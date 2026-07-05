@@ -124,6 +124,14 @@ export function OpenVault(path: string, secret: string): $CancellablePromise<vau
 }
 
 /**
+ * OpenVaultRemembered opens path with its unexpired secret from the OS
+ * keychain. This also supports switching directly between remembered vaults.
+ */
+export function OpenVaultRemembered(path: string): $CancellablePromise<vault$0.Session> {
+    return $Call.ByID(910528891, path);
+}
+
+/**
  * PullNow pulls and merges the remote vault snapshot without pushing back.
  */
 export function PullNow(): $CancellablePromise<vault$0.MergeResult> {

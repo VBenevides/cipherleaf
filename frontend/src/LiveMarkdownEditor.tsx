@@ -55,6 +55,7 @@ const externalDocumentUpdate = Annotation.define<boolean>();
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
 });
+const setAllQuotesCollapsed = StateEffect.define<boolean>();
 
 const liveMarkdownTheme = EditorView.theme(
   {
@@ -571,6 +572,18 @@ function outlineLine(text: string) {
   };
 }
 
+function collapsibleQuotePositions(state: EditorState): number[] {
+  const positions: number[] = [];
+  for (let lineNumber = 1; lineNumber < state.doc.lines; lineNumber++) {
+    const line = state.doc.line(lineNumber);
+    if (!outlineLine(line.text)) continue;
+    const previous = lineNumber > 1 ? outlineLine(state.doc.line(lineNumber - 1).text) : null;
+    const next = outlineLine(state.doc.line(lineNumber + 1).text);
+    if (!previous && next) positions.push(line.from);
+  }
+  return positions;
+}
+
 function buildLivePreviewState(
   state: EditorState,
   collapsedQuotes: ReadonlySet<number>,
@@ -822,7 +835,13 @@ function livePreviewExtension(
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
-      return buildLivePreviewState(state, new Set(), openWikilink, noteID, onError);
+      return buildLivePreviewState(
+        state,
+        new Set(collapsibleQuotePositions(state)),
+        openWikilink,
+        noteID,
+        onError,
+      );
     },
     update(value, transaction) {
       const collapsed = new Set<number>();
@@ -830,6 +849,15 @@ function livePreviewExtension(
         collapsed.add(transaction.changes.mapPos(position));
       }
       for (const effect of transaction.effects) {
+        if (effect.is(setAllQuotesCollapsed)) {
+          collapsed.clear();
+          if (effect.value) {
+            for (const position of collapsibleQuotePositions(transaction.state)) {
+              collapsed.add(position);
+            }
+          }
+          continue;
+        }
         if (!effect.is(toggleQuote)) continue;
         if (collapsed.has(effect.value)) collapsed.delete(effect.value);
         else collapsed.add(effect.value);
@@ -953,6 +981,11 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
   view.focus();
 
   return true;
+}
+
+function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
+  view.dispatch({ effects: setAllQuotesCollapsed.of(collapsed) });
+  view.focus();
 }
 
 export default function LiveMarkdownEditor({
@@ -1207,6 +1240,28 @@ export default function LiveMarkdownEditor({
           }}
         >
           ›
+        </button>
+        <button
+          type="button"
+          title="Collapse all sections"
+          aria-label="Collapse all sections"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            runWithEditor((editor) => setAllSectionsCollapsed(editor, true));
+          }}
+        >
+          ⊟
+        </button>
+        <button
+          type="button"
+          title="Expand all sections"
+          aria-label="Expand all sections"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            runWithEditor((editor) => setAllSectionsCollapsed(editor, false));
+          }}
+        >
+          ⊞
         </button>
       </div>
       <div ref={host} className="live-markdown-editor" />

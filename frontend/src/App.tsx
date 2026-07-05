@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
@@ -22,13 +21,8 @@ import type {
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { errorText } from "./errors";
-import { attachmentMarkdown } from "./markdown";
-import LiveMarkdownEditor, {
-  clipboardImage,
-  clipboardMayContainImage,
-  imageDataURL,
-  readClipboardImage,
-} from "./LiveMarkdownEditor";
+import LiveMarkdownEditor from "./LiveMarkdownEditor";
+import SourceMarkdownEditor from "./SourceMarkdownEditor";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "write";
@@ -139,6 +133,7 @@ function App() {
   const [view, setView] = useState<EditorView>("live");
   const [vaultAction, setVaultAction] = useState<VaultAction | null>(null);
   const [vaultPath, setVaultPath] = useState("");
+  const [lastVaultPath, setLastVaultPath] = useState("");
   const [vaultName, setVaultName] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [rememberSecret, setRememberSecret] = useState(false);
@@ -396,6 +391,7 @@ function App() {
         unlockedRef.current = !current.locked;
         setSession(current);
         if (!current.locked) {
+          await syncVaultOnOpen();
           await refreshFolders();
           await refreshNotes();
           return;
@@ -404,6 +400,8 @@ function App() {
           const autoUnlocked = await VaultService.TryUnlockRemembered();
           unlockedRef.current = !autoUnlocked.locked;
           setSession(autoUnlocked);
+          setLastVaultPath(autoUnlocked.path);
+          await syncVaultOnOpen();
           await refreshFolders();
           await refreshNotes();
           return;
@@ -414,7 +412,7 @@ function App() {
         const lastVaultPath = await VaultService.GetLastVaultPath();
         if (lastVaultPath) {
           setVaultPath(lastVaultPath);
-          setVaultAction("open");
+          setLastVaultPath(lastVaultPath);
         }
       })
       .catch((reason) => {
@@ -439,6 +437,33 @@ function App() {
 
   const refreshFolders = async () => {
     setFolders((await VaultService.ListFolders()) ?? []);
+  };
+
+  const syncVaultOnOpen = async () => {
+    let linked = false;
+    try {
+      const settings = await VaultService.GetSyncSettings();
+      linked = settings.linked;
+      setSyncLinked(linked);
+      setLastSyncedAt(settings.lastSyncedAt);
+    } catch {
+      setSyncLinked(false);
+      setLastSyncedAt(0);
+      return false;
+    }
+    if (!linked) return false;
+    setSyncing(true);
+    try {
+      const result = await VaultService.SyncNow();
+      if (result.warning) setError(result.warning);
+      const settings = await VaultService.GetSyncSettings();
+      setLastSyncedAt(settings.lastSyncedAt);
+    } catch (reason) {
+      setError(`Vault opened, but sync failed: ${errorText(reason)}`);
+    } finally {
+      setSyncing(false);
+    }
+    return true;
   };
 
   const updateSummary = (saved: Note) => {
@@ -473,6 +498,8 @@ function App() {
       );
       updateSummary(saved);
       if (version === editVersion.current) {
+        noteRef.current = saved;
+        dirtyRef.current = false;
         setNote(saved);
         setDirty(false);
         setSaveState("saved");
@@ -632,7 +659,32 @@ function App() {
       // Closing a native folder picker is not an application error.
       return;
     }
-    if (path) await prepareVaultPrompt(action, path);
+    if (!path) return;
+    if (action === "open" && await openRememberedVault(path)) return;
+    await prepareVaultPrompt(action, path);
+  };
+
+  const openRememberedVault = async (path: string) => {
+    let opened: Session;
+    try {
+      opened = await VaultService.OpenVaultRemembered(path);
+    } catch {
+      return false;
+    }
+    unlockedRef.current = true;
+    setSession(opened);
+    setLastVaultPath(opened.path);
+    setVaultAction(null);
+    await syncVaultOnOpen();
+    await refreshFolders();
+    await refreshNotes();
+    return true;
+  };
+
+  const openLastVault = async () => {
+    setError("");
+    if (await openRememberedVault(lastVaultPath)) return;
+    await prepareVaultPrompt("open", lastVaultPath);
   };
 
   const copyVaultSecret = async () => {
@@ -702,6 +754,7 @@ function App() {
       }
       unlockedRef.current = true;
       setSession(opened);
+      setLastVaultPath(opened.path);
       if (rememberSecret) {
         try {
           await VaultService.RememberVaultSecret();
@@ -712,20 +765,6 @@ function App() {
         }
         setRememberSecret(false);
       }
-      let linkedOnOpen = false;
-      if (completedAction === "clone") {
-        linkedOnOpen = true;
-      } else {
-        try {
-          const openedSettings = await VaultService.GetSyncSettings();
-          linkedOnOpen = openedSettings.linked;
-          setLastSyncedAt(openedSettings.lastSyncedAt);
-        } catch {
-          linkedOnOpen = false;
-          setLastSyncedAt(0);
-        }
-      }
-      setSyncLinked(linkedOnOpen);
       setVaultAction(null);
       setVaultName("");
       setPassphrase("");
@@ -736,6 +775,7 @@ function App() {
       setCloneSSHKey("");
       setCloneBranch("main");
       setCloneRepositoryPrivate(false);
+      await syncVaultOnOpen();
       await refreshFolders();
       if (completedAction === "create") {
         const first = await VaultService.CreateNote("Welcome");
@@ -747,29 +787,6 @@ function App() {
         await refreshNotes(saved.id);
       } else {
         await refreshNotes();
-      }
-      if (linkedOnOpen && completedAction !== "create") {
-        setSyncing(true);
-        try {
-          await VaultService.PullNow();
-          await refreshNotes();
-          await refreshFolders();
-          const note = noteRef.current;
-          if (note) {
-            try {
-              const fresh = await VaultService.GetNote(note.id);
-              setNote(fresh);
-              noteRef.current = fresh;
-              setDirty(false);
-            } catch {
-              // note may have been replaced by the merge; refresh will resync
-            }
-          }
-        } catch {
-          // offline or unreachable: stay on local data, user can sync manually
-        } finally {
-          setSyncing(false);
-        }
       }
       if (restoreWarning) setError(restoreWarning);
     } catch (reason) {
@@ -783,6 +800,7 @@ function App() {
     if (syncing) return;
     setSyncing(true);
     try {
+      await persistCurrent();
       const result: SyncResult = await VaultService.SyncNow();
       await refreshNotes();
       await refreshFolders();
@@ -855,6 +873,7 @@ function App() {
     try {
       await persistCurrent();
       resetToLocked(await VaultService.LockVault());
+      if (action === "open" && await openRememberedVault(path)) return;
       await prepareVaultPrompt(action, path);
     } catch {
       // persistCurrent already presents the actionable error.
@@ -1038,35 +1057,6 @@ function App() {
     editVersion.current++;
     setDirty(true);
     setSaveState("idle");
-  };
-
-  const pasteImageInSource = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
-    const source = clipboardImage(event.nativeEvent);
-    if (!source && !clipboardMayContainImage(event.nativeEvent)) return;
-    event.preventDefault();
-    const noteID = noteRef.current?.id;
-    const selectionStart = event.currentTarget.selectionStart;
-    const selectionEnd = event.currentTarget.selectionEnd;
-    if (!noteID) return;
-    void (source ? Promise.resolve(source) : readClipboardImage())
-      .then((value) => {
-        if (!value) throw new Error("Could not read image data from the clipboard");
-        return imageDataURL(value);
-      })
-      .then((value) => VaultService.SaveImageAttachment(noteID, value))
-      .then((id) => {
-        const current = noteRef.current;
-        if (!current || current.id !== noteID) return;
-        const from = Math.min(selectionStart, current.content.length);
-        const to = Math.min(Math.max(from, selectionEnd), current.content.length);
-        const lineStart = current.content.lastIndexOf("\n", from - 1) + 1;
-        const prefix = from > lineStart ? "\n" : "";
-        const markdown = `${prefix}${attachmentMarkdown(id)}\n`;
-        editNote({
-          content: current.content.slice(0, from) + markdown + current.content.slice(to),
-        });
-      })
-      .catch((reason) => setError(errorText(reason)));
   };
 
   useEffect(() => {
@@ -1262,6 +1252,11 @@ function App() {
             locally before it reaches disk.
           </p>
           <div className="welcome-actions">
+            {lastVaultPath && (
+              <button className="primary-button" onClick={() => void openLastVault()}>
+                Open Last Vault
+              </button>
+            )}
             <button className="primary-button" onClick={() => void chooseVault("create")}>
               Create a new vault
             </button>
@@ -1886,14 +1881,12 @@ function App() {
                 />
               )}
               {view === "write" && (
-                <textarea
-                  className="markdown-editor"
+                <SourceMarkdownEditor
+                  key={note.id}
+                  noteID={note.id}
                   value={note.content}
-                  onChange={(event) => editNote({ content: event.target.value })}
-                  onPaste={pasteImageInSource}
-                  spellCheck
-                  aria-label="Markdown editor"
-                  placeholder="Begin writing…"
+                  onChange={(content) => editNote({ content })}
+                  onError={(reason) => setError(errorText(reason))}
                 />
               )}
             </div>

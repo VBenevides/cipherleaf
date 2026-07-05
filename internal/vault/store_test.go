@@ -165,6 +165,58 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	}
 }
 
+func TestMergeRestoresMissingAttachmentForEqualNoteVersion(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "correct horse battery staple"
+	first := NewStore()
+	if _, err := first.Create(t.TempDir(), secret); err != nil {
+		t.Fatal(err)
+	}
+	note, err := first.CreateNote("Shared image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	webp := append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("synced pixels")...)
+	id, err := first.SaveAttachment(note.ID, webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.SaveNote(
+		note.ID,
+		note.Title,
+		fmt.Sprintf("![image](attachment:%s#width=640)", id),
+	); err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := first.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	second := NewStore()
+	secondSession, err := second.RestoreRemoteSnapshot(remote, t.TempDir(), "second", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.DeleteAttachment(note.ID, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.MergeRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := second.GetAttachment(note.ID, id)
+	if err != nil {
+		t.Fatalf("attachment was not repaired in %s: %v", secondSession.Path, err)
+	}
+	if !bytes.Equal(restored, webp) {
+		t.Fatal("repaired attachment differs from the remote attachment")
+	}
+}
+
 func TestFolderLifecycleAndNoteMovement(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

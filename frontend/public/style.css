@@ -1516,6 +1516,12 @@ a:focus-visible {
   font-style: italic;
 }
 
+.source-markdown-editor .cm-editor,
+.source-markdown-editor .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
 .live-markdown-editor .cm-live-heading {
   color: #37362f;
   font-family: Georgia, "Times New Roman", serif;

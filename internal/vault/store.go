@@ -1233,6 +1233,18 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			mergedNotes[localIndex] = remoteNote
 			result.UpdatedNotes++
 			result.UpToDate = false
+		} else if !versionIsNewer(
+			local.Revision,
+			local.ModifiedAt,
+			remoteNote.Revision,
+			remoteNote.ModifiedAt,
+		) {
+			// Equal note versions must also converge their attachment files.
+			// This repairs interrupted or older syncs that copied the note
+			// reference without copying its encrypted attachment.
+			if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
+				return MergeResult{}, err
+			}
 		}
 	}
 	sortSummaries(mergedNotes)

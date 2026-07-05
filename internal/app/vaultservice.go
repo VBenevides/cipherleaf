@@ -317,6 +317,12 @@ func (s *VaultService) TryUnlockRemembered() (vault.Session, error) {
 	if strings.TrimSpace(path) == "" {
 		return vault.Session{}, appsession.ErrNoLastVault
 	}
+	return s.OpenVaultRemembered(path)
+}
+
+// OpenVaultRemembered opens path with its unexpired secret from the OS
+// keychain. This also supports switching directly between remembered vaults.
+func (s *VaultService) OpenVaultRemembered(path string) (vault.Session, error) {
 	vaultID, err := vault.ReadVaultID(path)
 	if err != nil {
 		return vault.Session{}, err
@@ -332,13 +338,14 @@ func (s *VaultService) TryUnlockRemembered() (vault.Session, error) {
 		_ = s.secrets.Forget(vaultID)
 		return vault.Session{}, err
 	}
+	if err := s.rememberVault(session.Path); err != nil {
+		s.store.Lock()
+		return vault.Session{}, errors.New("the vault was unlocked, but its location could not be remembered")
+	}
 	return session, nil
 }
 
 func (s *VaultService) CloseVault() (vault.Session, error) {
-	if err := s.recent.Forget(); err != nil {
-		return s.store.Session(), errors.New("the recent-session entry could not be cleared, so the vault remains open")
-	}
 	return s.store.Lock(), nil
 }
 
