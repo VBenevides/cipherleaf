@@ -18,8 +18,8 @@ var assets embed.FS
 func main() {
 	vaultService := NewVaultService()
 	app := application.New(application.Options{
-		Name:        "Encrypted Markdown Vault",
-		Description: "A local-first encrypted Markdown notes application",
+		Name:        "Cipherleaf",
+		Description: "A local-first desktop Markdown notebook that encrypts your notes on disk and can sync them to a private GitHub repository",
 		Services: []application.Service{
 			application.NewService(vaultService),
 		},
@@ -33,7 +33,7 @@ func main() {
 	vaultService.setApp(app)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "Encrypted Markdown Vault",
+		Title:     "Cipherleaf",
 		Width:     1280,
 		Height:    800,
 		MinWidth:  920,

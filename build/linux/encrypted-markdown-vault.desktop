@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=encrypted-markdown-vault
-Exec=encrypted-markdown-vault
-Icon=encrypted-markdown-vault
+Name=cipherleaf
+Exec=cipherleaf
+Icon=cipherleaf
 Categories=Development;
 Terminal=false
 Keywords=wails

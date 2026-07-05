@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=Encrypted Markdown Vault
+Name=Cipherleaf
 Comment=Local-first encrypted Markdown notes
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/encrypted-markdown-vault %u
+Exec=/usr/local/bin/cipherleaf %u
 Terminal=false
 Type=Application
-Icon=encrypted-markdown-vault
+Icon=cipherleaf
 Categories=Utility;
-StartupWMClass=encrypted-markdown-vault
+StartupWMClass=cipherleaf
 
  

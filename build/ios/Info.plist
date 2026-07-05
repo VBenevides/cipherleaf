@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>encrypted-markdown-vault</string>
+    <string>cipherleaf</string>
     <key>CFBundleIdentifier</key>
-    <string>io.github.wdtg.encrypted-markdown-vault</string>
+    <string>io.github.vbenevides.cipherleaf</string>
     <key>CFBundleName</key>
-    <string>Encrypted Markdown Vault</string>
+    <string>Cipherleaf</string>
     <key>CFBundleDisplayName</key>
-    <string>Encrypted Markdown Vault</string>
+    <string>Cipherleaf</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

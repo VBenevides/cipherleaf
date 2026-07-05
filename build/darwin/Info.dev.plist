@@ -4,11 +4,11 @@
         <key>CFBundlePackageType</key>
             <string>APPL</string>
         <key>CFBundleName</key>
-            <string>Encrypted Markdown Vault</string>
+            <string>Cipherleaf</string>
         <key>CFBundleExecutable</key>
-            <string>encrypted-markdown-vault</string>
+            <string>cipherleaf</string>
         <key>CFBundleIdentifier</key>
-            <string>io.github.wdtg.encrypted-markdown-vault</string>
+            <string>io.github.vbenevides.cipherleaf</string>
         <key>CFBundleVersion</key>
             <string>0.1.0</string>
         <key>CFBundleGetInfoString</key>

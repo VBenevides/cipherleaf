@@ -8,15 +8,15 @@
         AllowPromptForPassword="false">
     </Settings>
     <Installer
-        Path="encrypted-markdown-vault"
+        Path="cipherleaf"
         Arguments=""
-        InstallLocation="C:\Program Files\wdtg\Encrypted Markdown Vault">
+        InstallLocation="C:\Program Files\vbenevides\Cipherleaf">
     </Installer>
     <PackageInformation
-        PackageName="Encrypted Markdown Vault"
-        PackageDisplayName="Encrypted Markdown Vault"
-        PublisherName="CN=wdtg"
-        PublisherDisplayName="wdtg"
+        PackageName="Cipherleaf"
+        PackageDisplayName="Cipherleaf"
+        PublisherName="CN=vbenevides"
+        PublisherDisplayName="vbenevides"
         Version="0.1.0.0"
         PackageDescription="Local-first encrypted Markdown notes">
         <Capabilities>
@@ -25,10 +25,10 @@
         </Capabilities>
         <Applications>
             <Application
-                Id="io.github.wdtg.encrypted-markdown-vault"
+                Id="io.github.vbenevides.cipherleaf"
                 Description="Local-first encrypted Markdown notes"
-                DisplayName="Encrypted Markdown Vault"
-                ExecutableName="encrypted-markdown-vault"
+                DisplayName="Cipherleaf"
+                ExecutableName="cipherleaf"
                 EntryPoint="Windows.FullTrustApplication">
                 
             </Application>
@@ -41,13 +41,13 @@
         </Dependencies>
         <Properties>
             <Framework>false</Framework>
-            <DisplayName>Encrypted Markdown Vault</DisplayName>
-            <PublisherDisplayName>wdtg</PublisherDisplayName>
+            <DisplayName>Cipherleaf</DisplayName>
+            <PublisherDisplayName>vbenevides</PublisherDisplayName>
             <Description>Local-first encrypted Markdown notes</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>
-    <SaveLocation PackagePath="encrypted-markdown-vault.msix" />
+    <SaveLocation PackagePath="cipherleaf.msix" />
     <PackageIntegrity>
         <CertificatePath></CertificatePath>
     </PackageIntegrity>

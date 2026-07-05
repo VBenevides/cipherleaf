@@ -5,11 +5,11 @@ version: '3'
 
 # This information is used to generate the build assets.
 info:
-  companyName: "wdtg"
+  companyName: "vbenevides"
   productName: "Cipherleaf"
-  productIdentifier: "io.github.wdtg.cipherleaf"
-  description: "A local-first encrypted Markdown notes application"
-  copyright: "© 2026 wdtg"
+  productIdentifier: "io.github.vbenevides.cipherleaf"
+  description: "A local-first desktop Markdown notebook that encrypts your notes on disk and can sync them to a private GitHub repository"
+  copyright: "© 2026 Vinicius Benevides"
   comments: "Built with Go and Wails v3"
   version: "0.1.0"
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)

@@ -19,9 +19,9 @@ Unicode true
 ####
 ## The following information is taken from the wails_tools.nsh file, but they can be overwritten here.
 ####
-## !define INFO_PROJECTNAME    "my-project" # Default "encrypted-markdown-vault"
-## !define INFO_COMPANYNAME    "My Company" # Default "wdtg"
-## !define INFO_PRODUCTNAME    "My Product Name" # Default "Encrypted Markdown Vault"
+## !define INFO_PROJECTNAME    "my-project" # Default "cipherleaf"
+## !define INFO_COMPANYNAME    "My Company" # Default "vbenevides"
+## !define INFO_PRODUCTNAME    "My Product Name" # Default "Cipherleaf"
 ## !define INFO_PRODUCTVERSION "1.0.0"     # Default "0.1.0"
 ## !define INFO_COPYRIGHT      "(c) Now, My Company" # Default "© 2026, My Company"
 ###

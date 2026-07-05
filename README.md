@@ -1,4 +1,4 @@
-# Encrypted Markdown Vault
+# Cipherleaf
 
 A local-first desktop Markdown editor built with Go, React, and the Wails v3
 alpha. Notes, titles, and the note manifest are encrypted before being written

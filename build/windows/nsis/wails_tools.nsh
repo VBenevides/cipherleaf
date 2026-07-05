@@ -5,13 +5,13 @@
 !include "FileFunc.nsh"
 
 !ifndef INFO_PROJECTNAME
-    !define INFO_PROJECTNAME "encrypted-markdown-vault"
+    !define INFO_PROJECTNAME "cipherleaf"
 !endif
 !ifndef INFO_COMPANYNAME
-    !define INFO_COMPANYNAME "wdtg"
+    !define INFO_COMPANYNAME "vbenevides"
 !endif
 !ifndef INFO_PRODUCTNAME
-    !define INFO_PRODUCTNAME "Encrypted Markdown Vault"
+    !define INFO_PRODUCTNAME "Cipherleaf"
 !endif
 !ifndef INFO_PRODUCTVERSION
     !define INFO_PRODUCTVERSION "0.1.0"
