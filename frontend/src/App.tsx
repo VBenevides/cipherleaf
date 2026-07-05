@@ -4,9 +4,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { VaultService } from "../bindings/cipherleaf";
+import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type {
   FindMatch,
   Folder,
@@ -19,12 +20,18 @@ import type {
   ConnectionResult,
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
-import type { SyncResult } from "../bindings/cipherleaf/models";
-import { errorText } from "./errors";import LiveMarkdownEditor from "./LiveMarkdownEditor";
-import NotionOutlinePreview from "./NotionOutlinePreview";
+import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
+import { errorText } from "./errors";
+import { attachmentMarkdown } from "./markdown";
+import LiveMarkdownEditor, {
+  clipboardImage,
+  clipboardMayContainImage,
+  imageDataURL,
+  readClipboardImage,
+} from "./LiveMarkdownEditor";
 
 type VaultAction = "create" | "open" | "clone";
-type EditorView = "live" | "write" | "preview" | "split";
+type EditorView = "live" | "write";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark";
 
@@ -735,7 +742,7 @@ function App() {
         const saved = await VaultService.SaveNote(
           first.id,
           first.title,
-          "# Welcome to your encrypted vault\n\nYour notes are encrypted before they touch the disk.\n\n* Write naturally in **Live Preview**\n* Add _emphasis_, **strong ideas**, and `[[double brackets]]`\n* [ ] Try the interactive checklist\n* Create a note with **Ctrl + N**\n\n> Collapsible project\n>> [ ] First task\n>>> [ ] Nested task—use Tab and Shift+Tab to change its level\n>> [ ] Another task\n\nThis vault locks automatically after 15 minutes of inactivity.",
+          "# Welcome to your encrypted vault\n\nYour notes are encrypted before they touch the disk.\n\n* Write naturally in **Live Preview**\n* Add _emphasis_, **strong ideas**, and `[[double brackets]]`\n* [ ] Try the interactive checklist\n* Create a note with **Ctrl + N**\n\n> Collapsible project\n> [ ] First task\n>> [ ] Nested task—use Tab and Shift+Tab to change its level\n> [ ] Another task\n\nThis vault locks automatically after 15 minutes of inactivity.",
         );
         await refreshNotes(saved.id);
       } else {
@@ -1033,6 +1040,35 @@ function App() {
     setSaveState("idle");
   };
 
+  const pasteImageInSource = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const source = clipboardImage(event.nativeEvent);
+    if (!source && !clipboardMayContainImage(event.nativeEvent)) return;
+    event.preventDefault();
+    const noteID = noteRef.current?.id;
+    const selectionStart = event.currentTarget.selectionStart;
+    const selectionEnd = event.currentTarget.selectionEnd;
+    if (!noteID) return;
+    void (source ? Promise.resolve(source) : readClipboardImage())
+      .then((value) => {
+        if (!value) throw new Error("Could not read image data from the clipboard");
+        return imageDataURL(value);
+      })
+      .then((value) => VaultService.SaveImageAttachment(noteID, value))
+      .then((id) => {
+        const current = noteRef.current;
+        if (!current || current.id !== noteID) return;
+        const from = Math.min(selectionStart, current.content.length);
+        const to = Math.min(Math.max(from, selectionEnd), current.content.length);
+        const lineStart = current.content.lastIndexOf("\n", from - 1) + 1;
+        const prefix = from > lineStart ? "\n" : "";
+        const markdown = `${prefix}${attachmentMarkdown(id)}\n`;
+        editNote({
+          content: current.content.slice(0, from) + markdown + current.content.slice(to),
+        });
+      })
+      .catch((reason) => setError(errorText(reason)));
+  };
+
   useEffect(() => {
     if (!session || session.locked) return;
     let active = true;
@@ -1205,7 +1241,7 @@ function App() {
   if (session === null) {
     return (
       <main className="loading-screen">
-        <div className="brand-glyph"><Icon name="book" size={26} /></div>
+        <div className="brand-glyph"><img src="/cipherleaf-logo.png" alt="" /></div>
         <p>Preparing your vault…</p>
       </main>
     );
@@ -1216,7 +1252,7 @@ function App() {
       <main className="welcome-screen">
         <section className="welcome-card">
           <div className="brand-row">
-            <div className="brand-glyph"><Icon name="book" size={26} /></div>
+            <div className="brand-glyph"><img src="/cipherleaf-logo.png" alt="" /></div>
             <span>Cipherleaf</span>
           </div>
           <p className="eyebrow">Local-first · end-to-end encrypted</p>
@@ -1617,7 +1653,7 @@ function App() {
       </header>
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
-          <div className="brand-glyph small"><Icon name="book" size={19} /></div>
+          <div className="brand-glyph small"><img src="/cipherleaf-logo.png" alt="" /></div>
           <div>
             <strong>Cipherleaf</strong>
             <span>{folderName(session.path)}</span>
@@ -1824,7 +1860,7 @@ function App() {
               </p>
             </div>
             <div className="view-tabs" role="tablist" aria-label="Editor view">
-              {(["live", "write", "preview", "split"] as EditorView[]).map((item) => (
+              {(["live", "write"] as EditorView[]).map((item) => (
                 <button
                   key={item}
                   role="tab"
@@ -1832,11 +1868,7 @@ function App() {
                   className={view === item ? "active" : ""}
                   onClick={() => setView(item)}
                 >
-                  {item === "live"
-                    ? "Live Preview"
-                    : item === "write"
-                      ? "Source"
-                      : item[0].toUpperCase() + item.slice(1)}
+                  {item === "live" ? "Live Preview" : "Source"}
                 </button>
               ))}
             </div>
@@ -1844,31 +1876,25 @@ function App() {
               {view === "live" && (
                 <LiveMarkdownEditor
                   key={note.id}
+                  noteID={note.id}
                   value={note.content}
                   onChange={(content) => editNote({ content })}
                   onSave={() => void persistCurrent()}
+                  onError={(reason) => setError(errorText(reason))}
                   onOpenWikilink={(title) => void openWikilinkTitle(title)}
                   scrollToOffset={scrollToOffset}
                 />
               )}
-              {(view === "write" || view === "split") && (
+              {view === "write" && (
                 <textarea
                   className="markdown-editor"
                   value={note.content}
                   onChange={(event) => editNote({ content: event.target.value })}
+                  onPaste={pasteImageInSource}
                   spellCheck
                   aria-label="Markdown editor"
                   placeholder="Begin writing…"
                 />
-              )}
-              {(view === "preview" || view === "split") && (
-                <article className="markdown-preview">
-                  <NotionOutlinePreview
-                    content={note.content}
-                    onChange={(content) => editNote({ content })}
-                    onOpenWikilink={(title) => void openWikilinkTitle(title)}
-                  />
-                </article>
               )}
             </div>
             <footer className="document-footer">

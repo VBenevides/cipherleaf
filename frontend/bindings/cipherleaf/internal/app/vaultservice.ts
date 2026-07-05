@@ -7,53 +7,60 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as githubsync$0 from "./internal/githubsync/models.js";
+import * as githubsync$0 from "../githubsync/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as vault$0 from "./internal/vault/models.js";
+import * as vault$0 from "../vault/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as application$0 from "../../../github.com/wailsapp/wails/v3/pkg/application/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 export function CloneGitHubVault(parentPath: string, name: string, repositorySSH: string, privateKeyPath: string, branch: string, secret: string, repositoryPrivate: boolean): $CancellablePromise<$models.CloneVaultResult> {
-    return $Call.ByID(3775142591, parentPath, name, repositorySSH, privateKeyPath, branch, secret, repositoryPrivate);
+    return $Call.ByID(3036187677, parentPath, name, repositorySSH, privateKeyPath, branch, secret, repositoryPrivate);
 }
 
 export function CloseVault(): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(3979838393);
+    return $Call.ByID(4139522503);
 }
 
 export function CopyVaultSecret(secret: string): $CancellablePromise<void> {
-    return $Call.ByID(4028793456, secret);
+    return $Call.ByID(3868872474, secret);
 }
 
 export function CreateFolder(name: string): $CancellablePromise<vault$0.Folder> {
-    return $Call.ByID(2923808401, name);
+    return $Call.ByID(239305947, name);
 }
 
 export function CreateNote(title: string): $CancellablePromise<vault$0.Note> {
-    return $Call.ByID(2924369193, title);
+    return $Call.ByID(2911480927, title);
 }
 
 export function CreateNoteInFolder(title: string, folderID: string): $CancellablePromise<vault$0.Note> {
-    return $Call.ByID(414141426, title, folderID);
+    return $Call.ByID(715955408, title, folderID);
 }
 
 export function CreateVault(parentPath: string, name: string, secret: string): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(426481523, parentPath, name, secret);
+    return $Call.ByID(814546393, parentPath, name, secret);
+}
+
+export function DeleteAttachment(noteID: string, id: string): $CancellablePromise<void> {
+    return $Call.ByID(3811592289, noteID, id);
 }
 
 export function DeleteFolder(id: string): $CancellablePromise<void> {
-    return $Call.ByID(3131389926, id);
+    return $Call.ByID(925796928, id);
 }
 
 export function DeleteNote(id: string): $CancellablePromise<void> {
-    return $Call.ByID(2663015250, id);
+    return $Call.ByID(2625750688, id);
 }
 
 export function FindInNotes(query: string): $CancellablePromise<vault$0.FindMatch[] | null> {
-    return $Call.ByID(1710427374, query);
+    return $Call.ByID(991868496, query);
 }
 
 /**
@@ -61,70 +68,78 @@ export function FindInNotes(query: string): $CancellablePromise<vault$0.FindMatc
  * a keychain entry.
  */
 export function ForgetVaultSecret(): $CancellablePromise<void> {
-    return $Call.ByID(873520808);
+    return $Call.ByID(1221274530);
 }
 
 export function GenerateVaultSecret(): $CancellablePromise<string> {
-    return $Call.ByID(2346026114);
+    return $Call.ByID(3315011432);
+}
+
+export function GetAttachment(noteID: string, id: string): $CancellablePromise<string> {
+    return $Call.ByID(115494468, noteID, id);
 }
 
 export function GetLastSession(): $CancellablePromise<$models.LastSession> {
-    return $Call.ByID(552484445);
+    return $Call.ByID(3632998615);
 }
 
 export function GetLastVaultPath(): $CancellablePromise<string> {
-    return $Call.ByID(1903514278);
+    return $Call.ByID(3809458984);
 }
 
 export function GetNote(id: string): $CancellablePromise<vault$0.Note> {
-    return $Call.ByID(3086395091, id);
+    return $Call.ByID(1503400201, id);
 }
 
 export function GetSession(): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(1647850109);
+    return $Call.ByID(355925843);
 }
 
 export function GetSyncSettings(): $CancellablePromise<githubsync$0.SyncSettings> {
-    return $Call.ByID(1559147273);
+    return $Call.ByID(2923257755);
 }
 
 export function LinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<githubsync$0.LinkResult> {
-    return $Call.ByID(4168621070, settings);
+    return $Call.ByID(974300788, settings);
 }
 
 export function ListFolders(): $CancellablePromise<vault$0.Folder[] | null> {
-    return $Call.ByID(509428674);
+    return $Call.ByID(220507736);
 }
 
 export function ListNotes(): $CancellablePromise<vault$0.NoteSummary[] | null> {
-    return $Call.ByID(957394914);
+    return $Call.ByID(888598820);
 }
 
 export function LockVault(): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(3610361410);
+    return $Call.ByID(3801710036);
 }
 
 export function MoveNote(id: string, folderID: string): $CancellablePromise<vault$0.Note> {
-    return $Call.ByID(844302716, id, folderID);
+    return $Call.ByID(4129360186, id, folderID);
 }
 
 export function OpenVault(path: string, secret: string): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(2142967671, path, secret);
+    return $Call.ByID(1998151597, path, secret);
 }
 
 /**
  * PullNow pulls and merges the remote vault snapshot without pushing back.
  */
 export function PullNow(): $CancellablePromise<vault$0.MergeResult> {
-    return $Call.ByID(4134315874);
+    return $Call.ByID(2641264576);
 }
 
 export function QuitApplication(): $CancellablePromise<void> {
-    return $Call.ByID(644217200);
+    return $Call.ByID(1295474446);
+}
+
+export function ReadClipboardImage(): $CancellablePromise<string> {
+    return $Call.ByID(242574664);
 }
 
 export function RememberTheme(theme: string): $CancellablePromise<void> {
-    return $Call.ByID(3940625263, theme);
+    return $Call.ByID(592066557, theme);
 }
 
 /**
@@ -133,39 +148,51 @@ export function RememberTheme(theme: string): $CancellablePromise<void> {
  * be called only after a successful Open so the secret is known to be valid.
  */
 export function RememberVaultSecret(): $CancellablePromise<void> {
-    return $Call.ByID(3785816506);
+    return $Call.ByID(4089226512);
 }
 
 export function RenameFolder(id: string, name: string): $CancellablePromise<vault$0.Folder> {
-    return $Call.ByID(4192434379, id, name);
+    return $Call.ByID(2836532501, id, name);
 }
 
 export function RenameVault(newName: string): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(2411141289, newName);
+    return $Call.ByID(1978051175, newName);
 }
 
 export function ReplaceAcrossNotes(find: string, replace: string, noteIDs: string[] | null): $CancellablePromise<vault$0.ReplaceResult> {
-    return $Call.ByID(1753583, find, replace, noteIDs);
+    return $Call.ByID(1932071061, find, replace, noteIDs);
+}
+
+export function SaveAttachment(noteID: string, webpBase64: string): $CancellablePromise<string> {
+    return $Call.ByID(2496789391, noteID, webpBase64);
+}
+
+export function SaveImageAttachment(noteID: string, imageDataURL: string): $CancellablePromise<string> {
+    return $Call.ByID(1556359170, noteID, imageDataURL);
 }
 
 export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.Note> {
-    return $Call.ByID(384107008, id, title, content);
+    return $Call.ByID(2770680190, id, title, content);
 }
 
 export function SearchNotes(query: string): $CancellablePromise<vault$0.NoteSummary[] | null> {
-    return $Call.ByID(2715025490, query);
+    return $Call.ByID(1370302028, query);
 }
 
 export function SelectGitHubSSHKey(): $CancellablePromise<string> {
-    return $Call.ByID(916216267);
+    return $Call.ByID(233117765);
 }
 
 export function SelectVaultDestinationFolder(): $CancellablePromise<string> {
-    return $Call.ByID(1149411857);
+    return $Call.ByID(2686336143);
 }
 
 export function SelectVaultFolder(): $CancellablePromise<string> {
-    return $Call.ByID(3004577695);
+    return $Call.ByID(2449201265);
+}
+
+export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
+    return $Call.ByID(3509715860, app);
 }
 
 /**
@@ -174,11 +201,11 @@ export function SelectVaultFolder(): $CancellablePromise<string> {
  * remote notes newer than local replace the local copy.
  */
 export function SyncNow(): $CancellablePromise<$models.SyncResult> {
-    return $Call.ByID(3393855758);
+    return $Call.ByID(3410023864);
 }
 
 export function TestGitHubConnection(settings: githubsync$0.SyncSettings): $CancellablePromise<githubsync$0.ConnectionResult> {
-    return $Call.ByID(331598122, settings);
+    return $Call.ByID(1416189504, settings);
 }
 
 /**
@@ -188,9 +215,9 @@ export function TestGitHubConnection(settings: githubsync$0.SyncSettings): $Canc
  * successful return yields an unlocked Session.
  */
 export function TryUnlockRemembered(): $CancellablePromise<vault$0.Session> {
-    return $Call.ByID(4124050448);
+    return $Call.ByID(3849116738);
 }
 
 export function UnlinkGitHubSync(): $CancellablePromise<void> {
-    return $Call.ByID(4085880674);
+    return $Call.ByID(3056730288);
 }

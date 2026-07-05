@@ -3,10 +3,10 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as githubsync$0 from "./internal/githubsync/models.js";
+import * as githubsync$0 from "../githubsync/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as vault$0 from "./internal/vault/models.js";
+import * as vault$0 from "../vault/models.js";
 
 export interface CloneVaultResult {
     "session": vault$0.Session;
