@@ -33,7 +33,7 @@ import {
   tableCells,
 } from "./markdown";
 import { SNIPPETS, expandSnippet } from "./snippets";
-import { VaultService } from "../bindings/cipherleaf";
+import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
   noteID: string;
@@ -266,6 +266,25 @@ class TableWidget extends WidgetType {
   }
 }
 
+async function copyImageToClipboard(image: HTMLImageElement) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    throw new Error("Copying images is not supported by this system");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare image for copying");
+  context.drawImage(image, 0, 0);
+  const blob = new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (value) => value ? resolve(value) : reject(new Error("Could not prepare image for copying")),
+      "image/png",
+    );
+  });
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
 class AttachmentWidget extends WidgetType {
   constructor(
     readonly noteID: string,
@@ -274,6 +293,7 @@ class AttachmentWidget extends WidgetType {
     readonly width: number,
     readonly from: number,
     readonly to: number,
+    readonly onError: (reason: unknown) => void,
   ) {
     super();
   }
@@ -303,26 +323,77 @@ class AttachmentWidget extends WidgetType {
         image.alt = `${this.alt} (image unavailable)`;
         image.removeAttribute("aria-busy");
       });
-    const controls = figure.appendChild(document.createElement("span"));
-    controls.className = "cm-live-attachment-controls";
-    for (const [label, factor] of [["−", 0.8], ["+", 1.25]] as const) {
-      const button = controls.appendChild(document.createElement("button"));
-      button.type = "button";
-      button.textContent = label;
-      button.title = label === "−" ? "Make image smaller" : "Make image larger";
-      button.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const width = Math.max(120, Math.min(2400, Math.round(this.width * factor)));
+
+    const resizeHandle = figure.appendChild(document.createElement("span"));
+    resizeHandle.className = "cm-live-attachment-resize";
+    resizeHandle.title = "Drag to resize image";
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startWidth = image.getBoundingClientRect().width;
+      let width = Math.round(startWidth);
+      const move = (moveEvent: PointerEvent) => {
+        width = Math.max(120, Math.min(2400, Math.round(startWidth + moveEvent.clientX - startX)));
+        image.style.width = `${width}px`;
+      };
+      const finish = () => {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", finish);
+        document.removeEventListener("pointercancel", finish);
+        if (width !== this.width) {
+          view.dispatch({
+            changes: {
+              from: this.from,
+              to: this.to,
+              insert: `![${this.alt}](attachment:${this.attachmentID}#width=${width})`,
+            },
+          });
+        }
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", finish);
+      document.addEventListener("pointercancel", finish);
+    });
+
+    figure.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelector(".cm-live-attachment-menu")?.remove();
+      const menu = document.body.appendChild(document.createElement("div"));
+      menu.className = "cm-live-attachment-menu";
+      menu.style.left = `${event.clientX}px`;
+      menu.style.top = `${event.clientY}px`;
+      const close = (closeEvent?: PointerEvent) => {
+        if (closeEvent && menu.contains(closeEvent.target as Node)) return;
+        menu.remove();
+        document.removeEventListener("pointerdown", close);
+      };
+      const copy = menu.appendChild(document.createElement("button"));
+      copy.type = "button";
+      copy.textContent = "Copy as image";
+      copy.addEventListener("click", () => {
+        close();
+        void copyImageToClipboard(image).catch(this.onError);
+      });
+      const remove = menu.appendChild(document.createElement("button"));
+      remove.type = "button";
+      remove.textContent = "Delete";
+      remove.addEventListener("click", () => {
+        close();
         view.dispatch({
           changes: {
             from: this.from,
             to: this.to,
-            insert: `![${this.alt}](attachment:${this.attachmentID}#width=${width})`,
+            insert: "",
           },
         });
+        view.focus();
+        void VaultService.DeleteAttachment(this.noteID, this.attachmentID)
+          .catch(this.onError);
       });
-    }
+      queueMicrotask(() => document.addEventListener("pointerdown", close));
+    });
     return figure;
   }
 
@@ -505,6 +576,7 @@ function buildLivePreviewState(
   collapsedQuotes: ReadonlySet<number>,
   openWikilink: (title: string) => void,
   noteID: string,
+  onError: (reason: unknown) => void,
 ): LivePreviewState {
   const decorations: Range<Decoration>[] = [];
   const atomicRanges: Range<Decoration>[] = [];
@@ -561,6 +633,7 @@ function buildLivePreviewState(
           attachment.width,
           line.from,
           line.to,
+          onError,
         ),
       );
       lineNumber++;
@@ -742,10 +815,14 @@ function buildLivePreviewState(
   };
 }
 
-function livePreviewExtension(openWikilink: (title: string) => void, noteID: string) {
+function livePreviewExtension(
+  openWikilink: (title: string) => void,
+  noteID: string,
+  onError: (reason: unknown) => void,
+) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
-      return buildLivePreviewState(state, new Set(), openWikilink, noteID);
+      return buildLivePreviewState(state, new Set(), openWikilink, noteID, onError);
     },
     update(value, transaction) {
       const collapsed = new Set<number>();
@@ -757,7 +834,7 @@ function livePreviewExtension(openWikilink: (title: string) => void, noteID: str
         if (collapsed.has(effect.value)) collapsed.delete(effect.value);
         else collapsed.add(effect.value);
       }
-      return buildLivePreviewState(transaction.state, collapsed, openWikilink, noteID);
+      return buildLivePreviewState(transaction.state, collapsed, openWikilink, noteID, onError);
     },
     provide(currentField) {
       return [
@@ -967,7 +1044,7 @@ export default function LiveMarkdownEditor({
           EditorView.domEventHandlers({
             paste(event, pastedView) {
               const image = clipboardImage(event);
-              if (!image && !clipboardClaimsImage(event)) return false;
+              if (!image && !clipboardMayContainImage(event)) return false;
               event.preventDefault();
               const insertion = pastedView.state.selection.main.from;
               void (image ? Promise.resolve(image) : readClipboardImage())
@@ -992,7 +1069,11 @@ export default function LiveMarkdownEditor({
             },
           }),
           placeholder("Begin writing…"),
-          livePreviewExtension((title) => onOpenWikilinkRef.current(title), noteID),
+          livePreviewExtension(
+            (title) => onOpenWikilinkRef.current(title),
+            noteID,
+            (reason) => onErrorRef.current(reason),
+          ),
           EditorView.updateListener.of((update) => {
             if (
               update.docChanged &&
@@ -1179,7 +1260,25 @@ export function clipboardClaimsImage(event: ClipboardEvent): boolean {
   );
 }
 
+export function clipboardMayContainImage(event: ClipboardEvent): boolean {
+  if (clipboardClaimsImage(event)) return true;
+  if (!/Linux/i.test(navigator.userAgent)) return false;
+  const clipboard = event.clipboardData;
+  if (!clipboard) return true;
+  const text = clipboard.getData("text/plain").trim();
+  const types = Array.from(clipboard.types);
+  return text === "" && !types.some((type) => type === "text/html");
+}
+
 export async function readClipboardImage(): Promise<Blob | string | null> {
+  const linux = /Linux/i.test(navigator.userAgent);
+  if (linux) {
+    try {
+      return await VaultService.ReadClipboardImage();
+    } catch {
+      // Fall through to the web clipboard API.
+    }
+  }
   if (navigator.clipboard?.read) {
     try {
       const items = await navigator.clipboard.read();
@@ -1191,6 +1290,7 @@ export async function readClipboardImage(): Promise<Blob | string | null> {
       // Linux WebKit often exposes the image MIME type without its bytes.
     }
   }
+  if (linux) return null;
   try {
     return await VaultService.ReadClipboardImage();
   } catch {

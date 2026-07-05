@@ -7,7 +7,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { VaultService } from "../bindings/cipherleaf";
+import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type {
   FindMatch,
   Folder,
@@ -20,12 +20,12 @@ import type {
   ConnectionResult,
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
-import type { SyncResult } from "../bindings/cipherleaf/models";
+import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { errorText } from "./errors";
 import { attachmentMarkdown } from "./markdown";
 import LiveMarkdownEditor, {
-  clipboardClaimsImage,
   clipboardImage,
+  clipboardMayContainImage,
   imageDataURL,
   readClipboardImage,
 } from "./LiveMarkdownEditor";
@@ -1042,7 +1042,7 @@ function App() {
 
   const pasteImageInSource = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const source = clipboardImage(event.nativeEvent);
-    if (!source && !clipboardClaimsImage(event.nativeEvent)) return;
+    if (!source && !clipboardMayContainImage(event.nativeEvent)) return;
     event.preventDefault();
     const noteID = noteRef.current?.id;
     const selectionStart = event.currentTarget.selectionStart;

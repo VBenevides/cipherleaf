@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -63,7 +63,7 @@ func NewVaultService() *VaultService {
 	}
 }
 
-func (s *VaultService) setApp(app *application.App) {
+func (s *VaultService) SetApp(app *application.App) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.app = app
@@ -419,25 +419,33 @@ func (s *VaultService) GetAttachment(noteID, id string) (string, error) {
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
+func (s *VaultService) DeleteAttachment(noteID, id string) error {
+	return s.store.DeleteAttachment(noteID, id)
+}
+
 func (s *VaultService) ReadClipboardImage() (string, error) {
 	if runtime.GOOS != "linux" {
 		return "", errors.New("native clipboard image fallback is unavailable")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 	var output []byte
 	var mimeType string
 	if _, err := exec.LookPath("wl-paste"); err == nil {
-		types, listErr := exec.CommandContext(ctx, "wl-paste", "--list-types").Output()
+		candidates := []string{"image/png", "image/webp", "image/jpeg"}
+		types, listErr := runClipboardCommand("wl-paste", "--list-types")
 		if listErr == nil {
 			mimeType = selectClipboardImageType(string(types))
 		}
 		if mimeType != "" {
-			value, readErr := runLimitedClipboardCommand(
-				ctx, "wl-paste", "--no-newline", "--type", mimeType,
+			candidates = append([]string{mimeType}, candidates...)
+		}
+		for _, candidate := range candidates {
+			value, readErr := runClipboardCommand(
+				"wl-paste", "--no-newline", "--type", candidate,
 			)
-			if readErr == nil {
+			if readErr == nil && len(value) > 0 {
 				output = value
+				mimeType = candidate
+				break
 			}
 		}
 	}
@@ -446,8 +454,8 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 			if _, err := exec.LookPath("xclip"); err != nil {
 				break
 			}
-			value, err := runLimitedClipboardCommand(
-				ctx, "xclip", "-selection", "clipboard", "-t", candidate, "-o",
+			value, err := runClipboardCommand(
+				"xclip", "-selection", "clipboard", "-t", candidate, "-o",
 			)
 			if err == nil && len(value) > 0 {
 				output = value
@@ -460,6 +468,12 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 		return "", errors.New("could not read image data from the system clipboard")
 	}
 	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(output), nil
+}
+
+func runClipboardCommand(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return runLimitedClipboardCommand(ctx, name, args...)
 }
 
 func runLimitedClipboardCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -571,9 +585,7 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 		result.Pull = pull
 		result.Branch = pull.Branch
 		result.LastCommit = pull.LastCommit
-		if pull.UpToDate {
-			result.Merge = vault.MergeResult{UpToDate: true}
-		} else if pull.StagingPath != "" {
+		if pull.StagingPath != "" {
 			merge, mergeErr := s.store.MergeRemoteSnapshot(pull.StagingPath)
 			if pull.Temporary {
 				_ = os.RemoveAll(pull.StagingPath)
@@ -583,6 +595,8 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 				return result, nil
 			}
 			result.Merge = merge
+		} else {
+			result.Merge = vault.MergeResult{UpToDate: true}
 		}
 		push, pushErr := s.sync.PushVault(context.Background(), vaultID, s.store)
 		if errors.Is(pushErr, githubsync.ErrRemoteAdvanced) && attempt+1 < maxAttempts {
@@ -616,12 +630,14 @@ func (s *VaultService) PullNow() (vault.MergeResult, error) {
 	if pull.Temporary {
 		defer os.RemoveAll(pull.StagingPath)
 	}
-	if pull.UpToDate {
-		s.sync.MarkSynced(vaultID)
-		return vault.MergeResult{UpToDate: true}, nil
+	if pull.StagingPath == "" {
+		return vault.MergeResult{}, errors.New("pull returned no encrypted vault snapshot")
 	}
 	merged, err := s.store.MergeRemoteSnapshot(pull.StagingPath)
 	if err != nil {
+		return vault.MergeResult{}, err
+	}
+	if err := s.store.PruneStaleAttachments(); err != nil {
 		return vault.MergeResult{}, err
 	}
 	s.sync.MarkSynced(vaultID)

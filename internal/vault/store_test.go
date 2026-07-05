@@ -110,9 +110,30 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	if !bytes.Equal(loaded, webp) {
 		t.Fatalf("GetAttachment() = %q, want %q", loaded, webp)
 	}
+	staleID, err := store.SaveAttachment(note.ID, webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(
+		note.ID,
+		note.Title,
+		fmt.Sprintf("![kept](attachment:%s#width=640)", id),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetAttachment(note.ID, staleID); err == nil {
+		t.Fatal("unreferenced attachment remains after saving")
+	}
+	syncStaleID, err := store.SaveAttachment(note.ID, webp)
+	if err != nil {
+		t.Fatal(err)
+	}
 	remote := t.TempDir()
 	if err := store.ExportRemoteSnapshot(remote); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := store.GetAttachment(note.ID, syncStaleID); err == nil {
+		t.Fatal("unreferenced attachment remains after sync export")
 	}
 	restored := NewStore()
 	if _, err := restored.RestoreRemoteSnapshot(
@@ -129,6 +150,12 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	}
 	if !bytes.Equal(restoredAttachment, webp) {
 		t.Fatal("restored attachment differs from its source")
+	}
+	if err := restored.DeleteAttachment(note.ID, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restored.GetAttachment(note.ID, id); err == nil {
+		t.Fatal("deleted attachment remains readable")
 	}
 	if err := store.DeleteNote(note.ID); err != nil {
 		t.Fatal(err)
@@ -773,6 +800,69 @@ func TestNoteRecordsModifiedAtEpoch(t *testing.T) {
 	}
 	if len(inventory.Objects) != 1 || inventory.Objects[0].ModifiedAt != saved.ModifiedAt {
 		t.Fatalf("remote inventory = %#v, want ModifiedAt %d", inventory.Objects, saved.ModifiedAt)
+	}
+}
+
+func TestMergePrefersHigherRevisionDespiteClockSkew(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "correct horse battery staple"
+	cloud := NewStore()
+	if _, err := cloud.Create(t.TempDir(), secret); err != nil {
+		t.Fatal(err)
+	}
+	base, err := cloud.CreateNote("Clock-skewed note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := cloud.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	local := NewStore()
+	if _, err := local.RestoreRemoteSnapshot(
+		remote,
+		t.TempDir(),
+		"Local",
+		secret,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := cloud.SaveNote(base.ID, base.Title, "newer cloud content")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloud.mu.Lock()
+	updated.ModifiedAt = base.ModifiedAt - 100
+	hash, err := cloud.writeNoteLocked(updated)
+	if err == nil {
+		index, _ := cloud.findNoteLocked(updated.ID)
+		cloud.manifest.Notes[index] = summaryFromNote(updated)
+		cloud.manifest.Notes[index].CiphertextHash = hash
+		err = cloud.saveManifestLocked()
+	}
+	cloud.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cloud.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := local.MergeRemoteSnapshot(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	received, err := local.GetNote(base.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.UpdatedNotes != 1 || received.Content != "newer cloud content" {
+		t.Fatalf("merge=%#v content=%q", merged, received.Content)
 	}
 }
 

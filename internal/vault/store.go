@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ var (
 	ErrVaultFolderExists   = errors.New("a folder with that vault name already exists")
 	ErrVaultNotFound       = errors.New("no encrypted vault exists in this folder")
 	ErrEncryptedFileAbsent = errors.New("an encrypted note file is missing")
+	attachmentReference    = regexp.MustCompile(`attachment:([a-f0-9]{32})`)
 )
 
 type Store struct {
@@ -452,6 +454,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		return Note{}, err
 	}
 	if current.Title == title && current.Content == content {
+		if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
+			return Note{}, err
+		}
 		return current, nil
 	}
 	current.Title = title
@@ -467,6 +472,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	s.manifest.Notes[index] = summaryFromNote(current)
 	s.manifest.Notes[index].CiphertextHash = hash
 	if err := s.saveManifestLocked(); err != nil {
+		return Note{}, err
+	}
+	if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
 		return Note{}, err
 	}
 	return current, nil
@@ -530,6 +538,104 @@ func (s *Store) GetAttachment(noteID, id string) ([]byte, error) {
 		return nil, errors.New("encrypted attachment is damaged")
 	}
 	return data, nil
+}
+
+// DeleteAttachment removes an image belonging to a note.
+func (s *Store) DeleteAttachment(noteID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if _, found := s.findNoteLocked(noteID); !found {
+		return errors.New("note not found")
+	}
+	if !validID(id) {
+		return errors.New("invalid attachment ID")
+	}
+	path := s.attachmentPathLocked(noteID, id)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove encrypted attachment: %w", err)
+	}
+	if err := os.Remove(path + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove encrypted attachment backup: %w", err)
+	}
+	return nil
+}
+
+// PruneStaleAttachments removes encrypted images not referenced by their note.
+func (s *Store) PruneStaleAttachments() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	return s.pruneStaleAttachmentsLocked()
+}
+
+func (s *Store) pruneStaleAttachmentsLocked() error {
+	attachmentRoot := filepath.Join(s.root, "attachments")
+	entries, err := os.ReadDir(attachmentRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect attachment folders: %w", err)
+	}
+	notes := make(map[string]struct{}, len(s.manifest.Notes))
+	for _, summary := range s.manifest.Notes {
+		notes[summary.ID] = struct{}{}
+		note, err := s.readNoteLocked(summary.ID)
+		if err != nil {
+			return err
+		}
+		if err := s.pruneNoteAttachmentsLocked(summary.ID, note.Content); err != nil {
+			return err
+		}
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !validID(entry.Name()) {
+			return errors.New("attachments folder contains an invalid path")
+		}
+		if _, found := notes[entry.Name()]; !found {
+			if err := os.RemoveAll(filepath.Join(attachmentRoot, entry.Name())); err != nil {
+				return fmt.Errorf("remove orphaned attachment folder: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) pruneNoteAttachmentsLocked(noteID, content string) error {
+	referenced := make(map[string]struct{})
+	for _, match := range attachmentReference.FindAllStringSubmatch(content, -1) {
+		referenced[match[1]] = struct{}{}
+	}
+	directory := filepath.Join(s.root, "attachments", noteID)
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect note attachments: %w", err)
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".enc") &&
+			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			return errors.New("note attachments folder contains an invalid path")
+		}
+		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
+		if entry.IsDir() || !validID(name) {
+			return errors.New("note attachments folder contains an invalid path")
+		}
+		if _, found := referenced[name]; found {
+			continue
+		}
+		if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+			return fmt.Errorf("remove stale attachment: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) DeleteNote(id string) error {
@@ -801,6 +907,9 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 	if err := s.requireUnlocked(); err != nil {
 		return err
 	}
+	if err := s.pruneStaleAttachmentsLocked(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(destination) == "" {
 		return errors.New("remote snapshot destination is required")
 	}
@@ -1024,10 +1133,8 @@ func (s *Store) readExistingRemoteInventoryLocked(
 }
 
 // MergeRemoteSnapshot pulls newer encrypted notes and folders from an
-// authenticated remote snapshot into the local vault. A remote note replaces
-// the local copy only when its ModifiedAt timestamp is strictly newer. Notes
-// that exist only locally are preserved (remote deletions are not propagated
-// in this version). The merged manifest is written atomically.
+// authenticated remote snapshot into the local vault. Revisions take
+// precedence over timestamps so clock skew cannot overwrite newer content.
 func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1049,11 +1156,18 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 	for _, deleted := range remote.Manifest.DeletedNotes {
 		found := false
 		var localModified int64
+		var localRevision uint64
 		for index, local := range mergedNotes {
 			if local.ID == deleted.ID {
 				found = true
 				localModified = local.ModifiedAt
-				if deleted.ModifiedAt > local.ModifiedAt {
+				localRevision = local.Revision
+				if versionIsNewer(
+					deleted.Revision,
+					deleted.ModifiedAt,
+					local.Revision,
+					local.ModifiedAt,
+				) {
 					mergedNotes = append(mergedNotes[:index], mergedNotes[index+1:]...)
 					removeFileAndBackup(s.notePathLocked(deleted.ID))
 					_ = os.RemoveAll(filepath.Join(s.root, "attachments", deleted.ID))
@@ -1063,13 +1177,24 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 				break
 			}
 		}
-		if !found || deleted.ModifiedAt > localModified {
+		if !found || versionIsNewer(
+			deleted.Revision,
+			deleted.ModifiedAt,
+			localRevision,
+			localModified,
+		) {
 			mergedDeletedNotes = upsertTombstone(mergedDeletedNotes, deleted)
 		}
 	}
 
 	for _, remoteNote := range remote.Manifest.Notes {
-		if deleted, found := findTombstone(mergedDeletedNotes, remoteNote.ID); found && deleted.ModifiedAt >= remoteNote.ModifiedAt {
+		if deleted, found := findTombstone(mergedDeletedNotes, remoteNote.ID); found &&
+			!versionIsNewer(
+				remoteNote.Revision,
+				remoteNote.ModifiedAt,
+				deleted.Revision,
+				deleted.ModifiedAt,
+			) {
 			continue
 		}
 		mergedDeletedNotes = removeTombstone(mergedDeletedNotes, remoteNote.ID)
@@ -1093,7 +1218,12 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			continue
 		}
 		local := mergedNotes[localIndex]
-		if remoteNote.ModifiedAt > local.ModifiedAt {
+		if versionIsNewer(
+			remoteNote.Revision,
+			remoteNote.ModifiedAt,
+			local.Revision,
+			local.ModifiedAt,
+		) {
 			if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
 				return MergeResult{}, err
 			}
@@ -2552,10 +2682,22 @@ func nextModifiedAt(previous int64) int64 {
 	return now
 }
 
+func versionIsNewer(revision uint64, modifiedAt int64, otherRevision uint64, otherModifiedAt int64) bool {
+	if revision != 0 && otherRevision != 0 && revision != otherRevision {
+		return revision > otherRevision
+	}
+	return modifiedAt > otherModifiedAt
+}
+
 func upsertTombstone(items []Tombstone, value Tombstone) []Tombstone {
 	for index := range items {
 		if items[index].ID == value.ID {
-			if value.ModifiedAt > items[index].ModifiedAt {
+			if versionIsNewer(
+				value.Revision,
+				value.ModifiedAt,
+				items[index].Revision,
+				items[index].ModifiedAt,
+			) {
 				items[index] = value
 			}
 			sortTombstones(items)

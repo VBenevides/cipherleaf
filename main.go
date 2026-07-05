@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 
+	cipherleafapp "cipherleaf/internal/app"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -16,7 +17,7 @@ import (
 var assets embed.FS
 
 func main() {
-	vaultService := NewVaultService()
+	vaultService := cipherleafapp.NewVaultService()
 	app := application.New(application.Options{
 		Name:        "Cipherleaf",
 		Description: "A local-first desktop Markdown notebook that encrypts your notes on disk and can sync them to a private GitHub repository",
@@ -30,7 +31,7 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
-	vaultService.setApp(app)
+	vaultService.SetApp(app)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "Cipherleaf",

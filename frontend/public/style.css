@@ -1598,27 +1598,51 @@ a:focus-visible {
   border-radius: 7px;
 }
 
-.live-markdown-editor .cm-live-attachment-controls {
+.live-markdown-editor .cm-live-attachment-resize {
   position: absolute;
-  right: 7px;
-  bottom: 7px;
-  display: none;
-  gap: 4px;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
 }
 
-.live-markdown-editor .cm-live-attachment:hover .cm-live-attachment-controls {
-  display: flex;
+.live-markdown-editor .cm-live-attachment-resize::after {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  content: "";
+  border-right: 2px solid rgba(255, 255, 255, 0.9);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.9);
 }
 
-.live-markdown-editor .cm-live-attachment-controls button {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 5px;
-  background: rgba(25, 28, 34, 0.82);
+.cm-live-attachment-menu {
+  position: fixed;
+  z-index: 10000;
+  display: grid;
+  min-width: 150px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--paper);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.cm-live-attachment-menu button {
+  padding: 7px 10px;
+  color: var(--ink);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
+  text-align: left;
+}
+
+.cm-live-attachment-menu button:hover {
+  background: rgba(127, 127, 127, 0.2);
 }
 
 .live-markdown-editor .cm-live-em {
