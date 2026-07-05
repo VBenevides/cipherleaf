@@ -120,6 +120,12 @@ a:focus-visible {
   box-shadow: none;
 }
 
+.brand-glyph img {
+  width: 82%;
+  height: 82%;
+  object-fit: contain;
+}
+
 .welcome-screen {
   position: relative;
   width: 100%;
@@ -1548,8 +1554,71 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-strong {
-  color: #38372f;
+  color: inherit;
   font-weight: 700;
+}
+
+.live-markdown-editor .cm-live-table-wrap {
+  display: block;
+  max-width: 100%;
+  margin: 0.75em 0;
+  overflow-x: auto;
+}
+
+.live-markdown-editor .cm-live-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: Inter, sans-serif;
+}
+
+.live-markdown-editor .cm-live-table-wrap th,
+.live-markdown-editor .cm-live-table-wrap td {
+  min-width: 110px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.live-markdown-editor .cm-live-table-wrap th {
+  background: rgba(127, 127, 127, 0.1);
+  font-weight: 700;
+}
+
+.live-markdown-editor .cm-live-attachment {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.8em 0;
+}
+
+.live-markdown-editor .cm-live-attachment img {
+  display: block;
+  min-height: 32px;
+  border-radius: 7px;
+}
+
+.live-markdown-editor .cm-live-attachment-controls {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: none;
+  gap: 4px;
+}
+
+.live-markdown-editor .cm-live-attachment:hover .cm-live-attachment-controls {
+  display: flex;
+}
+
+.live-markdown-editor .cm-live-attachment-controls button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 5px;
+  background: rgba(25, 28, 34, 0.82);
+  cursor: pointer;
 }
 
 .live-markdown-editor .cm-live-em {
@@ -1679,7 +1748,8 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-outline-line {
-  padding-left: calc(var(--outline-depth, 0) * 28px);
+  position: relative;
+  padding-left: calc(1rem + var(--outline-depth, 0) * 2ch);
   color: #4f4d46;
 }
 
@@ -1689,12 +1759,23 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-outline-line .cm-live-quote-toggle {
-  margin: 0 6px 0 0;
+  position: absolute;
+  left: 1px;
+  top: 2px;
+  width: 15px;
+  height: 18px;
+  margin: 0;
+  opacity: 0;
+}
+
+.live-markdown-editor .cm-live-outline-line:hover .cm-live-quote-toggle,
+.live-markdown-editor .cm-live-outline-line .cm-live-quote-toggle:focus-visible,
+.live-markdown-editor .cm-live-outline-collapsed .cm-live-quote-toggle {
+  opacity: 1;
 }
 
 .live-markdown-editor .cm-live-outline-spacer {
-  display: inline-block;
-  width: 27px;
+  display: none;
 }
 
 .live-markdown-editor .cm-live-outline-collapsed {
@@ -2313,6 +2394,10 @@ a:focus-visible {
 
 :root[data-theme="dark"] .live-markdown-editor .cm-activeLine {
   background: rgba(136, 192, 208, 0.06);
+}
+
+:root[data-theme="dark"] .live-markdown-editor .cm-live-strong {
+  color: inherit;
 }
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-code,

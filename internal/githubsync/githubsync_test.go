@@ -490,6 +490,15 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	if deleted.UpToDate {
 		t.Fatal("deleting the final note unexpectedly produced an up-to-date push")
 	}
+	cacheCommitCount := strings.TrimSpace(runGitTestCommand(
+		t,
+		"",
+		"-C", provider.cacheRepositoryPath(settings),
+		"rev-list", "--count", "HEAD",
+	))
+	if cacheCommitCount != "1" {
+		t.Fatalf("encrypted Git cache retained %s reachable commits, want 1", cacheCommitCount)
+	}
 	tree = runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
 	if strings.Contains(tree, note.ID+".enc") {
 		t.Fatalf("repository retained deleted final note:\n%s", tree)

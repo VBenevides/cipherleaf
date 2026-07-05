@@ -75,6 +75,69 @@ func TestVaultLifecycleStoresNoPlaintext(t *testing.T) {
 	}
 }
 
+func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	store := NewStore()
+	session, err := store.Create(t.TempDir(), "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("With image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	webp := append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("private pixels")...)
+	id, err := store.SaveAttachment(note.ID, webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(session.Path, "attachments", note.ID, id+".enc")
+	encrypted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encrypted, webp) {
+		t.Fatal("attachment was stored as plaintext")
+	}
+	loaded, err := store.GetAttachment(note.ID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(loaded, webp) {
+		t.Fatalf("GetAttachment() = %q, want %q", loaded, webp)
+	}
+	remote := t.TempDir()
+	if err := store.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	restored := NewStore()
+	if _, err := restored.RestoreRemoteSnapshot(
+		remote,
+		t.TempDir(),
+		"restored attachments",
+		"correct horse battery staple",
+	); err != nil {
+		t.Fatal(err)
+	}
+	restoredAttachment, err := restored.GetAttachment(note.ID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(restoredAttachment, webp) {
+		t.Fatal("restored attachment differs from its source")
+	}
+	if err := store.DeleteNote(note.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("attachment folder remains after deleting note: %v", err)
+	}
+}
+
 func TestFolderLifecycleAndNoteMovement(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

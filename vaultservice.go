@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +22,12 @@ import (
 )
 
 type VaultService struct {
-	mu     sync.RWMutex
-	app    *application.App
-	store  *vault.Store
-	recent *appsession.RecentVaultStore
+	mu      sync.RWMutex
+	app     *application.App
+	store   *vault.Store
+	recent  *appsession.RecentVaultStore
 	secrets *secretstore.Store
-	sync   *githubsync.Manager
+	sync    *githubsync.Manager
 }
 
 // RememberTTL is the default duration a vault secret stays in the OS keychain
@@ -290,7 +294,7 @@ func (s *VaultService) RememberVaultSecret() error {
 		return err
 	}
 	return nil
-}// ForgetVaultSecret removes any remembered secret for the currently open
+} // ForgetVaultSecret removes any remembered secret for the currently open
 // vault from the OS keychain. It is a no-op when the vault is not linked to
 // a keychain entry.
 func (s *VaultService) ForgetVaultSecret() error {
@@ -389,6 +393,104 @@ func (s *VaultService) GetNote(id string) (vault.Note, error) {
 
 func (s *VaultService) SaveNote(id, title, content string) (vault.Note, error) {
 	return s.store.SaveNote(id, title, content)
+}
+
+func (s *VaultService) SaveAttachment(noteID, webpBase64 string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(webpBase64)
+	if err != nil {
+		return "", errors.New("image data is not valid base64")
+	}
+	return s.store.SaveAttachment(noteID, data)
+}
+
+func (s *VaultService) GetAttachment(noteID, id string) (string, error) {
+	data, err := s.store.GetAttachment(noteID, id)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+func (s *VaultService) ReadClipboardImage() (string, error) {
+	if runtime.GOOS != "linux" {
+		return "", errors.New("native clipboard image fallback is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var output []byte
+	var mimeType string
+	if _, err := exec.LookPath("wl-paste"); err == nil {
+		types, listErr := exec.CommandContext(ctx, "wl-paste", "--list-types").Output()
+		if listErr == nil {
+			mimeType = selectClipboardImageType(string(types))
+		}
+		if mimeType != "" {
+			value, readErr := runLimitedClipboardCommand(
+				ctx, "wl-paste", "--no-newline", "--type", mimeType,
+			)
+			if readErr == nil {
+				output = value
+			}
+		}
+	}
+	if len(output) == 0 {
+		for _, candidate := range []string{"image/png", "image/webp", "image/jpeg"} {
+			if _, err := exec.LookPath("xclip"); err != nil {
+				break
+			}
+			value, err := runLimitedClipboardCommand(
+				ctx, "xclip", "-selection", "clipboard", "-t", candidate, "-o",
+			)
+			if err == nil && len(value) > 0 {
+				output = value
+				mimeType = candidate
+				break
+			}
+		}
+	}
+	if len(output) == 0 {
+		return "", errors.New("could not read image data from the system clipboard")
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(output), nil
+}
+
+func runLimitedClipboardCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	const limit = 15 * 1024 * 1024
+	command := exec.CommandContext(ctx, name, args...)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	output, readErr := io.ReadAll(io.LimitReader(stdout, limit+1))
+	if len(output) > limit {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, errors.New("clipboard image exceeds the 15 MiB input limit")
+	}
+	waitErr := command.Wait()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if waitErr != nil {
+		return nil, waitErr
+	}
+	return output, nil
+}
+
+func selectClipboardImageType(value string) string {
+	available := make(map[string]bool)
+	for _, item := range strings.Fields(value) {
+		available[strings.ToLower(item)] = true
+	}
+	for _, candidate := range []string{"image/png", "image/webp", "image/jpeg"} {
+		if available[candidate] {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (s *VaultService) DeleteNote(id string) error {

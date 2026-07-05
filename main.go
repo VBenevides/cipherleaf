@@ -45,6 +45,9 @@ func main() {
 		},
 		BackgroundColour: application.NewRGB(20, 20, 24),
 		URL:              "/",
+		Permissions: map[application.PermissionType]application.Permission{
+			application.PermissionClipboardRead: application.PermissionAllow,
+		},
 	})
 
 	if err := app.Run(); err != nil {

@@ -23,15 +23,16 @@ import (
 )
 
 const (
-	configFilename   = "vault.json"
-	manifestFilename = "manifest.enc"
-	syncDirectory    = "sync"
-	syncManifestFile = "manifest.enc"
-	syncFoldersFile  = "folders.enc"
-	maxNoteBytes     = 10 * 1024 * 1024
-	maxEnvelopeBytes = 16 * 1024 * 1024
-	maxTitleRunes    = 200
-	maxFolderRunes   = 120
+	configFilename     = "vault.json"
+	manifestFilename   = "manifest.enc"
+	syncDirectory      = "sync"
+	syncManifestFile   = "manifest.enc"
+	syncFoldersFile    = "folders.enc"
+	maxNoteBytes       = 10 * 1024 * 1024
+	maxAttachmentBytes = 10 * 1024 * 1024
+	maxEnvelopeBytes   = 16 * 1024 * 1024
+	maxTitleRunes      = 200
+	maxFolderRunes     = 120
 )
 
 var (
@@ -471,6 +472,66 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	return current, nil
 }
 
+// SaveAttachment encrypts a WebP image in the vault and returns its opaque ID.
+func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return "", err
+	}
+	if _, found := s.findNoteLocked(noteID); !found {
+		return "", errors.New("note not found")
+	}
+	if len(data) == 0 || len(data) > maxAttachmentBytes {
+		return "", errors.New("image must be between 1 byte and 10 MiB")
+	}
+	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return "", errors.New("image is not valid WebP data")
+	}
+	id, err := randomID(16)
+	if err != nil {
+		return "", fmt.Errorf("create attachment ID: %w", err)
+	}
+	path := s.attachmentPathLocked(noteID, id)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("create attachment folder: %w", err)
+	}
+	if err := s.writeEnvelopeLocked(path, "attachment", noteID+":"+id, data); err != nil {
+		return "", fmt.Errorf("encrypt attachment: %w", err)
+	}
+	return id, nil
+}
+
+// GetAttachment decrypts an image belonging to a note.
+func (s *Store) GetAttachment(noteID, id string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	if _, found := s.findNoteLocked(noteID); !found {
+		return nil, errors.New("note not found")
+	}
+	if !validID(id) {
+		return nil, errors.New("invalid attachment ID")
+	}
+	data, err := s.readEnvelopeLocked(
+		s.attachmentPathLocked(noteID, id),
+		"attachment",
+		noteID+":"+id,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt attachment: %w", err)
+	}
+	if len(data) > maxAttachmentBytes ||
+		len(data) < 12 ||
+		string(data[:4]) != "RIFF" ||
+		string(data[8:12]) != "WEBP" {
+		return nil, errors.New("encrypted attachment is damaged")
+	}
+	return data, nil
+}
+
 func (s *Store) DeleteNote(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -504,6 +565,9 @@ func (s *Store) DeleteNote(id string) error {
 	}
 	if err := os.Remove(path + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove encrypted note backup: %w", err)
+	}
+	if err := os.RemoveAll(filepath.Join(s.root, "attachments", id)); err != nil {
+		return fmt.Errorf("remove encrypted note attachments: %w", err)
 	}
 	return nil
 }
@@ -831,6 +895,9 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 	); err != nil {
 		return err
 	}
+	if err := s.exportAttachmentsLocked(destination); err != nil {
+		return err
+	}
 	inventoryPlaintext, err := json.Marshal(inventory)
 	if err != nil {
 		return fmt.Errorf("encode remote sync inventory: %w", err)
@@ -989,6 +1056,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 				if deleted.ModifiedAt > local.ModifiedAt {
 					mergedNotes = append(mergedNotes[:index], mergedNotes[index+1:]...)
 					removeFileAndBackup(s.notePathLocked(deleted.ID))
+					_ = os.RemoveAll(filepath.Join(s.root, "attachments", deleted.ID))
 					result.DeletedNotes++
 					result.UpToDate = false
 				}
@@ -1016,6 +1084,9 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
 				return MergeResult{}, err
 			}
+			if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
+				return MergeResult{}, err
+			}
 			mergedNotes = append(mergedNotes, remoteNote)
 			result.PulledNotes++
 			result.UpToDate = false
@@ -1024,6 +1095,9 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 		local := mergedNotes[localIndex]
 		if remoteNote.ModifiedAt > local.ModifiedAt {
 			if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
+				return MergeResult{}, err
+			}
+			if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
 				return MergeResult{}, err
 			}
 			mergedNotes[localIndex] = remoteNote
@@ -1113,6 +1187,129 @@ func copyRemoteNoteObject(source, localRoot, id string) error {
 		return fmt.Errorf("stage pulled encrypted note %s: %w", id, err)
 	}
 	return nil
+}
+
+func replaceRemoteAttachments(source, localRoot, noteID string) error {
+	target := filepath.Join(localRoot, "attachments", noteID)
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("replace local attachments: %w", err)
+	}
+	sourceDir := filepath.Join(source, "attachments", noteID)
+	if _, err := os.Stat(sourceDir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect remote attachments: %w", err)
+	}
+	return copyAttachmentDirectory(sourceDir, target)
+}
+
+func copyAttachmentDirectory(source, target string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o700)
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return errors.New("attachment folder contains a non-regular file")
+		}
+		return copyFileAtomic(path, destination)
+	})
+}
+
+func (s *Store) exportAttachmentsLocked(destination string) error {
+	sourceRoot := filepath.Join(s.root, "attachments")
+	targetRoot := filepath.Join(destination, "attachments")
+	expected := make(map[string]struct{})
+	if _, err := os.Stat(sourceRoot); errors.Is(err, os.ErrNotExist) {
+		return os.RemoveAll(targetRoot)
+	} else if err != nil {
+		return fmt.Errorf("inspect local attachments: %w", err)
+	}
+	if err := os.MkdirAll(targetRoot, 0o700); err != nil {
+		return fmt.Errorf("create remote attachments folder: %w", err)
+	}
+	err := filepath.WalkDir(sourceRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		relative, err := filepath.Rel(sourceRoot, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(relative), "/")
+		if len(parts) == 2 && strings.HasSuffix(parts[1], ".enc.bak") {
+			return nil
+		}
+		if len(parts) != 2 || !validID(parts[0]) ||
+			!strings.HasSuffix(parts[1], ".enc") ||
+			!validID(strings.TrimSuffix(parts[1], ".enc")) {
+			return errors.New("local attachments folder contains an invalid path")
+		}
+		if _, found := s.findNoteLocked(parts[0]); !found {
+			return errors.New("local attachment belongs to a missing note")
+		}
+		target := filepath.Join(targetRoot, relative)
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		if err := copyFileIfChangedFast(path, target); err != nil {
+			return fmt.Errorf("stage encrypted attachment: %w", err)
+		}
+		expected[filepath.Clean(target)] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return removeUnexpectedSnapshotObjects(targetRoot, expected)
+}
+
+func (s *Store) validateRemoteAttachmentsLocked(
+	source string,
+	remoteNotes map[string]remoteSyncObject,
+) error {
+	root := filepath.Join(source, "attachments")
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect remote attachments: %w", err)
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(relative), "/")
+		if len(parts) != 2 || !validID(parts[0]) ||
+			!strings.HasSuffix(parts[1], ".enc") {
+			return errors.New("remote attachments folder contains an invalid path")
+		}
+		id := strings.TrimSuffix(parts[1], ".enc")
+		note, found := remoteNotes[parts[0]]
+		if !found || note.Deleted || !validID(id) {
+			return errors.New("remote attachment belongs to a missing note")
+		}
+		data, err := s.readEnvelopeFileLocked(path, "attachment", parts[0]+":"+id)
+		if err != nil {
+			return fmt.Errorf("authenticate remote attachment: %w", err)
+		}
+		if len(data) == 0 || len(data) > maxAttachmentBytes ||
+			len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+			return errors.New("remote attachment contains invalid WebP data")
+		}
+		return nil
+	})
 }
 
 func (s *Store) readRemoteSnapshotLocked(
@@ -1320,6 +1517,9 @@ func (s *Store) readRemoteSnapshotLocked(
 			return authenticatedRemoteSnapshot{}, err
 		}
 	}
+	if err := s.validateRemoteAttachmentsLocked(source, remoteNotes); err != nil {
+		return authenticatedRemoteSnapshot{}, err
+	}
 	sortSummaries(noteSummaries)
 	return authenticatedRemoteSnapshot{
 		Config: remoteConfig,
@@ -1428,6 +1628,11 @@ func (s *Store) RestoreRemoteSnapshot(
 			}
 		}
 	}
+	if sourceAttachments := filepath.Join(source, "attachments"); directoryExists(sourceAttachments) {
+		if err := copyAttachmentDirectory(sourceAttachments, filepath.Join(stagingRoot, "attachments")); err != nil {
+			return Session{}, fmt.Errorf("restore encrypted attachments: %w", err)
+		}
+	}
 	validator.root = stagingRoot
 	validator.manifest = remote.Manifest
 	if err := validator.saveManifestLocked(); err != nil {
@@ -1524,6 +1729,10 @@ func (s *Store) folderNameExistsLocked(name, excludingID string) bool {
 
 func (s *Store) notePathLocked(id string) string {
 	return filepath.Join(s.root, "objects", id[:2], id+".enc")
+}
+
+func (s *Store) attachmentPathLocked(noteID, id string) string {
+	return filepath.Join(s.root, "attachments", noteID, id+".enc")
 }
 
 func (s *Store) writeNoteLocked(note Note) (string, error) {
@@ -2257,6 +2466,11 @@ func normalizeVaultName(name string) (string, error) {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func directoryExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func sameRegularFileSize(left, right string) bool {

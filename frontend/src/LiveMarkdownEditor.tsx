@@ -23,13 +23,23 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { openSearchPanel, searchKeymap, search } from "@codemirror/search";
-import { isHorizontalRule } from "./markdown";
+import {
+  isHorizontalRule,
+  isTableDivider,
+  embeddedClipboardImage,
+  outlineSectionEnd,
+  parseAttachmentMarkdown,
+  tableCells,
+} from "./markdown";
 import { SNIPPETS, expandSnippet } from "./snippets";
+import { VaultService } from "../bindings/cipherleaf";
 
 type LiveMarkdownEditorProps = {
+  noteID: string;
   value: string;
   onChange: (value: string) => void;
   onSave: () => void;
+  onError: (reason: unknown) => void;
   onOpenWikilink: (title: string) => void;
   scrollToOffset?: number | null;
 };
@@ -59,7 +69,7 @@ const liveMarkdownTheme = EditorView.theme(
     boxSizing: "border-box",
     background: "var(--outline-section-bg)",
     paddingLeft:
-      "calc(1.5rem + var(--outline-depth, 0) * var(--outline-indent-step))",
+      "calc(1rem + var(--outline-depth, 0) * var(--outline-indent-step))",
     paddingTop: "2px",
     paddingBottom: "2px",
     borderLeft: "2px solid var(--outline-section-border)",
@@ -75,10 +85,12 @@ const liveMarkdownTheme = EditorView.theme(
     borderBottomRightRadius: "var(--outline-section-radius)",
   },
 
-  ".cm-live-quote-toggle, .cm-live-outline-spacer": {
+  ".cm-live-quote-toggle": {
+    position: "absolute",
+    left: "1px",
+    top: "2px",
     display: "inline-flex",
-    width: "1.25rem",
-    marginLeft: "-1.25rem",
+    width: "15px",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -214,6 +226,103 @@ class QuoteToggleWidget extends WidgetType {
       view.focus();
     });
     return button;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+class TableWidget extends WidgetType {
+  constructor(readonly rows: string[][]) {
+    super();
+  }
+
+  eq(other: TableWidget) {
+    return JSON.stringify(other.rows) === JSON.stringify(this.rows);
+  }
+
+  toDOM() {
+    const wrapper = document.createElement("span");
+    wrapper.className = "cm-live-table-wrap";
+    const table = wrapper.appendChild(document.createElement("table"));
+    const [head, ...body] = this.rows;
+    const thead = table.appendChild(document.createElement("thead"));
+    const headRow = thead.appendChild(document.createElement("tr"));
+    for (const cell of head) {
+      const th = headRow.appendChild(document.createElement("th"));
+      th.textContent = cell;
+    }
+    const tbody = table.appendChild(document.createElement("tbody"));
+    for (const row of body) {
+      const tr = tbody.appendChild(document.createElement("tr"));
+      for (let index = 0; index < head.length; index++) {
+        const td = tr.appendChild(document.createElement("td"));
+        td.textContent = row[index] ?? "";
+      }
+    }
+    return wrapper;
+  }
+}
+
+class AttachmentWidget extends WidgetType {
+  constructor(
+    readonly noteID: string,
+    readonly attachmentID: string,
+    readonly alt: string,
+    readonly width: number,
+    readonly from: number,
+    readonly to: number,
+  ) {
+    super();
+  }
+
+  eq(other: AttachmentWidget) {
+    return other.noteID === this.noteID &&
+      other.attachmentID === this.attachmentID &&
+      other.alt === this.alt &&
+      other.width === this.width;
+  }
+
+  toDOM(view: EditorView) {
+    const figure = document.createElement("span");
+    figure.className = "cm-live-attachment";
+    const image = figure.appendChild(document.createElement("img"));
+    image.alt = this.alt;
+    image.style.width = `${this.width}px`;
+    image.style.maxWidth = "100%";
+    image.draggable = false;
+    image.setAttribute("aria-busy", "true");
+    void VaultService.GetAttachment(this.noteID, this.attachmentID)
+      .then((data) => {
+        image.src = `data:image/webp;base64,${data}`;
+        image.removeAttribute("aria-busy");
+      })
+      .catch(() => {
+        image.alt = `${this.alt} (image unavailable)`;
+        image.removeAttribute("aria-busy");
+      });
+    const controls = figure.appendChild(document.createElement("span"));
+    controls.className = "cm-live-attachment-controls";
+    for (const [label, factor] of [["−", 0.8], ["+", 1.25]] as const) {
+      const button = controls.appendChild(document.createElement("button"));
+      button.type = "button";
+      button.textContent = label;
+      button.title = label === "−" ? "Make image smaller" : "Make image larger";
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const width = Math.max(120, Math.min(2400, Math.round(this.width * factor)));
+        view.dispatch({
+          changes: {
+            from: this.from,
+            to: this.to,
+            insert: `![${this.alt}](attachment:${this.attachmentID}#width=${width})`,
+          },
+        });
+      });
+    }
+    return figure;
   }
 
   ignoreEvent() {
@@ -394,6 +503,7 @@ function buildLivePreviewState(
   state: EditorState,
   collapsedQuotes: ReadonlySet<number>,
   openWikilink: (title: string) => void,
+  noteID: string,
 ): LivePreviewState {
   const decorations: Range<Decoration>[] = [];
   const atomicRanges: Range<Decoration>[] = [];
@@ -403,26 +513,76 @@ function buildLivePreviewState(
     const line = state.doc.line(lineNumber);
     const outline = outlineLine(line.text);
 
-    if (outline) {
-      let lastDescendant = lineNumber;
-      for (let candidate = lineNumber + 1; candidate <= state.doc.lines; candidate++) {
-        const nested = outlineLine(state.doc.line(candidate).text);
-        if (!nested || nested.depth <= outline.depth) break;
-        lastDescendant = candidate;
+    if (
+      lineNumber < state.doc.lines &&
+      line.text.includes("|") &&
+      isTableDivider(state.doc.line(lineNumber + 1).text)
+    ) {
+      let lastLineNumber = lineNumber + 1;
+      while (
+        lastLineNumber < state.doc.lines &&
+        state.doc.line(lastLineNumber + 1).text.includes("|") &&
+        state.doc.line(lastLineNumber + 1).text.trim() !== ""
+      ) {
+        lastLineNumber++;
       }
+      const active = state.selection.ranges.some((range) =>
+        range.to >= line.from && range.from <= state.doc.line(lastLineNumber).to,
+      );
+      if (!active) {
+        const rows = [tableCells(line.text)];
+        for (let row = lineNumber + 2; row <= lastLineNumber; row++) {
+          rows.push(tableCells(state.doc.line(row).text));
+        }
+        addHiddenRange(
+          line.from,
+          state.doc.line(lastLineNumber).to,
+          decorations,
+          atomicRanges,
+          new TableWidget(rows),
+        );
+        lineNumber = lastLineNumber + 1;
+        continue;
+      }
+    }
 
-      const hasChildren = lastDescendant > lineNumber;
-      const collapsed = hasChildren && nextCollapsed.has(line.from);
-      const contentOffset = line.from + outline.prefixSize;
+    const attachment = parseAttachmentMarkdown(line.text);
+    if (attachment && !lineIsActive(state, lineNumber)) {
+      addHiddenRange(
+        line.from,
+        line.to,
+        decorations,
+        atomicRanges,
+        new AttachmentWidget(
+          noteID,
+          attachment.id,
+          attachment.alt,
+          attachment.width,
+          line.from,
+          line.to,
+        ),
+      );
+      lineNumber++;
+      continue;
+    }
 
+    if (outline) {
       const previousOutline =
         lineNumber > 1 ? outlineLine(state.doc.line(lineNumber - 1).text) : null;
-
       const nextOutline =
         lineNumber < state.doc.lines ? outlineLine(state.doc.line(lineNumber + 1).text) : null;
-
       const startsOutlineGroup = !previousOutline;
-      const endsOutlineGroup = collapsed || !nextOutline;
+      const endsOutlineGroup = !nextOutline;
+      const lastGroupLine = startsOutlineGroup
+        ? outlineSectionEnd(
+          lineNumber,
+          state.doc.lines,
+          (candidate) => Boolean(outlineLine(state.doc.line(candidate).text)),
+        )
+        : lineNumber;
+      const hasChildren = startsOutlineGroup && lastGroupLine > lineNumber;
+      const collapsed = hasChildren && nextCollapsed.has(line.from);
+      const contentOffset = line.from + outline.prefixSize;
 
       const isTask = decorateTaskMarker(
         outline.content,
@@ -461,14 +621,14 @@ function buildLivePreviewState(
         }).range(line.from),
       );
 
-      decorations.push(
-        Decoration.widget({
-          widget: hasChildren
-            ? new QuoteToggleWidget(line.from, collapsed)
-            : new TextWidget("", "cm-live-outline-spacer"),
-          side: -1,
-        }).range(line.from),
-      );
+      if (hasChildren) {
+        decorations.push(
+          Decoration.widget({
+            widget: new QuoteToggleWidget(line.from, collapsed),
+            side: -1,
+          }).range(line.from),
+        );
+      }
 
       addHiddenRange(
         line.from,
@@ -488,15 +648,15 @@ function buildLivePreviewState(
       );
 
       if (collapsed) {
-        const lastLine = state.doc.line(lastDescendant);
+        const lastLine = state.doc.line(lastGroupLine);
         addHiddenRange(
           line.to,
           lastLine.to,
           decorations,
           atomicRanges,
-          new FoldedQuoteWidget(lastDescendant - lineNumber),
+          new FoldedQuoteWidget(lastGroupLine - lineNumber),
         );
-        lineNumber = lastDescendant + 1;
+        lineNumber = lastGroupLine + 1;
       } else {
         lineNumber++;
       }
@@ -581,10 +741,10 @@ function buildLivePreviewState(
   };
 }
 
-function livePreviewExtension(openWikilink: (title: string) => void) {
+function livePreviewExtension(openWikilink: (title: string) => void, noteID: string) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
-      return buildLivePreviewState(state, new Set(), openWikilink);
+      return buildLivePreviewState(state, new Set(), openWikilink, noteID);
     },
     update(value, transaction) {
       const collapsed = new Set<number>();
@@ -596,7 +756,7 @@ function livePreviewExtension(openWikilink: (title: string) => void) {
         if (collapsed.has(effect.value)) collapsed.delete(effect.value);
         else collapsed.add(effect.value);
       }
-      return buildLivePreviewState(transaction.state, collapsed, openWikilink);
+      return buildLivePreviewState(transaction.state, collapsed, openWikilink, noteID);
     },
     provide(currentField) {
       return [
@@ -718,9 +878,11 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
 }
 
 export default function LiveMarkdownEditor({
+  noteID,
   value,
   onChange,
   onSave,
+  onError,
   onOpenWikilink,
   scrollToOffset,
 }: LiveMarkdownEditorProps) {
@@ -728,14 +890,16 @@ export default function LiveMarkdownEditor({
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  const onErrorRef = useRef(onError);
   const onOpenWikilinkRef = useRef(onOpenWikilink);
   const pendingScroll = useRef<number | null>(scrollToOffset ?? null);
 
   useEffect(() => {
     onChangeRef.current = onChange;
     onSaveRef.current = onSave;
+    onErrorRef.current = onError;
     onOpenWikilinkRef.current = onOpenWikilink;
-  }, [onChange, onSave, onOpenWikilink]);
+  }, [onChange, onSave, onError, onOpenWikilink]);
 
   useEffect(() => {
     if (typeof scrollToOffset === "number") {
@@ -799,8 +963,35 @@ export default function LiveMarkdownEditor({
             "aria-label": "Live Preview Markdown editor",
             spellcheck: "true",
           }),
+          EditorView.domEventHandlers({
+            paste(event, pastedView) {
+              const image = clipboardImage(event);
+              if (!image && !clipboardClaimsImage(event)) return false;
+              event.preventDefault();
+              const insertion = pastedView.state.selection.main.from;
+              void (image ? Promise.resolve(image) : readClipboardImage())
+                .then((source) => {
+                  if (!source) throw new Error("Could not read image data from the clipboard");
+                  return imageToWebPBase64(source);
+                })
+                .then((data) => VaultService.SaveAttachment(noteID, data))
+                .then((id) => {
+                  const markdown = `![Pasted image](attachment:${id}#width=640)`;
+                  const actualInsertion = Math.min(insertion, pastedView.state.doc.length);
+                  const line = pastedView.state.doc.lineAt(actualInsertion);
+                  const prefix = actualInsertion > line.from ? "\n" : "";
+                  const inserted = `${prefix}${markdown}\n`;
+                  pastedView.dispatch({
+                    changes: { from: actualInsertion, insert: inserted },
+                    selection: EditorSelection.cursor(actualInsertion + inserted.length),
+                  });
+                })
+                .catch((reason) => onErrorRef.current(reason));
+              return true;
+            },
+          }),
           placeholder("Begin writing…"),
-          livePreviewExtension((title) => onOpenWikilinkRef.current(title)),
+          livePreviewExtension((title) => onOpenWikilinkRef.current(title), noteID),
           EditorView.updateListener.of((update) => {
             if (
               update.docChanged &&
@@ -939,4 +1130,117 @@ export default function LiveMarkdownEditor({
       <div ref={host} className="live-markdown-editor" />
     </div>
   );
+}
+
+async function imageToWebPBase64(source: Blob | string): Promise<string> {
+  const loaded = await loadClipboardImage(source);
+  const scale = Math.min(1, 2400 / Math.max(loaded.width, loaded.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(loaded.width * scale));
+  canvas.height = Math.max(1, Math.round(loaded.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare pasted image");
+  context.drawImage(loaded.image, 0, 0, canvas.width, canvas.height);
+  loaded.close();
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (value) => value ? resolve(value) : reject(new Error("Could not convert pasted image")),
+      "image/webp",
+      0.86,
+    ),
+  );
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const isWebP = bytes.length >= 12 &&
+    String.fromCharCode(...bytes.subarray(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.subarray(8, 12)) === "WEBP";
+  if (!isWebP) {
+    throw new Error("This system WebView cannot convert clipboard images to WebP");
+  }
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function clipboardImage(event: ClipboardEvent): Blob | string | null {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return null;
+  for (let index = 0; index < clipboard.items.length; index++) {
+    const item = clipboard.items[index];
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  for (let index = 0; index < clipboard.files.length; index++) {
+    const file = clipboard.files[index];
+    if (file.type.startsWith("image/")) return file;
+  }
+  const encoded = `${clipboard.getData("text/html")}\n${clipboard.getData("text/plain")}`;
+  return embeddedClipboardImage(encoded);
+}
+
+function clipboardClaimsImage(event: ClipboardEvent): boolean {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return false;
+  for (let index = 0; index < clipboard.items.length; index++) {
+    if (clipboard.items[index].type.startsWith("image/")) return true;
+  }
+  for (let index = 0; index < clipboard.types.length; index++) {
+    if (clipboard.types[index].startsWith("image/")) return true;
+  }
+  return /^\/?PNG$/i.test(clipboard.getData("text/plain").trim());
+}
+
+async function readClipboardImage(): Promise<Blob | string | null> {
+  if (navigator.clipboard?.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((type) => type.startsWith("image/"));
+        if (imageType) return item.getType(imageType);
+      }
+    } catch {
+      // Linux WebKit often exposes the image MIME type without its bytes.
+    }
+  }
+  try {
+    return await VaultService.ReadClipboardImage();
+  } catch {
+    return null;
+  }
+}
+
+async function loadClipboardImage(source: Blob | string): Promise<{
+  image: CanvasImageSource;
+  width: number;
+  height: number;
+  close: () => void;
+}> {
+  if (typeof createImageBitmap === "function" && source instanceof Blob) {
+    try {
+      const bitmap = await createImageBitmap(source);
+      return {
+        image: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        close: () => bitmap.close(),
+      };
+    } catch {
+      // Fall through to the HTML image decoder used by older WebViews.
+    }
+  }
+  const url = typeof source === "string" ? source : URL.createObjectURL(source);
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  return {
+    image,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+    close: () => {
+      if (typeof source !== "string") URL.revokeObjectURL(url);
+    },
+  };
 }

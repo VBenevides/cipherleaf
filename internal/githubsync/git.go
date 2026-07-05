@@ -179,6 +179,7 @@ func prepareSSHFiles(runtimeDir string) (string, string, error) {
 }
 
 var remoteObjectPath = regexp.MustCompile(`^objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
+var remoteAttachmentPath = regexp.MustCompile(`^attachments/([a-f0-9]{32})/([a-f0-9]{32})\.enc$`)
 var remoteVaultID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 type GitHubSSHProvider struct {
@@ -488,6 +489,14 @@ func (p *GitHubSSHProvider) Push(
 	if err != nil {
 		return PushResult{}, err
 	}
+	if err := p.pruneEncryptedCache(
+		contextWithTimeout,
+		cachePath,
+		settings,
+		environment,
+	); err != nil {
+		return PushResult{}, err
+	}
 	return PushResult{
 		Linked:     true,
 		Message:    "The encrypted vault snapshot was pushed to GitHub.",
@@ -551,6 +560,9 @@ func (p *GitHubSSHProvider) Pull(
 		return PullResult{}, err
 	}
 	if previousCommit == remoteCommit {
+		if err := p.compactEncryptedCache(contextWithTimeout, cachePath); err != nil {
+			return PullResult{}, err
+		}
 		return PullResult{
 			Linked:      true,
 			Message:     "The encrypted GitHub snapshot is unchanged.",
@@ -579,6 +591,9 @@ func (p *GitHubSSHProvider) Pull(
 	if err != nil {
 		return PullResult{}, err
 	}
+	if err := p.compactEncryptedCache(contextWithTimeout, cachePath); err != nil {
+		return PullResult{}, err
+	}
 	return PullResult{
 		Linked:      true,
 		Message:     "The encrypted vault snapshot was pulled from GitHub.",
@@ -588,6 +603,40 @@ func (p *GitHubSSHProvider) Pull(
 		Temporary:   false,
 		UpToDate:    false,
 	}, nil
+}
+
+// pruneEncryptedCache makes the just-pushed tip the shallow boundary, expires
+// reflogs, and removes unreachable encrypted history from the local cache.
+func (p *GitHubSSHProvider) pruneEncryptedCache(
+	ctx context.Context,
+	cachePath string,
+	settings SyncSettings,
+	environment []string,
+) error {
+	output, err := p.runner.Run(ctx, "git", []string{
+		"-C", cachePath,
+		"fetch", "--quiet", "--prune", "--depth=1", "origin",
+		"+refs/heads/" + settings.Branch + ":refs/remotes/origin/" + settings.Branch,
+	}, environment)
+	if err != nil {
+		_ = output
+		return errors.New("the vault was pushed, but its encrypted Git cache could not be pruned")
+	}
+	return p.compactEncryptedCache(ctx, cachePath)
+}
+
+func (p *GitHubSSHProvider) compactEncryptedCache(ctx context.Context, cachePath string) error {
+	commands := [][]string{
+		{"-C", cachePath, "reflog", "expire", "--expire=now", "--all"},
+		{"-C", cachePath, "gc", "--quiet", "--prune=now"},
+	}
+	for _, arguments := range commands {
+		if output, err := p.runner.Run(ctx, "git", arguments, localGitEnvironment()); err != nil {
+			_ = output
+			return errors.New("Git could not compact the encrypted cache")
+		}
+	}
+	return nil
 }
 
 func (p *GitHubSSHProvider) ensureLinkedCache(
@@ -625,7 +674,7 @@ func (p *GitHubSSHProvider) ensureLinkedCache(
 }
 
 func clearMaterializedSnapshot(root string) error {
-	for _, relative := range []string{"vault.json", "sync", "objects"} {
+	for _, relative := range []string{"vault.json", "sync", "objects", "attachments"} {
 		if err := os.RemoveAll(filepath.Join(root, relative)); err != nil {
 			return errors.New("could not refresh the encrypted Git cache")
 		}
@@ -929,6 +978,9 @@ func validateWorkingTreeLayout(root string) error {
 		}
 		match := remoteObjectPath.FindStringSubmatch(slashPath)
 		if len(match) == 3 && match[1] == match[2][:2] {
+			return nil
+		}
+		if remoteAttachmentPath.MatchString(slashPath) {
 			return nil
 		}
 		return errors.New("encrypted snapshot export produced an unsafe repository path")

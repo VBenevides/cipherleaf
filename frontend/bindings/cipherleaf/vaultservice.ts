@@ -68,6 +68,10 @@ export function GenerateVaultSecret(): $CancellablePromise<string> {
     return $Call.ByID(2346026114);
 }
 
+export function GetAttachment(noteID: string, id: string): $CancellablePromise<string> {
+    return $Call.ByID(3542621470, noteID, id);
+}
+
 export function GetLastSession(): $CancellablePromise<$models.LastSession> {
     return $Call.ByID(552484445);
 }
@@ -123,6 +127,10 @@ export function QuitApplication(): $CancellablePromise<void> {
     return $Call.ByID(644217200);
 }
 
+export function ReadClipboardImage(): $CancellablePromise<string> {
+    return $Call.ByID(3871424962);
+}
+
 export function RememberTheme(theme: string): $CancellablePromise<void> {
     return $Call.ByID(3940625263, theme);
 }
@@ -146,6 +154,10 @@ export function RenameVault(newName: string): $CancellablePromise<vault$0.Sessio
 
 export function ReplaceAcrossNotes(find: string, replace: string, noteIDs: string[] | null): $CancellablePromise<vault$0.ReplaceResult> {
     return $Call.ByID(1753583, find, replace, noteIDs);
+}
+
+export function SaveAttachment(noteID: string, webpBase64: string): $CancellablePromise<string> {
+    return $Call.ByID(1950368961, noteID, webpBase64);
 }
 
 export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.Note> {

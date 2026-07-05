@@ -82,20 +82,23 @@ revive the deleted identity.
 The MVP supports named vault creation inside a selected parent
 folder, vault reopening, manual and 15-minute automatic locking, encrypted note
 CRUD, autosave 10 seconds after typing stops, explicit save, editable Markdown
-Live Preview, source/preview/split alternatives, `---` horizontal dividers,
+Live Preview and source modes, `---` horizontal dividers,
 collapsible `>` sections, encrypted folders and note movement, note context
 menus, titlebar vault/file actions, light and Nord-inspired dark themes,
 bold/italic formatting, interactive task checkboxes, bullet lists,
 title/content search, restart unlock prompts, and `[[wikilinks]]`.
 
-Notion-style nested toggles use one `>` per level. Tasks may appear at any
-level:
+Consecutive `>` lines form one collapsible section. A line without `>` ends
+the section; use more `>` characters to indent nested rows:
 
 ```markdown
 > Project
->> [ ] First task
->>> [x] Completed subtask
->> [ ] Second task
+> [ ] First task
+>> [x] Completed subtask
+> [ ] Second task
+
+> Another section
+> Its second row
 ```
 
 In Live Preview, use `Tab` and `Shift+Tab` to indent or outdent toggle rows.

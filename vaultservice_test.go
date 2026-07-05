@@ -29,3 +29,12 @@ func TestClearClipboardIfUnchanged(t *testing.T) {
 		t.Fatal("clipboard clear overwrote a newer value")
 	}
 }
+
+func TestSelectClipboardImageType(t *testing.T) {
+	if got := selectClipboardImageType("text/plain\nimage/jpeg\nimage/png\n"); got != "image/png" {
+		t.Fatalf("selected MIME type = %q, want image/png", got)
+	}
+	if got := selectClipboardImageType("text/plain\ntext/html\n"); got != "" {
+		t.Fatalf("selected non-image MIME type %q", got)
+	}
+}
