@@ -102,3 +102,5 @@ the section; use more `>` characters to indent nested rows:
 ```
 
 In Live Preview, use `Tab` and `Shift+Tab` to indent or outdent toggle rows.
+Use `Ctrl+]` / `Ctrl+[` to expand or collapse the current section, and
+`Ctrl+Shift+]` / `Ctrl+Shift+[` to expand or collapse all sections.

@@ -55,6 +55,12 @@ const externalDocumentUpdate = Annotation.define<boolean>();
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
 });
+const setQuoteCollapsed = StateEffect.define<{ position: number; collapsed: boolean }>({
+  map: (value, changes) => ({
+    ...value,
+    position: changes.mapPos(value.position),
+  }),
+});
 const setAllQuotesCollapsed = StateEffect.define<boolean>();
 
 const liveMarkdownTheme = EditorView.theme(
@@ -858,6 +864,11 @@ function livePreviewExtension(
           }
           continue;
         }
+        if (effect.is(setQuoteCollapsed)) {
+          if (effect.value.collapsed) collapsed.add(effect.value.position);
+          else collapsed.delete(effect.value.position);
+          continue;
+        }
         if (!effect.is(toggleQuote)) continue;
         if (collapsed.has(effect.value)) collapsed.delete(effect.value);
         else collapsed.add(effect.value);
@@ -986,6 +997,26 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
 function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
   view.dispatch({ effects: setAllQuotesCollapsed.of(collapsed) });
   view.focus();
+  return true;
+}
+
+function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
+  let lineNumber = view.state.doc.lineAt(view.state.selection.main.head).number;
+  if (!outlineLine(view.state.doc.line(lineNumber).text)) return false;
+
+  while (
+    lineNumber > 1 &&
+    outlineLine(view.state.doc.line(lineNumber - 1).text)
+  ) {
+    lineNumber--;
+  }
+
+  const position = view.state.doc.line(lineNumber).from;
+  if (!collapsibleQuotePositions(view.state).includes(position)) return false;
+
+  view.dispatch({ effects: setQuoteCollapsed.of({ position, collapsed }) });
+  view.focus();
+  return true;
 }
 
 export default function LiveMarkdownEditor({
@@ -1027,6 +1058,26 @@ export default function LiveMarkdownEditor({
         doc: value,
         extensions: [
           keymap.of([
+            {
+              key: "Ctrl-]",
+              preventDefault: true,
+              run: (editor) => setCurrentSectionCollapsed(editor, false),
+            },
+            {
+              key: "Ctrl-[",
+              preventDefault: true,
+              run: (editor) => setCurrentSectionCollapsed(editor, true),
+            },
+            {
+              key: "Ctrl-Shift-]",
+              preventDefault: true,
+              run: (editor) => setAllSectionsCollapsed(editor, false),
+            },
+            {
+              key: "Ctrl-Shift-[",
+              preventDefault: true,
+              run: (editor) => setAllSectionsCollapsed(editor, true),
+            },
             {
               key: "Tab",
               run: (editor) => changeOutlineDepth(editor, 1),
@@ -1243,7 +1294,7 @@ export default function LiveMarkdownEditor({
         </button>
         <button
           type="button"
-          title="Collapse all sections"
+          title="Collapse all sections (Ctrl+Shift+[)"
           aria-label="Collapse all sections"
           onMouseDown={(event) => {
             event.preventDefault();
@@ -1254,7 +1305,7 @@ export default function LiveMarkdownEditor({
         </button>
         <button
           type="button"
-          title="Expand all sections"
+          title="Expand all sections (Ctrl+Shift+])"
           aria-label="Expand all sections"
           onMouseDown={(event) => {
             event.preventDefault();
