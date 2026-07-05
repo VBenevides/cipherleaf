@@ -86,13 +86,12 @@ jobs:
       - name: Version binary
         run: |
           mv bin/cipherleaf "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
-          tar -C bin -czf "bin/cipherleaf-v${APP_VERSION}-linux-amd64.tar.gz" \
-            "cipherleaf-v${APP_VERSION}-linux-amd64"
+          chmod +x "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
 
       - uses: actions/upload-artifact@v4
         with:
           name: cipherleaf-v${{ env.APP_VERSION }}-linux-amd64
-          path: bin/cipherleaf-v${{ env.APP_VERSION }}-linux-amd64.tar.gz
+          path: bin/cipherleaf-v${{ env.APP_VERSION }}-linux-amd64
           if-no-files-found: error
 
   windows:
