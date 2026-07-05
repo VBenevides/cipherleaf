@@ -394,6 +394,10 @@ func (s *VaultService) MoveNote(id, folderID string) (vault.Note, error) {
 	return s.store.MoveNote(id, folderID)
 }
 
+func (s *VaultService) ReorderNotes(folderID string, orderedIDs []string) error {
+	return s.store.ReorderNotes(folderID, orderedIDs)
+}
+
 func (s *VaultService) GetNote(id string) (vault.Note, error) {
 	return s.store.GetNote(id)
 }

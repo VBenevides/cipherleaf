@@ -167,6 +167,10 @@ export function RenameVault(newName: string): $CancellablePromise<vault$0.Sessio
     return $Call.ByID(1978051175, newName);
 }
 
+export function ReorderNotes(folderID: string, orderedIDs: string[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2800466995, folderID, orderedIDs);
+}
+
 export function ReplaceAcrossNotes(find: string, replace: string, noteIDs: string[] | null): $CancellablePromise<vault$0.ReplaceResult> {
     return $Call.ByID(1932071061, find, replace, noteIDs);
 }

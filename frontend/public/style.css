@@ -919,6 +919,11 @@ a:focus-visible {
   background: rgba(255, 255, 255, 0.78);
 }
 
+.folder-list-item.drag-over {
+  outline: 1px solid var(--green);
+  background: rgba(255, 255, 255, 0.78);
+}
+
 .folder-list-item > span {
   overflow: hidden;
   font-size: 10px;
@@ -962,6 +967,22 @@ a:focus-visible {
   color: var(--green-dark);
   background: rgba(255, 255, 255, 0.8);
   box-shadow: inset 3px 0 var(--green);
+}
+
+.note-list-item {
+  cursor: grab;
+}
+
+.note-list-item:active {
+  cursor: grabbing;
+}
+
+.note-list-item.drag-over-before {
+  box-shadow: inset 0 2px var(--green);
+}
+
+.note-list-item.drag-over-after {
+  box-shadow: inset 0 -2px var(--green);
 }
 
 .note-list-item > span {

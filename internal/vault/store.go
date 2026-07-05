@@ -261,7 +261,7 @@ func (s *Store) CreateNoteInFolder(title, folderID string) (Note, error) {
 	now := time.Now().UTC()
 	nowRFC := now.Format(time.RFC3339Nano)
 	note := Note{
-		ID: id, Title: title, FolderID: folderID, Content: "",
+		ID: id, Title: title, FolderID: folderID, Order: s.nextNoteOrderLocked(folderID), Content: "",
 		CreatedAt: nowRFC, UpdatedAt: nowRFC, ModifiedAt: now.Unix(), Revision: 1,
 	}
 	hash, err := s.writeNoteLocked(note)
@@ -402,6 +402,7 @@ func (s *Store) MoveNote(id, folderID string) (Note, error) {
 	original := current
 	originalSummary := s.manifest.Notes[index]
 	current.FolderID = folderID
+	current.Order = s.nextNoteOrderLocked(folderID)
 	now := time.Now().UTC()
 	current.UpdatedAt = now.Format(time.RFC3339Nano)
 	current.ModifiedAt = nextModifiedAt(original.ModifiedAt)
@@ -418,6 +419,75 @@ func (s *Store) MoveNote(id, folderID string) (Note, error) {
 		return Note{}, err
 	}
 	return current, nil
+}
+
+func (s *Store) ReorderNotes(folderID string, orderedIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if !s.folderExistsLocked(folderID) {
+		return errors.New("folder not found")
+	}
+	folderCount := 0
+	seen := make(map[string]struct{}, len(orderedIDs))
+	for _, summary := range s.manifest.Notes {
+		if summary.FolderID == folderID {
+			folderCount++
+		}
+	}
+	if len(orderedIDs) != folderCount {
+		return errors.New("note order does not include every note in the folder")
+	}
+	for _, id := range orderedIDs {
+		index, found := s.findNoteLocked(id)
+		if !found || s.manifest.Notes[index].FolderID != folderID {
+			return errors.New("note order contains a note from another folder")
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return errors.New("note order contains a duplicate note")
+		}
+		seen[id] = struct{}{}
+	}
+
+	originalManifest := slices.Clone(s.manifest.Notes)
+	originalNotes := make(map[string]Note)
+	for order, id := range orderedIDs {
+		index, _ := s.findNoteLocked(id)
+		if s.manifest.Notes[index].Order == order {
+			continue
+		}
+		note, err := s.readNoteLocked(id)
+		if err != nil {
+			return err
+		}
+		originalNotes[id] = note
+		note.Order = order
+		now := time.Now().UTC()
+		note.UpdatedAt = now.Format(time.RFC3339Nano)
+		note.ModifiedAt = nextModifiedAt(note.ModifiedAt)
+		note.Revision++
+		hash, err := s.writeNoteLocked(note)
+		if err != nil {
+			s.restoreReorderedNotesLocked(originalManifest, originalNotes)
+			return err
+		}
+		s.manifest.Notes[index] = summaryFromNote(note)
+		s.manifest.Notes[index].CiphertextHash = hash
+	}
+	if err := s.saveManifestLocked(); err != nil {
+		s.restoreReorderedNotesLocked(originalManifest, originalNotes)
+		return err
+	}
+	return nil
+}
+
+func (s *Store) restoreReorderedNotesLocked(manifest []NoteSummary, notes map[string]Note) {
+	s.manifest.Notes = manifest
+	for _, note := range notes {
+		_, _ = s.writeNoteLocked(note)
+	}
 }
 
 func (s *Store) GetNote(id string) (Note, error) {
@@ -856,6 +926,7 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 			ID:         note.ID,
 			Title:      newTitle,
 			FolderID:   note.FolderID,
+			Order:      note.Order,
 			Content:    newContent,
 			CreatedAt:  note.CreatedAt,
 			UpdatedAt:  now.Format(time.RFC3339Nano),
@@ -2669,15 +2740,28 @@ func noteReferencesFolder(notes []NoteSummary, folderID string) bool {
 
 func summaryFromNote(note Note) NoteSummary {
 	return NoteSummary{
-		ID: note.ID, Title: note.Title, FolderID: note.FolderID, CreatedAt: note.CreatedAt,
+		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision,
 	}
 }
 
 func sortSummaries(items []NoteSummary) {
 	slices.SortStableFunc(items, func(left, right NoteSummary) int {
+		if left.Order != right.Order {
+			return left.Order - right.Order
+		}
 		return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
 	})
+}
+
+func (s *Store) nextNoteOrderLocked(folderID string) int {
+	next := 0
+	for _, note := range s.manifest.Notes {
+		if note.FolderID == folderID && note.Order >= next {
+			next = note.Order + 1
+		}
+	}
+	return next
 }
 
 func sortFolders(items []Folder) {

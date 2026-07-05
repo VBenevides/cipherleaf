@@ -130,6 +130,7 @@ function App() {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [query, setQuery] = useState("");
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [view, setView] = useState<EditorView>("live");
   const [vaultAction, setVaultAction] = useState<VaultAction | null>(null);
   const [vaultPath, setVaultPath] = useState("");
@@ -182,6 +183,8 @@ function App() {
   const noteRef = useRef<Note | null>(null);
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
+  const dragCandidateRef = useRef<{ id: string; active: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     noteRef.current = note;
@@ -475,6 +478,7 @@ function App() {
                 id: saved.id,
                 title: saved.title,
                 folderId: saved.folderId,
+                order: saved.order,
                 createdAt: saved.createdAt,
                 updatedAt: saved.updatedAt,
                 modifiedAt: saved.modifiedAt,
@@ -1027,7 +1031,7 @@ function App() {
     try {
       if (noteRef.current?.id === id) await persistCurrent();
       const moved = await VaultService.MoveNote(id, folderID);
-      updateSummary(moved);
+      setNotes((await VaultService.ListNotes()) ?? []);
       if (noteRef.current?.id === id) {
         setNote(moved);
         setDirty(false);
@@ -1038,6 +1042,67 @@ function App() {
       setError(errorText(reason));
     }
   };
+
+  const reorderNote = async (id: string, targetID: string, placeAfter = false) => {
+    if (id === targetID) return;
+    setError("");
+    try {
+      if (noteRef.current?.id === id) await persistCurrent();
+      const target = notes.find((item) => item.id === targetID);
+      const source = notes.find((item) => item.id === id);
+      if (!target || !source) return;
+      if (source.folderId !== target.folderId) {
+        await VaultService.MoveNote(id, target.folderId);
+      }
+      const current = (await VaultService.ListNotes()) ?? [];
+      const ordered = current
+        .filter((item) => item.folderId === target.folderId && item.id !== id);
+      const targetIndex = ordered.findIndex((item) => item.id === targetID);
+      const insertAt = targetIndex < 0 ? ordered.length : targetIndex + (placeAfter ? 1 : 0);
+      ordered.splice(insertAt, 0,
+        current.find((item) => item.id === id)!);
+      await VaultService.ReorderNotes(target.folderId, ordered.map((item) => item.id));
+      setNotes((await VaultService.ListNotes()) ?? []);
+      if (noteRef.current?.id === id) {
+        setNote(await VaultService.GetNote(id));
+        setDirty(false);
+        setSaveState("saved");
+      }
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setDropTarget(null);
+    }
+  };
+
+  const activatePointerDrag = (target: string) => {
+    const candidate = dragCandidateRef.current;
+    if (!candidate) return false;
+    candidate.active = true;
+    setDropTarget(target);
+    return true;
+  };
+
+  const finishPointerDrag = (
+    target: { kind: "folder"; id: string } | { kind: "note"; id: string; after: boolean },
+  ) => {
+    const candidate = dragCandidateRef.current;
+    if (!candidate?.active) return;
+    suppressClickRef.current = true;
+    if (target.kind === "folder") void moveNote(candidate.id, target.id);
+    else void reorderNote(candidate.id, target.id, target.after);
+    dragCandidateRef.current = null;
+    setDropTarget(null);
+  };
+
+  useEffect(() => {
+    const cancelDrag = () => {
+      dragCandidateRef.current = null;
+      setDropTarget(null);
+    };
+    window.addEventListener("mouseup", cancelDrag);
+    return () => window.removeEventListener("mouseup", cancelDrag);
+  }, []);
 
   const showContextMenu = (
     event: ReactMouseEvent,
@@ -1687,11 +1752,17 @@ function App() {
             <small>{notes.length}</small>
           </button>
           <button
-            className={`folder-list-item ${selectedFolderID === "" ? "active" : ""}`}
+            className={`folder-list-item ${selectedFolderID === "" ? "active" : ""} ${dropTarget === "folder:" ? "drag-over" : ""}`}
             onClick={() => {
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
               setSelectedFolderID("");
               setQuery("");
             }}
+            onMouseEnter={(event) => event.buttons === 1 && activatePointerDrag("folder:")}
+            onMouseUp={() => finishPointerDrag({ kind: "folder", id: "" })}
           >
             <Icon name="folder" size={15} />
             <span>Unfiled</span>
@@ -1700,8 +1771,12 @@ function App() {
           {folders.map((folder) => (
             <button
               key={folder.id}
-              className={`folder-list-item ${selectedFolderID === folder.id ? "active" : ""}`}
+              className={`folder-list-item ${selectedFolderID === folder.id ? "active" : ""} ${dropTarget === `folder:${folder.id}` ? "drag-over" : ""}`}
               onClick={() => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+                }
                 setSelectedFolderID(folder.id);
                 setQuery("");
               }}
@@ -1712,6 +1787,8 @@ function App() {
                   label: folder.name,
                 })
               }
+              onMouseEnter={(event) => event.buttons === 1 && activatePointerDrag(`folder:${folder.id}`)}
+              onMouseUp={() => finishPointerDrag({ kind: "folder", id: folder.id })}
             >
               <Icon name="folder" size={15} />
               <span>{folder.name}</span>
@@ -1737,8 +1814,30 @@ function App() {
           {visibleNotes.map((item) => (
             <button
               key={item.id}
-              className={`note-list-item ${note?.id === item.id ? "active" : ""}`}
-              onClick={() => void selectNote(item.id)}
+              className={`note-list-item ${note?.id === item.id ? "active" : ""} ${dropTarget === `note:${item.id}:before` ? "drag-over-before" : ""} ${dropTarget === `note:${item.id}:after` ? "drag-over-after" : ""}`}
+              onClick={() => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+                }
+                void selectNote(item.id);
+              }}
+              onMouseDown={(event) => {
+                if (event.button === 0 && !query) {
+                  dragCandidateRef.current = { id: item.id, active: false };
+                }
+              }}
+              onMouseEnter={(event) => {
+                if (event.buttons !== 1 || dragCandidateRef.current?.id === item.id) return;
+                const after = event.clientY > event.currentTarget.getBoundingClientRect().top +
+                  event.currentTarget.getBoundingClientRect().height / 2;
+                activatePointerDrag(`note:${item.id}:${after ? "after" : "before"}`);
+              }}
+              onMouseUp={(event) => {
+                const after = event.clientY > event.currentTarget.getBoundingClientRect().top +
+                  event.currentTarget.getBoundingClientRect().height / 2;
+                finishPointerDrag({ kind: "note", id: item.id, after });
+              }}
               onContextMenu={(event) =>
                 showContextMenu(event, {
                   kind: "note",

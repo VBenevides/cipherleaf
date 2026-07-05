@@ -270,6 +270,43 @@ func TestFolderLifecycleAndNoteMovement(t *testing.T) {
 	}
 }
 
+func TestNotesKeepCustomOrderInsideFolder(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := store.CreateFolder("Projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := store.CreateNoteInFolder("Alpha", folder.ID)
+	second, _ := store.CreateNoteInFolder("Beta", folder.ID)
+	third, _ := store.CreateNoteInFolder("Gamma", folder.ID)
+
+	if err := store.ReorderNotes(folder.ID, []string{third.ID, first.ID, second.ID}); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := store.ListNotes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notes[0].ID != third.ID || notes[1].ID != first.ID || notes[2].ID != second.ID {
+		t.Fatalf("unexpected note order: %v", []string{notes[0].ID, notes[1].ID, notes[2].ID})
+	}
+	loaded, err := store.GetNote(third.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Order != 0 {
+		t.Fatalf("got persisted order %d, want 0", loaded.Order)
+	}
+}
+
 func TestTamperedNoteFailsAuthentication(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

@@ -16,6 +16,7 @@ type NoteSummary struct {
 	ID             string `json:"id"`
 	Title          string `json:"title"`
 	FolderID       string `json:"folderId"`
+	Order          int    `json:"order"`
 	CreatedAt      string `json:"createdAt"`
 	UpdatedAt      string `json:"updatedAt"`
 	ModifiedAt     int64  `json:"modifiedAt"`
@@ -27,6 +28,7 @@ type Note struct {
 	ID         string `json:"id"`
 	Title      string `json:"title"`
 	FolderID   string `json:"folderId"`
+	Order      int    `json:"order"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"createdAt"`
 	UpdatedAt  string `json:"updatedAt"`

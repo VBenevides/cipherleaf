@@ -36,6 +36,7 @@ export interface Note {
     "id": string;
     "title": string;
     "folderId": string;
+    "order": number;
     "content": string;
     "createdAt": string;
     "updatedAt": string;
@@ -47,6 +48,7 @@ export interface NoteSummary {
     "id": string;
     "title": string;
     "folderId": string;
+    "order": number;
     "createdAt": string;
     "updatedAt": string;
     "modifiedAt": number;
