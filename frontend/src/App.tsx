@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { VaultService } from "../bindings/cipherleaf";
@@ -21,7 +22,13 @@ import type {
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { SyncResult } from "../bindings/cipherleaf/models";
 import { errorText } from "./errors";
-import LiveMarkdownEditor from "./LiveMarkdownEditor";
+import { attachmentMarkdown } from "./markdown";
+import LiveMarkdownEditor, {
+  clipboardClaimsImage,
+  clipboardImage,
+  imageDataURL,
+  readClipboardImage,
+} from "./LiveMarkdownEditor";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "write";
@@ -1033,6 +1040,35 @@ function App() {
     setSaveState("idle");
   };
 
+  const pasteImageInSource = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const source = clipboardImage(event.nativeEvent);
+    if (!source && !clipboardClaimsImage(event.nativeEvent)) return;
+    event.preventDefault();
+    const noteID = noteRef.current?.id;
+    const selectionStart = event.currentTarget.selectionStart;
+    const selectionEnd = event.currentTarget.selectionEnd;
+    if (!noteID) return;
+    void (source ? Promise.resolve(source) : readClipboardImage())
+      .then((value) => {
+        if (!value) throw new Error("Could not read image data from the clipboard");
+        return imageDataURL(value);
+      })
+      .then((value) => VaultService.SaveImageAttachment(noteID, value))
+      .then((id) => {
+        const current = noteRef.current;
+        if (!current || current.id !== noteID) return;
+        const from = Math.min(selectionStart, current.content.length);
+        const to = Math.min(Math.max(from, selectionEnd), current.content.length);
+        const lineStart = current.content.lastIndexOf("\n", from - 1) + 1;
+        const prefix = from > lineStart ? "\n" : "";
+        const markdown = `${prefix}${attachmentMarkdown(id)}\n`;
+        editNote({
+          content: current.content.slice(0, from) + markdown + current.content.slice(to),
+        });
+      })
+      .catch((reason) => setError(errorText(reason)));
+  };
+
   useEffect(() => {
     if (!session || session.locked) return;
     let active = true;
@@ -1854,6 +1890,7 @@ function App() {
                   className="markdown-editor"
                   value={note.content}
                   onChange={(event) => editNote({ content: event.target.value })}
+                  onPaste={pasteImageInSource}
                   spellCheck
                   aria-label="Markdown editor"
                   placeholder="Begin writing…"

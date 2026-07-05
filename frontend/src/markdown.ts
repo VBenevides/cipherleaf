@@ -23,6 +23,10 @@ export function parseAttachmentMarkdown(line: string) {
   };
 }
 
+export function attachmentMarkdown(id: string, width = 640, alt = "Pasted image"): string {
+  return `![${alt}](attachment:${id}#width=${width})`;
+}
+
 export function outlineSectionEnd(
   start: number,
   last: number,

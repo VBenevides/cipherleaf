@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  attachmentMarkdown,
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
@@ -45,4 +46,12 @@ test("accepts only bounded Cipherleaf attachment references", () => {
   );
   assert.equal(parseAttachmentMarkdown("![remote](https://example.com/image.webp)"), null);
   assert.equal(parseAttachmentMarkdown("![bad](attachment:../secret)"), null);
+});
+
+test("writes pasted images as Markdown image references", () => {
+  const id = "b".repeat(32);
+  assert.equal(
+    attachmentMarkdown(id),
+    `![Pasted image](attachment:${id}#width=640)`,
+  );
 });

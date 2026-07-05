@@ -403,6 +403,14 @@ func (s *VaultService) SaveAttachment(noteID, webpBase64 string) (string, error)
 	return s.store.SaveAttachment(noteID, data)
 }
 
+func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string, error) {
+	data, err := convertImageDataURLToWebP(imageDataURL)
+	if err != nil {
+		return "", err
+	}
+	return s.store.SaveAttachment(noteID, data)
+}
+
 func (s *VaultService) GetAttachment(noteID, id string) (string, error) {
 	data, err := s.store.GetAttachment(noteID, id)
 	if err != nil {

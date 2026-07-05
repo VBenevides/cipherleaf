@@ -3,6 +3,7 @@ module cipherleaf
 go 1.25.0
 
 require (
+	github.com/deepteams/webp v1.2.4
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.112
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.50.0

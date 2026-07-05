@@ -24,6 +24,7 @@ import {
 } from "@codemirror/autocomplete";
 import { openSearchPanel, searchKeymap, search } from "@codemirror/search";
 import {
+  attachmentMarkdown,
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
@@ -972,11 +973,11 @@ export default function LiveMarkdownEditor({
               void (image ? Promise.resolve(image) : readClipboardImage())
                 .then((source) => {
                   if (!source) throw new Error("Could not read image data from the clipboard");
-                  return imageToWebPBase64(source);
+                  return imageDataURL(source);
                 })
-                .then((data) => VaultService.SaveAttachment(noteID, data))
+                .then((data) => VaultService.SaveImageAttachment(noteID, data))
                 .then((id) => {
-                  const markdown = `![Pasted image](attachment:${id}#width=640)`;
+                  const markdown = attachmentMarkdown(id);
                   const actualInsertion = Math.min(insertion, pastedView.state.doc.length);
                   const line = pastedView.state.doc.lineAt(actualInsertion);
                   const prefix = actualInsertion > line.from ? "\n" : "";
@@ -1132,38 +1133,20 @@ export default function LiveMarkdownEditor({
   );
 }
 
-async function imageToWebPBase64(source: Blob | string): Promise<string> {
-  const loaded = await loadClipboardImage(source);
-  const scale = Math.min(1, 2400 / Math.max(loaded.width, loaded.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(loaded.width * scale));
-  canvas.height = Math.max(1, Math.round(loaded.height * scale));
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Could not prepare pasted image");
-  context.drawImage(loaded.image, 0, 0, canvas.width, canvas.height);
-  loaded.close();
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (value) => value ? resolve(value) : reject(new Error("Could not convert pasted image")),
-      "image/webp",
-      0.86,
-    ),
-  );
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const isWebP = bytes.length >= 12 &&
-    String.fromCharCode(...bytes.subarray(0, 4)) === "RIFF" &&
-    String.fromCharCode(...bytes.subarray(8, 12)) === "WEBP";
-  if (!isWebP) {
-    throw new Error("This system WebView cannot convert clipboard images to WebP");
+export async function imageDataURL(source: Blob | string): Promise<string> {
+  if (typeof source === "string") return source;
+  if (!["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(source.type)) {
+    throw new Error("Only PNG, JPEG, and WebP clipboard images are supported");
   }
+  const bytes = new Uint8Array(await source.arrayBuffer());
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   }
-  return btoa(binary);
+  return `data:${source.type};base64,${btoa(binary)}`;
 }
 
-function clipboardImage(event: ClipboardEvent): Blob | string | null {
+export function clipboardImage(event: ClipboardEvent): Blob | string | null {
   const clipboard = event.clipboardData;
   if (!clipboard) return null;
   for (let index = 0; index < clipboard.items.length; index++) {
@@ -1181,19 +1164,22 @@ function clipboardImage(event: ClipboardEvent): Blob | string | null {
   return embeddedClipboardImage(encoded);
 }
 
-function clipboardClaimsImage(event: ClipboardEvent): boolean {
+export function clipboardClaimsImage(event: ClipboardEvent): boolean {
   const clipboard = event.clipboardData;
   if (!clipboard) return false;
   for (let index = 0; index < clipboard.items.length; index++) {
     if (clipboard.items[index].type.startsWith("image/")) return true;
   }
   for (let index = 0; index < clipboard.types.length; index++) {
-    if (clipboard.types[index].startsWith("image/")) return true;
+    const type = clipboard.types[index];
+    if (type.startsWith("image/") || type === "Files") return true;
   }
-  return /^\/?PNG$/i.test(clipboard.getData("text/plain").trim());
+  return /^(?:\/?(?:PNG|JPE?G)|image\/(?:png|jpe?g))$/i.test(
+    clipboard.getData("text/plain").trim(),
+  );
 }
 
-async function readClipboardImage(): Promise<Blob | string | null> {
+export async function readClipboardImage(): Promise<Blob | string | null> {
   if (navigator.clipboard?.read) {
     try {
       const items = await navigator.clipboard.read();
@@ -1210,37 +1196,4 @@ async function readClipboardImage(): Promise<Blob | string | null> {
   } catch {
     return null;
   }
-}
-
-async function loadClipboardImage(source: Blob | string): Promise<{
-  image: CanvasImageSource;
-  width: number;
-  height: number;
-  close: () => void;
-}> {
-  if (typeof createImageBitmap === "function" && source instanceof Blob) {
-    try {
-      const bitmap = await createImageBitmap(source);
-      return {
-        image: bitmap,
-        width: bitmap.width,
-        height: bitmap.height,
-        close: () => bitmap.close(),
-      };
-    } catch {
-      // Fall through to the HTML image decoder used by older WebViews.
-    }
-  }
-  const url = typeof source === "string" ? source : URL.createObjectURL(source);
-  const image = new Image();
-  image.src = url;
-  await image.decode();
-  return {
-    image,
-    width: image.naturalWidth,
-    height: image.naturalHeight,
-    close: () => {
-      if (typeof source !== "string") URL.revokeObjectURL(url);
-    },
-  };
 }

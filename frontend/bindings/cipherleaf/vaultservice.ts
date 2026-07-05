@@ -160,6 +160,10 @@ export function SaveAttachment(noteID: string, webpBase64: string): $Cancellable
     return $Call.ByID(1950368961, noteID, webpBase64);
 }
 
+export function SaveImageAttachment(noteID: string, imageDataURL: string): $CancellablePromise<string> {
+    return $Call.ByID(3821466452, noteID, imageDataURL);
+}
+
 export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.Note> {
     return $Call.ByID(384107008, id, title, content);
 }
