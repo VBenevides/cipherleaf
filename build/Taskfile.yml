@@ -4,8 +4,6 @@ tasks:
   go:mod:tidy:
     summary: Runs `go mod tidy`
     internal: true
-    # Universal/multi-arch builds invoke this concurrently from parallel deps;
-    # two `go mod tidy` processes racing on go.mod can corrupt it (#4637).
     run: once
     cmds:
       - go mod tidy
@@ -72,11 +70,6 @@ tasks:
   build:frontend:
     label: build:frontend (DEV={{.DEV}} RUNNER={{.PACKAGE_MANAGER}})
     summary: Build the frontend project
-    # darwin:build:universal runs its per-arch builds as parallel deps, each of
-    # which depends on this task. Without run:once the two executions race:
-    # one regenerates frontend/bindings (-clean deletes it first) while the
-    # other's bundler is reading it, failing intermittently with
-    # 'Could not resolve "./bindings/<pkg>"' (#4637).
     run: once
     dir: frontend
     sources:
@@ -146,7 +139,6 @@ tasks:
       - |
         set -euo pipefail
         mkdir -p frontend/public/puppertino
-        # If bundled Puppertino exists, prefer it. Otherwise, try to fetch, but don't fail build on error.
         if [ ! -f frontend/public/puppertino/puppertino.css ]; then
           echo "No bundled Puppertino found. Attempting to fetch from GitHub..."
           if curl -fsSL https://raw.githubusercontent.com/codedgar/Puppertino/main/dist/css/full.css -o frontend/public/puppertino/puppertino.css; then
@@ -158,20 +150,17 @@ tasks:
         else
           echo "Using bundled Puppertino at frontend/public/puppertino/puppertino.css"
         fi
-        # Ensure index.html includes Puppertino CSS and button classes
+
         INDEX_HTML=frontend/index.html
         if [ -f "$INDEX_HTML" ]; then
           if ! grep -q 'href="/puppertino/puppertino.css"' "$INDEX_HTML"; then
-            # Insert Puppertino link tag after style.css link
             awk '
               /href="\/style.css"\/?/ && !x { print; print "    <link rel=\"stylesheet\" href=\"/puppertino/puppertino.css\"/>"; x=1; next }1
             ' "$INDEX_HTML" > "$INDEX_HTML.tmp" && mv "$INDEX_HTML.tmp" "$INDEX_HTML"
           fi
-          # Replace default .btn with Puppertino primary button classes if present
+
           sed -E -i'' 's/class=\"btn\"/class=\"p-btn p-prim-col\"/g' "$INDEX_HTML" || true
         fi
-
-
 
   generate:bindings:
     summary: Generates bindings for the frontend
@@ -181,7 +170,7 @@ tasks:
     sources:
       - "**/*.[jt]s"
       - exclude: frontend/**/*
-      - frontend/bindings/**/*  # Rerun when switching between dev/production mode causes changes in output
+      - frontend/bindings/**/*
       - "**/*.go"
       - go.mod
       - go.sum
@@ -191,7 +180,7 @@ tasks:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}'{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
   generate:icons:
-    summary: Generates Windows `.ico` and Mac `.icns` from an image; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` from a `.icon` file (skipped on other platforms).
+    summary: Generates Windows `.ico` and Mac `.icns` from an image
     run: once
     dir: build
     sources:
@@ -245,7 +234,7 @@ tasks:
 
       Usage: task build:server [DEV=true] [OBFUSCATED=true] [EXTRA_TAGS=tag1,tag2]
         DEV=true        development server (-tags server, no strip, inlining kept)
-        OBFUSCATED=true obfuscated build via garble (requires garble installed)
+        OBFUSCATED=true obfuscated build via garble
         EXTRA_TAGS      additional comma-separated build tags
     deps:
       - task: build:frontend
@@ -258,7 +247,7 @@ tasks:
             ref: .OBFUSCATED
     preconditions:
       - sh: '{{if eq .OBFUSCATED "true"}}command -v garble >/dev/null 2>&1{{else}}true{{end}}'
-        msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0 (requires Go 1.24+). See https://github.com/burrowers/garble/releases for version/toolchain compatibility."
+        msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0"
     cmds:
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.BIN_DIR}}/{{.APP_NAME}}-server{{exeExt}}"'
     vars:
@@ -277,17 +266,7 @@ tasks:
     summary: Builds a Docker image for server mode deployment
     desc: |
       Creates a minimal Docker image containing the production server binary.
-      Defaults to a pure-Go static binary on a distroless/static base. The
-      production frontend is built first so the embedded assets are current.
-
-      Usage: task build:docker [TAG=myapp:latest] [CGO_ENABLED=1] [GO_IMAGE=...] [RUNTIME_IMAGE=...]
-      For CGO apps, set CGO_ENABLED=1 with libc-compatible builder/runtime images, e.g.:
-        task build:docker CGO_ENABLED=1 GO_IMAGE=golang:bookworm RUNTIME_IMAGE=gcr.io/distroless/base-debian12
     deps:
-      # Build the production frontend so frontend/dist (embedded by the Go build
-      # inside the image) is present and current in the Docker build context.
-      # Pass the server,production tags so binding generation analyses the same
-      # build the Docker image compiles, not the default-tag build.
       - task: build:frontend
         vars:
           BUILD_FLAGS: "-tags server,production"
@@ -309,12 +288,6 @@ tasks:
 
   run:docker:
     summary: Builds and runs the Docker image
-    desc: |
-      Builds the Docker image and runs it, exposing port 8080.
-      Usage: task run:docker [TAG=myapp:latest] [PORT=8080]
-      Note: The internal container port is always 8080. The PORT variable
-      only changes the host port mapping. Ensure your app uses port 8080
-      or modify the Dockerfile to match your ServerOptions.Port setting.
     deps:
       - task: build:docker
         vars:
@@ -327,7 +300,7 @@ tasks:
       PORT: "{{.PORT}}"
 
   setup:docker:
-    summary: Builds Docker image for cross-compilation (~800MB download)
+    summary: Builds Docker image for cross-compilation
     desc: |
       Builds the Docker image needed for cross-compiling to any platform.
       Run this once to enable cross-platform builds from any OS.
@@ -343,32 +316,34 @@ tasks:
       - xcrun xcdevice list
 
   ios:run:device:
-    summary: Build, install, and launch on a physical iPhone using Apple tools (xcodebuild/devicectl)
+    summary: Build, install, and launch on a physical iPhone using Apple tools
     vars:
-      PROJECT: '{{.PROJECT}}'   # e.g., build/ios/xcode/<YourProject>.xcodeproj
-      SCHEME: '{{.SCHEME}}'     # e.g., ios.dev
+      PROJECT: '{{.PROJECT}}'
+      SCHEME: '{{.SCHEME}}'
       CONFIG: '{{.CONFIG | default "Debug"}}'
       DERIVED: '{{.DERIVED | default "build/ios/DerivedData"}}'
-      UDID: '{{.UDID}}'         # from `task ios:device:list`
-      BUNDLE_ID: '{{.BUNDLE_ID}}' # e.g., com.yourco.wails.ios.dev
-      TEAM_ID: '{{.TEAM_ID}}'   # optional, if your project is not already set up for signing
+      UDID: '{{.UDID}}'
+      BUNDLE_ID: '{{.BUNDLE_ID}}'
+      TEAM_ID: '{{.TEAM_ID}}'
     preconditions:
       - sh: xcrun -f xcodebuild
         msg: "xcodebuild not found. Please install Xcode."
       - sh: xcrun -f devicectl
-        msg: "devicectl not found. Please update to Xcode 15+ (which includes devicectl)."
+        msg: "devicectl not found. Please update to Xcode 15+."
       - sh: test -n '{{.PROJECT}}'
-        msg: "Set PROJECT to your .xcodeproj path (e.g., PROJECT=build/ios/xcode/App.xcodeproj)."
+        msg: "Set PROJECT to your .xcodeproj path."
       - sh: test -n '{{.SCHEME}}'
-        msg: "Set SCHEME to your app scheme (e.g., SCHEME=ios.dev)."
+        msg: "Set SCHEME to your app scheme."
       - sh: test -n '{{.UDID}}'
-        msg: "Set UDID to your device UDID (see: task ios:device:list)."
+        msg: "Set UDID to your device UDID."
       - sh: test -n '{{.BUNDLE_ID}}'
-        msg: "Set BUNDLE_ID to your app's bundle identifier (e.g., com.yourco.wails.ios.dev)."
+        msg: "Set BUNDLE_ID to your app's bundle identifier."
     cmds:
       - |
         set -euo pipefail
+
         echo "Building for device: UDID={{.UDID}} SCHEME={{.SCHEME}} PROJECT={{.PROJECT}}"
+
         XCB_ARGS=(
           -project "{{.PROJECT}}"
           -scheme "{{.SCHEME}}"
@@ -378,21 +353,246 @@ tasks:
           -allowProvisioningUpdates
           -allowProvisioningDeviceRegistration
         )
-        # Optionally inject signing identifiers if provided
-        if [ -n '{{.TEAM_ID}}' ]; then XCB_ARGS+=(DEVELOPMENT_TEAM={{.TEAM_ID}}); fi
-        if [ -n '{{.BUNDLE_ID}}' ]; then XCB_ARGS+=(PRODUCT_BUNDLE_IDENTIFIER={{.BUNDLE_ID}}); fi
-        xcodebuild "${XCB_ARGS[@]}" build | xcpretty || true
-        # If xcpretty isn't installed, run without it
-        if [ "${PIPESTATUS[0]}" -ne 0 ]; then
-          xcodebuild "${XCB_ARGS[@]}" build
+
+        if [ -n '{{.TEAM_ID}}' ]; then
+          XCB_ARGS+=(DEVELOPMENT_TEAM={{.TEAM_ID}})
         fi
-        # Find built .app
-        APP_PATH=$(find "{{.DERIVED}}/Build/Products" -type d -name "*.app" -maxdepth 3 | head -n 1)
+
+        if [ -n '{{.BUNDLE_ID}}' ]; then
+          XCB_ARGS+=(PRODUCT_BUNDLE_IDENTIFIER={{.BUNDLE_ID}})
+        fi
+
+        xcodebuild "${XCB_ARGS[@]}" build
+
+        APP_PATH=$(find "{{.DERIVED}}/Build/Products" -maxdepth 3 -type d -name "*.app" | head -n 1)
+
         if [ -z "$APP_PATH" ]; then
           echo "Could not locate built .app under {{.DERIVED}}/Build/Products" >&2
           exit 1
         fi
+
         echo "Installing: $APP_PATH"
         xcrun devicectl device install app --device "{{.UDID}}" "$APP_PATH"
+
         echo "Launching: {{.BUNDLE_ID}}"
         xcrun devicectl device process launch --device "{{.UDID}}" --stderr console --stdout console "{{.BUNDLE_ID}}"
+
+  build:all:
+    summary: Builds Linux amd64, Windows amd64, and macOS amd64/arm64 binaries with UPX
+    desc: |
+      Builds release binaries for:
+        - linux/amd64
+        - windows/amd64
+        - darwin/amd64
+        - darwin/arm64
+
+      Usage if this file is included as `common` from your root Taskfile:
+        wails3 task common:build:all
+
+      Usage if this file is your root Taskfile:
+        wails3 task build:all
+
+      Optional:
+        wails3 task common:build:all UPX_FLAGS="--best --lzma"
+
+      Notes:
+        - macOS cross-builds from Linux require the wails-cross Docker image.
+          Run once first: wails3 task setup:docker
+        - UPX is required.
+        - Sign/notarize macOS apps after UPX compression.
+    cmds:
+      - task: build:linux:amd64:upx
+      - task: build:windows:amd64:upx
+      - task: build:darwin:amd64:upx
+      - task: build:darwin:arm64:upx
+
+  build:release:
+    summary: Alias for build:all
+    cmds:
+      - task: build:all
+
+  build:linux:amd64:upx:
+    summary: Builds Linux amd64 and compresses it with UPX
+    cmds:
+      - task: build:target:upx
+        vars:
+          TARGET_GOOS: linux
+          TARGET_GOARCH: amd64
+          TARGET_EXT: ""
+
+  build:windows:amd64:upx:
+    summary: Builds Windows amd64 and compresses it with UPX
+    cmds:
+      - task: build:target:upx
+        vars:
+          TARGET_GOOS: windows
+          TARGET_GOARCH: amd64
+          TARGET_EXT: ".exe"
+
+  build:darwin:amd64:upx:
+    summary: Builds macOS Intel amd64 and compresses it with UPX
+    cmds:
+      - task: build:target:upx
+        vars:
+          TARGET_GOOS: darwin
+          TARGET_GOARCH: amd64
+          TARGET_EXT: ""
+
+  build:darwin:arm64:upx:
+    summary: Builds macOS Apple Silicon arm64 and compresses it with UPX
+    cmds:
+      - task: build:target:upx
+        vars:
+          TARGET_GOOS: darwin
+          TARGET_GOARCH: arm64
+          TARGET_EXT: ""
+
+  build:target:upx:
+    summary: Builds one GOOS/GOARCH target, normalizes the output filename, and compresses it with UPX
+    internal: true
+    vars:
+      TARGET_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}-{{.TARGET_GOOS}}-{{.TARGET_GOARCH}}{{.TARGET_EXT}}'
+    preconditions:
+      - sh: test -n "{{.TARGET_GOOS}}"
+        msg: "TARGET_GOOS is required"
+      - sh: test -n "{{.TARGET_GOARCH}}"
+        msg: "TARGET_GOARCH is required"
+      - sh: command -v wails3 >/dev/null 2>&1
+        msg: "wails3 is required on PATH"
+      - sh: command -v upx >/dev/null 2>&1
+        msg: "UPX is required to compress release binaries. Install UPX and rerun the task."
+    cmds:
+      - cmd: |
+          set -eu
+
+          target="{{.TARGET_OUTPUT}}"
+          bin_dir="{{.BIN_DIR}}"
+          app_name="{{.APP_NAME}}"
+          target_goos="{{.TARGET_GOOS}}"
+          target_goarch="{{.TARGET_GOARCH}}"
+          target_ext="{{.TARGET_EXT}}"
+
+          mkdir -p "$bin_dir"
+
+          rm -f "$target" "$target.upx-backup"
+
+          case "$target_goos" in
+            windows)
+              rm -f "$bin_dir/$app_name.exe" "$bin_dir/$app_name.exe.upx-backup"
+              ;;
+            linux)
+              rm -f "$bin_dir/$app_name" "$bin_dir/$app_name.upx-backup"
+              ;;
+            darwin)
+              rm -f "$bin_dir/$app_name" "$bin_dir/$app_name.upx-backup"
+              rm -f "$bin_dir/$app_name-darwin-$target_goarch" "$bin_dir/$app_name-darwin-$target_goarch.upx-backup"
+              ;;
+          esac
+
+          echo "Building $target_goos/$target_goarch..."
+
+          wails3 task "$target_goos:build" ARCH="$target_goarch"
+
+          source=""
+
+          for candidate in \
+            "$target" \
+            "$bin_dir/$app_name-$target_goos-$target_goarch$target_ext" \
+            "$bin_dir/$app_name$target_ext" \
+            "$bin_dir/$app_name" \
+            "$bin_dir/$app_name-$target_goos-$target_goarch"
+          do
+            if [ -f "$candidate" ]; then
+              source="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$source" ]; then
+            echo "Could not find built binary for $target_goos/$target_goarch."
+            echo "Files currently in $bin_dir:"
+            find "$bin_dir" -maxdepth 2 -type f -print | sed 's/^/  - /'
+            exit 1
+          fi
+
+          if [ "$source" != "$target" ]; then
+            echo "Normalizing output:"
+            echo "  from: $source"
+            echo "  to:   $target"
+
+            mv -f "$source" "$target"
+
+            if [ -f "$source.upx-backup" ]; then
+              mv -f "$source.upx-backup" "$target.upx-backup"
+            fi
+          else
+            echo "Output already normalized: $target"
+          fi
+
+          if [ ! -f "$target" ]; then
+            echo "Expected output was not created: $target"
+            exit 1
+          fi
+
+      - task: compress:upx:file
+        vars:
+          FILE: '{{.TARGET_OUTPUT}}'
+          UPX_FLAGS: '{{.UPX_FLAGS}}'
+
+  compress:upx:file:
+    summary: Compresses one exact binary with UPX if it is not already compressed
+    internal: true
+    vars:
+      UPX_FLAGS: '{{.UPX_FLAGS | default "--best --lzma"}}'
+    preconditions:
+      - sh: test -n "{{.FILE}}"
+        msg: "FILE is required"
+      - sh: command -v upx >/dev/null 2>&1
+        msg: "UPX is required to compress release binaries. Install UPX and rerun the task."
+    cmds:
+      - cmd: |
+          set -eu
+
+          file="{{.FILE}}"
+          backup="$file.upx-backup"
+          upx_flags='{{.UPX_FLAGS}}'
+
+          if [ ! -f "$file" ]; then
+            echo "No binary at $file"
+            exit 1
+          fi
+
+          if [ -f "$backup" ]; then
+            echo "UPX backup already exists, assuming already compressed: $file"
+            exit 0
+          fi
+
+          echo "Compressing with UPX: $file"
+
+          restore="$(mktemp)"
+          log="$(mktemp)"
+          trap 'rm -f "$restore" "$log"' EXIT
+
+          cp -f "$file" "$restore"
+
+          set +e
+          upx $upx_flags "$file" >"$log" 2>&1
+          status=$?
+          set -e
+
+          cat "$log"
+
+          if [ "$status" -eq 0 ]; then
+            cp -f "$restore" "$backup"
+            echo "UPX-compressed: $file"
+            exit 0
+          fi
+
+          if grep -q 'AlreadyPackedException' "$log"; then
+            echo "Already UPX-packed, keeping existing binary: $file"
+            exit 0
+          fi
+
+          echo "UPX failed; restoring original binary: $file"
+          cp -f "$restore" "$file"
+          exit "$status"

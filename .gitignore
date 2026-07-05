@@ -2,6 +2,7 @@
 local/
 AGENTS.md
 .vscode
+.kilo
 
 # Automatic / Template Entries
 .task
