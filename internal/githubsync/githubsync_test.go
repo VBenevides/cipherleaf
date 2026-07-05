@@ -1,0 +1,621 @@
+package githubsync
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"cipherleaf/internal/vault"
+)
+
+func TestParseGitHubSSHRepository(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{"git@github.com:owner/repository.git", "git@github.com:owner/repository.git"},
+		{"ssh://git@github.com/owner/repository.git", "git@github.com:owner/repository.git"},
+		{"ssh://git@github.com:22/owner/repository", "git@github.com:owner/repository.git"},
+	}
+	for _, test := range tests {
+		parsed, err := ParseGitHubSSHRepository(test.value)
+		if err != nil {
+			t.Fatalf("ParseGitHubSSHRepository(%q): %v", test.value, err)
+		}
+		if parsed.Canonical != test.want {
+			t.Fatalf("canonical repository = %q, want %q", parsed.Canonical, test.want)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"https://github.com/owner/repository",
+		"git@gitlab.com:owner/repository.git",
+		"git@github.com:owner/too/many.git",
+		"ssh://owner@github.com/owner/repository.git",
+		"ssh://git@github.com:2222/owner/repository.git",
+		"git@github.com:owner/repo name.git",
+	}
+	for _, value := range invalid {
+		if _, err := ParseGitHubSSHRepository(value); err == nil {
+			t.Fatalf("ParseGitHubSSHRepository(%q) unexpectedly succeeded", value)
+		}
+	}
+}
+
+func TestValidateSettings(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_cipherleaf")
+	if err := os.WriteFile(keyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value := DefaultSettings("vault-id-123")
+	value.RepositorySSH = "ssh://git@github.com/acme/notes"
+	value.PrivateKeyPath = keyPath
+	value.RepositoryPrivate = true
+
+	validated, warning, err := ValidateSettings(value, "vault-id-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.RepositorySSH != "git@github.com:acme/notes.git" {
+		t.Fatalf("repository = %q", validated.RepositorySSH)
+	}
+	if validated.PrivateKeyPath != keyPath {
+		t.Fatalf("key path = %q, want %q", validated.PrivateKeyPath, keyPath)
+	}
+	if warning != "" {
+		t.Fatalf("unexpected key permission warning: %s", warning)
+	}
+	downloadSettings := value
+	downloadSettings.VaultID = ""
+	downloadSettings.Linked = false
+	if validatedDownload, _, err := ValidateDownloadSettings(downloadSettings); err != nil {
+		t.Fatal(err)
+	} else if validatedDownload.VaultID != "" {
+		t.Fatalf("download settings unexpectedly contain vault ID %q", validatedDownload.VaultID)
+	}
+
+	value.RepositoryPrivate = false
+	if _, _, err := ValidateSettings(value, "vault-id-123"); err == nil {
+		t.Fatal("unconfirmed private repository unexpectedly validated")
+	}
+	value.RepositoryPrivate = true
+	value.PrivateKeyPath += ".pub"
+	if _, _, err := ValidateSettings(value, "vault-id-123"); err == nil ||
+		!strings.Contains(err.Error(), ".pub") {
+		t.Fatalf("public key validation error = %v", err)
+	}
+}
+
+func TestValidateSettingsWarnsAboutBroadKeyPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not exposed on Windows")
+	}
+	keyPath := filepath.Join(t.TempDir(), "id_cipherleaf")
+	if err := os.WriteFile(keyPath, []byte("not-a-real-key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	value := DefaultSettings("vault-id-123")
+	value.RepositorySSH = "git@github.com:acme/notes.git"
+	value.PrivateKeyPath = keyPath
+	value.RepositoryPrivate = true
+	_, warning, err := ValidateSettings(value, "vault-id-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(warning, "chmod 600") {
+		t.Fatalf("warning = %q", warning)
+	}
+}
+
+func TestFileSettingsStoreRoundTripIsOwnerOnly(t *testing.T) {
+	root := t.TempDir()
+	store := NewFileSettingsStore(root)
+	value := DefaultSettings("vault-id-123")
+	value.RepositorySSH = "git@github.com:acme/notes.git"
+	value.PrivateKeyPath = "/home/person/.ssh/id_cipherleaf"
+	value.RepositoryPrivate = true
+	if err := store.Save(value); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(value.VaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded != value {
+		t.Fatalf("loaded settings = %#v, want %#v", loaded, value)
+	}
+	path := filepath.Join(root, value.VaultID, settingsFilename)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("settings permissions are too broad: %o", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "not-a-real-key") {
+		t.Fatal("settings unexpectedly contain private key bytes")
+	}
+	if !strings.Contains(string(data), `"private_key_path"`) ||
+		strings.Contains(string(data), `"privateKeyPath"`) {
+		t.Fatalf("settings do not use the documented disk schema: %s", data)
+	}
+	if err := store.Remove(value.VaultID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(value.VaultID); !errors.Is(err, ErrSettingsNotFound) {
+		t.Fatalf("Load() after remove error = %v", err)
+	}
+}
+
+func TestRedactCommandErrorDoesNotReturnRawOutput(t *testing.T) {
+	keyPath := "/home/person/.ssh/secret-key"
+	repository := "git@github.com:secret/private.git"
+	err := RedactCommandError("fatal: strange failure " + keyPath + " " + repository)
+	if strings.Contains(err.Error(), keyPath) || strings.Contains(err.Error(), repository) {
+		t.Fatalf("error leaked sensitive input: %v", err)
+	}
+}
+
+func TestMergedEnvironmentRemovesGitOverrides(t *testing.T) {
+	merged := mergedEnvironment(
+		[]string{
+			"PATH=/usr/bin",
+			"GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no",
+			"GIT_DIR=/tmp/attacker",
+		},
+		[]string{"GIT_SSH_COMMAND", "GIT_DIR", "GIT_SSH=/safe/wrapper"},
+	)
+	joined := strings.Join(merged, "\n")
+	if strings.Contains(joined, "StrictHostKeyChecking=no") ||
+		strings.Contains(joined, "GIT_DIR=") {
+		t.Fatalf("unsafe Git environment survived merge: %s", joined)
+	}
+	if !strings.Contains(joined, "GIT_SSH=/safe/wrapper") {
+		t.Fatalf("secure Git wrapper missing after merge: %s", joined)
+	}
+}
+
+func TestDetectsNonFastForwardPushOutput(t *testing.T) {
+	for _, output := range [][]byte{
+		[]byte("! [rejected] HEAD -> main (non-fast-forward)"),
+		[]byte("Updates were rejected because the remote contains work; fetch first"),
+	} {
+		if !isNonFastForward(output) {
+			t.Fatalf("non-fast-forward output was not detected: %q", output)
+		}
+	}
+	if isNonFastForward([]byte("Permission denied (publickey)")) {
+		t.Fatal("authentication failure misclassified as non-fast-forward")
+	}
+}
+
+type successfulConnectionTester struct {
+	settings SyncSettings
+}
+
+type countingGitTransport struct {
+	showCalls int
+}
+
+func (c *countingGitTransport) Run(
+	ctx context.Context,
+	name string,
+	args []string,
+	environment []string,
+) ([]byte, error) {
+	for _, argument := range args {
+		if argument == "show" {
+			c.showCalls++
+		}
+	}
+	return (ExecCommandRunner{}).Run(ctx, name, args, environment)
+}
+
+func (t *successfulConnectionTester) TestConnection(
+	_ context.Context,
+	settings SyncSettings,
+) (ConnectionResult, error) {
+	t.settings = settings
+	return ConnectionResult{Success: true, Message: "ok", Branch: settings.Branch}, nil
+}
+
+func TestManagerUsesValidatedSettingsForConnection(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_cipherleaf")
+	if err := os.WriteFile(keyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tester := &successfulConnectionTester{}
+	manager := NewManager(NewFileSettingsStore(t.TempDir()), tester)
+	value := DefaultSettings("vault-id-123")
+	value.RepositorySSH = "ssh://git@github.com/acme/notes"
+	value.PrivateKeyPath = keyPath
+	value.RepositoryPrivate = true
+	result, err := manager.TestConnection(context.Background(), "vault-id-123", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Success || tester.settings.RepositorySSH != "git@github.com:acme/notes.git" {
+		t.Fatalf("connection result = %#v, settings = %#v", result, tester.settings)
+	}
+}
+
+type successfulDownloadProvider struct{}
+
+func (successfulDownloadProvider) Link(
+	_ context.Context,
+	_ SyncSettings,
+	_ RemoteSnapshotStore,
+) (LinkResult, error) {
+	return LinkResult{}, errors.New("not used")
+}
+
+type successfulPullProvider struct{ successfulDownloadProvider }
+
+func (successfulPullProvider) Pull(
+	_ context.Context,
+	settings SyncSettings,
+) (PullResult, error) {
+	return PullResult{Linked: true, Branch: settings.Branch}, nil
+}
+
+func TestPullTimestampIsRecordedOnlyAfterMergeConfirmation(t *testing.T) {
+	settingsStore := NewFileSettingsStore(t.TempDir())
+	settings := DefaultSettings("vault-id-123")
+	settings.RepositorySSH = "git@github.com:acme/notes.git"
+	settings.PrivateKeyPath = "/home/person/.ssh/id_cipherleaf"
+	settings.RepositoryPrivate = true
+	settings.Linked = true
+	if err := settingsStore.Save(settings); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(settingsStore, &successfulConnectionTester{})
+	manager.provider = successfulPullProvider{}
+	if _, err := manager.PullVault(context.Background(), settings.VaultID); err != nil {
+		t.Fatal(err)
+	}
+	beforeMerge, err := settingsStore.Load(settings.VaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beforeMerge.LastSyncedAt != 0 {
+		t.Fatalf("pull transport prematurely recorded sync time %d", beforeMerge.LastSyncedAt)
+	}
+	manager.MarkSynced(settings.VaultID)
+	afterMerge, err := settingsStore.Load(settings.VaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterMerge.LastSyncedAt == 0 {
+		t.Fatal("confirmed merge did not record sync time")
+	}
+}
+
+func (successfulDownloadProvider) Download(
+	_ context.Context,
+	settings SyncSettings,
+) (DownloadedVault, error) {
+	if settings.VaultID != "" || settings.RepositorySSH != "git@github.com:acme/notes.git" {
+		return DownloadedVault{}, errors.New("provider received unvalidated download settings")
+	}
+	return DownloadedVault{
+		VaultID:    strings.Repeat("a", 32),
+		CachePath:  "/encrypted/cache",
+		LastCommit: strings.Repeat("b", 40),
+		Branch:     settings.Branch,
+	}, nil
+}
+
+func (successfulDownloadProvider) Push(
+	_ context.Context,
+	_ SyncSettings,
+	_ RemoteSnapshotStore,
+) (PushResult, error) {
+	return PushResult{}, errors.New("not used")
+}
+
+func (successfulDownloadProvider) Pull(
+	_ context.Context,
+	_ SyncSettings,
+) (PullResult, error) {
+	return PullResult{}, errors.New("not used")
+}
+
+func TestManagerDownloadsThenActivatesVaultSettings(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "id_cipherleaf")
+	if err := os.WriteFile(keyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settingsStore := NewFileSettingsStore(t.TempDir())
+	manager := NewManager(settingsStore, &successfulConnectionTester{})
+	manager.provider = successfulDownloadProvider{}
+	value := DefaultSettings("")
+	value.RepositorySSH = "ssh://git@github.com/acme/notes"
+	value.PrivateKeyPath = keyPath
+	value.RepositoryPrivate = true
+	downloaded, linkedSettings, err := manager.DownloadVault(
+		context.Background(),
+		value,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downloaded.VaultID != strings.Repeat("a", 32) ||
+		linkedSettings.VaultID != downloaded.VaultID ||
+		!linkedSettings.Linked {
+		t.Fatalf("download = %#v, settings = %#v", downloaded, linkedSettings)
+	}
+	if err := manager.ActivateDownloadedVault(linkedSettings); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := settingsStore.Load(downloaded.VaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !saved.Linked || saved.RepositorySSH != "git@github.com:acme/notes.git" {
+		t.Fatalf("saved downloaded settings = %#v", saved)
+	}
+}
+
+func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is not installed")
+	}
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runGitTestCommand(t, "", "init", "--quiet", "--bare", "--initial-branch=main", remote)
+
+	store := vault.NewStore()
+	session, err := store.Create(t.TempDir(), "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := store.CreateFolder("Provider private folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNoteInFolder("Provider private title", folder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Provider private content"); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := DefaultSettings(session.VaultID)
+	settings.RepositorySSH = remote
+	settings.PrivateKeyPath = filepath.Join(t.TempDir(), "unused-test-key")
+	settings.RepositoryPrivate = true
+	provider := NewGitHubSSHProvider(t.TempDir(), t.TempDir())
+	transport := &countingGitTransport{}
+	provider.runner = transport
+	result, err := provider.Link(context.Background(), settings, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Linked || len(result.LastCommit) < 40 {
+		t.Fatalf("link result = %#v", result)
+	}
+
+	tree := runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
+	for _, required := range []string{
+		"vault.json",
+		"sync/folders.enc",
+		"sync/manifest.enc",
+		"objects/" + note.ID[:2] + "/" + note.ID + ".enc",
+	} {
+		if !strings.Contains(tree, required+"\n") {
+			t.Fatalf("repository tree is missing %q:\n%s", required, tree)
+		}
+	}
+	if strings.Contains(tree, ".bak") {
+		t.Fatalf("repository tree contains local-only files:\n%s", tree)
+	}
+	for _, path := range strings.Fields(tree) {
+		if path == "manifest.enc" {
+			t.Fatalf("repository tree contains the local manifest:\n%s", tree)
+		}
+		data := runGitTestCommand(t, "", "--git-dir="+remote, "show", "main:"+path)
+		for _, plaintext := range []string{
+			"Provider private folder",
+			"Provider private title",
+			"Provider private content",
+		} {
+			if strings.Contains(data, plaintext) {
+				t.Fatalf("Git object %q leaked plaintext %q", path, plaintext)
+			}
+		}
+	}
+
+	downloaded, err := provider.Download(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downloaded.VaultID != session.VaultID ||
+		downloaded.LastCommit != result.LastCommit {
+		t.Fatalf("download result = %#v, link result = %#v", downloaded, result)
+	}
+	restoredStore := vault.NewStore()
+	restoredSession, err := restoredStore.RestoreRemoteSnapshot(
+		downloaded.CachePath,
+		t.TempDir(),
+		"Restored from Git",
+		"correct horse battery staple",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredSession.VaultID != session.VaultID {
+		t.Fatalf("restored vault ID = %q, want %q", restoredSession.VaultID, session.VaultID)
+	}
+	restoredNote, err := restoredStore.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredNote.Content != "Provider private content" {
+		t.Fatalf("restored content = %q", restoredNote.Content)
+	}
+	restoredStore.Lock()
+
+	reopened, err := provider.Link(context.Background(), settings, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.LastCommit != result.LastCommit {
+		t.Fatalf("reopened commit = %q, want %q", reopened.LastCommit, result.LastCommit)
+	}
+	unchanged, err := provider.Push(context.Background(), settings, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchanged.UpToDate || unchanged.LastCommit != result.LastCommit {
+		t.Fatalf("unchanged push = %#v, want commit %q", unchanged, result.LastCommit)
+	}
+	if err := store.DeleteNote(note.ID); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := provider.Push(context.Background(), settings, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.UpToDate {
+		t.Fatal("deleting the final note unexpectedly produced an up-to-date push")
+	}
+	tree = runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
+	if strings.Contains(tree, note.ID+".enc") {
+		t.Fatalf("repository retained deleted final note:\n%s", tree)
+	}
+	downloaded, err = provider.Download(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.ValidateRemoteSnapshot(downloaded.CachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matches {
+		t.Fatal("downloaded empty repository does not match local vault")
+	}
+	if transport.showCalls != 0 {
+		t.Fatalf("provider spawned %d per-file git show commands", transport.showCalls)
+	}
+
+	otherStore := vault.NewStore()
+	otherSession, err := otherStore.Create(t.TempDir(), "another correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSettings := settings
+	otherSettings.VaultID = otherSession.VaultID
+	if _, err := provider.Link(context.Background(), otherSettings, otherStore); err == nil ||
+		!strings.Contains(err.Error(), "another vault") {
+		t.Fatalf("vault mismatch link error = %v", err)
+	}
+}
+
+func TestPullAdvancesPersistentCacheBeforeFollowingPush(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is not installed")
+	}
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runGitTestCommand(t, "", "init", "--quiet", "--bare", "--initial-branch=main", remote)
+	const secret = "correct horse battery staple"
+
+	firstStore := vault.NewStore()
+	firstSession, err := firstStore.Create(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := firstStore.CreateNote("Shared note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := firstStore.SaveNote(note.ID, note.Title, "first"); err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultSettings(firstSession.VaultID)
+	settings.RepositorySSH = remote
+	settings.PrivateKeyPath = filepath.Join(t.TempDir(), "unused-test-key")
+	settings.RepositoryPrivate = true
+
+	firstProvider := NewGitHubSSHProvider(t.TempDir(), t.TempDir())
+	if _, err := firstProvider.Link(context.Background(), settings, firstStore); err != nil {
+		t.Fatal(err)
+	}
+	secondProvider := NewGitHubSSHProvider(t.TempDir(), t.TempDir())
+	downloaded, err := secondProvider.Download(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStore := vault.NewStore()
+	if _, err := secondStore.RestoreRemoteSnapshot(
+		downloaded.CachePath,
+		t.TempDir(),
+		"Second device",
+		secret,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(time.Second)
+	if _, err := firstStore.SaveNote(note.ID, note.Title, "from first device"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := firstProvider.Push(context.Background(), settings, firstStore); err != nil {
+		t.Fatal(err)
+	}
+	pulled, err := secondProvider.Pull(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pulled.Temporary || pulled.StagingPath != secondProvider.cacheRepositoryPath(settings) {
+		t.Fatalf("pull did not return persistent cache: %#v", pulled)
+	}
+	if _, err := secondStore.MergeRemoteSnapshot(pulled.StagingPath); err != nil {
+		t.Fatal(err)
+	}
+	received, err := secondStore.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if received.Content != "from first device" {
+		t.Fatalf("second device content = %q", received.Content)
+	}
+
+	time.Sleep(time.Second)
+	if _, err := secondStore.SaveNote(note.ID, note.Title, "from second device"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secondProvider.Push(context.Background(), settings, secondStore); err != nil {
+		t.Fatalf("push after pull used a stale Git base: %v", err)
+	}
+	unchanged, err := secondProvider.Pull(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchanged.UpToDate {
+		t.Fatalf("unchanged pull did not use its fast path: %#v", unchanged)
+	}
+}
+
+func runGitTestCommand(t *testing.T, directory string, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", arguments...)
+	if directory != "" {
+		command.Dir = directory
+	}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
+	}
+	return string(output)
+}

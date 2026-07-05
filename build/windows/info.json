@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.1.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "wdtg",
+			"FileDescription": "Local-first encrypted Markdown notes",
+			"LegalCopyright": "© 2026, My Company",
+			"ProductName": "Encrypted Markdown Vault",
+			"Comments": "This is a comment"
+		}
+	}
+}

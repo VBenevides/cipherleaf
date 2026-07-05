@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=encrypted-markdown-vault
+Exec=encrypted-markdown-vault
+Icon=encrypted-markdown-vault
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false
