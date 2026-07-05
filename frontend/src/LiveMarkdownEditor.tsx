@@ -28,7 +28,6 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
-  outlineSectionEnd,
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
@@ -66,43 +65,59 @@ const setAllQuotesCollapsed = StateEffect.define<boolean>();
 const liveMarkdownTheme = EditorView.theme(
   {
     "&": {
-      "--outline-indent-step": "2ch",
-      "--outline-section-bg": "rgba(127, 127, 127, 0.08)",
-      "--outline-section-border": "rgba(127, 127, 127, 0.32)",
-      "--outline-section-radius": "8px",
+      "--toggle-indent-step": "2ch",
+      "--toggle-button-width": "1.35em",
+      "--toggle-button-gap": "0.25em",
     },
 
-  ".cm-line.cm-live-outline-line": {
-    position: "relative",
-    boxSizing: "border-box",
-    background: "var(--outline-section-bg)",
-    paddingLeft:
-      "calc(1rem + var(--outline-depth, 0) * var(--outline-indent-step))",
-    paddingTop: "2px",
-    paddingBottom: "2px",
-    borderLeft: "2px solid var(--outline-section-border)",
-  },
+    ".cm-line.cm-live-toggle-line": {
+      boxSizing: "border-box",
+      backgroundColor: "transparent",
+      paddingLeft: "var(--toggle-padding-left, 0px)",
+      paddingTop: "2px",
+      paddingBottom: "2px",
+    },
 
-  ".cm-line.cm-live-outline-start": {
-    borderTopLeftRadius: "var(--outline-section-radius)",
-    borderTopRightRadius: "var(--outline-section-radius)",
-  },
+    ".cm-live-toggle-button": {
+      display: "inline-flex",
+      width: "var(--toggle-button-width)",
+      marginRight: "var(--toggle-button-gap)",
+      justifyContent: "center",
+      alignItems: "center",
+      verticalAlign: "baseline",
+      background: "transparent",
+      border: "0",
+      color: "inherit",
+      cursor: "pointer",
+      padding: "0",
+      font: "inherit",
+      lineHeight: "inherit",
+      opacity: "0.9",
+    },
 
-  ".cm-line.cm-live-outline-end": {
-    borderBottomLeftRadius: "var(--outline-section-radius)",
-    borderBottomRightRadius: "var(--outline-section-radius)",
-  },
+    ".cm-live-toggle-button:hover": {
+      backgroundColor: "rgba(127, 127, 127, 0.14)",
+      borderRadius: "3px",
+    },
 
-  ".cm-live-quote-toggle": {
-    position: "absolute",
-    left: "1px",
-    top: "2px",
-    display: "inline-flex",
-    width: "15px",
-    justifyContent: "center",
-    alignItems: "center",
+    ".cm-live-toggle-button.is-empty": {
+      cursor: "default",
+      opacity: "0.45",
+    },
+
+    ".cm-live-toggle-button.is-empty:hover": {
+      backgroundColor: "transparent",
+    },
+
+    ".cm-live-toggle-button:disabled": {
+      color: "inherit",
+    },
+
+    ".cm-live-folded-toggle": {
+      display: "none",
+    },
   },
-});
+);
 
 class TextWidget extends WidgetType {
   constructor(
@@ -201,8 +216,8 @@ class FoldedQuoteWidget extends WidgetType {
 
   toDOM() {
     const element = document.createElement("span");
-    element.className = "cm-live-folded-quote";
-    element.textContent = ` … ${this.hiddenLines} hidden ${this.hiddenLines === 1 ? "line" : "lines"}`;
+    element.className = "cm-live-folded-toggle";
+    element.setAttribute("aria-hidden", "true");
     return element;
   }
 }
@@ -211,28 +226,56 @@ class QuoteToggleWidget extends WidgetType {
   constructor(
     readonly position: number,
     readonly collapsed: boolean,
+    readonly empty: boolean,
   ) {
     super();
   }
 
   eq(other: QuoteToggleWidget) {
-    return other.position === this.position && other.collapsed === this.collapsed;
+    return other.position === this.position &&
+      other.collapsed === this.collapsed &&
+      other.empty === this.empty;
   }
 
   toDOM(view: EditorView) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `cm-live-quote-toggle ${this.collapsed ? "is-collapsed" : ""}`;
-    button.setAttribute("aria-label", this.collapsed ? "Expand quoted section" : "Collapse quoted section");
+    button.className = [
+      "cm-live-toggle-button",
+      this.collapsed ? "is-collapsed" : "is-expanded",
+      this.empty ? "is-empty" : "",
+    ].filter(Boolean).join(" ");
+
+    button.setAttribute(
+      "aria-label",
+      this.empty
+        ? "Empty toggle section"
+        : this.collapsed
+          ? "Expand section"
+          : "Collapse section",
+    );
+
     button.setAttribute("aria-expanded", String(!this.collapsed));
-    button.title = this.collapsed ? "Expand quoted section" : "Collapse quoted section";
-    button.textContent = "⌄";
+    button.title = this.empty
+      ? "Empty section"
+      : this.collapsed
+        ? "Expand section"
+        : "Collapse section";
+
+    button.textContent = this.collapsed || this.empty ? "▸" : "▾";
+
+    if (this.empty) {
+      button.disabled = true;
+      return button;
+    }
+
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
       view.dispatch({ effects: toggleQuote.of(this.position) });
       view.focus();
     });
+
     return button;
   }
 
@@ -568,25 +611,84 @@ function decorateTaskMarker(
   return true;
 }
 
-function outlineLine(text: string) {
-  const match = text.match(/^(\s*)((?:>\s*)+)(.*)$/);
+type ToggleLine = {
+  indent: number;
+  prefixSize: number;
+  content: string;
+};
+
+function visualIndent(text: string): number {
+  return text.replace(/\t/g, "  ").length;
+}
+
+function lineIndent(text: string): number {
+  return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
+}
+
+function toggleLine(text: string): ToggleLine | null {
+  const match = text.match(/^([ \t]*)>([ \t]?)(.*)$/);
   if (!match) return null;
+
   return {
-    prefixSize: match[1].length + match[2].length,
-    depth: (match[2].match(/>/g) ?? []).length,
+    indent: visualIndent(match[1]),
+    prefixSize: match[1].length + 1 + match[2].length,
     content: match[3],
   };
 }
 
+function toggleLineStyle(indent: number): string {
+  return `--toggle-padding-left: ${indent}ch;`;
+}
+
+function toggleSectionEnd(
+  state: EditorState,
+  startLineNumber: number,
+  startIndent: number,
+): number {
+  let endLineNumber = startLineNumber;
+
+  for (
+    let lineNumber = startLineNumber + 1;
+    lineNumber <= state.doc.lines;
+    lineNumber++
+  ) {
+    const line = state.doc.line(lineNumber);
+    const text = line.text;
+
+    if (text.trim() === "") {
+      endLineNumber = lineNumber;
+      continue;
+    }
+
+    if (lineIndent(text) <= startIndent) break;
+
+    endLineNumber = lineNumber;
+  }
+
+  return endLineNumber;
+}
+
+function toggleHasChildren(
+  state: EditorState,
+  lineNumber: number,
+  toggle: ToggleLine,
+): boolean {
+  return toggleSectionEnd(state, lineNumber, toggle.indent) > lineNumber;
+}
+
 function collapsibleQuotePositions(state: EditorState): number[] {
   const positions: number[] = [];
-  for (let lineNumber = 1; lineNumber < state.doc.lines; lineNumber++) {
+
+  for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
     const line = state.doc.line(lineNumber);
-    if (!outlineLine(line.text)) continue;
-    const previous = lineNumber > 1 ? outlineLine(state.doc.line(lineNumber - 1).text) : null;
-    const next = outlineLine(state.doc.line(lineNumber + 1).text);
-    if (!previous && next) positions.push(line.from);
+    const toggle = toggleLine(line.text);
+
+    if (!toggle) continue;
+    if (!toggleHasChildren(state, lineNumber, toggle)) continue;
+
+    positions.push(line.from);
   }
+
   return positions;
 }
 
@@ -603,7 +705,7 @@ function buildLivePreviewState(
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
-    const outline = outlineLine(line.text);
+    const toggle = toggleLine(line.text);
 
     if (
       lineNumber < state.doc.lines &&
@@ -659,36 +761,29 @@ function buildLivePreviewState(
       continue;
     }
 
-    if (outline) {
-      const previousOutline =
-        lineNumber > 1 ? outlineLine(state.doc.line(lineNumber - 1).text) : null;
-      const nextOutline =
-        lineNumber < state.doc.lines ? outlineLine(state.doc.line(lineNumber + 1).text) : null;
-      const startsOutlineGroup = !previousOutline;
-      const endsOutlineGroup = !nextOutline;
-      const lastGroupLine = startsOutlineGroup
-        ? outlineSectionEnd(
-          lineNumber,
-          state.doc.lines,
-          (candidate) => Boolean(outlineLine(state.doc.line(candidate).text)),
-        )
-        : lineNumber;
-      const hasChildren = startsOutlineGroup && lastGroupLine > lineNumber;
+    if (toggle) {
+      const sectionEndLineNumber = toggleSectionEnd(
+        state,
+        lineNumber,
+        toggle.indent,
+      );
+
+      const hasChildren = sectionEndLineNumber > lineNumber;
       const collapsed = hasChildren && nextCollapsed.has(line.from);
-      const contentOffset = line.from + outline.prefixSize;
+      const contentOffset = line.from + toggle.prefixSize;
 
       const isTask = decorateTaskMarker(
-        outline.content,
+        toggle.content,
         contentOffset,
         decorations,
         atomicRanges,
       );
 
-      const outlineList = !isTask && outline.content.match(/^([-+*])\s+/);
-      if (outlineList) {
+      const toggleList = !isTask && toggle.content.match(/^([-+*])\s+/);
+      if (toggleList) {
         addHiddenRange(
           contentOffset,
-          contentOffset + outlineList[0].length,
+          contentOffset + toggleList[0].length,
           decorations,
           atomicRanges,
           new TextWidget("•", "cm-live-bullet"),
@@ -696,44 +791,34 @@ function buildLivePreviewState(
       }
 
       const classes = [
-        "cm-live-outline-line",
-        startsOutlineGroup ? "cm-live-outline-start" : "",
-        endsOutlineGroup ? "cm-live-outline-end" : "",
-        hasChildren ? "cm-live-outline-parent" : "",
-        collapsed ? "cm-live-outline-collapsed" : "",
+        "cm-live-toggle-line",
+        hasChildren ? "cm-live-toggle-parent" : "cm-live-toggle-empty",
+        collapsed ? "cm-live-toggle-collapsed" : "",
         isTask ? "cm-live-task-line" : "",
-        outlineList ? "cm-live-list-line" : "",
+        toggleList ? "cm-live-list-line" : "",
       ].filter(Boolean).join(" ");
 
       decorations.push(
         Decoration.line({
           attributes: {
             class: classes,
-            style: `--outline-depth: ${Math.max(0, outline.depth - 1)}`,
+            style: toggleLineStyle(toggle.indent),
           },
         }).range(line.from),
       );
-
-      if (hasChildren) {
-        decorations.push(
-          Decoration.widget({
-            widget: new QuoteToggleWidget(line.from, collapsed),
-            side: -1,
-          }).range(line.from),
-        );
-      }
 
       addHiddenRange(
         line.from,
         contentOffset,
         decorations,
         atomicRanges,
+        new QuoteToggleWidget(line.from, collapsed, !hasChildren),
       );
 
       decorateInlineMarkdown(
         state,
         lineNumber,
-        outline.content,
+        toggle.content,
         contentOffset,
         decorations,
         atomicRanges,
@@ -741,18 +826,21 @@ function buildLivePreviewState(
       );
 
       if (collapsed) {
-        const lastLine = state.doc.line(lastGroupLine);
+        const lastLine = state.doc.line(sectionEndLineNumber);
+
         addHiddenRange(
           line.to,
           lastLine.to,
           decorations,
           atomicRanges,
-          new FoldedQuoteWidget(lastGroupLine - lineNumber),
+          new FoldedQuoteWidget(sectionEndLineNumber - lineNumber),
         );
-        lineNumber = lastGroupLine + 1;
+
+        lineNumber = sectionEndLineNumber + 1;
       } else {
         lineNumber++;
       }
+
       continue;
     }
 
@@ -921,10 +1009,18 @@ function prefixSelectedLines(view: EditorView, prefix: string) {
     .sort((left, right) => left - right)
     .map((lineNumber) => {
       const line = view.state.doc.line(lineNumber);
-      const outlinePrefix = line.text.match(/^\s*(?:>\s*)+/)?.[0];
-      const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
+      const toggle = toggleLine(line.text);
+      const indentation = line.text.match(/^[ \t]*/)?.[0].length ?? 0;
+
+      const insertionPoint =
+        prefix === "> "
+          ? line.from + indentation
+          : toggle
+            ? line.from + toggle.prefixSize
+            : line.from + indentation;
+
       return {
-        from: line.from + (outlinePrefix?.length ?? indentation),
+        from: insertionPoint,
         insert: prefix,
       };
     });
@@ -974,16 +1070,23 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
 
   for (const lineNumber of [...lineNumbers].sort((left, right) => left - right)) {
     const line = view.state.doc.line(lineNumber);
-    const match = line.text.match(/^(\s*)(>+)/);
-    if (!match) continue;
-
-    const markerStart = line.from + match[1].length;
 
     if (direction === 1) {
-      changes.push({ from: markerStart, insert: ">" });
-    } else if (match[2].length > 1) {
-      changes.push({ from: markerStart, to: markerStart + 1, insert: "" });
+      changes.push({
+        from: line.from,
+        insert: "  ",
+      });
+      continue;
     }
+
+    const removable = line.text.match(/^ {1,2}|\t/)?.[0];
+    if (!removable) continue;
+
+    changes.push({
+      from: line.from,
+      to: line.from + removable.length,
+      insert: "",
+    });
   }
 
   if (changes.length === 0) return false;
@@ -994,27 +1097,78 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
   return true;
 }
 
+function insertNewlineAfterToggleTitle(view: EditorView) {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+
+  const line = view.state.doc.lineAt(range.head);
+  if (range.head !== line.to) return false;
+
+  const toggle = toggleLine(line.text);
+  if (!toggle) return false;
+
+  const childIndent = " ".repeat(toggle.indent + 2);
+  const inserted = `\n${childIndent}`;
+
+  view.dispatch({
+    changes: {
+      from: range.head,
+      insert: inserted,
+    },
+    selection: EditorSelection.cursor(range.head + inserted.length),
+  });
+
+  view.focus();
+  return true;
+}
+
 function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
   view.dispatch({ effects: setAllQuotesCollapsed.of(collapsed) });
   view.focus();
   return true;
 }
 
-function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
-  let lineNumber = view.state.doc.lineAt(view.state.selection.main.head).number;
-  if (!outlineLine(view.state.doc.line(lineNumber).text)) return false;
+function currentToggleSectionPosition(state: EditorState): number | null {
+  const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
+  const currentLine = state.doc.line(currentLineNumber);
+  const currentToggle = toggleLine(currentLine.text);
 
-  while (
-    lineNumber > 1 &&
-    outlineLine(view.state.doc.line(lineNumber - 1).text)
+  if (
+    currentToggle &&
+    toggleHasChildren(state, currentLineNumber, currentToggle)
   ) {
-    lineNumber--;
+    return currentLine.from;
   }
 
-  const position = view.state.doc.line(lineNumber).from;
-  if (!collapsibleQuotePositions(view.state).includes(position)) return false;
+  for (let lineNumber = currentLineNumber - 1; lineNumber >= 1; lineNumber--) {
+    const line = state.doc.line(lineNumber);
+    const toggle = toggleLine(line.text);
 
-  view.dispatch({ effects: setQuoteCollapsed.of({ position, collapsed }) });
+    if (!toggle) continue;
+
+    const endLineNumber = toggleSectionEnd(
+      state,
+      lineNumber,
+      toggle.indent,
+    );
+
+    if (endLineNumber >= currentLineNumber && endLineNumber > lineNumber) {
+      return line.from;
+    }
+  }
+
+  return null;
+}
+
+function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
+  const position = currentToggleSectionPosition(view.state);
+
+  if (position === null) return false;
+
+  view.dispatch({
+    effects: setQuoteCollapsed.of({ position, collapsed }),
+  });
+
   view.focus();
   return true;
 }
@@ -1077,6 +1231,10 @@ export default function LiveMarkdownEditor({
               key: "Ctrl-Shift-[",
               preventDefault: true,
               run: (editor) => setAllSectionsCollapsed(editor, true),
+            },
+            {
+              key: "Enter",
+              run: insertNewlineAfterToggleTitle,
             },
             {
               key: "Tab",
