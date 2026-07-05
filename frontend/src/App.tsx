@@ -561,7 +561,7 @@ function App() {
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [session?.locked, selectedFolderID, syncLinked]);
+  }, [session?.locked, selectedFolderID, syncLinked, syncing]);
 
   useEffect(() => {
     if (!contextMenu) return;
