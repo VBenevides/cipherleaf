@@ -19,6 +19,7 @@ import {
 import { markdown } from "@codemirror/lang-markdown";
 import { minimalSetup } from "codemirror";
 import {
+  acceptCompletion,
   autocompletion,
   type CompletionContext,
   type CompletionResult,
@@ -67,8 +68,8 @@ const liveMarkdownTheme = EditorView.theme(
   {
     "&": {
       "--toggle-indent-step": "2ch",
-      "--toggle-button-width": "1.35em",
-      "--toggle-button-gap": "0.25em",
+      "--toggle-button-width": "1.25em",
+      "--toggle-button-gap": "0em",
     },
 
     ".cm-line.cm-live-toggle-line": {
@@ -527,6 +528,20 @@ function decorateInlineMarkdown(
 ) {
   const active = lineIsActive(state, lineNumber);
 
+  if (!active) {
+    for (const match of text.matchAll(/->/g)) {
+      if (match.index === undefined) continue;
+      const start = offset + match.index;
+      addHiddenRange(
+        start,
+        start + match[0].length,
+        decorations,
+        atomicRanges,
+        new TextWidget("→", "cm-live-arrow"),
+      );
+    }
+  }
+
   const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
   for (const match of text.matchAll(bold)) {
     if (match.index === undefined) continue;
@@ -661,10 +676,7 @@ function toggleSectionEnd(
     const line = state.doc.line(lineNumber);
     const text = line.text;
 
-    if (text.trim() === "") {
-      endLineNumber = lineNumber;
-      continue;
-    }
+    if (text.trim() === "") break;
 
     if (lineIndent(text) <= startIndent) break;
 
@@ -696,6 +708,29 @@ function collapsibleQuotePositions(state: EditorState): number[] {
   }
 
   return positions;
+}
+
+function expandToggleTree(
+  state: EditorState,
+  position: number,
+  collapsed: Set<number>,
+) {
+  const line = state.doc.lineAt(position);
+  const toggle = toggleLine(line.text);
+
+  if (!toggle || line.from !== position) {
+    collapsed.delete(position);
+    return;
+  }
+
+  const endLineNumber = toggleSectionEnd(state, line.number, toggle.indent);
+  for (
+    let lineNumber = line.number;
+    lineNumber <= endLineNumber;
+    lineNumber++
+  ) {
+    collapsed.delete(state.doc.line(lineNumber).from);
+  }
 }
 
 function buildLivePreviewState(
@@ -768,6 +803,7 @@ function buildLivePreviewState(
     }
 
     if (toggle) {
+      const toggleAttachment = parseAttachmentMarkdown(toggle.content);
       const sectionEndLineNumber = toggleSectionEnd(
         state,
         lineNumber,
@@ -778,14 +814,15 @@ function buildLivePreviewState(
       const collapsed = hasChildren && nextCollapsed.has(line.from);
       const contentOffset = line.from + toggle.prefixSize;
 
-      const isTask = decorateTaskMarker(
-        toggle.content,
-        contentOffset,
-        decorations,
-        atomicRanges,
-      );
+      const isTask = !toggleAttachment && decorateTaskMarker(
+          toggle.content,
+          contentOffset,
+          decorations,
+          atomicRanges,
+        );
 
-      const toggleList = !isTask && toggle.content.match(/^([-+*])\s+/);
+      const toggleList = !toggleAttachment && !isTask &&
+        toggle.content.match(/^([-+*])\s+/);
       if (toggleList) {
         addHiddenRange(
           contentOffset,
@@ -821,15 +858,33 @@ function buildLivePreviewState(
         new QuoteToggleWidget(line.from, collapsed, !hasChildren),
       );
 
-      decorateInlineMarkdown(
-        state,
-        lineNumber,
-        toggle.content,
-        contentOffset,
-        decorations,
-        atomicRanges,
-        openWikilink,
-      );
+      if (toggleAttachment && !lineIsActive(state, lineNumber)) {
+        addHiddenRange(
+          contentOffset,
+          line.to,
+          decorations,
+          atomicRanges,
+          new AttachmentWidget(
+            noteID,
+            toggleAttachment.id,
+            toggleAttachment.alt,
+            toggleAttachment.width,
+            contentOffset,
+            line.to,
+            onError,
+          ),
+        );
+      } else {
+        decorateInlineMarkdown(
+          state,
+          lineNumber,
+          toggle.content,
+          contentOffset,
+          decorations,
+          atomicRanges,
+          openWikilink,
+        );
+      }
 
       if (collapsed) {
         const lastLine = state.doc.line(sectionEndLineNumber);
@@ -960,11 +1015,17 @@ function livePreviewExtension(
         }
         if (effect.is(setQuoteCollapsed)) {
           if (effect.value.collapsed) collapsed.add(effect.value.position);
-          else collapsed.delete(effect.value.position);
+          else expandToggleTree(
+            transaction.state,
+            effect.value.position,
+            collapsed,
+          );
           continue;
         }
         if (!effect.is(toggleQuote)) continue;
-        if (collapsed.has(effect.value)) collapsed.delete(effect.value);
+        if (collapsed.has(effect.value)) {
+          expandToggleTree(transaction.state, effect.value, collapsed);
+        }
         else collapsed.add(effect.value);
       }
       return buildLivePreviewState(transaction.state, collapsed, openWikilink, noteID, onError);
@@ -1243,7 +1304,8 @@ export default function LiveMarkdownEditor({
             },
             {
               key: "Enter",
-              run: insertNewlineAtOutlineDepth,
+              run: (editor) =>
+                acceptCompletion(editor) || insertNewlineAtOutlineDepth(editor),
             },
             {
               key: "Tab",

@@ -44,6 +44,10 @@ test("accepts only bounded Cipherleaf attachment references", () => {
     parseAttachmentMarkdown(`![Diagram](attachment:${id}#width=900)`),
     { alt: "Diagram", id, width: 900 },
   );
+  assert.deepEqual(
+    parseAttachmentMarkdown(`    ![Nested](attachment:${id}#width=480)`),
+    { alt: "Nested", id, width: 480 },
+  );
   assert.equal(parseAttachmentMarkdown("![remote](https://example.com/image.webp)"), null);
   assert.equal(parseAttachmentMarkdown("![bad](attachment:../secret)"), null);
 });

@@ -485,8 +485,7 @@ function App() {
                 revision: saved.revision,
               }
             : item,
-        )
-        .sort((left, right) => left.title.localeCompare(right.title)),
+        ),
     );
   };
 

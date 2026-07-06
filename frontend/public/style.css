@@ -1699,8 +1699,12 @@ a:focus-visible {
   text-align: center;
 }
 
+.live-markdown-editor .cm-live-arrow {
+  color: var(--green-dark);
+}
+
 .live-markdown-editor .cm-live-list-line {
-  padding-left: 0.12em;
+  padding-left: 0;
 }
 
 .live-markdown-editor .cm-live-horizontal-rule-line {

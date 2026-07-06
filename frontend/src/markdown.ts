@@ -13,7 +13,7 @@ export function isTableDivider(line: string): boolean {
 
 export function parseAttachmentMarkdown(line: string) {
   const match = line.match(
-    /^!\[([^\]]*)\]\(attachment:([a-f0-9]{32})(?:#width=(\d{2,4}))?\)$/,
+    /^\s*!\[([^\]]*)\]\(attachment:([a-f0-9]{32})(?:#width=(\d{2,4}))?\)\s*$/,
   );
   if (!match) return null;
   return {
