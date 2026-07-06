@@ -5,10 +5,16 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  normalizeArrowText,
   outlineSectionEnd,
   parseAttachmentMarkdown,
   tableCells,
 } from "../src/markdown.ts";
+
+test("stores ASCII arrows as Unicode arrows", () => {
+  assert.equal(normalizeArrowText("first -> second -> third"), "first → second → third");
+  assert.equal(normalizeArrowText("already → converted"), "already → converted");
+});
 
 test("recognizes a three-dash horizontal rule line", () => {
   assert.equal(isHorizontalRule("---"), true);

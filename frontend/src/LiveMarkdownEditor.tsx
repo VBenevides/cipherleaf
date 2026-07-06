@@ -30,6 +30,7 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  normalizeArrowText,
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
@@ -527,20 +528,6 @@ function decorateInlineMarkdown(
   openWikilink: (title: string) => void,
 ) {
   const active = lineIsActive(state, lineNumber);
-
-  if (!active) {
-    for (const match of text.matchAll(/->/g)) {
-      if (match.index === undefined) continue;
-      const start = offset + match.index;
-      addHiddenRange(
-        start,
-        start + match[0].length,
-        decorations,
-        atomicRanges,
-        new TextWidget("→", "cm-live-arrow"),
-      );
-    }
-  }
 
   const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
   for (const match of text.matchAll(bold)) {
@@ -1276,10 +1263,11 @@ export default function LiveMarkdownEditor({
   useEffect(() => {
     if (!host.current) return;
 
+    const normalizedValue = normalizeArrowText(value);
     const editor = new EditorView({
       parent: host.current,
       state: EditorState.create({
-        doc: value,
+        doc: normalizedValue,
         extensions: [
           Prec.highest(keymap.of([
             {
@@ -1350,6 +1338,41 @@ export default function LiveMarkdownEditor({
           markdown(),
           liveMarkdownTheme,
           EditorView.lineWrapping,
+          EditorView.inputHandler.of((inputView, from, to, text) => {
+            let changeFrom = from;
+            let changeTo = to;
+            let inserted = text;
+
+            if (
+              changeFrom > 0 &&
+              inputView.state.sliceDoc(changeFrom - 1, changeFrom) === "-" &&
+              inserted.startsWith(">")
+            ) {
+              changeFrom--;
+              inserted = `-${inserted}`;
+            }
+            if (
+              changeTo < inputView.state.doc.length &&
+              inserted.endsWith("-") &&
+              inputView.state.sliceDoc(changeTo, changeTo + 1) === ">"
+            ) {
+              changeTo++;
+              inserted += ">";
+            }
+
+            const normalized = normalizeArrowText(inserted);
+            if (normalized === inserted) return false;
+
+            inputView.dispatch({
+              changes: {
+                from: changeFrom,
+                to: changeTo,
+                insert: normalized,
+              },
+              selection: EditorSelection.cursor(changeFrom + normalized.length),
+            });
+            return true;
+          }),
           EditorView.contentAttributes.of({
             "aria-label": "Live Preview Markdown editor",
             spellcheck: "true",
@@ -1414,6 +1437,9 @@ export default function LiveMarkdownEditor({
     });
 
     view.current = editor;
+    if (normalizedValue !== value) {
+      queueMicrotask(() => onChangeRef.current(normalizedValue));
+    }
 
     return () => {
       editor.destroy();
@@ -1423,12 +1449,17 @@ export default function LiveMarkdownEditor({
 
   useEffect(() => {
     const editor = view.current;
-    if (!editor || editor.state.doc.toString() === value) return;
+    if (!editor) return;
+    const normalizedValue = normalizeArrowText(value);
+    if (editor.state.doc.toString() === normalizedValue) return;
 
     editor.dispatch({
-      changes: { from: 0, to: editor.state.doc.length, insert: value },
+      changes: { from: 0, to: editor.state.doc.length, insert: normalizedValue },
       annotations: externalDocumentUpdate.of(true),
     });
+    if (normalizedValue !== value) {
+      queueMicrotask(() => onChangeRef.current(normalizedValue));
+    }
   }, [value]);
 
   const runWithEditor = (action: (editor: EditorView) => void) => {

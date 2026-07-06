@@ -2,6 +2,10 @@ export function isHorizontalRule(line: string): boolean {
   return line.trim() === "---";
 }
 
+export function normalizeArrowText(text: string): string {
+  return text.replace(/->/g, "→");
+}
+
 export function tableCells(line: string): string[] {
   return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 }
