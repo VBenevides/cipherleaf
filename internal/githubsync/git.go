@@ -911,7 +911,8 @@ func parseRemotePaths(data []byte) ([]string, error) {
 			required[path] = true
 		} else {
 			match := remoteObjectPath.FindStringSubmatch(path)
-			if len(match) != 3 || match[1] != match[2][:2] {
+			validObject := len(match) == 3 && match[1] == match[2][:2]
+			if !validObject && !remoteAttachmentPath.MatchString(path) {
 				return nil, errors.New("the non-empty repository contains an unknown or unsafe layout")
 			}
 		}

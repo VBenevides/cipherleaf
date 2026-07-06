@@ -186,6 +186,23 @@ func TestMergedEnvironmentRemovesGitOverrides(t *testing.T) {
 	}
 }
 
+func TestParseRemotePathsAcceptsEncryptedAttachments(t *testing.T) {
+	objectID := strings.Repeat("a", 32)
+	attachmentID := strings.Repeat("b", 32)
+	data := strings.Join([]string{
+		"vault.json",
+		"sync/manifest.enc",
+		"sync/folders.enc",
+		"objects/aa/" + objectID + ".enc",
+		"attachments/" + objectID + "/" + attachmentID + ".enc",
+		"",
+	}, "\x00")
+
+	if _, err := parseRemotePaths([]byte(data)); err != nil {
+		t.Fatalf("encrypted attachment path was rejected: %v", err)
+	}
+}
+
 func TestDetectsNonFastForwardPushOutput(t *testing.T) {
 	for _, output := range [][]byte{
 		[]byte("! [rejected] HEAD -> main (non-fast-forward)"),
