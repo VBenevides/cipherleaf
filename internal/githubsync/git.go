@@ -41,6 +41,7 @@ func (ExecCommandRunner) Run(
 	environment []string,
 ) ([]byte, error) {
 	command := exec.CommandContext(ctx, name, args...)
+	configureBackgroundCommand(command)
 	command.Env = mergedEnvironment(os.Environ(), environment)
 	stdout := &limitedBuffer{limit: 20 * 1024 * 1024}
 	stderr := &limitedBuffer{limit: 1024 * 1024}
