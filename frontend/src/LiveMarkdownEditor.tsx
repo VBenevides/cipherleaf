@@ -3,6 +3,7 @@ import {
   Annotation,
   EditorSelection,
   EditorState,
+  Prec,
   StateEffect,
   StateField,
   type Range,
@@ -102,7 +103,10 @@ const liveMarkdownTheme = EditorView.theme(
 
     ".cm-live-toggle-button.is-empty": {
       cursor: "default",
-      opacity: "0.45",
+      color: "var(--green)",
+      fontSize: "1.2em",
+      fontWeight: "800",
+      opacity: "1",
     },
 
     ".cm-live-toggle-button.is-empty:hover": {
@@ -249,20 +253,22 @@ class QuoteToggleWidget extends WidgetType {
     button.setAttribute(
       "aria-label",
       this.empty
-        ? "Empty toggle section"
+        ? "Bullet point"
         : this.collapsed
           ? "Expand section"
           : "Collapse section",
     );
 
-    button.setAttribute("aria-expanded", String(!this.collapsed));
+    if (!this.empty) {
+      button.setAttribute("aria-expanded", String(!this.collapsed));
+    }
     button.title = this.empty
-      ? "Empty section"
+      ? "Bullet point"
       : this.collapsed
         ? "Expand section"
         : "Collapse section";
 
-    button.textContent = this.collapsed || this.empty ? "▸" : "▾";
+    button.textContent = this.empty ? "•" : this.collapsed ? "▸" : "▾";
 
     if (this.empty) {
       button.disabled = true;
@@ -1097,18 +1103,21 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
   return true;
 }
 
-function insertNewlineAfterToggleTitle(view: EditorView) {
+function insertNewlineAtOutlineDepth(view: EditorView) {
   const range = view.state.selection.main;
   if (!range.empty) return false;
 
   const line = view.state.doc.lineAt(range.head);
-  if (range.head !== line.to) return false;
-
   const toggle = toggleLine(line.text);
-  if (!toggle) return false;
+  const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
+  const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
+  if (!toggle && !list && indentation === "") return false;
 
-  const childIndent = " ".repeat(toggle.indent + 2);
-  const inserted = `\n${childIndent}`;
+  const inserted = toggle
+    ? `\n${indentation}> `
+    : list
+      ? `\n${indentation}${list[2]} `
+      : `\n${indentation}`;
 
   view.dispatch({
     changes: {
@@ -1211,7 +1220,7 @@ export default function LiveMarkdownEditor({
       state: EditorState.create({
         doc: value,
         extensions: [
-          keymap.of([
+          Prec.highest(keymap.of([
             {
               key: "Ctrl-]",
               preventDefault: true,
@@ -1234,7 +1243,7 @@ export default function LiveMarkdownEditor({
             },
             {
               key: "Enter",
-              run: insertNewlineAfterToggleTitle,
+              run: insertNewlineAtOutlineDepth,
             },
             {
               key: "Tab",
@@ -1269,7 +1278,7 @@ export default function LiveMarkdownEditor({
                 return true;
               },
             },
-          ]),
+          ])),
           search(),
           keymap.of(searchKeymap),
           autocompletion({
