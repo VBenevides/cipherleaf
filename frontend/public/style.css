@@ -574,6 +574,102 @@ a:focus-visible {
   margin-bottom: 8px;
 }
 
+.appearance-settings-modal {
+  width: min(520px, 100%);
+}
+
+.appearance-fieldset {
+  margin: 18px 0;
+  padding: 0;
+  border: 0;
+}
+
+.appearance-fieldset legend {
+  margin-bottom: 8px;
+  color: #6b685f;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.appearance-theme-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.appearance-theme-options button {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.appearance-theme-options button.active {
+  border-color: var(--green-dark);
+  background: var(--green-pale);
+}
+
+.appearance-font-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appearance-font-row > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appearance-font-row .secondary-button {
+  min-height: 38px;
+  flex: 0 0 auto;
+}
+
+.appearance-font-input {
+  display: none !important;
+}
+
+.appearance-size-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 12px;
+}
+
+.vault-modal .appearance-size-row input[type="range"] {
+  height: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  accent-color: var(--green-dark);
+}
+
+.appearance-size-row output {
+  color: var(--ink);
+  font-size: 11px;
+  text-align: right;
+}
+
+.appearance-help {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .sync-link-state {
   display: inline-flex;
   align-items: center;
@@ -1491,7 +1587,13 @@ a:focus-visible {
   color: var(--ink);
   background: transparent;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 14px;
+  font-size: var(--editor-font-size, 14px);
+}
+
+:root[data-editor-font="custom"] .title-input,
+:root[data-editor-font="custom"] .live-markdown-editor .cm-editor,
+:root[data-editor-font="custom"] .live-markdown-editor .cm-editor * {
+  font-family: "CipherleafEditorFont", monospace !important;
 }
 
 .live-markdown-editor .cm-editor.cm-focused {

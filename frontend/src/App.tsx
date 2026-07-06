@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
@@ -33,13 +34,71 @@ const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
   { value: "dark", label: "Dark (Nord)", swatch: "dark" },
 ];
-type TitlebarMenu = "file" | "view";
+type TitlebarMenu = "file";
 type ContextMenuState =
   | { kind: "note"; id: string; label: string; x: number; y: number }
   | { kind: "folder"; id: string; label: string; x: number; y: number };
 
 const AUTO_LOCK_MS = 15 * 60 * 1000;
 const AUTOSAVE_DELAY_MS = 10 * 1000;
+const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
+const EDITOR_FONT_STORE = "appearance";
+const EDITOR_FONT_KEY = "editor-font";
+
+type StoredEditorFont = {
+  name: string;
+  data: ArrayBuffer;
+};
+
+function openAppearanceDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("cipherleaf-settings", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(EDITOR_FONT_STORE)) {
+        request.result.createObjectStore(EDITOR_FONT_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readStoredEditorFont(): Promise<StoredEditorFont | null> {
+  const database = await openAppearanceDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(EDITOR_FONT_STORE, "readonly");
+    const request = transaction.objectStore(EDITOR_FONT_STORE).get(EDITOR_FONT_KEY);
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => database.close();
+  });
+}
+
+async function writeStoredEditorFont(font: StoredEditorFont): Promise<void> {
+  const database = await openAppearanceDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(EDITOR_FONT_STORE, "readwrite");
+    transaction.objectStore(EDITOR_FONT_STORE).put(font, EDITOR_FONT_KEY);
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+async function removeStoredEditorFont(): Promise<void> {
+  const database = await openAppearanceDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(EDITOR_FONT_STORE, "readwrite");
+    transaction.objectStore(EDITOR_FONT_STORE).delete(EDITOR_FONT_KEY);
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
 
 function Icon({
   name,
@@ -150,8 +209,8 @@ function App() {
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
-  const [viewThemeOpen, setViewThemeOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
+  const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
   const [syncSettings, setSyncSettings] = useState<SyncSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
@@ -177,7 +236,14 @@ function App() {
     }
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
+  const [editorFontName, setEditorFontName] = useState("");
+  const [editorFontSize, setEditorFontSize] = useState(() => {
+    const saved = Number(window.localStorage.getItem("cipherleaf-editor-font-size"));
+    return Number.isFinite(saved) && saved >= 10 && saved <= 32 ? saved : 14;
+  });
   const initialThemeRef = useRef(true);
+  const editorFontInputRef = useRef<HTMLInputElement | null>(null);
+  const activeEditorFontRef = useRef<FontFace | null>(null);
   const sidebarSearchRef = useRef<HTMLInputElement | null>(null);
   const editVersion = useRef(0);
   const noteRef = useRef<Note | null>(null);
@@ -204,6 +270,43 @@ function App() {
     }
     void VaultService.RememberTheme(theme);
   }, [theme]);
+
+  const activateEditorFont = useCallback(async (name: string, data: ArrayBuffer) => {
+    const font = new FontFace(EDITOR_FONT_FAMILY, data);
+    await font.load();
+    if (activeEditorFontRef.current) {
+      document.fonts.delete(activeEditorFontRef.current);
+    }
+    document.fonts.add(font);
+    activeEditorFontRef.current = font;
+    document.documentElement.dataset.editorFont = "custom";
+    setEditorFontName(name);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void readStoredEditorFont()
+      .then((font) => {
+        if (active && font) return activateEditorFont(font.name, font.data);
+      })
+      .catch(() => {
+        // A damaged or unavailable appearance database falls back to Georgia.
+      });
+    return () => {
+      active = false;
+    };
+  }, [activateEditorFont]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--editor-font-size",
+      `${editorFontSize}px`,
+    );
+    window.localStorage.setItem(
+      "cipherleaf-editor-font-size",
+      String(editorFontSize),
+    );
+  }, [editorFontSize]);
 
   useEffect(() => {
     let active = true;
@@ -586,7 +689,6 @@ function App() {
     if (!titlebarMenu) return;
     const close = () => {
       setTitlebarMenu(null);
-      setViewThemeOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
@@ -845,7 +947,7 @@ function App() {
       return;
     }
     if (!syncLinked) {
-      setError("Link this vault to GitHub in Settings before syncing.");
+      setError("Link this vault to GitHub in Vault Settings before syncing.");
       return;
     }
     await syncNow();
@@ -1160,9 +1262,9 @@ function App() {
     else setError(`No note named “${title}” exists yet.`);
   };
 
-  const openSettings = async () => {
+  const openVaultSettings = async () => {
     setTitlebarMenu(null);
-    setSettingsOpen(true);
+    setVaultSettingsOpen(true);
     setSyncSettings(null);
     setSettingsBusy(true);
     setConnectionResult(null);
@@ -1173,10 +1275,42 @@ function App() {
       setSyncLinked(settings.linked);
       setLastSyncedAt(settings.lastSyncedAt);
     } catch (reason) {
-      setSettingsOpen(false);
+      setVaultSettingsOpen(false);
       setError(errorText(reason));
     } finally {
       setSettingsBusy(false);
+    }
+  };
+
+  const chooseEditorFont = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.name.toLocaleLowerCase().endsWith(".ttf")) {
+      setError("Select a TrueType (.ttf) font file.");
+      return;
+    }
+    try {
+      const data = await file.arrayBuffer();
+      await activateEditorFont(file.name, data);
+      await writeStoredEditorFont({ name: file.name, data });
+      setError("");
+    } catch (reason) {
+      setError(`Could not load font: ${errorText(reason)}`);
+    }
+  };
+
+  const resetEditorFont = async () => {
+    try {
+      if (activeEditorFontRef.current) {
+        document.fonts.delete(activeEditorFontRef.current);
+        activeEditorFontRef.current = null;
+      }
+      delete document.documentElement.dataset.editorFont;
+      setEditorFontName("");
+      await removeStoredEditorFont();
+    } catch (reason) {
+      setError(`Could not reset font: ${errorText(reason)}`);
     }
   };
 
@@ -1592,7 +1726,6 @@ function App() {
               aria-haspopup="menu"
               aria-expanded={titlebarMenu === "file"}
               onClick={() => {
-                setViewThemeOpen(false);
                 setTitlebarMenu((current) => current === "file" ? null : "file")
               }}
             >
@@ -1619,14 +1752,20 @@ function App() {
                   Save file and sync <kbd>Ctrl + Shift + S</kbd>
                 </button>
                 <div className="titlebar-menu-separator" />
-                <button role="menuitem" disabled={!syncLinked || syncing} title={!syncLinked ? "Link this vault in Settings first" : syncing ? "Syncing…" : "Pull then push the vault to GitHub"} onClick={() => {
+                <button role="menuitem" disabled={!syncLinked || syncing} title={!syncLinked ? "Link this vault in Vault Settings first" : syncing ? "Syncing…" : "Pull then push the vault to GitHub"} onClick={() => {
                   setTitlebarMenu(null);
                   void syncNow();
                 }}>
                   Sync vault <kbd>Ctrl + Shift + R</kbd>
                 </button>
-                <button role="menuitem" onClick={() => void openSettings()}>
+                <button role="menuitem" onClick={() => {
+                  setTitlebarMenu(null);
+                  setAppearanceSettingsOpen(true);
+                }}>
                   Settings…
+                </button>
+                <button role="menuitem" onClick={() => void openVaultSettings()}>
+                  Vault Settings…
                 </button>
                 <div className="titlebar-menu-separator" />
                 <button role="menuitem" onClick={() => void switchVault("create")}>
@@ -1649,59 +1788,6 @@ function App() {
                 <button role="menuitem" onClick={() => void closeApplication()}>
                   Close application
                 </button>
-              </div>
-            )}
-          </div>
-          <div className="titlebar-menu">
-            <button
-              className={titlebarMenu === "view" ? "active" : ""}
-              aria-haspopup="menu"
-              aria-expanded={titlebarMenu === "view"}
-              onClick={() => {
-                setViewThemeOpen(false);
-                setTitlebarMenu((current) => current === "view" ? null : "view")
-              }}
-            >
-              View
-            </button>
-            {titlebarMenu === "view" && (
-              <div className="titlebar-menu-popover view-menu" role="menu">
-                <div className="titlebar-submenu">
-                  <button
-                    className={viewThemeOpen ? "active" : ""}
-                    role="menuitem"
-                    aria-haspopup="menu"
-                    aria-expanded={viewThemeOpen}
-                    onClick={() => setViewThemeOpen((current) => !current)}
-                  >
-                    Theme
-                    <span className="submenu-arrow">›</span>
-                  </button>
-                  {viewThemeOpen && (
-                    <div
-                      className="titlebar-menu-popover titlebar-submenu-popover theme-menu"
-                      role="menu"
-                      aria-label="Theme"
-                    >
-                      {THEME_OPTIONS.map((item) => (
-                        <button
-                          key={item.value}
-                          role="menuitemradio"
-                          aria-checked={theme === item.value}
-                          onClick={() => {
-                            setTheme(item.value);
-                            setViewThemeOpen(false);
-                            setTitlebarMenu(null);
-                          }}
-                        >
-                          <span className={`theme-swatch ${item.swatch}`} />
-                          {item.label}
-                          {theme === item.value && <span className="menu-check">✓</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -1905,7 +1991,7 @@ function App() {
               !note
                 ? "No note open"
                 : !syncLinked
-                  ? "Link this vault to GitHub in Settings first"
+                  ? "Link this vault to GitHub in Vault Settings first"
                   : "Save and sync to GitHub (Ctrl + Shift + S)"
             }
             onClick={() => void saveAndSync()}
@@ -2005,7 +2091,95 @@ function App() {
           </div>
         )}
       </section>
-      {settingsOpen && (
+      {appearanceSettingsOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="vault-modal settings-modal appearance-settings-modal"
+            role="dialog"
+            aria-labelledby="appearance-settings-title"
+          >
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Close settings"
+              onClick={() => setAppearanceSettingsOpen(false)}
+            >
+              <Icon name="x" />
+            </button>
+            <p className="eyebrow">Settings</p>
+            <h2 id="appearance-settings-title">Appearance</h2>
+
+            <fieldset className="appearance-fieldset">
+              <legend>Theme</legend>
+              <div className="appearance-theme-options">
+                {THEME_OPTIONS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={theme === item.value ? "active" : ""}
+                    aria-pressed={theme === item.value}
+                    onClick={() => setTheme(item.value)}
+                  >
+                    <span className={`theme-swatch ${item.swatch}`} />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <label>
+              Font
+              <div className="appearance-font-row">
+                <span title={editorFontName}>
+                  {editorFontName || "Default (Georgia)"}
+                </span>
+                {editorFontName && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void resetEditorFont()}
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => editorFontInputRef.current?.click()}
+                >
+                  Select .ttf…
+                </button>
+                <input
+                  ref={editorFontInputRef}
+                  className="appearance-font-input"
+                  type="file"
+                  accept=".ttf,font/ttf"
+                  onChange={(event) => void chooseEditorFont(event)}
+                />
+              </div>
+            </label>
+
+            <label>
+              Font size
+              <div className="appearance-size-row">
+                <input
+                  type="range"
+                  min="10"
+                  max="32"
+                  step="1"
+                  value={editorFontSize}
+                  onChange={(event) => setEditorFontSize(Number(event.target.value))}
+                />
+                <output>{editorFontSize}px</output>
+              </div>
+            </label>
+            <p className="appearance-help">
+              Download and extract a Nerd Font, then select one of its .ttf files.
+            </p>
+          </section>
+        </div>
+      )}
+      {vaultSettingsOpen && (
         <div className="modal-backdrop" role="presentation">
           <form
             className="vault-modal settings-modal"
@@ -2019,7 +2193,7 @@ function App() {
               className="icon-button modal-close"
               aria-label="Close settings"
               onClick={() => {
-                setSettingsOpen(false);
+                setVaultSettingsOpen(false);
                 setConnectionResult(null);
               }}
             >
