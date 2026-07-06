@@ -81,7 +81,7 @@ jobs:
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: Build
-        run: wails3 build
+        run: wails3 build GOOS=linux GOARCH=amd64
 
       - name: Version binary
         run: |
@@ -97,7 +97,7 @@ jobs:
   windows:
     name: Windows amd64
     needs: validate
-    runs-on: windows-latest
+    runs-on: ubuntu-24.04
 
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
@@ -117,16 +117,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Wails
-        shell: pwsh
-        run: go install "github.com/wailsapp/wails/v3/cmd/wails3@$env:WAILS_VERSION"
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
 
       - name: Build
-        shell: pwsh
-        run: wails3 build
+        run: wails3 build GOOS=windows GOARCH=amd64
 
       - name: Version binary
-        shell: pwsh
-        run: Move-Item bin/cipherleaf.exe "bin/cipherleaf-v$env:APP_VERSION-windows-amd64.exe"
+        run: |
+          mv bin/cipherleaf.exe "bin/cipherleaf-v${APP_VERSION}-windows-amd64.exe"
 
       - uses: actions/upload-artifact@v4
         with:
