@@ -1222,6 +1222,18 @@ function App() {
     try {
       await persistCurrent();
       const loaded = await VaultService.GetNote(id);
+      const folder = folderByID.get(loaded.folderId);
+      if (folder?.locked && !unlockedFolderIDs.has(folder.id)) {
+        const password = window.prompt(`Unlock “${folder.name}”`, "");
+        if (password === null) return;
+        try {
+          await VaultService.CheckFolderPassword(folder.id, password);
+          setUnlockedFolderIDs((current) => new Set(current).add(folder.id));
+        } catch (reason) {
+          setError(errorText(reason));
+          return;
+        }
+      }
       setNote(loaded);
       if (options.replaceTrail) {
         setNoteTrail(options.replaceTrail);
