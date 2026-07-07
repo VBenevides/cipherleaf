@@ -2,7 +2,9 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"log"
+	"strings"
 
 	cipherleafapp "cipherleaf/internal/app"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -16,10 +18,14 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed VERSION
+var version string
+
 func main() {
+	appTitle := fmt.Sprintf("Cipherleaf - v%s", strings.TrimSpace(version))
 	vaultService := cipherleafapp.NewVaultService()
 	app := application.New(application.Options{
-		Name:        "Cipherleaf",
+		Name:        appTitle,
 		Description: "A local-first desktop Markdown notebook that encrypts your notes on disk and can sync them to a private GitHub repository",
 		Services: []application.Service{
 			application.NewService(vaultService),
@@ -34,7 +40,7 @@ func main() {
 	vaultService.SetApp(app)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "Cipherleaf",
+		Title:     appTitle,
 		Width:     1280,
 		Height:    800,
 		MinWidth:  920,

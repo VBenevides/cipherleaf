@@ -48,11 +48,15 @@ test("accepts only bounded Cipherleaf attachment references", () => {
   const id = "a".repeat(32);
   assert.deepEqual(
     parseAttachmentMarkdown(`![Diagram](attachment:${id}#width=900)`),
-    { alt: "Diagram", id, width: 900 },
+    { alt: "Diagram", id, width: 900, align: "left" },
   );
   assert.deepEqual(
     parseAttachmentMarkdown(`    ![Nested](attachment:${id}#width=480)`),
-    { alt: "Nested", id, width: 480 },
+    { alt: "Nested", id, width: 480, align: "left" },
+  );
+  assert.deepEqual(
+    parseAttachmentMarkdown(`![Centered](attachment:${id}#width=480&align=center)`),
+    { alt: "Centered", id, width: 480, align: "center" },
   );
   assert.equal(parseAttachmentMarkdown("![remote](https://example.com/image.webp)"), null);
   assert.equal(parseAttachmentMarkdown("![bad](attachment:../secret)"), null);
@@ -60,6 +64,10 @@ test("accepts only bounded Cipherleaf attachment references", () => {
 
 test("writes pasted images as Markdown image references", () => {
   const id = "b".repeat(32);
+  assert.equal(
+    attachmentMarkdown(id, 640, "Pasted image", "center"),
+    `![Pasted image](attachment:${id}#width=640&align=center)`,
+  );
   assert.equal(
     attachmentMarkdown(id),
     `![Pasted image](attachment:${id}#width=640)`,

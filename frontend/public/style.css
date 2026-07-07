@@ -1722,12 +1722,21 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-attachment {
   position: relative;
-  display: inline-block;
+  display: flex;
   width: fit-content;
   max-width: 100%;
   margin: 0.1em 0;
   line-height: 1;
   vertical-align: top;
+}
+
+.live-markdown-editor .cm-live-attachment.align-center {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.live-markdown-editor .cm-live-attachment.align-right {
+  margin-left: auto;
 }
 
 .live-markdown-editor .cm-live-attachment img {
@@ -1787,6 +1796,11 @@ a:focus-visible {
 
 .cm-live-attachment-menu button:hover {
   background: rgba(127, 127, 127, 0.2);
+}
+
+.cm-live-attachment-menu button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .live-markdown-editor .cm-live-code {

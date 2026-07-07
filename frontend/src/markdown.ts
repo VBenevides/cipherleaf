@@ -1,3 +1,5 @@
+export type AttachmentAlignment = "left" | "center" | "right";
+
 export function isHorizontalRule(line: string): boolean {
   return line.trim() === "---";
 }
@@ -17,18 +19,25 @@ export function isTableDivider(line: string): boolean {
 
 export function parseAttachmentMarkdown(line: string) {
   const match = line.match(
-    /^\s*!\[([^\]]*)\]\(attachment:([a-f0-9]{32})(?:#width=(\d{2,4}))?\)\s*$/,
+    /^\s*!\[([^\]]*)\]\(attachment:([a-f0-9]{32})(?:#width=(\d{2,4})(?:&align=(left|center|right))?)?\)\s*$/,
   );
   if (!match) return null;
   return {
     alt: match[1],
     id: match[2],
     width: Math.max(120, Math.min(2400, Number(match[3] ?? 640))),
+    align: (match[4] ?? "left") as AttachmentAlignment,
   };
 }
 
-export function attachmentMarkdown(id: string, width = 640, alt = "Pasted image"): string {
-  return `![${alt}](attachment:${id}#width=${width})`;
+export function attachmentMarkdown(
+  id: string,
+  width = 640,
+  alt = "Pasted image",
+  align: AttachmentAlignment = "left",
+): string {
+  const alignment = align === "left" ? "" : `&align=${align}`;
+  return `![${alt}](attachment:${id}#width=${width}${alignment})`;
 }
 
 export function outlineSectionEnd(

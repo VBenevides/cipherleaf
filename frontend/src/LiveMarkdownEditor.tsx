@@ -44,6 +44,8 @@ type LiveMarkdownEditorProps = {
   onSave: () => void;
   onError: (reason: unknown) => void;
   onOpenWikilink: (title: string) => void;
+  onDecreaseFontSize: () => void;
+  onIncreaseFontSize: () => void;
   scrollToOffset?: number | null;
 };
 
@@ -349,6 +351,7 @@ class AttachmentWidget extends WidgetType {
     readonly attachmentID: string,
     readonly alt: string,
     readonly width: number,
+    readonly align: "left" | "center" | "right",
     readonly from: number,
     readonly to: number,
     readonly onError: (reason: unknown) => void,
@@ -360,12 +363,13 @@ class AttachmentWidget extends WidgetType {
     return other.noteID === this.noteID &&
       other.attachmentID === this.attachmentID &&
       other.alt === this.alt &&
-      other.width === this.width;
+      other.width === this.width &&
+      other.align === this.align;
   }
 
   toDOM(view: EditorView) {
     const figure = document.createElement("span");
-    figure.className = "cm-live-attachment";
+    figure.className = `cm-live-attachment align-${this.align}`;
     const image = figure.appendChild(document.createElement("img"));
     image.alt = this.alt;
     image.style.width = `${this.width}px`;
@@ -404,7 +408,7 @@ class AttachmentWidget extends WidgetType {
             changes: {
               from: this.from,
               to: this.to,
-              insert: `![${this.alt}](attachment:${this.attachmentID}#width=${width})`,
+              insert: attachmentMarkdown(this.attachmentID, width, this.alt, this.align),
             },
           });
         }
@@ -434,6 +438,27 @@ class AttachmentWidget extends WidgetType {
         close();
         void copyImageToClipboard(image).catch(this.onError);
       });
+      for (const align of ["left", "center", "right"] as const) {
+        const alignButton = menu.appendChild(document.createElement("button"));
+        alignButton.type = "button";
+        alignButton.textContent = align === "left"
+          ? "Align left"
+          : align === "center"
+            ? "Align center"
+            : "Align right";
+        alignButton.disabled = align === this.align;
+        alignButton.addEventListener("click", () => {
+          close();
+          view.dispatch({
+            changes: {
+              from: this.from,
+              to: this.to,
+              insert: attachmentMarkdown(this.attachmentID, this.width, this.alt, align),
+            },
+          });
+          view.focus();
+        });
+      }
       const remove = menu.appendChild(document.createElement("button"));
       remove.type = "button";
       remove.textContent = "Delete";
@@ -779,6 +804,7 @@ function buildLivePreviewState(
           attachment.id,
           attachment.alt,
           attachment.width,
+          attachment.align,
           line.from,
           line.to,
           onError,
@@ -870,6 +896,7 @@ function buildLivePreviewState(
             toggleAttachment.id,
             toggleAttachment.alt,
             toggleAttachment.width,
+            toggleAttachment.align,
             contentOffset,
             line.to,
             onError,
@@ -1306,6 +1333,8 @@ export default function LiveMarkdownEditor({
   onSave,
   onError,
   onOpenWikilink,
+  onDecreaseFontSize,
+  onIncreaseFontSize,
   scrollToOffset,
 }: LiveMarkdownEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -1314,6 +1343,8 @@ export default function LiveMarkdownEditor({
   const onSaveRef = useRef(onSave);
   const onErrorRef = useRef(onError);
   const onOpenWikilinkRef = useRef(onOpenWikilink);
+  const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
+  const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const pendingScroll = useRef<number | null>(scrollToOffset ?? null);
 
   useEffect(() => {
@@ -1321,7 +1352,9 @@ export default function LiveMarkdownEditor({
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
     onOpenWikilinkRef.current = onOpenWikilink;
-  }, [onChange, onSave, onError, onOpenWikilink]);
+    onDecreaseFontSizeRef.current = onDecreaseFontSize;
+    onIncreaseFontSizeRef.current = onIncreaseFontSize;
+  }, [onChange, onSave, onError, onOpenWikilink, onDecreaseFontSize, onIncreaseFontSize]);
 
   useEffect(() => {
     if (typeof scrollToOffset === "number") {
@@ -1377,6 +1410,22 @@ export default function LiveMarkdownEditor({
               preventDefault: true,
               run: () => {
                 onSaveRef.current();
+                return true;
+              },
+            },
+            {
+              key: "Ctrl--",
+              preventDefault: true,
+              run: () => {
+                onDecreaseFontSizeRef.current();
+                return true;
+              },
+            },
+            {
+              key: "Ctrl-=",
+              preventDefault: true,
+              run: () => {
+                onIncreaseFontSizeRef.current();
                 return true;
               },
             },

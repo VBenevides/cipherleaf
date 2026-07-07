@@ -308,6 +308,14 @@ function App() {
     );
   }, [editorFontSize]);
 
+  const decreaseEditorFontSize = useCallback(() => {
+    setEditorFontSize((current) => Math.max(10, current - 1));
+  }, []);
+
+  const increaseEditorFontSize = useCallback(() => {
+    setEditorFontSize((current) => Math.min(32, current + 1));
+  }, []);
+
   useEffect(() => {
     let active = true;
     VaultService.GetLastSession()
@@ -2078,6 +2086,8 @@ function App() {
                   onSave={() => void persistCurrent()}
                   onError={(reason) => setError(errorText(reason))}
                   onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
                   scrollToOffset={scrollToOffset}
                 />
               )}
