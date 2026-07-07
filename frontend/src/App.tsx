@@ -1184,6 +1184,18 @@ function App() {
     return true;
   };
 
+  const noteDropTargetFromPointer = (
+    event: ReactMouseEvent<HTMLElement>,
+    id: string,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    return {
+      after,
+      key: `note:${id}:${after ? "after" : "before"}`,
+    };
+  };
+
   const finishPointerDrag = (
     target: { kind: "folder"; id: string } | { kind: "note"; id: string; after: boolean },
   ) => {
@@ -1914,14 +1926,19 @@ function App() {
               }}
               onMouseEnter={(event) => {
                 if (event.buttons !== 1 || dragCandidateRef.current?.id === item.id) return;
-                const after = event.clientY > event.currentTarget.getBoundingClientRect().top +
-                  event.currentTarget.getBoundingClientRect().height / 2;
-                activatePointerDrag(`note:${item.id}:${after ? "after" : "before"}`);
+                activatePointerDrag(noteDropTargetFromPointer(event, item.id).key);
+              }}
+              onMouseMove={(event) => {
+                if (event.buttons !== 1 || !dragCandidateRef.current?.active) return;
+                if (dragCandidateRef.current.id === item.id) return;
+                setDropTarget(noteDropTargetFromPointer(event, item.id).key);
               }}
               onMouseUp={(event) => {
-                const after = event.clientY > event.currentTarget.getBoundingClientRect().top +
-                  event.currentTarget.getBoundingClientRect().height / 2;
-                finishPointerDrag({ kind: "note", id: item.id, after });
+                finishPointerDrag({
+                  kind: "note",
+                  id: item.id,
+                  after: noteDropTargetFromPointer(event, item.id).after,
+                });
               }}
               onContextMenu={(event) =>
                 showContextMenu(event, {

@@ -518,6 +518,21 @@ function addHiddenRange(
   atomicRanges.push(range);
 }
 
+function hideSyntaxRange(
+  from: number,
+  to: number,
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  if (to <= from) return;
+  const range = Decoration.mark({
+    attributes: { "aria-hidden": "true" },
+    class: "cm-live-syntax-hidden",
+  }).range(from, to);
+  decorations.push(range);
+  atomicRanges.push(range);
+}
+
 function decorateInlineMarkdown(
   state: EditorState,
   lineNumber: number,
@@ -527,8 +542,6 @@ function decorateInlineMarkdown(
   atomicRanges: Range<Decoration>[],
   openWikilink: (title: string) => void,
 ) {
-  const active = lineIsActive(state, lineNumber);
-
   const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
   for (const match of text.matchAll(bold)) {
     if (match.index === undefined) continue;
@@ -538,22 +551,8 @@ function decorateInlineMarkdown(
     decorations.push(
       Decoration.mark({ class: "cm-live-strong" }).range(start + markerSize, end - markerSize),
     );
-    if (!active) {
-      addHiddenRange(start, start + markerSize, decorations, atomicRanges);
-      addHiddenRange(end - markerSize, end, decorations, atomicRanges);
-    }
-  }
-
-  const italic = /(^|[^*_])([*_])(?=\S)([^*_\n]*?\S)\2(?![*_])/g;
-  for (const match of text.matchAll(italic)) {
-    if (match.index === undefined) continue;
-    const start = offset + match.index + match[1].length;
-    const end = start + match[2].length + match[3].length + match[2].length;
-    decorations.push(Decoration.mark({ class: "cm-live-em" }).range(start + 1, end - 1));
-    if (!active) {
-      addHiddenRange(start, start + 1, decorations, atomicRanges);
-      addHiddenRange(end - 1, end, decorations, atomicRanges);
-    }
+    hideSyntaxRange(start, start + markerSize, decorations, atomicRanges);
+    hideSyntaxRange(end - markerSize, end, decorations, atomicRanges);
   }
 
   const inlineCode = /`([^`\n]+)`/g;
@@ -562,10 +561,8 @@ function decorateInlineMarkdown(
     const start = offset + match.index;
     const end = start + match[0].length;
     decorations.push(Decoration.mark({ class: "cm-live-code" }).range(start + 1, end - 1));
-    if (!active) {
-      addHiddenRange(start, start + 1, decorations, atomicRanges);
-      addHiddenRange(end - 1, end, decorations, atomicRanges);
-    }
+    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
+    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
   }
 
   const strike = /~~(?=\S)(.+?\S)~~/g;
@@ -574,13 +571,11 @@ function decorateInlineMarkdown(
     const start = offset + match.index;
     const end = start + match[0].length;
     decorations.push(Decoration.mark({ class: "cm-live-strike" }).range(start + 2, end - 2));
-    if (!active) {
-      addHiddenRange(start, start + 2, decorations, atomicRanges);
-      addHiddenRange(end - 2, end, decorations, atomicRanges);
-    }
+    hideSyntaxRange(start, start + 2, decorations, atomicRanges);
+    hideSyntaxRange(end - 2, end, decorations, atomicRanges);
   }
 
-  if (!active) {
+  if (!lineIsActive(state, lineNumber)) {
     const wikilinks = /\[\[([^\]\n]+)\]\]/g;
     for (const match of text.matchAll(wikilinks)) {
       if (match.index === undefined) continue;
@@ -646,6 +641,10 @@ function toggleLine(text: string): ToggleLine | null {
 
 function toggleLineStyle(indent: number): string {
   return `--toggle-padding-left: ${indent}ch;`;
+}
+
+function listLineStyle(indent: number, markerWidth = "1.25em"): string {
+  return `--live-list-indent: ${indent}ch; --live-list-marker-width: ${markerWidth};`;
 }
 
 function toggleSectionEnd(
@@ -819,20 +818,35 @@ function buildLivePreviewState(
           new TextWidget("•", "cm-live-bullet"),
         );
       }
+      const toggleOrderedList = !toggleAttachment && !isTask && !toggleList &&
+        toggle.content.match(/^(\d+[.)])\s+/);
+      if (toggleOrderedList) {
+        addHiddenRange(
+          contentOffset,
+          contentOffset + toggleOrderedList[0].length,
+          decorations,
+          atomicRanges,
+          new TextWidget(toggleOrderedList[1], "cm-live-list-marker"),
+        );
+      }
 
       const classes = [
         "cm-live-toggle-line",
         hasChildren ? "cm-live-toggle-parent" : "cm-live-toggle-empty",
         collapsed ? "cm-live-toggle-collapsed" : "",
+        toggleAttachment ? "cm-live-attachment-line" : "",
         isTask ? "cm-live-task-line" : "",
-        toggleList ? "cm-live-list-line" : "",
+        isTask || toggleList || toggleOrderedList ? "cm-live-list-line" : "",
       ].filter(Boolean).join(" ");
 
+      const toggleMarkerWidth = isTask ? "1.45em" : toggleOrderedList ? "2em" : "1.25em";
       decorations.push(
         Decoration.line({
           attributes: {
             class: classes,
-            style: toggleLineStyle(toggle.indent),
+            style: isTask || toggleList || toggleOrderedList
+              ? `${toggleLineStyle(toggle.indent)} ${listLineStyle(0, toggleMarkerWidth)}`
+              : toggleLineStyle(toggle.indent),
           },
         }).range(line.from),
       );
@@ -934,7 +948,12 @@ function buildLivePreviewState(
     );
 
     if (task) {
-      decorations.push(Decoration.line({ class: "cm-live-task-line" }).range(line.from));
+      decorations.push(Decoration.line({
+        attributes: {
+          class: "cm-live-task-line cm-live-list-line",
+          style: listLineStyle(visualIndent(line.text.match(/^\s*/)?.[0] ?? ""), "1.45em"),
+        },
+      }).range(line.from));
     }
 
     const unorderedList = !task && line.text.match(/^(\s*)([-+*])\s+/);
@@ -947,7 +966,30 @@ function buildLivePreviewState(
         atomicRanges,
         new TextWidget("•", "cm-live-bullet"),
       );
-      decorations.push(Decoration.line({ class: "cm-live-list-line" }).range(line.from));
+      decorations.push(Decoration.line({
+        attributes: {
+          class: "cm-live-list-line",
+          style: listLineStyle(visualIndent(unorderedList[1])),
+        },
+      }).range(line.from));
+    }
+
+    const orderedList = !task && !unorderedList && line.text.match(/^(\s*)(\d+[.)])\s+/);
+    if (orderedList) {
+      const markerStart = line.from + orderedList[1].length;
+      addHiddenRange(
+        markerStart,
+        markerStart + orderedList[2].length + 1,
+        decorations,
+        atomicRanges,
+        new TextWidget(orderedList[2], "cm-live-list-marker"),
+      );
+      decorations.push(Decoration.line({
+        attributes: {
+          class: "cm-live-list-line",
+          style: listLineStyle(visualIndent(orderedList[1]), "2em"),
+        },
+      }).range(line.from));
     }
 
     decorateInlineMarkdown(
@@ -1034,8 +1076,35 @@ function wrapSelection(view: EditorView, marker: string) {
   view.dispatch(
     view.state.changeByRange((range) => {
       const selected = view.state.sliceDoc(range.from, range.to);
+      const markerSize = marker.length;
+
+      if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= markerSize * 2) {
+        const inner = selected.slice(markerSize, selected.length - markerSize);
+        return {
+          changes: { from: range.from, to: range.to, insert: inner },
+          range: EditorSelection.range(range.from, range.from + inner.length),
+        };
+      }
+
+      const before = range.from >= markerSize
+        ? view.state.sliceDoc(range.from - markerSize, range.from)
+        : "";
+      const after = range.to + markerSize <= view.state.doc.length
+        ? view.state.sliceDoc(range.to, range.to + markerSize)
+        : "";
+
+      if (selected && before === marker && after === marker) {
+        return {
+          changes: [
+            { from: range.to, to: range.to + markerSize, insert: "" },
+            { from: range.from - markerSize, to: range.from, insert: "" },
+          ],
+          range: EditorSelection.range(range.from - markerSize, range.to - markerSize),
+        };
+      }
+
       const insert = `${marker}${selected}${marker}`;
-      const contentFrom = range.from + marker.length;
+      const contentFrom = range.from + markerSize;
       return {
         changes: { from: range.from, to: range.to, insert },
         range: selected
@@ -1479,17 +1548,6 @@ export default function LiveMarkdownEditor({
           }}
         >
           <strong>B</strong>
-        </button>
-        <button
-          type="button"
-          title="Italic"
-          aria-label="Make text italic"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => wrapSelection(editor, "_"));
-          }}
-        >
-          <em>I</em>
         </button>
         <span className="markdown-toolbar-separator" />
         <button

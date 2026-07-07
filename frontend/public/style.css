@@ -1687,6 +1687,13 @@ a:focus-visible {
   font-weight: 700;
 }
 
+.live-markdown-editor .cm-live-syntax-hidden {
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
 .live-markdown-editor .cm-live-table-wrap {
   display: block;
   max-width: 100%;
@@ -1715,16 +1722,24 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-attachment {
   position: relative;
-  display: block;
+  display: inline-block;
   width: fit-content;
   max-width: 100%;
-  margin: 0.8em 0;
+  margin: 0.1em 0;
+  line-height: 1;
+  vertical-align: top;
 }
 
 .live-markdown-editor .cm-live-attachment img {
   display: block;
   min-height: 32px;
   border-radius: 7px;
+}
+
+.live-markdown-editor .cm-live-attachment-line {
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .live-markdown-editor .cm-live-attachment-resize {
@@ -1774,10 +1789,6 @@ a:focus-visible {
   background: rgba(127, 127, 127, 0.2);
 }
 
-.live-markdown-editor .cm-live-em {
-  font-style: italic;
-}
-
 .live-markdown-editor .cm-live-code {
   padding: 2px 5px;
   color: #4e584e;
@@ -1801,8 +1812,33 @@ a:focus-visible {
   text-align: center;
 }
 
+.live-markdown-editor .cm-live-list-marker {
+  display: inline-block;
+  width: var(--live-list-marker-width, 2em);
+  padding-right: 0.35em;
+  color: var(--green-dark);
+  font-weight: 700;
+  text-align: right;
+}
+
 .live-markdown-editor .cm-live-list-line {
-  padding-left: 0;
+  padding-left: calc(var(--live-list-indent, 0ch) + var(--live-list-marker-width, 1.25em));
+  text-indent: calc(0px - var(--live-list-marker-width, 1.25em));
+}
+
+.live-markdown-editor .cm-live-toggle-line.cm-live-list-line {
+  padding-left: calc(
+    var(--toggle-padding-left, 0px) +
+    var(--toggle-button-width) +
+    var(--toggle-button-gap) +
+    var(--live-list-marker-width, 1.25em)
+  );
+  text-indent: calc(
+    0px -
+    var(--toggle-button-width) -
+    var(--toggle-button-gap) -
+    var(--live-list-marker-width, 1.25em)
+  );
 }
 
 .live-markdown-editor .cm-live-horizontal-rule-line {
@@ -2547,6 +2583,11 @@ a:focus-visible {
 
 :root[data-theme="dark"] .live-markdown-editor .cm-activeLine {
   background: rgba(136, 192, 208, 0.06);
+}
+
+:root[data-theme="dark"] .live-markdown-editor .cm-live-list-marker,
+:root[data-theme="dark"] .live-markdown-editor .cm-live-bullet {
+  color: #b7d5d4;
 }
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-strong {
