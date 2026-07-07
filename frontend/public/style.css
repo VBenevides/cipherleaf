@@ -2023,10 +2023,14 @@ a:focus-visible {
   color: #526d57;
   border-radius: 4px;
   background: #e8eee6;
-  cursor: text;
+  cursor: pointer;
   text-decoration: underline;
   text-decoration-color: #9caf9e;
   text-underline-offset: 3px;
+}
+
+.live-markdown-editor .cm-live-wikilink:hover {
+  background: #d8e4d6;
 }
 
 .live-markdown-editor .cm-live-quote {

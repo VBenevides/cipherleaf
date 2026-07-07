@@ -596,20 +596,18 @@ function decorateInlineMarkdown(
     hideSyntaxRange(end - 2, end, decorations, atomicRanges);
   }
 
-  if (!lineIsActive(state, lineNumber)) {
-    const wikilinks = /\[\[([^\]\n]+)\]\]/g;
-    for (const match of text.matchAll(wikilinks)) {
-      if (match.index === undefined) continue;
-      const start = offset + match.index;
-      const end = start + match[0].length;
-      addHiddenRange(
-        start,
-        end,
-        decorations,
-        atomicRanges,
-        new WikilinkWidget(match[1], start, openWikilink),
-      );
-    }
+  const wikilinks = /\[\[([^\]\n]+)\]\]/g;
+  for (const match of text.matchAll(wikilinks)) {
+    if (match.index === undefined) continue;
+    const start = offset + match.index;
+    const end = start + match[0].length;
+    addHiddenRange(
+      start,
+      end,
+      decorations,
+      atomicRanges,
+      new WikilinkWidget(match[1], start, openWikilink),
+    );
   }
 }
 
