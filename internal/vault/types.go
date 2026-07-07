@@ -13,15 +13,16 @@ type Session struct {
 }
 
 type NoteSummary struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	FolderID       string `json:"folderId"`
-	Order          int    `json:"order"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
-	ModifiedAt     int64  `json:"modifiedAt"`
-	Revision       uint64 `json:"revision"`
-	CiphertextHash string `json:"ciphertextHash,omitempty"`
+	ID             string   `json:"id"`
+	Title          string   `json:"title"`
+	FolderID       string   `json:"folderId"`
+	Order          int      `json:"order"`
+	CreatedAt      string   `json:"createdAt"`
+	UpdatedAt      string   `json:"updatedAt"`
+	ModifiedAt     int64    `json:"modifiedAt"`
+	Revision       uint64   `json:"revision"`
+	CiphertextHash string   `json:"ciphertextHash,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
 }
 
 type Note struct {
@@ -37,10 +38,15 @@ type Note struct {
 }
 
 type Folder struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Order            int    `json:"order"`
+	Hidden           bool   `json:"hidden,omitempty"`
+	Locked           bool   `json:"locked,omitempty"`
+	LockPasswordHash string `json:"lockPasswordHash,omitempty"`
+	SortMode         string `json:"sortMode,omitempty"`
+	CreatedAt        string `json:"createdAt"`
+	UpdatedAt        string `json:"updatedAt"`
 }
 
 type Tombstone struct {
@@ -122,12 +128,20 @@ type authenticatedRemoteSnapshot struct {
 
 // MergeResult summarizes a pull merge between the remote and local vault.
 type MergeResult struct {
-	PulledNotes    int  `json:"pulledNotes"`
-	UpdatedNotes   int  `json:"updatedNotes"`
-	DeletedNotes   int  `json:"deletedNotes"`
-	PulledFolders  int  `json:"pulledFolders"`
-	DeletedFolders int  `json:"deletedFolders"`
-	UpToDate       bool `json:"upToDate"`
+	PulledNotes    int             `json:"pulledNotes"`
+	UpdatedNotes   int             `json:"updatedNotes"`
+	DeletedNotes   int             `json:"deletedNotes"`
+	PulledFolders  int             `json:"pulledFolders"`
+	DeletedFolders int             `json:"deletedFolders"`
+	UpToDate       bool            `json:"upToDate"`
+	Conflicts      []MergeConflict `json:"conflicts,omitempty"`
+}
+
+type MergeConflict struct {
+	LocalNoteID  string `json:"localNoteId"`
+	RemoteNoteID string `json:"remoteNoteId"`
+	Title        string `json:"title"`
+	Message      string `json:"message"`
 }
 
 // FindMatch describes a single occurrence of a query inside a note.

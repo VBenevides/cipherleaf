@@ -842,6 +842,10 @@ a:focus-visible {
   background: var(--paper);
 }
 
+.workspace.sidebar-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
 .app-menubar {
   position: relative;
   z-index: 60;
@@ -855,6 +859,29 @@ a:focus-visible {
   border-bottom: 1px solid var(--line-soft);
   background: rgba(247, 245, 239, 0.98);
   --wails-draggable: drag;
+}
+
+.sidebar-collapse-toggle {
+  min-width: 38px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  color: #7f887d;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  --wails-draggable: no-drag;
+}
+
+.sidebar-collapse-toggle:hover {
+  color: var(--green-dark);
+  background: var(--green-pale);
 }
 
 .app-menubar-mark {
@@ -896,6 +923,17 @@ a:focus-visible {
   background:
     linear-gradient(rgba(239, 236, 226, 0.95), rgba(237, 233, 223, 0.97)),
     var(--canvas);
+}
+
+.workspace.sidebar-collapsed .sidebar {
+  overflow: hidden;
+  border-right: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workspace.sidebar-collapsed .editor-shell {
+  grid-column: 2;
 }
 
 .sidebar-brand {
@@ -978,8 +1016,26 @@ a:focus-visible {
   height: 27px;
 }
 
+.notes-sort-select {
+  min-width: 82px;
+  height: 25px;
+  margin-left: auto;
+  padding: 0 7px;
+  color: #77736a;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: none;
+}
+
 .folders-heading {
   padding-top: 1px;
+}
+
+.tags-heading {
+  padding-top: 10px;
 }
 
 .folder-list {
@@ -990,6 +1046,7 @@ a:focus-visible {
 }
 
 .folder-list-item {
+  position: relative;
   width: 100%;
   height: 31px;
   display: grid;
@@ -1020,6 +1077,25 @@ a:focus-visible {
   background: rgba(255, 255, 255, 0.78);
 }
 
+.folder-list-item.drag-over-before::before,
+.folder-list-item.drag-over-after::after {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  height: 2px;
+  content: "";
+  border-radius: 999px;
+  background: var(--green-dark);
+}
+
+.folder-list-item.drag-over-before::before {
+  top: 0;
+}
+
+.folder-list-item.drag-over-after::after {
+  bottom: 0;
+}
+
 .folder-list-item > span {
   overflow: hidden;
   font-size: 10px;
@@ -1031,6 +1107,34 @@ a:focus-visible {
 .folder-list-item > small {
   color: #aaa69c;
   font-size: 8px;
+}
+
+.tag-list {
+  max-height: 110px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  overflow-y: auto;
+  padding: 0 9px 12px;
+  border-bottom: 1px solid rgba(205, 200, 188, 0.65);
+}
+
+.tag-list-item {
+  min-height: 25px;
+  padding: 0 9px;
+  color: #77736a;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.tag-list-item:hover,
+.tag-list-item.active {
+  color: var(--green-dark);
+  background: var(--green-pale);
 }
 
 .note-list {
@@ -1322,6 +1426,28 @@ a:focus-visible {
   gap: 9px;
   color: #98948a;
   font-size: 9px;
+}
+
+.breadcrumb-item {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.breadcrumb-item button {
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.breadcrumb-item button:hover {
+  color: var(--green-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .breadcrumbs b {
@@ -1950,6 +2076,15 @@ a:focus-visible {
   transform: rotate(-90deg);
 }
 
+.live-markdown-editor .cm-live-heading-parent .cm-live-quote-toggle {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.16em 0 0;
+  vertical-align: 0.02em;
+  font-family: Inter, sans-serif;
+  font-size: 0.72em;
+}
+
 .live-markdown-editor .cm-live-outline-line {
   position: relative;
   padding-left: calc(1rem + var(--outline-depth, 0) * 2ch);
@@ -2279,6 +2414,76 @@ a:focus-visible {
   color: #819082;
 }
 
+.backlinks-panel {
+  display: grid;
+  gap: 6px;
+  padding: 9px clamp(30px, 5vw, 72px) 13px;
+  border-top: 1px solid var(--line-soft);
+  background: rgba(247, 245, 239, 0.58);
+}
+
+.backlinks-panel > strong {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.backlinks-panel button {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  color: var(--ink);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.backlinks-panel button:hover {
+  background: var(--green-pale);
+}
+
+.backlinks-panel small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-modal {
+  max-width: 520px;
+}
+
+.conflict-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.conflict-list button {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.42);
+  cursor: pointer;
+  text-align: left;
+}
+
+.conflict-list button:hover {
+  background: var(--green-pale);
+}
+
+.conflict-list span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .empty-editor {
   min-height: 0;
   flex: 1;
@@ -2423,6 +2628,14 @@ a:focus-visible {
     grid-template-rows: 42px minmax(0, 1fr);
   }
 
+  .workspace.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar-collapse-toggle {
+    display: none;
+  }
+
   .sidebar {
     position: fixed;
     inset: 42px auto 0 0;
@@ -2439,6 +2652,10 @@ a:focus-visible {
   .editor-shell {
     grid-column: 1;
     grid-row: 2;
+  }
+
+  .workspace.sidebar-collapsed .editor-shell {
+    grid-column: 1;
   }
 
   .app-menubar-title {

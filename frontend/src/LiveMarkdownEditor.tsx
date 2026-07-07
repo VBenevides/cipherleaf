@@ -499,19 +499,15 @@ class WikilinkWidget extends WidgetType {
   }
 
   toDOM(view: EditorView) {
+    const label = this.title.split("|")[0]?.trim() || this.title;
     const link = document.createElement("span");
     link.className = "cm-live-wikilink";
-    link.textContent = this.title;
-    link.title = `Hold Ctrl and click to open “${this.title}”`;
+    link.textContent = label;
+    link.title = `Open “${label}”`;
     link.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (event.ctrlKey || event.metaKey) {
-        this.open(this.title);
-        return;
-      }
-      view.dispatch({ selection: { anchor: this.position } });
-      view.focus();
+      this.open(this.title);
     });
     return link;
   }
@@ -705,17 +701,56 @@ function toggleHasChildren(
   return toggleSectionEnd(state, lineNumber, toggle.indent) > lineNumber;
 }
 
+function headingLevel(text: string): number | null {
+  const match = text.match(/^(#{1,6})\s+/);
+  return match ? match[1].length : null;
+}
+
+function headingSectionEnd(
+  state: EditorState,
+  startLineNumber: number,
+  startLevel: number,
+): number {
+  let endLineNumber = startLineNumber;
+
+  for (
+    let lineNumber = startLineNumber + 1;
+    lineNumber <= state.doc.lines;
+    lineNumber++
+  ) {
+    const line = state.doc.line(lineNumber);
+    const level = headingLevel(line.text);
+    if (level !== null && level <= startLevel) break;
+    endLineNumber = lineNumber;
+  }
+
+  return endLineNumber;
+}
+
+function headingHasChildren(
+  state: EditorState,
+  lineNumber: number,
+  level: number,
+): boolean {
+  return headingSectionEnd(state, lineNumber, level) > lineNumber;
+}
+
 function collapsibleQuotePositions(state: EditorState): number[] {
   const positions: number[] = [];
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
     const line = state.doc.line(lineNumber);
     const toggle = toggleLine(line.text);
+    const level = headingLevel(line.text);
 
-    if (!toggle) continue;
-    if (!toggleHasChildren(state, lineNumber, toggle)) continue;
+    if (toggle && toggleHasChildren(state, lineNumber, toggle)) {
+      positions.push(line.from);
+      continue;
+    }
 
-    positions.push(line.from);
+    if (level !== null && headingHasChildren(state, lineNumber, level)) {
+      positions.push(line.from);
+    }
   }
 
   return positions;
@@ -728,13 +763,18 @@ function expandToggleTree(
 ) {
   const line = state.doc.lineAt(position);
   const toggle = toggleLine(line.text);
+  const level = headingLevel(line.text);
 
-  if (!toggle || line.from !== position) {
+  if (line.from !== position) {
     collapsed.delete(position);
     return;
   }
 
-  const endLineNumber = toggleSectionEnd(state, line.number, toggle.indent);
+  const endLineNumber = toggle
+    ? toggleSectionEnd(state, line.number, toggle.indent)
+    : level !== null
+      ? headingSectionEnd(state, line.number, level)
+      : line.number;
   for (
     let lineNumber = line.number;
     lineNumber <= endLineNumber;
@@ -953,10 +993,28 @@ function buildLivePreviewState(
     const heading = line.text.match(/^(#{1,6})\s+/);
     if (heading) {
       const level = heading[1].length;
+      const sectionEndLineNumber = headingSectionEnd(state, lineNumber, level);
+      const hasChildren = sectionEndLineNumber > lineNumber;
+      const collapsed = hasChildren && nextCollapsed.has(line.from);
       decorations.push(
-        Decoration.line({ class: `cm-live-heading cm-live-h${level}` }).range(line.from),
+        Decoration.line({
+          class: [
+            "cm-live-heading",
+            `cm-live-h${level}`,
+            hasChildren ? "cm-live-heading-parent" : "",
+            collapsed ? "cm-live-heading-collapsed" : "",
+          ].filter(Boolean).join(" "),
+        }).range(line.from),
       );
-      if (!lineIsActive(state, lineNumber)) {
+      if (hasChildren) {
+        addHiddenRange(
+          line.from,
+          line.from + heading[0].length,
+          decorations,
+          atomicRanges,
+          new QuoteToggleWidget(line.from, collapsed, false),
+        );
+      } else if (!lineIsActive(state, lineNumber)) {
         addHiddenRange(
           line.from,
           line.from + heading[0].length,
@@ -964,6 +1022,32 @@ function buildLivePreviewState(
           atomicRanges,
         );
       }
+
+      decorateInlineMarkdown(
+        state,
+        lineNumber,
+        line.text.slice(heading[0].length),
+        line.from + heading[0].length,
+        decorations,
+        atomicRanges,
+        openWikilink,
+      );
+
+      if (collapsed) {
+        const lastLine = state.doc.line(sectionEndLineNumber);
+        addHiddenRange(
+          line.to,
+          lastLine.to,
+          decorations,
+          atomicRanges,
+          new FoldedQuoteWidget(sectionEndLineNumber - lineNumber),
+        );
+        lineNumber = sectionEndLineNumber + 1;
+        continue;
+      }
+
+      lineNumber++;
+      continue;
     }
 
     const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
@@ -1285,6 +1369,7 @@ function currentToggleSectionPosition(state: EditorState): number | null {
   const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
   const currentLine = state.doc.line(currentLineNumber);
   const currentToggle = toggleLine(currentLine.text);
+  const currentHeadingLevel = headingLevel(currentLine.text);
 
   if (
     currentToggle &&
@@ -1293,17 +1378,23 @@ function currentToggleSectionPosition(state: EditorState): number | null {
     return currentLine.from;
   }
 
+  if (
+    currentHeadingLevel !== null &&
+    headingHasChildren(state, currentLineNumber, currentHeadingLevel)
+  ) {
+    return currentLine.from;
+  }
+
   for (let lineNumber = currentLineNumber - 1; lineNumber >= 1; lineNumber--) {
     const line = state.doc.line(lineNumber);
     const toggle = toggleLine(line.text);
+    const level = headingLevel(line.text);
 
-    if (!toggle) continue;
+    if (!toggle && level === null) continue;
 
-    const endLineNumber = toggleSectionEnd(
-      state,
-      lineNumber,
-      toggle.indent,
-    );
+    const endLineNumber = toggle
+      ? toggleSectionEnd(state, lineNumber, toggle.indent)
+      : headingSectionEnd(state, lineNumber, level!);
 
     if (endLineNumber >= currentLineNumber && endLineNumber > lineNumber) {
       return line.from;

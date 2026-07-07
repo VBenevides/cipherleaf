@@ -19,6 +19,10 @@ import * as application$0 from "../../../github.com/wailsapp/wails/v3/pkg/applic
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function CheckFolderPassword(id: string, password: string): $CancellablePromise<void> {
+    return $Call.ByID(883597332, id, password);
+}
+
 export function CloneGitHubVault(parentPath: string, name: string, repositorySSH: string, privateKeyPath: string, branch: string, secret: string, repositoryPrivate: boolean): $CancellablePromise<$models.CloneVaultResult> {
     return $Call.ByID(3036187677, parentPath, name, repositorySSH, privateKeyPath, branch, secret, repositoryPrivate);
 }
@@ -103,12 +107,20 @@ export function LinkGitHubVault(settings: githubsync$0.SyncSettings): $Cancellab
     return $Call.ByID(974300788, settings);
 }
 
+export function ListBacklinks(noteID: string): $CancellablePromise<vault$0.FindMatch[] | null> {
+    return $Call.ByID(1268925393, noteID);
+}
+
 export function ListFolders(): $CancellablePromise<vault$0.Folder[] | null> {
     return $Call.ByID(220507736);
 }
 
 export function ListNotes(): $CancellablePromise<vault$0.NoteSummary[] | null> {
     return $Call.ByID(888598820);
+}
+
+export function LockFolder(id: string, password: string): $CancellablePromise<vault$0.Folder> {
+    return $Call.ByID(1628193172, id, password);
 }
 
 export function LockVault(): $CancellablePromise<vault$0.Session> {
@@ -167,12 +179,20 @@ export function RenameVault(newName: string): $CancellablePromise<vault$0.Sessio
     return $Call.ByID(1978051175, newName);
 }
 
+export function ReorderFolders(orderedIDs: string[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3012602063, orderedIDs);
+}
+
 export function ReorderNotes(folderID: string, orderedIDs: string[] | null): $CancellablePromise<void> {
     return $Call.ByID(2800466995, folderID, orderedIDs);
 }
 
 export function ReplaceAcrossNotes(find: string, replace: string, noteIDs: string[] | null): $CancellablePromise<vault$0.ReplaceResult> {
     return $Call.ByID(1932071061, find, replace, noteIDs);
+}
+
+export function ResolveNoteReference(reference: string): $CancellablePromise<vault$0.NoteSummary> {
+    return $Call.ByID(4068969958, reference);
 }
 
 export function SaveAttachment(noteID: string, webpBase64: string): $CancellablePromise<string> {
@@ -207,6 +227,14 @@ export function SetApp(app: application$0.App | null): $CancellablePromise<void>
     return $Call.ByID(3509715860, app);
 }
 
+export function SetFolderHidden(id: string, hidden: boolean): $CancellablePromise<vault$0.Folder> {
+    return $Call.ByID(3809884713, id, hidden);
+}
+
+export function SetFolderSortMode(id: string, mode: string): $CancellablePromise<vault$0.Folder> {
+    return $Call.ByID(3310669214, id, mode);
+}
+
 /**
  * SyncNow performs a manual pull-merge-push against the linked GitHub
  * repository. Local notes newer than their remote counterpart are preserved;
@@ -232,4 +260,8 @@ export function TryUnlockRemembered(): $CancellablePromise<vault$0.Session> {
 
 export function UnlinkGitHubSync(): $CancellablePromise<void> {
     return $Call.ByID(3056730288);
+}
+
+export function UnlockFolder(id: string, password: string): $CancellablePromise<vault$0.Folder> {
+    return $Call.ByID(3266411627, id, password);
 }

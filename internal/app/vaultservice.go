@@ -382,6 +382,30 @@ func (s *VaultService) DeleteFolder(id string) error {
 	return s.store.DeleteFolder(id)
 }
 
+func (s *VaultService) ReorderFolders(orderedIDs []string) error {
+	return s.store.ReorderFolders(orderedIDs)
+}
+
+func (s *VaultService) SetFolderHidden(id string, hidden bool) (vault.Folder, error) {
+	return s.store.SetFolderHidden(id, hidden)
+}
+
+func (s *VaultService) LockFolder(id, password string) (vault.Folder, error) {
+	return s.store.LockFolder(id, password)
+}
+
+func (s *VaultService) UnlockFolder(id, password string) (vault.Folder, error) {
+	return s.store.UnlockFolder(id, password)
+}
+
+func (s *VaultService) CheckFolderPassword(id, password string) error {
+	return s.store.CheckFolderPassword(id, password)
+}
+
+func (s *VaultService) SetFolderSortMode(id, mode string) (vault.Folder, error) {
+	return s.store.SetFolderSortMode(id, mode)
+}
+
 func (s *VaultService) CreateNote(title string) (vault.Note, error) {
 	return s.store.CreateNote(title)
 }
@@ -532,6 +556,14 @@ func (s *VaultService) DeleteNote(id string) error {
 
 func (s *VaultService) SearchNotes(query string) ([]vault.NoteSummary, error) {
 	return s.store.Search(query)
+}
+
+func (s *VaultService) ResolveNoteReference(reference string) (vault.NoteSummary, error) {
+	return s.store.ResolveNoteReference(reference)
+}
+
+func (s *VaultService) ListBacklinks(noteID string) ([]vault.FindMatch, error) {
+	return s.store.ListBacklinks(noteID)
 }
 
 func (s *VaultService) FindInNotes(query string) ([]vault.FindMatch, error) {

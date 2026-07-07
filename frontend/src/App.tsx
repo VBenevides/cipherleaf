@@ -11,6 +11,7 @@ import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type {
   FindMatch,
   Folder,
+  MergeConflict,
   Note,
   NoteSummary,
   ReplaceResult,
@@ -38,6 +39,11 @@ type TitlebarMenu = "file";
 type ContextMenuState =
   | { kind: "note"; id: string; label: string; x: number; y: number }
   | { kind: "folder"; id: string; label: string; x: number; y: number };
+
+type NoteCrumb = {
+  id: string;
+  title: string;
+};
 
 const AUTO_LOCK_MS = 15 * 60 * 1000;
 const AUTOSAVE_DELAY_MS = 10 * 1000;
@@ -104,7 +110,7 @@ function Icon({
   name,
   size = 18,
 }: {
-  name: "book" | "copy" | "dots" | "file" | "folder" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
+  name: "book" | "copy" | "dots" | "eye" | "file" | "folder" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
   size?: number;
 }) {
   const paths = {
@@ -125,6 +131,12 @@ function Icon({
         <circle cx="5" cy="12" r="1" />
         <circle cx="12" cy="12" r="1" />
         <circle cx="19" cy="12" r="1" />
+      </>
+    ),
+    eye: (
+      <>
+        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="3" />
       </>
     ),
     file: (
@@ -184,11 +196,17 @@ function App() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [note, setNote] = useState<Note | null>(null);
+  const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
+  const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
+  const [unlockedFolderIDs, setUnlockedFolderIDs] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedFolderID, setSelectedFolderID] = useState("all");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [query, setQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState("");
+  const [globalSortMode, setGlobalSortMode] = useState(() => window.localStorage.getItem("cipherleaf-sort-all") || "manual");
+  const [unfiledSortMode, setUnfiledSortMode] = useState(() => window.localStorage.getItem("cipherleaf-sort-unfiled") || "manual");
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [view, setView] = useState<EditorView>("live");
   const [vaultAction, setVaultAction] = useState<VaultAction | null>(null);
@@ -208,6 +226,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
@@ -216,6 +235,7 @@ function App() {
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
@@ -249,13 +269,39 @@ function App() {
   const noteRef = useRef<Note | null>(null);
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
-  const dragCandidateRef = useRef<{ id: string; active: boolean } | null>(null);
+  const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
   const suppressClickRef = useRef(false);
 
   useEffect(() => {
     noteRef.current = note;
     dirtyRef.current = dirty;
   }, [note, dirty]);
+
+  useEffect(() => {
+    window.localStorage.setItem("cipherleaf-sort-all", globalSortMode);
+  }, [globalSortMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem("cipherleaf-sort-unfiled", unfiledSortMode);
+  }, [unfiledSortMode]);
+
+  useEffect(() => {
+    if (!note || session?.locked) {
+      setBacklinks([]);
+      return;
+    }
+    let active = true;
+    VaultService.ListBacklinks(note.id)
+      .then((result) => {
+        if (active) setBacklinks(result ?? []);
+      })
+      .catch(() => {
+        if (active) setBacklinks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [note?.id, session?.locked]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -723,6 +769,7 @@ function App() {
 
   const resetToLocked = (locked: Session) => {
     unlockedRef.current = false;
+    setUnlockedFolderIDs(new Set());
     setSession(locked);
     setFolders([]);
     setNotes([]);
@@ -939,6 +986,9 @@ function App() {
       } else if (result.message) {
         setSaveState("saved");
       }
+      if (result.merge.conflicts?.length) {
+        setSyncConflicts(result.merge.conflicts);
+      }
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -1092,16 +1142,99 @@ function App() {
     }
   };
 
-  const selectNote = async (id: string) => {
+  const setFolderHidden = async (folder: Folder, hidden: boolean) => {
+    setError("");
+    try {
+      await VaultService.SetFolderHidden(folder.id, hidden);
+      if (hidden && selectedFolderID === folder.id) setSelectedFolderID("all");
+      await refreshFolders();
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const lockFolder = async (folder: Folder) => {
+    const password = window.prompt(`Password for “${folder.name}”`, "");
+    if (password === null) return;
+    setError("");
+    try {
+      await VaultService.LockFolder(folder.id, password);
+      if (selectedFolderID === folder.id) setSelectedFolderID("all");
+      await refreshFolders();
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const removeFolderLock = async (folder: Folder) => {
+    const password = window.prompt(`Remove lock from “${folder.name}”`, "");
+    if (password === null) return;
+    setError("");
+    try {
+      await VaultService.UnlockFolder(folder.id, password);
+      setUnlockedFolderIDs((current) => {
+        const next = new Set(current);
+        next.delete(folder.id);
+        return next;
+      });
+      await refreshFolders();
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const setFolderSortMode = async (folder: Folder, mode: string) => {
+    setError("");
+    try {
+      await VaultService.SetFolderSortMode(folder.id, mode);
+      await refreshFolders();
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const selectFolder = async (folder: Folder) => {
+    if (folder.locked && !unlockedFolderIDs.has(folder.id)) {
+      const password = window.prompt(`Unlock “${folder.name}”`, "");
+      if (password === null) return;
+      try {
+        await VaultService.CheckFolderPassword(folder.id, password);
+        setUnlockedFolderIDs((current) => new Set(current).add(folder.id));
+      } catch (reason) {
+        setError(errorText(reason));
+        return;
+      }
+    }
+    setSelectedFolderID(folder.id);
+    setQuery("");
+  };
+
+  const selectNote = async (
+    id: string,
+    options: { appendTrail?: boolean; replaceTrail?: NoteCrumb[] } = {},
+  ) => {
     if (note?.id === id) {
       setSidebarOpen(false);
       return;
     }
+    const previous = noteRef.current;
     setError("");
     try {
       await persistCurrent();
       const loaded = await VaultService.GetNote(id);
       setNote(loaded);
+      if (options.replaceTrail) {
+        setNoteTrail(options.replaceTrail);
+      } else if (options.appendTrail && previous) {
+        setNoteTrail((current) => {
+          const base = current.length
+            ? current
+            : [{ id: previous.id, title: previous.title || "Untitled" }];
+          return [...base.filter((item) => item.id !== loaded.id), { id: loaded.id, title: loaded.title || "Untitled" }];
+        });
+      } else {
+        setNoteTrail([]);
+      }
       setDirty(false);
       setSaveState("idle");
       setSidebarOpen(false);
@@ -1184,6 +1317,24 @@ function App() {
     }
   };
 
+  const reorderFolder = async (id: string, targetID: string, placeAfter = false) => {
+    if (id === targetID) return;
+    setError("");
+    try {
+      const ordered = folders.filter((item) => item.id !== id);
+      const targetIndex = ordered.findIndex((item) => item.id === targetID);
+      const source = folders.find((item) => item.id === id);
+      if (!source || targetIndex < 0) return;
+      ordered.splice(targetIndex + (placeAfter ? 1 : 0), 0, source);
+      await VaultService.ReorderFolders(ordered.map((item) => item.id));
+      await refreshFolders();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setDropTarget(null);
+    }
+  };
+
   const activatePointerDrag = (target: string) => {
     const candidate = dragCandidateRef.current;
     if (!candidate) return false;
@@ -1204,14 +1355,27 @@ function App() {
     };
   };
 
+  const folderDropTargetFromPointer = (
+    event: ReactMouseEvent<HTMLElement>,
+    id: string,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    return {
+      after,
+      key: `folder:${id}:${after ? "after" : "before"}`,
+    };
+  };
+
   const finishPointerDrag = (
-    target: { kind: "folder"; id: string } | { kind: "note"; id: string; after: boolean },
+    target: { kind: "folder"; id: string; after?: boolean } | { kind: "note"; id: string; after: boolean },
   ) => {
     const candidate = dragCandidateRef.current;
     if (!candidate?.active) return;
     suppressClickRef.current = true;
-    if (target.kind === "folder") void moveNote(candidate.id, target.id);
-    else void reorderNote(candidate.id, target.id, target.after);
+    if (candidate.kind === "note" && target.kind === "folder") void moveNote(candidate.id, target.id);
+    else if (candidate.kind === "note" && target.kind === "note") void reorderNote(candidate.id, target.id, target.after);
+    else if (candidate.kind === "folder" && target.kind === "folder" && target.id) void reorderFolder(candidate.id, target.id, target.after ?? false);
     dragCandidateRef.current = null;
     setDropTarget(null);
   };
@@ -1263,23 +1427,86 @@ function App() {
     };
   }, [query, session?.locked, session?.vaultId]);
 
-  const visibleNotes = useMemo(
-    () =>
-      query.trim() || selectedFolderID === "all"
-        ? notes
-        : notes.filter((item) => item.folderId === selectedFolderID),
-    [notes, query, selectedFolderID],
+  const folderByID = useMemo(
+    () => new Map(folders.map((folder) => [folder.id, folder])),
+    [folders],
   );
+
+  const publicNotes = useMemo(
+    () => notes.filter((item) => {
+      if (!item.folderId) return true;
+      const folder = folderByID.get(item.folderId);
+      return !folder?.hidden && (!folder?.locked || unlockedFolderIDs.has(item.folderId));
+    }),
+    [folderByID, notes, unlockedFolderIDs],
+  );
+
+  const sortNotesForMode = useCallback((items: NoteSummary[], mode: string) => {
+    const sorted = [...items];
+    sorted.sort((left, right) => {
+      if (mode === "title") return left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+      if (mode === "updated") return right.updatedAt.localeCompare(left.updatedAt);
+      if (mode === "created") return right.createdAt.localeCompare(left.createdAt);
+      if (left.order !== right.order) return left.order - right.order;
+      return left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+    });
+    return sorted;
+  }, []);
+
+  const sortNotesForFolder = useCallback((items: NoteSummary[], folderID: string) => {
+    const mode = folderID
+      ? folderByID.get(folderID)?.sortMode || "manual"
+      : unfiledSortMode;
+    return sortNotesForMode(items, mode);
+  }, [folderByID, sortNotesForMode, unfiledSortMode]);
+
+  const currentSortMode = selectedFolderID === "all"
+    ? globalSortMode
+    : selectedFolderID === ""
+      ? unfiledSortMode
+      : folderByID.get(selectedFolderID)?.sortMode || "manual";
+
+  const setCurrentSortMode = (mode: string) => {
+    if (selectedFolderID === "all") {
+      setGlobalSortMode(mode);
+      return;
+    }
+    if (selectedFolderID === "") {
+      setUnfiledSortMode(mode);
+      return;
+    }
+    const folder = folderByID.get(selectedFolderID);
+    if (folder) void setFolderSortMode(folder, mode);
+  };
+
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>();
+    for (const item of publicNotes) {
+      for (const tag of item.tags ?? []) tags.add(tag);
+    }
+    return [...tags].sort((left, right) => left.localeCompare(right));
+  }, [publicNotes]);
+
+  const visibleNotes = useMemo(() => {
+    const tagged = selectedTag
+      ? publicNotes.filter((item) => (item.tags ?? []).includes(selectedTag))
+      : publicNotes;
+    if (query.trim() || selectedFolderID === "all") return sortNotesForMode(tagged, globalSortMode);
+    return sortNotesForFolder(
+      notes.filter((item) => item.folderId === selectedFolderID),
+      selectedFolderID,
+    ).filter((item) => !selectedTag || (item.tags ?? []).includes(selectedTag));
+  }, [globalSortMode, notes, publicNotes, query, selectedFolderID, selectedTag, sortNotesForFolder, sortNotesForMode]);
 
   const currentFolder = folders.find((folder) => folder.id === note?.folderId);
 
   const openWikilinkTitle = async (title: string) => {
-    const matches = (await VaultService.SearchNotes(title)) ?? [];
-    const linked = matches.find(
-      (item) => item.title.toLocaleLowerCase() === title.toLocaleLowerCase(),
-    );
-    if (linked) await selectNote(linked.id);
-    else setError(`No note named “${title}” exists yet.`);
+    try {
+      const linked = await VaultService.ResolveNoteReference(title);
+      await selectNote(linked.id, { appendTrail: true });
+    } catch {
+      setError(`No note named “${title}” exists yet.`);
+    }
   };
 
   const openVaultSettings = async () => {
@@ -1730,8 +1957,17 @@ function App() {
   }
 
   return (
-    <main className="workspace">
+    <main className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <header className="app-menubar">
+        <button
+          type="button"
+          className="sidebar-collapse-toggle"
+          onClick={() => setSidebarCollapsed((current) => !current)}
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {sidebarCollapsed ? ">>>" : "<<<"}
+        </button>
         <div className="app-menubar-mark" title="Cipherleaf" aria-label="Cipherleaf">
           <Icon name="book" size={17} />
         </div>
@@ -1854,7 +2090,7 @@ function App() {
           >
             <Icon name="book" size={15} />
             <span>All notes</span>
-            <small>{notes.length}</small>
+            <small>{publicNotes.length}</small>
           </button>
           <button
             className={`folder-list-item ${selectedFolderID === "" ? "active" : ""} ${dropTarget === "folder:" ? "drag-over" : ""}`}
@@ -1866,24 +2102,30 @@ function App() {
               setSelectedFolderID("");
               setQuery("");
             }}
-            onMouseEnter={(event) => event.buttons === 1 && activatePointerDrag("folder:")}
+            onMouseEnter={(event) => {
+              if (event.buttons === 1 && dragCandidateRef.current?.kind === "note") activatePointerDrag("folder:");
+            }}
             onMouseUp={() => finishPointerDrag({ kind: "folder", id: "" })}
           >
             <Icon name="folder" size={15} />
             <span>Unfiled</span>
-            <small>{notes.filter((item) => !item.folderId).length}</small>
+            <small>{publicNotes.filter((item) => !item.folderId).length}</small>
           </button>
           {folders.map((folder) => (
             <button
               key={folder.id}
-              className={`folder-list-item ${selectedFolderID === folder.id ? "active" : ""} ${dropTarget === `folder:${folder.id}` ? "drag-over" : ""}`}
+              className={`folder-list-item ${selectedFolderID === folder.id ? "active" : ""} ${dropTarget === `folder:${folder.id}` ? "drag-over" : ""} ${dropTarget === `folder:${folder.id}:before` ? "drag-over-before" : ""} ${dropTarget === `folder:${folder.id}:after` ? "drag-over-after" : ""}`}
               onClick={() => {
                 if (suppressClickRef.current) {
                   suppressClickRef.current = false;
                   return;
                 }
-                setSelectedFolderID(folder.id);
-                setQuery("");
+                void selectFolder(folder);
+              }}
+              onMouseDown={(event) => {
+                if (event.button === 0 && !query) {
+                  dragCandidateRef.current = { kind: "folder", id: folder.id, active: false };
+                }
               }}
               onContextMenu={(event) =>
                 showContextMenu(event, {
@@ -1892,15 +2134,51 @@ function App() {
                   label: folder.name,
                 })
               }
-              onMouseEnter={(event) => event.buttons === 1 && activatePointerDrag(`folder:${folder.id}`)}
-              onMouseUp={() => finishPointerDrag({ kind: "folder", id: folder.id })}
+              onMouseEnter={(event) => {
+                if (event.buttons !== 1 || !dragCandidateRef.current) return;
+                if (dragCandidateRef.current.kind === "note") activatePointerDrag(`folder:${folder.id}`);
+                else if (dragCandidateRef.current.id !== folder.id) activatePointerDrag(folderDropTargetFromPointer(event, folder.id).key);
+              }}
+              onMouseMove={(event) => {
+                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "folder" || !dragCandidateRef.current.active) return;
+                if (dragCandidateRef.current.id === folder.id) return;
+                setDropTarget(folderDropTargetFromPointer(event, folder.id).key);
+              }}
+              onMouseUp={(event) => {
+                const target = folderDropTargetFromPointer(event, folder.id);
+                finishPointerDrag({ kind: "folder", id: folder.id, after: target.after });
+              }}
             >
-              <Icon name="folder" size={15} />
+              <Icon name={folder.locked && !unlockedFolderIDs.has(folder.id) ? "lock" : "folder"} size={15} />
               <span>{folder.name}</span>
-              <small>{notes.filter((item) => item.folderId === folder.id).length}</small>
+              <small>{folder.locked && !unlockedFolderIDs.has(folder.id) ? "Locked" : notes.filter((item) => item.folderId === folder.id).length}</small>
             </button>
           ))}
         </nav>
+        {availableTags.length > 0 && (
+          <>
+            <div className="notes-heading tags-heading">
+              <span>Tags</span>
+            </div>
+            <nav className="tag-list" aria-label="Tags">
+              <button
+                className={`tag-list-item ${selectedTag === "" ? "active" : ""}`}
+                onClick={() => setSelectedTag("")}
+              >
+                All tags
+              </button>
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  className={`tag-list-item ${selectedTag === tag ? "active" : ""}`}
+                  onClick={() => setSelectedTag(tag)}
+                >
+                  #{tag}
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
         <div className="notes-heading">
           <span>
             {query
@@ -1911,6 +2189,17 @@ function App() {
                   ? "Unfiled"
                   : folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes"}
           </span>
+          <select
+            className="notes-sort-select"
+            value={currentSortMode}
+            onChange={(event) => setCurrentSortMode(event.target.value)}
+            aria-label="Sort notes"
+          >
+            <option value="manual">Manual</option>
+            <option value="title">Title</option>
+            <option value="updated">Updated</option>
+            <option value="created">Created</option>
+          </select>
           <button className="icon-button" onClick={() => void createNote()} aria-label="Create note" title="New note (Ctrl + N)">
             <Icon name="plus" size={17} />
           </button>
@@ -1929,15 +2218,15 @@ function App() {
               }}
               onMouseDown={(event) => {
                 if (event.button === 0 && !query) {
-                  dragCandidateRef.current = { id: item.id, active: false };
+                  dragCandidateRef.current = { kind: "note", id: item.id, active: false };
                 }
               }}
               onMouseEnter={(event) => {
-                if (event.buttons !== 1 || dragCandidateRef.current?.id === item.id) return;
+                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "note" || dragCandidateRef.current.id === item.id) return;
                 activatePointerDrag(noteDropTargetFromPointer(event, item.id).key);
               }}
               onMouseMove={(event) => {
-                if (event.buttons !== 1 || !dragCandidateRef.current?.active) return;
+                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "note" || !dragCandidateRef.current.active) return;
                 if (dragCandidateRef.current.id === item.id) return;
                 setDropTarget(noteDropTargetFromPointer(event, item.id).key);
               }}
@@ -1983,9 +2272,27 @@ function App() {
             <Icon name="menu" />
           </button>
           <div className="breadcrumbs">
-            <span>{folderName(session.path)}</span>
-            {currentFolder && <><b>/</b><span>{currentFolder.name}</span></>}
-            {note && <><b>/</b><strong>{note.title || "Untitled"}</strong></>}
+            {(noteTrail.length ? noteTrail : [
+              { id: "", title: folderName(session.path) },
+              ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
+              ...(note ? [{ id: note.id, title: note.title || "Untitled" }] : []),
+            ]).map((crumb, index, items) => (
+              <span className="breadcrumb-item" key={`${crumb.id || crumb.title}-${index}`}>
+                {index > 0 && <b>/</b>}
+                {crumb.id && index < items.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => void selectNote(crumb.id, { replaceTrail: items.slice(0, index + 1) })}
+                  >
+                    {crumb.title}
+                  </button>
+                ) : index === items.length - 1 ? (
+                  <strong>{crumb.title}</strong>
+                ) : (
+                  <span>{crumb.title}</span>
+                )}
+              </span>
+            ))}
           </div>
           <div className={`save-status ${saveState}`}>
             <span />
@@ -2106,6 +2413,21 @@ function App() {
               <span>Revision {note.revision}</span>
               <span className="footer-encryption"><Icon name="lock" size={12} /> Encrypted at rest</span>
             </footer>
+            {backlinks.length > 0 && (
+              <aside className="backlinks-panel" aria-label="Backlinks">
+                <strong>Backlinks</strong>
+                {backlinks.map((item) => (
+                  <button
+                    key={`${item.noteId}-${item.offset}`}
+                    type="button"
+                    onClick={() => void selectNote(item.noteId)}
+                  >
+                    <span>{item.title}</span>
+                    <small>{item.snippet}</small>
+                  </button>
+                ))}
+              </aside>
+            )}
           </>
         ) : (
           <div className="empty-editor">
@@ -2403,6 +2725,49 @@ function App() {
             </>
           ) : (
             <>
+              {(() => {
+                const folder = folders.find((item) => item.id === contextMenu.id);
+                if (!folder) return null;
+                return (
+                  <>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setContextMenu(null);
+                        void setFolderHidden(folder, !folder.hidden);
+                      }}
+                    >
+                      <Icon name="eye" size={14} />
+                      {folder.hidden ? "Show notes" : "Hide notes"}
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setContextMenu(null);
+                        void (folder.locked ? removeFolderLock(folder) : lockFolder(folder));
+                      }}
+                    >
+                      <Icon name="lock" size={14} />
+                      {folder.locked ? "Remove lock" : "Lock folder"}
+                    </button>
+                    <div className="titlebar-menu-separator" />
+                    {(["manual", "title", "updated", "created"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        role="menuitem"
+                        onClick={() => {
+                          setContextMenu(null);
+                          void setFolderSortMode(folder, mode);
+                        }}
+                      >
+                        <Icon name="dots" size={14} />
+                        Sort: {mode}{(folder.sortMode || "manual") === mode ? " ✓" : ""}
+                      </button>
+                    ))}
+                    <div className="titlebar-menu-separator" />
+                  </>
+                );
+              })()}
               <button
                 role="menuitem"
                 onClick={() => {
@@ -2434,6 +2799,37 @@ function App() {
         <div className="sync-overlay" role="status" aria-live="polite" aria-busy="true">
           <div className="sync-spinner" aria-hidden="true" />
           <div className="sync-overlay-label">Sync in progress</div>
+        </div>
+      )}
+      {syncConflicts.length > 0 && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="vault-modal conflict-modal" role="dialog" aria-labelledby="conflict-title">
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Close conflicts"
+              onClick={() => setSyncConflicts([])}
+            >
+              <Icon name="x" />
+            </button>
+            <p className="eyebrow">Sync conflicts</p>
+            <h2 id="conflict-title">Remote edits were preserved</h2>
+            <div className="conflict-list">
+              {syncConflicts.map((conflict) => (
+                <button
+                  key={conflict.remoteNoteId}
+                  type="button"
+                  onClick={() => {
+                    setSyncConflicts([]);
+                    void selectNote(conflict.remoteNoteId);
+                  }}
+                >
+                  <strong>{conflict.title}</strong>
+                  <span>{conflict.message}</span>
+                </button>
+              ))}
+            </div>
+          </section>
         </div>
       )}
       {globalSearchOpen && (

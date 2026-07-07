@@ -44,6 +44,8 @@ var (
 	ErrVaultNotFound       = errors.New("no encrypted vault exists in this folder")
 	ErrEncryptedFileAbsent = errors.New("an encrypted note file is missing")
 	attachmentReference    = regexp.MustCompile(`attachment:([a-f0-9]{32})`)
+	wikilinkPattern        = regexp.MustCompile(`\[\[([^\]\n]+)\]\]`)
+	tagPattern             = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9][A-Za-z0-9_-]{0,63})`)
 )
 
 type Store struct {
@@ -308,7 +310,7 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 		return Folder{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	folder := Folder{ID: id, Name: name, CreatedAt: now, UpdatedAt: now}
+	folder := Folder{ID: id, Name: name, Order: s.nextFolderOrderLocked(), SortMode: "manual", CreatedAt: now, UpdatedAt: now}
 	s.manifest.Folders = append(s.manifest.Folders, folder)
 	if err := s.saveManifestLocked(); err != nil {
 		s.manifest.Folders = s.manifest.Folders[:len(s.manifest.Folders)-1]
@@ -336,6 +338,119 @@ func (s *Store) RenameFolder(id, name string) (Folder, error) {
 	}
 	original := s.manifest.Folders[index]
 	s.manifest.Folders[index].Name = name
+	s.manifest.Folders[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.saveManifestLocked(); err != nil {
+		s.manifest.Folders[index] = original
+		return Folder{}, err
+	}
+	return s.manifest.Folders[index], nil
+}
+
+func (s *Store) ReorderFolders(orderedIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if len(orderedIDs) != len(s.manifest.Folders) {
+		return errors.New("folder order does not include every folder")
+	}
+	seen := make(map[string]struct{}, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if _, found := s.findFolderLocked(id); !found {
+			return errors.New("folder order contains an unknown folder")
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return errors.New("folder order contains a duplicate folder")
+		}
+		seen[id] = struct{}{}
+	}
+	original := slices.Clone(s.manifest.Folders)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for order, id := range orderedIDs {
+		index, _ := s.findFolderLocked(id)
+		s.manifest.Folders[index].Order = order
+		s.manifest.Folders[index].UpdatedAt = now
+	}
+	if err := s.saveManifestLocked(); err != nil {
+		s.manifest.Folders = original
+		return err
+	}
+	return nil
+}
+
+func (s *Store) SetFolderHidden(id string, hidden bool) (Folder, error) {
+	return s.updateFolderLocked(id, func(folder *Folder) {
+		folder.Hidden = hidden
+	})
+}
+
+func (s *Store) LockFolder(id, password string) (Folder, error) {
+	return s.updateFolderLocked(id, func(folder *Folder) {
+		folder.Locked = true
+		folder.LockPasswordHash = folderPasswordHash(password)
+	})
+}
+
+func (s *Store) UnlockFolder(id, password string) (Folder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return Folder{}, err
+	}
+	index, found := s.findFolderLocked(id)
+	if !found {
+		return Folder{}, errors.New("folder not found")
+	}
+	if s.manifest.Folders[index].LockPasswordHash != folderPasswordHash(password) {
+		return Folder{}, errors.New("folder password is incorrect")
+	}
+	original := s.manifest.Folders[index]
+	s.manifest.Folders[index].Locked = false
+	s.manifest.Folders[index].LockPasswordHash = ""
+	s.manifest.Folders[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.saveManifestLocked(); err != nil {
+		s.manifest.Folders[index] = original
+		return Folder{}, err
+	}
+	return s.manifest.Folders[index], nil
+}
+
+func (s *Store) CheckFolderPassword(id, password string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	index, found := s.findFolderLocked(id)
+	if !found {
+		return errors.New("folder not found")
+	}
+	if s.manifest.Folders[index].LockPasswordHash != folderPasswordHash(password) {
+		return errors.New("folder password is incorrect")
+	}
+	return nil
+}
+
+func (s *Store) SetFolderSortMode(id, mode string) (Folder, error) {
+	mode = normalizeSortMode(mode)
+	return s.updateFolderLocked(id, func(folder *Folder) {
+		folder.SortMode = mode
+	})
+}
+
+func (s *Store) updateFolderLocked(id string, update func(*Folder)) (Folder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return Folder{}, err
+	}
+	index, found := s.findFolderLocked(id)
+	if !found {
+		return Folder{}, errors.New("folder not found")
+	}
+	original := s.manifest.Folders[index]
+	update(&s.manifest.Folders[index])
 	s.manifest.Folders[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := s.saveManifestLocked(); err != nil {
 		s.manifest.Folders[index] = original
@@ -776,6 +891,90 @@ func (s *Store) Search(query string) ([]NoteSummary, error) {
 	}
 	sortSummaries(result)
 	return result, nil
+}
+
+func (s *Store) ResolveNoteReference(reference string) (NoteSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return NoteSummary{}, err
+	}
+	reference = strings.TrimSpace(reference)
+	if label, id, ok := parseNoteReference(reference); ok {
+		if index, found := s.findNoteLocked(id); found {
+			return s.manifest.Notes[index], nil
+		}
+		reference = label
+	}
+	if strings.HasPrefix(reference, "note:") {
+		id := strings.TrimPrefix(reference, "note:")
+		if index, found := s.findNoteLocked(id); found {
+			return s.manifest.Notes[index], nil
+		}
+		return NoteSummary{}, errors.New("note reference not found")
+	}
+	normalized := strings.ToLower(reference)
+	for _, item := range s.manifest.Notes {
+		if strings.ToLower(item.Title) == normalized {
+			return item, nil
+		}
+		if item.FolderID != "" {
+			if folder, found := s.folderByIDLocked(item.FolderID); found &&
+				strings.ToLower(folder.Name+"/"+item.Title) == normalized {
+				return item, nil
+			}
+		}
+	}
+	return NoteSummary{}, errors.New("note reference not found")
+}
+
+func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	targetIndex, found := s.findNoteLocked(noteID)
+	if !found {
+		return nil, errors.New("note not found")
+	}
+	target := s.manifest.Notes[targetIndex]
+	aliases := map[string]struct{}{
+		strings.ToLower(target.Title): {},
+		"note:" + target.ID:           {},
+	}
+	if target.FolderID != "" {
+		if folder, found := s.folderByIDLocked(target.FolderID); found {
+			aliases[strings.ToLower(folder.Name+"/"+target.Title)] = struct{}{}
+		}
+	}
+	var matches []FindMatch
+	for _, summary := range s.manifest.Notes {
+		if summary.ID == noteID {
+			continue
+		}
+		note, err := s.readNoteLocked(summary.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, match := range wikilinkPattern.FindAllStringSubmatchIndex(note.Content, -1) {
+			raw := note.Content[match[2]:match[3]]
+			label, id, hasID := parseNoteReference(raw)
+			key := strings.ToLower(strings.TrimSpace(raw))
+			if hasID {
+				if id == target.ID {
+					matches = append(matches, backlinkMatch(summary, note.Content, match[0], match[1], raw))
+					break
+				}
+				key = strings.ToLower(label)
+			}
+			if _, ok := aliases[key]; ok {
+				matches = append(matches, backlinkMatch(summary, note.Content, match[0], match[1], raw))
+				break
+			}
+		}
+	}
+	return matches, nil
 }
 
 // FindInNotes decrypts every note, locates all case-insensitive matches of
@@ -1289,7 +1488,24 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			continue
 		}
 		local := mergedNotes[localIndex]
-		if versionIsNewer(
+		if remoteNote.Revision == local.Revision &&
+			remoteNote.CiphertextHash != "" &&
+			local.CiphertextHash != "" &&
+			remoteNote.CiphertextHash != local.CiphertextHash {
+			duplicate, err := s.duplicateRemoteConflictLocked(source, remoteNote.ID)
+			if err != nil {
+				return MergeResult{}, err
+			}
+			mergedNotes = append(mergedNotes, duplicate)
+			result.Conflicts = append(result.Conflicts, MergeConflict{
+				LocalNoteID:  local.ID,
+				RemoteNoteID: duplicate.ID,
+				Title:        local.Title,
+				Message:      "Local and remote edits conflicted; the remote version was preserved as a separate note.",
+			})
+			result.PulledNotes++
+			result.UpToDate = false
+		} else if versionIsNewer(
 			remoteNote.Revision,
 			remoteNote.ModifiedAt,
 			local.Revision,
@@ -1400,6 +1616,40 @@ func copyRemoteNoteObject(source, localRoot, id string) error {
 		return fmt.Errorf("stage pulled encrypted note %s: %w", id, err)
 	}
 	return nil
+}
+
+func (s *Store) duplicateRemoteConflictLocked(source, id string) (NoteSummary, error) {
+	remote, err := s.readNoteAtLocked(source, id)
+	if err != nil {
+		return NoteSummary{}, err
+	}
+	newID, err := randomID(16)
+	if err != nil {
+		return NoteSummary{}, err
+	}
+	now := time.Now().UTC()
+	remote.ID = newID
+	remote.Title = remote.Title + " (remote conflict)"
+	remote.Order = s.nextNoteOrderLocked(remote.FolderID)
+	remote.CreatedAt = now.Format(time.RFC3339Nano)
+	remote.UpdatedAt = remote.CreatedAt
+	remote.ModifiedAt = now.Unix()
+	remote.Revision = 1
+	hash, err := s.writeNoteLocked(remote)
+	if err != nil {
+		return NoteSummary{}, err
+	}
+	sourceAttachments := filepath.Join(source, "attachments", id)
+	if _, err := os.Stat(sourceAttachments); err == nil {
+		if err := copyAttachmentDirectory(sourceAttachments, filepath.Join(s.root, "attachments", newID)); err != nil {
+			return NoteSummary{}, err
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return NoteSummary{}, fmt.Errorf("inspect remote conflict attachments: %w", err)
+	}
+	summary := summaryFromNote(remote)
+	summary.CiphertextHash = hash
+	return summary, nil
 }
 
 func replaceRemoteAttachments(source, localRoot, noteID string) error {
@@ -1923,6 +2173,14 @@ func (s *Store) findFolderLocked(id string) (int, bool) {
 	return -1, false
 }
 
+func (s *Store) folderByIDLocked(id string) (Folder, bool) {
+	index, found := s.findFolderLocked(id)
+	if !found {
+		return Folder{}, false
+	}
+	return s.manifest.Folders[index], true
+}
+
 func (s *Store) folderExistsLocked(id string) bool {
 	if id == "" {
 		return true
@@ -2042,12 +2300,16 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 	if result.FormatVersion != FormatVersion || result.VaultID != s.vaultID {
 		return manifest{}, errors.New("manifest belongs to another vault or format version")
 	}
-	for _, folder := range result.Folders {
+	for index, folder := range result.Folders {
 		if !validID(folder.ID) {
 			return manifest{}, errors.New("manifest contains an invalid folder ID")
 		}
 		if _, err := normalizeFolderName(folder.Name); err != nil {
 			return manifest{}, errors.New("manifest contains an invalid folder name")
+		}
+		result.Folders[index].SortMode = normalizeSortMode(folder.SortMode)
+		if folder.Locked && folder.LockPasswordHash == "" {
+			return manifest{}, errors.New("manifest contains a locked folder without a verifier")
 		}
 	}
 	for _, item := range result.Notes {
@@ -2741,7 +3003,7 @@ func noteReferencesFolder(notes []NoteSummary, folderID string) bool {
 func summaryFromNote(note Note) NoteSummary {
 	return NoteSummary{
 		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
-		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision,
+		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(note.Content),
 	}
 }
 
@@ -2766,8 +3028,76 @@ func (s *Store) nextNoteOrderLocked(folderID string) int {
 
 func sortFolders(items []Folder) {
 	slices.SortStableFunc(items, func(left, right Folder) int {
+		if left.Order != right.Order {
+			return left.Order - right.Order
+		}
 		return strings.Compare(strings.ToLower(left.Name), strings.ToLower(right.Name))
 	})
+}
+
+func (s *Store) nextFolderOrderLocked() int {
+	next := 0
+	for _, folder := range s.manifest.Folders {
+		if folder.Order >= next {
+			next = folder.Order + 1
+		}
+	}
+	return next
+}
+
+func normalizeSortMode(mode string) string {
+	switch mode {
+	case "title", "updated", "created":
+		return mode
+	default:
+		return "manual"
+	}
+}
+
+func folderPasswordHash(password string) string {
+	hash := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(hash[:])
+}
+
+func extractTags(content string) []string {
+	seen := make(map[string]struct{})
+	var tags []string
+	for _, match := range tagPattern.FindAllStringSubmatch(content, -1) {
+		tag := strings.ToLower(match[2])
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	slices.Sort(tags)
+	return tags
+}
+
+func parseNoteReference(reference string) (label string, id string, ok bool) {
+	parts := strings.Split(reference, "|")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "note:") {
+			id = strings.TrimPrefix(part, "note:")
+			if validID(id) {
+				label = strings.TrimSpace(parts[0])
+				return label, id, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func backlinkMatch(summary NoteSummary, content string, from, to int, raw string) FindMatch {
+	return FindMatch{
+		NoteID:      summary.ID,
+		Title:       summary.Title,
+		Field:       "content",
+		Snippet:     makeSnippet(content, from, to-from),
+		Offset:      from,
+		MatchLength: len(raw) + 4,
+	}
 }
 
 func nextModifiedAt(previous int64) int64 {

@@ -16,8 +16,20 @@ export interface FindMatch {
 export interface Folder {
     "id": string;
     "name": string;
+    "order": number;
+    "hidden"?: boolean;
+    "locked"?: boolean;
+    "lockPasswordHash"?: string;
+    "sortMode"?: string;
     "createdAt": string;
     "updatedAt": string;
+}
+
+export interface MergeConflict {
+    "localNoteId": string;
+    "remoteNoteId": string;
+    "title": string;
+    "message": string;
 }
 
 /**
@@ -30,6 +42,7 @@ export interface MergeResult {
     "pulledFolders": number;
     "deletedFolders": number;
     "upToDate": boolean;
+    "conflicts"?: MergeConflict[] | null;
 }
 
 export interface Note {
@@ -54,6 +67,7 @@ export interface NoteSummary {
     "modifiedAt": number;
     "revision": number;
     "ciphertextHash"?: string;
+    "tags"?: string[] | null;
 }
 
 /**

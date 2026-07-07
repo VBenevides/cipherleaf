@@ -4,6 +4,7 @@
 export type {
     FindMatch,
     Folder,
+    MergeConflict,
     MergeResult,
     Note,
     NoteSummary,
