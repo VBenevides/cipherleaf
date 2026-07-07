@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -24,16 +25,18 @@ import (
 )
 
 const (
-	configFilename     = "vault.json"
-	manifestFilename   = "manifest.enc"
-	syncDirectory      = "sync"
-	syncManifestFile   = "manifest.enc"
-	syncFoldersFile    = "folders.enc"
-	maxNoteBytes       = 10 * 1024 * 1024
-	maxAttachmentBytes = 10 * 1024 * 1024
-	maxEnvelopeBytes   = 16 * 1024 * 1024
-	maxTitleRunes      = 200
-	maxFolderRunes     = 120
+	configFilename               = "vault.json"
+	manifestFilename             = "manifest.enc"
+	syncDirectory                = "sync"
+	syncManifestFile             = "manifest.enc"
+	syncFoldersFile              = "folders.enc"
+	maxNoteBytes                 = 10 * 1024 * 1024
+	maxAttachmentBytes           = 10 * 1024 * 1024
+	maxEnvelopeBytes             = 16 * 1024 * 1024
+	maxTitleRunes                = 200
+	maxFolderRunes               = 120
+	folderPasswordSaltBytes      = 16
+	folderPasswordVerifierPrefix = "sha256-salt-v1:"
 )
 
 var (
@@ -386,9 +389,13 @@ func (s *Store) SetFolderHidden(id string, hidden bool) (Folder, error) {
 }
 
 func (s *Store) LockFolder(id, password string) (Folder, error) {
+	verifier, err := newFolderPasswordVerifier(password)
+	if err != nil {
+		return Folder{}, err
+	}
 	return s.updateFolderLocked(id, func(folder *Folder) {
 		folder.Locked = true
-		folder.LockPasswordHash = folderPasswordHash(password)
+		folder.LockPasswordHash = verifier
 	})
 }
 
@@ -402,7 +409,7 @@ func (s *Store) UnlockFolder(id, password string) (Folder, error) {
 	if !found {
 		return Folder{}, errors.New("folder not found")
 	}
-	if s.manifest.Folders[index].LockPasswordHash != folderPasswordHash(password) {
+	if !verifyFolderPassword(s.manifest.Folders[index].LockPasswordHash, password) {
 		return Folder{}, errors.New("folder password is incorrect")
 	}
 	original := s.manifest.Folders[index]
@@ -426,7 +433,7 @@ func (s *Store) CheckFolderPassword(id, password string) error {
 	if !found {
 		return errors.New("folder not found")
 	}
-	if s.manifest.Folders[index].LockPasswordHash != folderPasswordHash(password) {
+	if !verifyFolderPassword(s.manifest.Folders[index].LockPasswordHash, password) {
 		return errors.New("folder password is incorrect")
 	}
 	return nil
@@ -3054,9 +3061,50 @@ func normalizeSortMode(mode string) string {
 	}
 }
 
-func folderPasswordHash(password string) string {
-	hash := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(hash[:])
+func newFolderPasswordVerifier(password string) (string, error) {
+	salt := make([]byte, folderPasswordSaltBytes)
+	if _, err := rand.Read(salt); err != nil {
+		return "", fmt.Errorf("generate folder password salt: %w", err)
+	}
+	hash := saltedFolderPasswordHash(password, salt)
+	return folderPasswordVerifierPrefix +
+		base64.RawURLEncoding.EncodeToString(salt) + ":" +
+		hex.EncodeToString(hash), nil
+}
+
+func verifyFolderPassword(verifier, password string) bool {
+	if strings.HasPrefix(verifier, folderPasswordVerifierPrefix) {
+		payload := strings.TrimPrefix(verifier, folderPasswordVerifierPrefix)
+		parts := strings.Split(payload, ":")
+		if len(parts) != 2 {
+			return false
+		}
+		salt, err := base64.RawURLEncoding.DecodeString(parts[0])
+		if err != nil || len(salt) != folderPasswordSaltBytes {
+			return false
+		}
+		expected, err := hex.DecodeString(parts[1])
+		if err != nil || len(expected) != sha256.Size {
+			return false
+		}
+		actual := saltedFolderPasswordHash(password, salt)
+		return subtle.ConstantTimeCompare(actual, expected) == 1
+	}
+
+	// Backward compatibility for folders locked before salted verifiers existed.
+	expected, err := hex.DecodeString(verifier)
+	if err != nil || len(expected) != sha256.Size {
+		return false
+	}
+	legacyHash := sha256.Sum256([]byte(password))
+	return subtle.ConstantTimeCompare(legacyHash[:], expected) == 1
+}
+
+func saltedFolderPasswordHash(password string, salt []byte) []byte {
+	hasher := sha256.New()
+	_, _ = hasher.Write(salt)
+	_, _ = hasher.Write([]byte(password))
+	return hasher.Sum(nil)
 }
 
 func extractTags(content string) []string {
