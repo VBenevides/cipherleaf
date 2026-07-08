@@ -39,6 +39,16 @@ type TitlebarMenu = "file";
 type ContextMenuState =
   | { kind: "note"; id: string; label: string; x: number; y: number }
   | { kind: "folder"; id: string; label: string; x: number; y: number };
+type ConsoleEntry = {
+  id: number;
+  level: "log" | "info" | "warn" | "error";
+  message: string;
+  timestamp: string;
+};
+type FolderPasswordPrompt = {
+  title: string;
+  submitLabel: string;
+};
 
 type NoteCrumb = {
   id: string;
@@ -228,8 +238,14 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
+  const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
+  const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
+  const [folderPasswordPrompt, setFolderPasswordPrompt] = useState<FolderPasswordPrompt | null>(null);
+  const [folderPassword, setFolderPassword] = useState("");
+  const [folderPasswordVisible, setFolderPasswordVisible] = useState(false);
   const [syncSettings, setSyncSettings] = useState<SyncSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
@@ -271,11 +287,59 @@ function App() {
   const unlockedRef = useRef(false);
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
   const suppressClickRef = useRef(false);
+  const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
 
   useEffect(() => {
     noteRef.current = note;
     dirtyRef.current = dirty;
   }, [note, dirty]);
+
+  useEffect(() => {
+    const stringify = (value: unknown) => {
+      if (value instanceof Error) return value.stack || value.message;
+      if (typeof value === "string") return value;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    };
+    const append = (level: ConsoleEntry["level"], values: unknown[]) => {
+      setConsoleEntries((current) => [
+        ...current.slice(-199),
+        {
+          id: ++consoleEntryIDRef.current,
+          level,
+          message: values.map(stringify).join(" "),
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+    };
+    const original = {
+      log: console.log,
+      info: console.info,
+      warn: console.warn,
+      error: console.error,
+    };
+    (["log", "info", "warn", "error"] as const).forEach((level) => {
+      console[level] = (...values: unknown[]) => {
+        append(level, values);
+        original[level](...values);
+      };
+    });
+    const onError = (event: ErrorEvent) => append("error", [event.error || event.message]);
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => append("error", [event.reason]);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      console.log = original.log;
+      console.info = original.info;
+      console.warn = original.warn;
+      console.error = original.error;
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem("cipherleaf-sort-all", globalSortMode);
@@ -1153,8 +1217,25 @@ function App() {
     }
   };
 
+  const requestFolderPassword = (title: string, submitLabel: string) => {
+    setFolderPassword("");
+    setFolderPasswordVisible(false);
+    setFolderPasswordPrompt({ title, submitLabel });
+    return new Promise<string | null>((resolve) => {
+      folderPasswordResolverRef.current = resolve;
+    });
+  };
+
+  const closeFolderPasswordPrompt = (value: string | null) => {
+    folderPasswordResolverRef.current?.(value);
+    folderPasswordResolverRef.current = null;
+    setFolderPasswordPrompt(null);
+    setFolderPassword("");
+    setFolderPasswordVisible(false);
+  };
+
   const lockFolder = async (folder: Folder) => {
-    const password = window.prompt(`Password for “${folder.name}”`, "");
+    const password = await requestFolderPassword(`Password for “${folder.name}”`, "Lock folder");
     if (password === null) return;
     setError("");
     try {
@@ -1167,7 +1248,7 @@ function App() {
   };
 
   const removeFolderLock = async (folder: Folder) => {
-    const password = window.prompt(`Remove lock from “${folder.name}”`, "");
+    const password = await requestFolderPassword(`Remove lock from “${folder.name}”`, "Remove lock");
     if (password === null) return;
     setError("");
     try {
@@ -1195,7 +1276,7 @@ function App() {
 
   const selectFolder = async (folder: Folder) => {
     if (folder.locked && !unlockedFolderIDs.has(folder.id)) {
-      const password = window.prompt(`Unlock “${folder.name}”`, "");
+      const password = await requestFolderPassword(`Unlock “${folder.name}”`, "Unlock folder");
       if (password === null) return;
       try {
         await VaultService.CheckFolderPassword(folder.id, password);
@@ -1224,7 +1305,7 @@ function App() {
       const loaded = await VaultService.GetNote(id);
       const folder = folderByID.get(loaded.folderId);
       if (folder?.locked && !unlockedFolderIDs.has(folder.id)) {
-        const password = window.prompt(`Unlock “${folder.name}”`, "");
+        const password = await requestFolderPassword(`Unlock “${folder.name}”`, "Unlock folder");
         if (password === null) return;
         try {
           await VaultService.CheckFolderPassword(folder.id, password);
@@ -1969,7 +2050,7 @@ function App() {
   }
 
   return (
-    <main className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${logOpen ? "log-open" : ""}`}>
       <header className="app-menubar">
         <button
           type="button"
@@ -2034,6 +2115,12 @@ function App() {
                 </button>
                 <button role="menuitem" onClick={() => void openVaultSettings()}>
                   Vault Settings…
+                </button>
+                <button role="menuitem" onClick={() => {
+                  setTitlebarMenu(null);
+                  setLogOpen(true);
+                }}>
+                  Log
                 </button>
                 <div className="titlebar-menu-separator" />
                 <button role="menuitem" onClick={() => void switchVault("create")}>
@@ -2452,6 +2539,91 @@ function App() {
           </div>
         )}
       </section>
+      {logOpen && (
+        <section className="log-panel" aria-labelledby="log-title">
+          <div className="log-panel-header">
+            <div>
+              <p className="eyebrow">Diagnostics</p>
+              <h2 id="log-title">Log</h2>
+            </div>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setConsoleEntries([])}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Close log"
+              onClick={() => setLogOpen(false)}
+            >
+              <Icon name="x" />
+            </button>
+          </div>
+          <div className="log-output" role="log" aria-live="polite">
+            {consoleEntries.length === 0 ? (
+              <p className="log-empty">No console messages yet.</p>
+            ) : (
+              consoleEntries.map((entry) => (
+                <div className={`log-entry ${entry.level}`} key={entry.id}>
+                  <span>{entry.timestamp}</span>
+                  <strong>{entry.level}</strong>
+                  <code>{entry.message}</code>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+      {folderPasswordPrompt && (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            className="vault-modal folder-password-modal"
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeFolderPasswordPrompt(folderPassword);
+            }}
+          >
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Cancel"
+              onClick={() => closeFolderPasswordPrompt(null)}
+            >
+              <Icon name="x" />
+            </button>
+            <div className="modal-icon"><Icon name="lock" size={21} /></div>
+            <p className="eyebrow">Folder password</p>
+            <h2>{folderPasswordPrompt.title}</h2>
+            <label>
+              Password
+              <div className="password-field">
+                <input
+                  autoFocus
+                  type={folderPasswordVisible ? "text" : "password"}
+                  value={folderPassword}
+                  onChange={(event) => setFolderPassword(event.target.value)}
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={folderPasswordVisible ? "Hide password" : "Show password"}
+                  title={folderPasswordVisible ? "Hide password" : "Show password"}
+                  onClick={() => setFolderPasswordVisible((current) => !current)}
+                >
+                  <Icon name="eye" size={17} />
+                </button>
+              </div>
+            </label>
+            <button className="primary-button">
+              {folderPasswordPrompt.submitLabel}
+            </button>
+          </form>
+        </div>
+      )}
       {appearanceSettingsOpen && (
         <div className="modal-backdrop" role="presentation">
           <section

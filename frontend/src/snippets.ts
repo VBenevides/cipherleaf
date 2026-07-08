@@ -8,18 +8,17 @@ function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function localDate(): string {
-  const now = new Date();
+function localDate(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-function localTime(): string {
-  const now = new Date();
+function localTime(now = new Date()): string {
   return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 function localDateTime(): string {
-  return `${localDate()} ${localTime()}`;
+  const now = new Date();
+  return `${localDate(now)} ${localTime(now)}`;
 }
 
 function utcDateTime(): string {
@@ -89,6 +88,99 @@ Your name
 const loremParagraph =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
+type OutlineLine = {
+  indent: number;
+  content: string;
+};
+
+function visualIndent(text: string): number {
+  return text.replace(/\t/g, "  ").length;
+}
+
+function outlineLine(text: string): OutlineLine | null {
+  const match = text.match(/^([ \t]*)>([ \t]?)(.*)$/);
+  if (!match) return null;
+  return {
+    indent: visualIndent(match[1]),
+    content: match[3],
+  };
+}
+
+function isDatedSectionStart(text: string): boolean {
+  return /^>\s*\d{4}-\d{2}-\d{2}(?:\b.*)?$/.test(text);
+}
+
+function isRootNonOutlineLine(text: string): boolean {
+  return text.trim() !== "" && !/^[ \t]/.test(text) && !text.startsWith(">");
+}
+
+function isCheckedOutlineLine(line: OutlineLine): boolean {
+  return /^(?:[-+*]\s+|\d+[.)]\s+)?\[[xX]\]\s+/.test(line.content.trimStart());
+}
+
+export function rollLastDatedSection(markdown: string, now = new Date()): string | null {
+  const lines = markdown.split("\n");
+  let start = -1;
+  for (let index = lines.length - 1; index >= 0; index--) {
+    if (isDatedSectionStart(lines[index])) {
+      start = index;
+      break;
+    }
+  }
+  if (start < 0) return null;
+
+  return rollDatedSectionLines(lines, start, now);
+}
+
+function rollFirstDatedSection(markdown: string, now = new Date()): string | null {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((line) => isDatedSectionStart(line));
+  if (start < 0) return null;
+  return rollDatedSectionLines(lines, start, now);
+}
+
+function rollDatedSectionLines(lines: string[], start: number, now: Date): string {
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index++) {
+    if (
+      lines[index].trim() === "" ||
+      isRootNonOutlineLine(lines[index]) ||
+      isDatedSectionStart(lines[index])
+    ) {
+      end = index;
+      break;
+    }
+  }
+
+  const rolled = [`> ${localDate(now)}`];
+  const skippedIndents: number[] = [];
+
+  for (const line of lines.slice(start + 1, end)) {
+    const outline = outlineLine(line);
+
+    if (!outline && skippedIndents.length > 0) continue;
+
+    while (
+      outline &&
+      skippedIndents.length > 0 &&
+      outline.indent <= skippedIndents[skippedIndents.length - 1]
+    ) {
+      skippedIndents.pop();
+    }
+
+    if (outline && skippedIndents.length > 0) continue;
+
+    if (outline && isCheckedOutlineLine(outline)) {
+      skippedIndents.push(outline.indent);
+      continue;
+    }
+
+    rolled.push(line);
+  }
+
+  return rolled.join("\n").replace(/\n+$/, "");
+}
+
 export const SNIPPETS: Snippet[] = [
   { trigger: "today", description: "Insert the current date (local timezone)", expand: localDate },
   { trigger: "date", description: "Insert the current date (local timezone)", expand: localDate },
@@ -109,6 +201,8 @@ export const SNIPPETS: Snippet[] = [
   { trigger: "task", description: "Insert a single checkbox line", expand: () => taskLine },
   { trigger: "sig", description: "Insert a signature block", expand: () => signatureTemplate },
   { trigger: "lorem", description: "Insert a lorem ipsum paragraph", expand: () => loremParagraph },
+  { trigger: "rollb", description: "Roll the previous dated outline section", expand: () => "/rollb" },
+  { trigger: "rollf", description: "Roll the next dated outline section", expand: () => "/rollf" },
 ];
 
 const SNIPPETS_BY_TRIGGER: Record<string, Snippet> = {};
@@ -122,4 +216,19 @@ export function expandSnippet(trigger: string): string {
     return `/${trigger}`;
   }
   return snippet.expand();
+}
+
+export function expandSnippetWithContext(
+  trigger: string,
+  markdownBeforeTrigger: string,
+  markdownAfterTrigger = "",
+  now = new Date(),
+): string {
+  if (trigger === "rollb") {
+    return rollLastDatedSection(markdownBeforeTrigger, now) ?? `/${trigger}`;
+  }
+  if (trigger === "rollf") {
+    return rollFirstDatedSection(markdownAfterTrigger, now) ?? "/rollf";
+  }
+  return expandSnippet(trigger);
 }

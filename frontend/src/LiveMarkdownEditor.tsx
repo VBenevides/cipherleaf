@@ -34,7 +34,7 @@ import {
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
-import { SNIPPETS, expandSnippet } from "./snippets";
+import { SNIPPETS, expandSnippetWithContext } from "./snippets";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -633,6 +633,21 @@ function decorateTaskMarker(
   return true;
 }
 
+function decorateUnorderedListMarker(
+  from: number,
+  marker: "-" | "*",
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  addHiddenRange(
+    from,
+    from + 1,
+    decorations,
+    atomicRanges,
+    new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
+  );
+}
+
 type ToggleLine = {
   indent: number;
   prefixSize: number;
@@ -872,14 +887,13 @@ function buildLivePreviewState(
         );
 
       const toggleList = !toggleAttachment && !isTask &&
-        toggle.content.match(/^([-+*])\s+/);
+        toggle.content.match(/^([-*])\s+/);
       if (toggleList) {
-        addHiddenRange(
+        decorateUnorderedListMarker(
           contentOffset,
-          contentOffset + toggleList[0].length,
+          toggleList[1] as "-" | "*",
           decorations,
           atomicRanges,
-          new TextWidget("•", "cm-live-bullet"),
         );
       }
       const toggleOrderedList = !toggleAttachment && !isTask && !toggleList &&
@@ -1065,15 +1079,14 @@ function buildLivePreviewState(
       }).range(line.from));
     }
 
-    const unorderedList = !task && line.text.match(/^(\s*)([-+*])\s+/);
+    const unorderedList = !task && line.text.match(/^(\s*)([-*])\s+/);
     if (unorderedList) {
       const markerStart = line.from + unorderedList[1].length;
-      addHiddenRange(
+      decorateUnorderedListMarker(
         markerStart,
-        markerStart + unorderedList[2].length + 1,
+        unorderedList[2] as "-" | "*",
         decorations,
         atomicRanges,
-        new TextWidget("•", "cm-live-bullet"),
       );
       decorations.push(Decoration.line({
         attributes: {
@@ -1276,15 +1289,60 @@ function snippetCompletion(context: CompletionContext): CompletionResult | null 
       label: `/${snippet.trigger}`,
       detail: snippet.description,
       apply: (view: EditorView, _completion: unknown, from: number, to: number) => {
-        const expansion = expandSnippet(snippet.trigger);
-        view.dispatch({
-          changes: { from, to, insert: expansion },
-          selection: EditorSelection.cursor(from + expansion.length),
-        });
+        applySnippetExpansion(view, snippet.trigger, from, to);
       },
     })),
     validFor: /^[A-Za-z]*$/,
   };
+}
+
+function rollReplacementRange(view: EditorView, from: number, to: number) {
+  const line = view.state.doc.lineAt(from);
+  const beforeTrigger = view.state.sliceDoc(line.from, from);
+  const afterTrigger = view.state.sliceDoc(to, line.to);
+  if (/^\s*>?\s*$/.test(beforeTrigger) && /^\s*$/.test(afterTrigger)) {
+    return { from: line.from, to: line.to };
+  }
+  return { from, to };
+}
+
+function applySnippetExpansion(view: EditorView, trigger: string, from: number, to: number) {
+  const isRoll = trigger === "rollb" || trigger === "rollf";
+  const replacement = isRoll ? rollReplacementRange(view, from, to) : { from, to };
+  const expansion = expandSnippetWithContext(
+    trigger,
+    view.state.sliceDoc(0, replacement.from),
+    view.state.sliceDoc(replacement.to),
+  );
+
+  if (expansion === `/${trigger}`) {
+    console.warn(
+      trigger === "rollf"
+        ? "/rollf did not expand. Place it before a > YYYY-MM-DD section."
+        : `/${trigger} did not expand. Place it after a > YYYY-MM-DD section.`,
+    );
+    return false;
+  }
+
+  console.info(`Expanded /${trigger}`);
+  view.dispatch({
+    changes: { ...replacement, insert: expansion },
+    selection: EditorSelection.cursor(replacement.from + expansion.length),
+  });
+  view.focus();
+  return true;
+}
+
+function expandSnippetBeforeCursor(view: EditorView) {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+
+  const before = view.state.sliceDoc(0, range.head);
+  const match = before.match(/\/([A-Za-z]+)$/);
+  if (!match) return false;
+
+  const from = range.head - match[0].length;
+  return applySnippetExpansion(view, match[1], from, range.head);
 }
 
 function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
@@ -1484,7 +1542,9 @@ export default function LiveMarkdownEditor({
             {
               key: "Enter",
               run: (editor) =>
-                acceptCompletion(editor) || insertNewlineAtOutlineDepth(editor),
+                acceptCompletion(editor) ||
+                expandSnippetBeforeCursor(editor) ||
+                insertNewlineAtOutlineDepth(editor),
             },
             {
               key: "Tab",
