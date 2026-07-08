@@ -23,6 +23,7 @@ type NoteSummary struct {
 	Revision       uint64   `json:"revision"`
 	CiphertextHash string   `json:"ciphertextHash,omitempty"`
 	Tags           []string `json:"tags,omitempty"`
+	AttachmentIDs  []string `json:"attachmentIds"`
 }
 
 type Note struct {

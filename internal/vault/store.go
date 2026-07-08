@@ -651,6 +651,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
 			return Note{}, err
 		}
+		if err := s.pruneSharedAttachmentsForSaveLocked(); err != nil {
+			return Note{}, err
+		}
 		return current, nil
 	}
 	current.Title = title
@@ -671,7 +674,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
 		return Note{}, err
 	}
-	if err := s.pruneSharedAttachmentsLocked(); err != nil {
+	if err := s.pruneSharedAttachmentsForSaveLocked(); err != nil {
 		return Note{}, err
 	}
 	return current, nil
@@ -823,12 +826,12 @@ func (s *Store) pruneStaleAttachmentsLocked() error {
 func (s *Store) pruneSharedAttachmentsLocked() error {
 	referenced := make(map[string]struct{})
 	for _, summary := range s.manifest.Notes {
-		note, err := s.readNoteLocked(summary.ID)
+		ids, err := s.attachmentIDsForSummaryLocked(summary)
 		if err != nil {
 			return err
 		}
-		for _, match := range attachmentReference.FindAllStringSubmatch(note.Content, -1) {
-			referenced[match[1]] = struct{}{}
+		for _, id := range ids {
+			referenced[id] = struct{}{}
 		}
 	}
 	directory := filepath.Join(s.root, "attachments", sharedAttachmentFolder)
@@ -856,6 +859,83 @@ func (s *Store) pruneSharedAttachmentsLocked() error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) pruneSharedAttachmentsForSaveLocked() error {
+	candidates, err := s.sharedAttachmentIDsLocked()
+	if err != nil {
+		return err
+	}
+	return s.pruneSharedAttachmentsByIDLocked(candidates)
+}
+
+func (s *Store) pruneSharedAttachmentsByIDLocked(candidates map[string]struct{}) error {
+	if len(candidates) == 0 {
+		return nil
+	}
+	referenced := make(map[string]struct{}, len(candidates))
+	for _, summary := range s.manifest.Notes {
+		ids, err := s.attachmentIDsForSummaryLocked(summary)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, ok := candidates[id]; ok {
+				referenced[id] = struct{}{}
+			}
+		}
+		if len(referenced) == len(candidates) {
+			return nil
+		}
+	}
+	for id := range candidates {
+		if _, found := referenced[id]; found {
+			continue
+		}
+		path := s.sharedAttachmentPathLocked(id)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove stale shared attachment: %w", err)
+		}
+		if err := os.Remove(path + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove stale shared attachment backup: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) attachmentIDsForSummaryLocked(summary NoteSummary) ([]string, error) {
+	if summary.AttachmentIDs != nil {
+		return summary.AttachmentIDs, nil
+	}
+	note, err := s.readNoteLocked(summary.ID)
+	if err != nil {
+		return nil, err
+	}
+	return extractAttachmentIDs(note.Content), nil
+}
+
+func (s *Store) sharedAttachmentIDsLocked() (map[string]struct{}, error) {
+	directory := filepath.Join(s.root, "attachments", sharedAttachmentFolder)
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspect shared attachments: %w", err)
+	}
+	ids := make(map[string]struct{})
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".enc") &&
+			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			return nil, errors.New("shared attachments folder contains an invalid path")
+		}
+		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
+		if entry.IsDir() || !validID(name) {
+			return nil, errors.New("shared attachments folder contains an invalid path")
+		}
+		ids[name] = struct{}{}
+	}
+	return ids, nil
 }
 
 func (s *Store) pruneNoteAttachmentsLocked(noteID, content string) error {
@@ -3098,6 +3178,7 @@ func summaryFromNote(note Note) NoteSummary {
 	return NoteSummary{
 		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(note.Content),
+		AttachmentIDs: extractAttachmentIDs(note.Content),
 	}
 }
 
@@ -3207,6 +3288,19 @@ func extractTags(content string) []string {
 	}
 	slices.Sort(tags)
 	return tags
+}
+
+func extractAttachmentIDs(content string) []string {
+	seen := make(map[string]struct{})
+	for _, match := range attachmentReference.FindAllStringSubmatch(content, -1) {
+		seen[match[1]] = struct{}{}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 func parseNoteReference(reference string) (label string, id string, ok bool) {

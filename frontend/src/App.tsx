@@ -697,6 +697,7 @@ function App() {
         .map((item) =>
           item.id === saved.id
             ? {
+                ...item,
                 id: saved.id,
                 title: saved.title,
                 folderId: saved.folderId,
@@ -1535,6 +1536,14 @@ function App() {
     [folderByID, notes, unlockedFolderIDs],
   );
 
+  const noteCountsByFolder = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of notes) {
+      counts.set(item.folderId, (counts.get(item.folderId) ?? 0) + 1);
+    }
+    return counts;
+  }, [notes]);
+
   const sortNotesForMode = useCallback((items: NoteSummary[], mode: string) => {
     const sorted = [...items];
     sorted.sort((left, right) => {
@@ -1592,7 +1601,15 @@ function App() {
     ).filter((item) => !selectedTag || (item.tags ?? []).includes(selectedTag));
   }, [globalSortMode, notes, publicNotes, query, selectedFolderID, selectedTag, sortNotesForFolder, sortNotesForMode]);
 
-  const currentFolder = folders.find((folder) => folder.id === note?.folderId);
+  const currentFolder = useMemo(
+    () => folders.find((folder) => folder.id === note?.folderId),
+    [folders, note?.folderId],
+  );
+
+  const contentWordCount = useMemo(() => {
+    const content = note?.content.trim() ?? "";
+    return content ? content.split(/\s+/).length : 0;
+  }, [note?.content]);
 
   const openWikilinkTitle = async (title: string) => {
     try {
@@ -2209,7 +2226,7 @@ function App() {
           >
             <Icon name="folder" size={15} />
             <span>Unfiled</span>
-            <small>{publicNotes.filter((item) => !item.folderId).length}</small>
+            <small>{noteCountsByFolder.get("") ?? 0}</small>
           </button>
           {folders.map((folder) => (
             <button
@@ -2251,7 +2268,7 @@ function App() {
             >
               <Icon name={folder.locked && !unlockedFolderIDs.has(folder.id) ? "lock" : "folder"} size={15} />
               <span>{folder.name}</span>
-              <small>{folder.locked && !unlockedFolderIDs.has(folder.id) ? "Locked" : notes.filter((item) => item.folderId === folder.id).length}</small>
+              <small>{folder.locked && !unlockedFolderIDs.has(folder.id) ? "Locked" : (noteCountsByFolder.get(folder.id) ?? 0)}</small>
             </button>
           ))}
         </nav>
@@ -2488,35 +2505,41 @@ function App() {
               ))}
             </div>
             <div className={`document-body view-${view}`}>
-              <div className={`editor-view-pane ${view === "live" ? "active" : ""}`}>
-                <LiveMarkdownEditor
-                  key={note.id}
-                  noteID={note.id}
-                  value={note.content}
-                  onChange={(content) => editNote({ content })}
-                  onSave={() => void persistCurrent()}
-                  onError={(reason) => setError(errorText(reason))}
-                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
-                  onDecreaseFontSize={decreaseEditorFontSize}
-                  onIncreaseFontSize={increaseEditorFontSize}
-                  scrollToOffset={scrollToOffset}
-                />
-              </div>
-              <div className={`editor-view-pane ${view === "object" ? "active" : ""}`}>
-                <ObjectTreeView value={note.content} onChange={(content) => editNote({ content })} />
-              </div>
-              <div className={`editor-view-pane ${view === "markdown" ? "active" : ""}`}>
-                <SourceMarkdownEditor
-                  key={note.id}
-                  noteID={note.id}
-                  value={note.content}
-                  onChange={(content) => editNote({ content })}
-                  onError={(reason) => setError(errorText(reason))}
-                />
-              </div>
+              {view === "live" && (
+                <div className="editor-view-pane active">
+                  <LiveMarkdownEditor
+                    key={note.id}
+                    noteID={note.id}
+                    value={note.content}
+                    onChange={(content) => editNote({ content })}
+                    onSave={() => void persistCurrent()}
+                    onError={(reason) => setError(errorText(reason))}
+                    onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                    onDecreaseFontSize={decreaseEditorFontSize}
+                    onIncreaseFontSize={increaseEditorFontSize}
+                    scrollToOffset={scrollToOffset}
+                  />
+                </div>
+              )}
+              {view === "object" && (
+                <div className="editor-view-pane active">
+                  <ObjectTreeView value={note.content} onChange={(content) => editNote({ content })} />
+                </div>
+              )}
+              {view === "markdown" && (
+                <div className="editor-view-pane active">
+                  <SourceMarkdownEditor
+                    key={note.id}
+                    noteID={note.id}
+                    value={note.content}
+                    onChange={(content) => editNote({ content })}
+                    onError={(reason) => setError(errorText(reason))}
+                  />
+                </div>
+              )}
             </div>
             <footer className="document-footer">
-              <span>{note.content.trim() ? note.content.trim().split(/\s+/).length : 0} words</span>
+              <span>{contentWordCount} words</span>
               <span>Revision {note.revision}</span>
               <span className="footer-encryption"><Icon name="lock" size={12} /> Encrypted at rest</span>
             </footer>

@@ -68,6 +68,7 @@ export interface NoteSummary {
     "revision": number;
     "ciphertextHash"?: string;
     "tags"?: string[] | null;
+    "attachmentIds": string[] | null;
 }
 
 /**
