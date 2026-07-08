@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Annotation,
   EditorSelection,
@@ -1730,6 +1731,30 @@ export default function LiveMarkdownEditor({
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const pendingScroll = useRef<number | null>(scrollToOffset ?? null);
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const editorHost = host.current;
+    if (!editorHost) return;
+
+    const editorShell = editorHost.closest<HTMLElement>(".editor-shell");
+    const documentBody = editorShell?.querySelector<HTMLElement>(".document-body");
+
+    if (!editorShell || !documentBody) return;
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "markdown-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Markdown formatting");
+
+    editorShell.insertBefore(toolbar, documentBody);
+    setToolbarHost(toolbar);
+
+    return () => {
+      setToolbarHost(null);
+      toolbar.remove();
+    };
+  }, []);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -2041,106 +2066,114 @@ export default function LiveMarkdownEditor({
   };
 
   return (
-    <div className="live-editor-frame">
-      <div className="markdown-toolbar" role="toolbar" aria-label="Markdown formatting">
-        <button
-          type="button"
-          title="Bold"
-          aria-label="Make text bold"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => wrapSelection(editor, "**"));
-          }}
-        >
-          <strong>B</strong>
-        </button>
-        <span className="markdown-toolbar-separator" />
-        <button
-          type="button"
-          title="Checklist"
-          aria-label="Insert checklist item"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => prefixSelectedLines(editor, "* [ ] "));
-          }}
-        >
-          <span className="toolbar-checkbox" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          title="Bullet list"
-          aria-label="Insert bullet point"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => prefixSelectedLines(editor, "* "));
-          }}
-        >
-          <span className="toolbar-bullet" aria-hidden="true">
-            •
-          </span>
-        </button>
-        <span className="markdown-toolbar-separator" />
-        <button
-          type="button"
-          title="Toggle section"
-          aria-label="Insert toggle section"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => prefixSelectedLines(editor, "> "));
-          }}
-        >
-          <span className="toolbar-toggle" aria-hidden="true">
-            ▾
-          </span>
-        </button>
-        <button
-          type="button"
-          title="Outdent toggle (Shift+Tab)"
-          aria-label="Outdent toggle section"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => changeOutlineDepth(editor, -1));
-          }}
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          title="Indent toggle (Tab)"
-          aria-label="Indent toggle section"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => changeOutlineDepth(editor, 1));
-          }}
-        >
-          ›
-        </button>
-        <button
-          type="button"
-          title="Collapse all sections (Ctrl+Shift+[)"
-          aria-label="Collapse all sections"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => setAllSectionsCollapsed(editor, true));
-          }}
-        >
-          ⊟
-        </button>
-        <button
-          type="button"
-          title="Expand all sections (Ctrl+Shift+])"
-          aria-label="Expand all sections"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => setAllSectionsCollapsed(editor, false));
-          }}
-        >
-          ⊞
-        </button>
+    <>
+      {toolbarHost
+        ? createPortal(
+            <>
+              <button
+                type="button"
+                title="Bold"
+                aria-label="Make text bold"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => wrapSelection(editor, "**"));
+                }}
+              >
+                <strong>B</strong>
+              </button>
+              <span className="markdown-toolbar-separator" />
+              <button
+                type="button"
+                title="Checklist"
+                aria-label="Insert checklist item"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "* [ ] "));
+                }}
+              >
+                <span className="toolbar-checkbox" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                title="Bullet list"
+                aria-label="Insert bullet point"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "* "));
+                }}
+              >
+                <span className="toolbar-bullet" aria-hidden="true">
+                  •
+                </span>
+              </button>
+              <span className="markdown-toolbar-separator" />
+              <button
+                type="button"
+                title="Toggle section"
+                aria-label="Insert toggle section"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "> "));
+                }}
+              >
+                <span className="toolbar-toggle" aria-hidden="true">
+                  ▾
+                </span>
+              </button>
+              <button
+                type="button"
+                title="Outdent toggle (Shift+Tab)"
+                aria-label="Outdent toggle section"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => changeOutlineDepth(editor, -1));
+                }}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                title="Indent toggle (Tab)"
+                aria-label="Indent toggle section"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => changeOutlineDepth(editor, 1));
+                }}
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                title="Collapse all sections (Ctrl+Shift+[)"
+                aria-label="Collapse all sections"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => setAllSectionsCollapsed(editor, true));
+                }}
+              >
+                ⊟
+              </button>
+              <button
+                type="button"
+                title="Expand all sections (Ctrl+Shift+])"
+                aria-label="Expand all sections"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => setAllSectionsCollapsed(editor, false));
+                }}
+              >
+                ⊞
+              </button>
+            </>,
+            toolbarHost,
+          )
+        : null}
+      <div className="live-editor-frame">
+        <div ref={host} className="live-markdown-editor" />
       </div>
-      <div ref={host} className="live-markdown-editor" />
-    </div>
+    </>
   );
+
 }
 
 export async function imageDataURL(source: Blob | string): Promise<string> {
