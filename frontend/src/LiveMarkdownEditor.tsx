@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Annotation,
   EditorSelection,
@@ -18,6 +19,7 @@ import {
 } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { minimalSetup } from "codemirror";
+import { redo, undo } from "@codemirror/commands";
 import {
   acceptCompletion,
   autocompletion,
@@ -34,7 +36,7 @@ import {
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
-import { SNIPPETS, expandSnippet } from "./snippets";
+import { SNIPPETS, expandSnippetWithContext } from "./snippets";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -54,6 +56,39 @@ type LivePreviewState = {
   decorations: DecorationSet;
   atomicRanges: DecorationSet;
 };
+
+function collapsedStorageKey(noteID: string): string {
+  return `cipherleaf-collapsed-sections:${noteID}`;
+}
+
+function savedCollapsedPositions(state: EditorState, noteID: string): Set<number> | null {
+  try {
+    const saved = window.localStorage.getItem(collapsedStorageKey(noteID));
+    if (!saved) return null;
+    const texts = new Set(JSON.parse(saved) as string[]);
+    const positions = new Set<number>();
+    for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
+      const line = state.doc.line(lineNumber);
+      if (texts.has(line.text)) positions.add(line.from);
+    }
+    return positions;
+  } catch {
+    return null;
+  }
+}
+
+function persistCollapsedPositions(state: EditorState, noteID: string, collapsed: ReadonlySet<number>) {
+  try {
+    const texts: string[] = [];
+    for (const position of collapsed) {
+      if (position < 0 || position > state.doc.length) continue;
+      texts.push(state.doc.lineAt(position).text);
+    }
+    window.localStorage.setItem(collapsedStorageKey(noteID), JSON.stringify(texts));
+  } catch {
+    // Best-effort UI state persistence.
+  }
+}
 
 const externalDocumentUpdate = Annotation.define<boolean>();
 const toggleQuote = StateEffect.define<number>({
@@ -227,6 +262,30 @@ class FoldedQuoteWidget extends WidgetType {
     element.className = "cm-live-folded-toggle";
     element.setAttribute("aria-hidden", "true");
     return element;
+  }
+}
+
+class DragHandleWidget extends WidgetType {
+  constructor(readonly lineNumber: number) {
+    super();
+  }
+
+  eq(other: DragHandleWidget) {
+    return other.lineNumber === this.lineNumber;
+  }
+
+  toDOM() {
+    const handle = document.createElement("span");
+    handle.className = "cm-live-object-handle";
+    handle.dataset.objectLine = String(this.lineNumber);
+    handle.title = "Drag object";
+    handle.setAttribute("aria-label", "Drag object");
+    handle.textContent = "⋮⋮";
+    return handle;
+  }
+
+  ignoreEvent() {
+    return false;
   }
 }
 
@@ -633,6 +692,21 @@ function decorateTaskMarker(
   return true;
 }
 
+function decorateUnorderedListMarker(
+  from: number,
+  marker: "-" | "*",
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  addHiddenRange(
+    from,
+    from + 1,
+    decorations,
+    atomicRanges,
+    new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
+  );
+}
+
 type ToggleLine = {
   indent: number;
   prefixSize: number;
@@ -664,6 +738,18 @@ function toggleLineStyle(indent: number): string {
 
 function listLineStyle(indent: number, markerWidth = "1.25em"): string {
   return `--live-list-indent: ${indent}ch; --live-list-marker-width: ${markerWidth};`;
+}
+
+function objectLineAttributes(
+  lineNumber: number,
+  className = "",
+  style?: string,
+): Record<string, string> {
+  return {
+    class: ["cm-live-object-line", className].filter(Boolean).join(" "),
+    "data-object-line": String(lineNumber),
+    ...(style ? { style } : {}),
+  };
 }
 
 function toggleSectionEnd(
@@ -797,6 +883,15 @@ function buildLivePreviewState(
     const line = state.doc.line(lineNumber);
     const toggle = toggleLine(line.text);
 
+    if (line.text.trim() !== "") {
+      decorations.push(
+        Decoration.widget({
+          widget: new DragHandleWidget(lineNumber),
+          side: -1,
+        }).range(line.from),
+      );
+    }
+
     if (
       lineNumber < state.doc.lines &&
       line.text.includes("|") &&
@@ -832,6 +927,11 @@ function buildLivePreviewState(
 
     const attachment = parseAttachmentMarkdown(line.text);
     if (attachment && !lineIsActive(state, lineNumber)) {
+      decorations.push(
+        Decoration.line({
+          attributes: objectLineAttributes(lineNumber, "cm-live-attachment-line"),
+        }).range(line.from),
+      );
       addHiddenRange(
         line.from,
         line.to,
@@ -872,14 +972,13 @@ function buildLivePreviewState(
         );
 
       const toggleList = !toggleAttachment && !isTask &&
-        toggle.content.match(/^([-+*])\s+/);
+        toggle.content.match(/^([-*])\s+/);
       if (toggleList) {
-        addHiddenRange(
+        decorateUnorderedListMarker(
           contentOffset,
-          contentOffset + toggleList[0].length,
+          toggleList[1] as "-" | "*",
           decorations,
           atomicRanges,
-          new TextWidget("•", "cm-live-bullet"),
         );
       }
       const toggleOrderedList = !toggleAttachment && !isTask && !toggleList &&
@@ -906,12 +1005,13 @@ function buildLivePreviewState(
       const toggleMarkerWidth = isTask ? "1.45em" : toggleOrderedList ? "2em" : "1.25em";
       decorations.push(
         Decoration.line({
-          attributes: {
-            class: classes,
-            style: isTask || toggleList || toggleOrderedList
+          attributes: objectLineAttributes(
+            lineNumber,
+            classes,
+            isTask || toggleList || toggleOrderedList
               ? `${toggleLineStyle(toggle.indent)} ${listLineStyle(0, toggleMarkerWidth)}`
               : toggleLineStyle(toggle.indent),
-          },
+          ),
         }).range(line.from),
       );
 
@@ -973,7 +1073,9 @@ function buildLivePreviewState(
 
     if (isHorizontalRule(line.text)) {
       decorations.push(
-        Decoration.line({ class: "cm-live-horizontal-rule-line" }).range(line.from),
+        Decoration.line({
+          attributes: objectLineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
+        }).range(line.from),
       );
       if (!lineIsActive(state, lineNumber)) {
         addHiddenRange(
@@ -996,12 +1098,15 @@ function buildLivePreviewState(
       const collapsed = hasChildren && nextCollapsed.has(line.from);
       decorations.push(
         Decoration.line({
-          class: [
-            "cm-live-heading",
-            `cm-live-h${level}`,
-            hasChildren ? "cm-live-heading-parent" : "",
-            collapsed ? "cm-live-heading-collapsed" : "",
-          ].filter(Boolean).join(" "),
+          attributes: objectLineAttributes(
+            lineNumber,
+            [
+              "cm-live-heading",
+              `cm-live-h${level}`,
+              hasChildren ? "cm-live-heading-parent" : "",
+              collapsed ? "cm-live-heading-collapsed" : "",
+            ].filter(Boolean).join(" "),
+          ),
         }).range(line.from),
       );
       if (hasChildren) {
@@ -1058,28 +1163,29 @@ function buildLivePreviewState(
 
     if (task) {
       decorations.push(Decoration.line({
-        attributes: {
-          class: "cm-live-task-line cm-live-list-line",
-          style: listLineStyle(visualIndent(line.text.match(/^\s*/)?.[0] ?? ""), "1.45em"),
-        },
+        attributes: objectLineAttributes(
+          lineNumber,
+          "cm-live-task-line cm-live-list-line",
+          listLineStyle(visualIndent(line.text.match(/^\s*/)?.[0] ?? ""), "1.45em"),
+        ),
       }).range(line.from));
     }
 
-    const unorderedList = !task && line.text.match(/^(\s*)([-+*])\s+/);
+    const unorderedList = !task && line.text.match(/^(\s*)([-*])\s+/);
     if (unorderedList) {
       const markerStart = line.from + unorderedList[1].length;
-      addHiddenRange(
+      decorateUnorderedListMarker(
         markerStart,
-        markerStart + unorderedList[2].length + 1,
+        unorderedList[2] as "-" | "*",
         decorations,
         atomicRanges,
-        new TextWidget("•", "cm-live-bullet"),
       );
       decorations.push(Decoration.line({
-        attributes: {
-          class: "cm-live-list-line",
-          style: listLineStyle(visualIndent(unorderedList[1])),
-        },
+        attributes: objectLineAttributes(
+          lineNumber,
+          "cm-live-list-line",
+          listLineStyle(visualIndent(unorderedList[1])),
+        ),
       }).range(line.from));
     }
 
@@ -1094,11 +1200,20 @@ function buildLivePreviewState(
         new TextWidget(orderedList[2], "cm-live-list-marker"),
       );
       decorations.push(Decoration.line({
-        attributes: {
-          class: "cm-live-list-line",
-          style: listLineStyle(visualIndent(orderedList[1]), "2em"),
-        },
+        attributes: objectLineAttributes(
+          lineNumber,
+          "cm-live-list-line",
+          listLineStyle(visualIndent(orderedList[1]), "2em"),
+        ),
       }).range(line.from));
+    }
+
+    if (!task && !unorderedList && !orderedList) {
+      decorations.push(
+        Decoration.line({
+          attributes: objectLineAttributes(lineNumber),
+        }).range(line.from),
+      );
     }
 
     decorateInlineMarkdown(
@@ -1128,9 +1243,10 @@ function livePreviewExtension(
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
+      const collapsed = savedCollapsedPositions(state, noteID) ?? new Set(collapsibleQuotePositions(state));
       return buildLivePreviewState(
         state,
-        new Set(collapsibleQuotePositions(state)),
+        collapsed,
         openWikilink,
         noteID,
         onError,
@@ -1166,6 +1282,7 @@ function livePreviewExtension(
         }
         else collapsed.add(effect.value);
       }
+      persistCollapsedPositions(transaction.state, noteID, collapsed);
       return buildLivePreviewState(transaction.state, collapsed, openWikilink, noteID, onError);
     },
     provide(currentField) {
@@ -1276,15 +1393,60 @@ function snippetCompletion(context: CompletionContext): CompletionResult | null 
       label: `/${snippet.trigger}`,
       detail: snippet.description,
       apply: (view: EditorView, _completion: unknown, from: number, to: number) => {
-        const expansion = expandSnippet(snippet.trigger);
-        view.dispatch({
-          changes: { from, to, insert: expansion },
-          selection: EditorSelection.cursor(from + expansion.length),
-        });
+        applySnippetExpansion(view, snippet.trigger, from, to);
       },
     })),
     validFor: /^[A-Za-z]*$/,
   };
+}
+
+function rollReplacementRange(view: EditorView, from: number, to: number) {
+  const line = view.state.doc.lineAt(from);
+  const beforeTrigger = view.state.sliceDoc(line.from, from);
+  const afterTrigger = view.state.sliceDoc(to, line.to);
+  if (/^\s*>?\s*$/.test(beforeTrigger) && /^\s*$/.test(afterTrigger)) {
+    return { from: line.from, to: line.to };
+  }
+  return { from, to };
+}
+
+function applySnippetExpansion(view: EditorView, trigger: string, from: number, to: number) {
+  const isRoll = trigger === "rollb" || trigger === "rollf";
+  const replacement = isRoll ? rollReplacementRange(view, from, to) : { from, to };
+  const expansion = expandSnippetWithContext(
+    trigger,
+    view.state.sliceDoc(0, replacement.from),
+    view.state.sliceDoc(replacement.to),
+  );
+
+  if (expansion === `/${trigger}`) {
+    console.warn(
+      trigger === "rollf"
+        ? "/rollf did not expand. Place it before a > YYYY-MM-DD section."
+        : `/${trigger} did not expand. Place it after a > YYYY-MM-DD section.`,
+    );
+    return false;
+  }
+
+  console.info(`Expanded /${trigger}`);
+  view.dispatch({
+    changes: { ...replacement, insert: expansion },
+    selection: EditorSelection.cursor(replacement.from + expansion.length),
+  });
+  view.focus();
+  return true;
+}
+
+function expandSnippetBeforeCursor(view: EditorView) {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+
+  const before = view.state.sliceDoc(0, range.head);
+  const match = before.match(/\/([A-Za-z]+)$/);
+  if (!match) return false;
+
+  const from = range.head - match[0].length;
+  return applySnippetExpansion(view, match[1], from, range.head);
 }
 
 function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
@@ -1415,6 +1577,140 @@ function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
   return true;
 }
 
+function objectHandleElement(target: EventTarget | null): HTMLElement | null {
+  return target instanceof HTMLElement
+    ? target.closest<HTMLElement>(".cm-live-object-handle[data-object-line]")
+    : null;
+}
+
+function objectLineElementAt(x: number, y: number): HTMLElement | null {
+  const elements = document.elementsFromPoint(x, y);
+  for (const element of elements) {
+    if (element instanceof HTMLElement && element.matches(".cm-live-object-line[data-object-line]")) {
+      return element;
+    }
+    if (element instanceof HTMLElement) {
+      const line = element.closest<HTMLElement>(".cm-live-object-line[data-object-line]");
+      if (line) return line;
+    }
+  }
+  return null;
+}
+
+type ObjectDropMode = "before" | "child" | "after";
+
+function dropModeForPoint(
+  targetLine: HTMLElement,
+  clientY: number,
+  previous?: ObjectDropMode | null,
+): ObjectDropMode {
+  const rect = targetLine.getBoundingClientRect();
+  const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+  if (previous === "before" && ratio < 0.4) return "before";
+  if (previous === "after" && ratio > 0.6) return "after";
+  if (previous === "child" && ratio > 0.2 && ratio < 0.8) return "child";
+  if (ratio < 0.28) return "before";
+  if (ratio > 0.72) return "after";
+  return "child";
+}
+
+function clearObjectDropPreview(target?: HTMLElement | null) {
+  if (target) {
+    target.classList.remove("is-drop-before", "is-drop-child", "is-drop-after");
+    target.removeAttribute("data-drop-mode");
+    return;
+  }
+  document.querySelectorAll(".cm-live-object-line[data-drop-mode]").forEach((element) => {
+    element.classList.remove("is-drop-before", "is-drop-child", "is-drop-after");
+    element.removeAttribute("data-drop-mode");
+  });
+}
+
+function movableLineIndent(text: string): number {
+  const toggle = toggleLine(text);
+  return toggle ? toggle.indent : lineIndent(text);
+}
+
+function movableBlockEnd(state: EditorState, startLineNumber: number): number {
+  const startLine = state.doc.line(startLineNumber);
+  const startIndent = movableLineIndent(startLine.text);
+  let endLineNumber = startLineNumber;
+
+  for (let lineNumber = startLineNumber + 1; lineNumber <= state.doc.lines; lineNumber++) {
+    const line = state.doc.line(lineNumber);
+    if (line.text.trim() === "") break;
+    if (movableLineIndent(line.text) <= startIndent) break;
+    endLineNumber = lineNumber;
+  }
+
+  return endLineNumber;
+}
+
+function reindentLine(text: string, delta: number): string {
+  if (text.trim() === "" || delta === 0) return text;
+  if (delta > 0) return `${" ".repeat(delta)}${text}`;
+  const removable = Math.min(text.match(/^ */)?.[0].length ?? 0, Math.abs(delta));
+  return text.slice(removable);
+}
+
+function reindentBlock(text: string, fromIndent: number, toIndent: number): string {
+  const delta = Math.max(0, toIndent) - fromIndent;
+  return text.split("\n").map((line) => reindentLine(line, delta)).join("\n");
+}
+
+function moveObjectBlock(
+  view: EditorView,
+  sourceLineNumber: number,
+  targetLineNumber: number,
+  clientY: number,
+  targetElement: HTMLElement,
+  forcedMode?: ObjectDropMode | null,
+) {
+  if (sourceLineNumber === targetLineNumber) return false;
+
+  const state = view.state;
+  const sourceStart = state.doc.line(sourceLineNumber);
+  const sourceEnd = state.doc.line(movableBlockEnd(state, sourceLineNumber));
+  if (targetLineNumber >= sourceLineNumber && targetLineNumber <= sourceEnd.number) return false;
+
+  const targetLine = state.doc.line(targetLineNumber);
+  const mode = forcedMode ?? dropModeForPoint(targetElement, clientY);
+  const targetIndent = movableLineIndent(targetLine.text);
+  const newIndent = mode === "child" ? targetIndent + 2 : targetIndent;
+  const targetEndNumber = mode === "after" ? movableBlockEnd(state, targetLineNumber) : targetLineNumber;
+  const targetEnd = state.doc.line(targetEndNumber);
+
+  const doc = state.doc.toString();
+  const sourceFrom = sourceStart.from;
+  const sourceTo = sourceEnd.number < state.doc.lines ? sourceEnd.to + 1 : sourceEnd.to;
+  const rawBlock = doc.slice(sourceFrom, sourceTo).replace(/\n$/, "");
+  const movedBlock = reindentBlock(rawBlock, movableLineIndent(sourceStart.text), newIndent);
+  const insertionPoint = mode === "before"
+    ? targetLine.from
+    : targetEnd.number < state.doc.lines
+      ? targetEnd.to + 1
+      : targetEnd.to;
+
+  const withoutBlock = doc.slice(0, sourceFrom) + doc.slice(sourceTo);
+  const insertPos = sourceFrom < insertionPoint ? insertionPoint - (sourceTo - sourceFrom) : insertionPoint;
+  const prefix = insertPos > 0 && withoutBlock[insertPos - 1] !== "\n" ? "\n" : "";
+  const suffix = insertPos < withoutBlock.length && withoutBlock[insertPos] !== "\n" ? "\n" : "";
+  const movedBlockText = `${prefix}${movedBlock}${suffix}`;
+
+  const newDocLength = doc.length - (sourceTo - sourceFrom) + movedBlockText.length;
+  const cursorPos = Math.min((sourceFrom < insertionPoint ? insertionPoint - (sourceTo - sourceFrom) : insertionPoint) + prefix.length, newDocLength);
+
+  view.dispatch({
+    changes: [
+      { from: sourceFrom, to: sourceTo, insert: "" },
+      { from: insertionPoint, insert: movedBlockText },
+    ],
+    selection: EditorSelection.cursor(cursorPos),
+  });
+  view.focus();
+  return true;
+}
+
 export default function LiveMarkdownEditor({
   noteID,
   value,
@@ -1435,6 +1731,30 @@ export default function LiveMarkdownEditor({
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const pendingScroll = useRef<number | null>(scrollToOffset ?? null);
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const editorHost = host.current;
+    if (!editorHost) return;
+
+    const editorShell = editorHost.closest<HTMLElement>(".editor-shell");
+    const documentBody = editorShell?.querySelector<HTMLElement>(".document-body");
+
+    if (!editorShell || !documentBody) return;
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "markdown-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Markdown formatting");
+
+    editorShell.insertBefore(toolbar, documentBody);
+    setToolbarHost(toolbar);
+
+    return () => {
+      setToolbarHost(null);
+      toolbar.remove();
+    };
+  }, []);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -1462,6 +1782,16 @@ export default function LiveMarkdownEditor({
         extensions: [
           Prec.highest(keymap.of([
             {
+              key: "Mod-z",
+              preventDefault: true,
+              run: (editor) => undo(editor),
+            },
+            {
+              key: "Ctrl-r",
+              preventDefault: true,
+              run: (editor) => redo(editor),
+            },
+            {
               key: "Ctrl-]",
               preventDefault: true,
               run: (editor) => setCurrentSectionCollapsed(editor, false),
@@ -1484,7 +1814,9 @@ export default function LiveMarkdownEditor({
             {
               key: "Enter",
               run: (editor) =>
-                acceptCompletion(editor) || insertNewlineAtOutlineDepth(editor),
+                acceptCompletion(editor) ||
+                expandSnippetBeforeCursor(editor) ||
+                insertNewlineAtOutlineDepth(editor),
             },
             {
               key: "Tab",
@@ -1585,6 +1917,66 @@ export default function LiveMarkdownEditor({
             spellcheck: "true",
           }),
           EditorView.domEventHandlers({
+            pointerdown(event, pointerView) {
+              const handle = objectHandleElement(event.target);
+              const sourceLine = Number(handle?.dataset.objectLine);
+              if (!handle || !Number.isFinite(sourceLine)) return false;
+              event.preventDefault();
+              event.stopPropagation();
+              handle.setPointerCapture(event.pointerId);
+              handle.classList.add("is-dragging");
+              const sourceElement = handle.closest<HTMLElement>(".cm-live-object-line");
+              sourceElement?.classList.add("is-dragging");
+
+              const ghost = document.body.appendChild(document.createElement("div"));
+              ghost.className = "cm-live-drag-ghost";
+              ghost.textContent = pointerView.state.doc.line(sourceLine).text.trim() || "Object";
+
+              let lastX = event.clientX;
+              let lastY = event.clientY;
+              let previewTarget: HTMLElement | null = null;
+              let previewMode: ObjectDropMode | null = null;
+              const updateGhost = () => {
+                ghost.style.transform = `translate(${lastX + 12}px, ${lastY + 12}px)`;
+              };
+              updateGhost();
+              const move = (moveEvent: PointerEvent) => {
+                lastX = moveEvent.clientX;
+                lastY = moveEvent.clientY;
+                updateGhost();
+                const targetLine = objectLineElementAt(lastX, lastY);
+                if (targetLine !== previewTarget) {
+                  clearObjectDropPreview(previewTarget);
+                  previewTarget = targetLine;
+                  previewMode = null;
+                }
+                if (previewTarget) {
+                  const mode = dropModeForPoint(previewTarget, lastY, previewMode);
+                  previewMode = mode;
+                  previewTarget.classList.remove("is-drop-before", "is-drop-child", "is-drop-after");
+                  previewTarget.classList.add(`is-drop-${mode}`);
+                  previewTarget.dataset.dropMode = mode;
+                }
+              };
+              const finish = (upEvent: PointerEvent) => {
+                handle.releasePointerCapture(upEvent.pointerId);
+                handle.classList.remove("is-dragging");
+                sourceElement?.classList.remove("is-dragging");
+                ghost.remove();
+                clearObjectDropPreview(previewTarget);
+                document.removeEventListener("pointermove", move);
+                document.removeEventListener("pointerup", finish);
+                document.removeEventListener("pointercancel", finish);
+                const targetLine = objectLineElementAt(lastX, lastY);
+                const targetLineNumber = Number(targetLine?.dataset.objectLine);
+                if (!targetLine || !Number.isFinite(targetLineNumber)) return;
+                moveObjectBlock(pointerView, sourceLine, targetLineNumber, lastY, targetLine, previewMode);
+              };
+              document.addEventListener("pointermove", move);
+              document.addEventListener("pointerup", finish);
+              document.addEventListener("pointercancel", finish);
+              return true;
+            },
             paste(event, pastedView) {
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) return false;
@@ -1674,106 +2066,114 @@ export default function LiveMarkdownEditor({
   };
 
   return (
-    <div className="live-editor-frame">
-      <div className="markdown-toolbar" role="toolbar" aria-label="Markdown formatting">
-        <button
-          type="button"
-          title="Bold"
-          aria-label="Make text bold"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => wrapSelection(editor, "**"));
-          }}
-        >
-          <strong>B</strong>
-        </button>
-        <span className="markdown-toolbar-separator" />
-        <button
-          type="button"
-          title="Checklist"
-          aria-label="Insert checklist item"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => prefixSelectedLines(editor, "* [ ] "));
-          }}
-        >
-          <span className="toolbar-checkbox" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          title="Bullet list"
-          aria-label="Insert bullet point"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => prefixSelectedLines(editor, "* "));
-          }}
-        >
-          <span className="toolbar-bullet" aria-hidden="true">
-            •
-          </span>
-        </button>
-        <span className="markdown-toolbar-separator" />
-        <button
-          type="button"
-          title="Toggle section"
-          aria-label="Insert toggle section"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => prefixSelectedLines(editor, "> "));
-          }}
-        >
-          <span className="toolbar-toggle" aria-hidden="true">
-            ▾
-          </span>
-        </button>
-        <button
-          type="button"
-          title="Outdent toggle (Shift+Tab)"
-          aria-label="Outdent toggle section"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => changeOutlineDepth(editor, -1));
-          }}
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          title="Indent toggle (Tab)"
-          aria-label="Indent toggle section"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => changeOutlineDepth(editor, 1));
-          }}
-        >
-          ›
-        </button>
-        <button
-          type="button"
-          title="Collapse all sections (Ctrl+Shift+[)"
-          aria-label="Collapse all sections"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => setAllSectionsCollapsed(editor, true));
-          }}
-        >
-          ⊟
-        </button>
-        <button
-          type="button"
-          title="Expand all sections (Ctrl+Shift+])"
-          aria-label="Expand all sections"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runWithEditor((editor) => setAllSectionsCollapsed(editor, false));
-          }}
-        >
-          ⊞
-        </button>
+    <>
+      {toolbarHost
+        ? createPortal(
+            <>
+              <button
+                type="button"
+                title="Bold"
+                aria-label="Make text bold"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => wrapSelection(editor, "**"));
+                }}
+              >
+                <strong>B</strong>
+              </button>
+              <span className="markdown-toolbar-separator" />
+              <button
+                type="button"
+                title="Checklist"
+                aria-label="Insert checklist item"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "* [ ] "));
+                }}
+              >
+                <span className="toolbar-checkbox" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                title="Bullet list"
+                aria-label="Insert bullet point"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "* "));
+                }}
+              >
+                <span className="toolbar-bullet" aria-hidden="true">
+                  •
+                </span>
+              </button>
+              <span className="markdown-toolbar-separator" />
+              <button
+                type="button"
+                title="Toggle section"
+                aria-label="Insert toggle section"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "> "));
+                }}
+              >
+                <span className="toolbar-toggle" aria-hidden="true">
+                  ▾
+                </span>
+              </button>
+              <button
+                type="button"
+                title="Outdent toggle (Shift+Tab)"
+                aria-label="Outdent toggle section"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => changeOutlineDepth(editor, -1));
+                }}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                title="Indent toggle (Tab)"
+                aria-label="Indent toggle section"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => changeOutlineDepth(editor, 1));
+                }}
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                title="Collapse all sections (Ctrl+Shift+[)"
+                aria-label="Collapse all sections"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => setAllSectionsCollapsed(editor, true));
+                }}
+              >
+                ⊟
+              </button>
+              <button
+                type="button"
+                title="Expand all sections (Ctrl+Shift+])"
+                aria-label="Expand all sections"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => setAllSectionsCollapsed(editor, false));
+                }}
+              >
+                ⊞
+              </button>
+            </>,
+            toolbarHost,
+          )
+        : null}
+      <div className="live-editor-frame">
+        <div ref={host} className="live-markdown-editor" />
       </div>
-      <div ref={host} className="live-markdown-editor" />
-    </div>
+    </>
   );
+
 }
 
 export async function imageDataURL(source: Blob | string): Promise<string> {

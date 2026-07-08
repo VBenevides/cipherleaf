@@ -95,7 +95,7 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(session.Path, "attachments", note.ID, id+".enc")
+	path := filepath.Join(session.Path, "attachments", sharedAttachmentFolder, id+".enc")
 	encrypted, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +109,17 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	}
 	if !bytes.Equal(loaded, webp) {
 		t.Fatalf("GetAttachment() = %q, want %q", loaded, webp)
+	}
+	other, err := store.CreateNote("Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedFromOtherNote, err := store.GetAttachment(other.ID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(loadedFromOtherNote, webp) {
+		t.Fatal("shared attachment differs when read from another note")
 	}
 	staleID, err := store.SaveAttachment(note.ID, webp)
 	if err != nil {
@@ -160,8 +171,8 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	if err := store.DeleteNote(note.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("attachment folder remains after deleting note: %v", err)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("attachment remains after deleting note: %v", err)
 	}
 }
 
