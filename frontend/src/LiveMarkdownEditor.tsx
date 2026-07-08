@@ -36,6 +36,21 @@ import {
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
+import {
+  continuationPrefix,
+  isContinuationLine,
+  isSeparatorLine,
+  lineIndent,
+  lineStartsObject,
+  moveObjectInMarkdown,
+  objectContentIndent,
+  objectHierarchyIndent,
+  objectOwnerLineNumber as ownerLineNumberInLines,
+  parseObjectDocument,
+  repeatedObjectPrefix,
+  visualIndent,
+  type ObjectDropMode,
+} from "./objectDocument";
 import { SNIPPETS, expandSnippetWithContext } from "./snippets";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
@@ -52,7 +67,7 @@ type LiveMarkdownEditorProps = {
 };
 
 type LivePreviewState = {
-  collapsedQuotes: ReadonlySet<number>;
+  collapsedQuotes: ReadonlySet<string>;
   decorations: DecorationSet;
   atomicRanges: DecorationSet;
 };
@@ -61,30 +76,25 @@ function collapsedStorageKey(noteID: string): string {
   return `cipherleaf-collapsed-sections:${noteID}`;
 }
 
-function savedCollapsedPositions(state: EditorState, noteID: string): Set<number> | null {
+function collapseKeyForPosition(state: EditorState, position: number): string {
+  const line = state.doc.lineAt(position);
+  const object = parseObjectDocument(state.doc.toString()).byLine.get(line.number);
+  return object ? `object:${object.id}` : `position:${line.from}`;
+}
+
+function savedCollapsedPositions(_state: EditorState, noteID: string): Set<string> | null {
   try {
     const saved = window.localStorage.getItem(collapsedStorageKey(noteID));
     if (!saved) return null;
-    const texts = new Set(JSON.parse(saved) as string[]);
-    const positions = new Set<number>();
-    for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
-      const line = state.doc.line(lineNumber);
-      if (texts.has(line.text)) positions.add(line.from);
-    }
-    return positions;
+    return new Set(JSON.parse(saved) as string[]);
   } catch {
     return null;
   }
 }
 
-function persistCollapsedPositions(state: EditorState, noteID: string, collapsed: ReadonlySet<number>) {
+function persistCollapsedPositions(_state: EditorState, noteID: string, collapsed: ReadonlySet<string>) {
   try {
-    const texts: string[] = [];
-    for (const position of collapsed) {
-      if (position < 0 || position > state.doc.length) continue;
-      texts.push(state.doc.lineAt(position).text);
-    }
-    window.localStorage.setItem(collapsedStorageKey(noteID), JSON.stringify(texts));
+    window.localStorage.setItem(collapsedStorageKey(noteID), JSON.stringify([...collapsed]));
   } catch {
     // Best-effort UI state persistence.
   }
@@ -713,57 +723,8 @@ type ToggleLine = {
   content: string;
 };
 
-function visualIndent(text: string): number {
-  return text.replace(/\t/g, "  ").length;
-}
-
-function lineIndent(text: string): number {
-  return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
-}
-
-function objectHierarchyIndent(text: string): number {
-  const quote = text.match(/^([ \t]*)(>+)/);
-  return quote ? visualIndent(quote[1]) + (quote[2].length - 1) * 2 : lineIndent(text);
-}
-
-function lineStartsObject(text: string): boolean {
-  if (/^[ \t]*>/.test(text)) return true;
-  const source = text.trimStart();
-  return Boolean(
-    parseAttachmentMarkdown(source) ||
-      /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
-      /^(?:[-+*]\s+)?\[[ xX]\]\s+/.test(source) ||
-      /^[-*]\s+/.test(source) ||
-      /^\d+[.)]\s+/.test(source) ||
-      /^#{1,6}\s+/.test(source),
-  );
-}
-
-function objectContentIndent(text: string): number {
-  const quote = text.match(/^([ \t]*)(>+)([ \t]?)/);
-  if (quote) return visualIndent(quote[1]) + quote[2].length + visualIndent(quote[3]);
-
-  const marker = text.match(/^([ \t]*)((?:[-+*][ \t]+)?\[[ xX]\][ \t]+|[-*][ \t]+|\d+[.)][ \t]+)/);
-  if (marker) return visualIndent(marker[1]) + visualIndent(marker[2]);
-
-  return lineIndent(text);
-}
-
-function repeatedObjectPrefix(text: string): string | null {
-  const quote = text.match(/^([ \t]*)(>+)([ \t]?)/);
-  if (quote) return `${quote[1]}${quote[2]} `;
-
-  const task = text.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
-  if (task) return `${task[1]}${task[2] ?? ""}[ ] `;
-
-  const unordered = text.match(/^([ \t]*)([-+*])[ \t]+/);
-  if (unordered) return `${unordered[1]}${unordered[2]} `;
-
-  const ordered = text.match(/^([ \t]*)(\d+)([.)])[ \t]+/);
-  if (ordered) return `${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `;
-
-  const indentation = text.match(/^[ \t]+/)?.[0];
-  return indentation ?? null;
+function stateLines(state: EditorState): string[] {
+  return state.doc.toString().split("\n");
 }
 
 function parentObjectPrefixForContinuation(state: EditorState, lineNumber: number): string | null {
@@ -782,44 +743,15 @@ function parentObjectPrefixForContinuation(state: EditorState, lineNumber: numbe
 }
 
 function isObjectContinuationLine(state: EditorState, lineNumber: number): boolean {
-  if (lineNumber <= 1) return false;
-  const line = state.doc.line(lineNumber);
-  if (lineStartsObject(line.text)) return false;
-
-  if (line.text.trim() === "") {
-    const next = lineNumber < state.doc.lines ? state.doc.line(lineNumber + 1) : null;
-    if (!next || next.text.trim() === "" || lineStartsObject(next.text)) return false;
-  }
-
-  for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
-    const previous = state.doc.line(previousNumber);
-    if (previous.text.trim() === "") continue;
-    if (!lineStartsObject(previous.text)) continue;
-    if (line.text.trim() === "") {
-      const next = state.doc.line(lineNumber + 1);
-      return lineIndent(next.text) >= objectContentIndent(previous.text);
-    }
-    if (lineIndent(line.text) >= objectContentIndent(previous.text)) return true;
-    return false;
-  }
-
-  return false;
+  return isContinuationLine(stateLines(state), lineNumber);
 }
 
 function isSectionSeparatorLine(state: EditorState, lineNumber: number): boolean {
-  const line = state.doc.line(lineNumber);
-  return line.text.trim() === "" && !isObjectContinuationLine(state, lineNumber);
+  return isSeparatorLine(stateLines(state), lineNumber);
 }
 
 function objectOwnerLineNumber(state: EditorState, lineNumber: number): number {
-  if (lineNumber <= 1 || !isObjectContinuationLine(state, lineNumber)) return lineNumber;
-
-  for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
-    const previous = state.doc.line(previousNumber);
-    if (lineStartsObject(previous.text)) return previousNumber;
-  }
-
-  return lineNumber;
+  return ownerLineNumberInLines(stateLines(state), lineNumber);
 }
 
 function toggleLine(text: string): ToggleLine | null {
@@ -970,14 +902,14 @@ function collapsibleQuotePositions(state: EditorState): number[] {
 function expandToggleTree(
   state: EditorState,
   position: number,
-  collapsed: Set<number>,
+  collapsed: Set<string>,
 ) {
   const line = state.doc.lineAt(position);
   const toggle = toggleLine(line.text);
   const level = headingLevel(line.text);
 
   if (line.from !== position) {
-    collapsed.delete(position);
+    collapsed.delete(collapseKeyForPosition(state, position));
     return;
   }
 
@@ -991,13 +923,13 @@ function expandToggleTree(
     lineNumber <= endLineNumber;
     lineNumber++
   ) {
-    collapsed.delete(state.doc.line(lineNumber).from);
+    collapsed.delete(collapseKeyForPosition(state, state.doc.line(lineNumber).from));
   }
 }
 
 function buildLivePreviewState(
   state: EditorState,
-  collapsedQuotes: ReadonlySet<number>,
+  collapsedQuotes: ReadonlySet<string>,
   openWikilink: (title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
@@ -1089,7 +1021,8 @@ function buildLivePreviewState(
       );
 
       const hasChildren = sectionEndLineNumber > lineNumber;
-      const collapsed = hasChildren && nextCollapsed.has(line.from);
+      const collapseKey = collapseKeyForPosition(state, line.from);
+      const collapsed = hasChildren && nextCollapsed.has(collapseKey);
       const contentOffset = line.from + toggle.prefixSize;
 
       const isTask = !toggleAttachment && decorateTaskMarker(
@@ -1223,7 +1156,8 @@ function buildLivePreviewState(
       const level = heading[1].length;
       const sectionEndLineNumber = headingSectionEnd(state, lineNumber, level);
       const hasChildren = sectionEndLineNumber > lineNumber;
-      const collapsed = hasChildren && nextCollapsed.has(line.from);
+      const collapseKey = collapseKeyForPosition(state, line.from);
+      const collapsed = hasChildren && nextCollapsed.has(collapseKey);
       decorations.push(
         Decoration.line({
           attributes: objectLineAttributes(
@@ -1385,7 +1319,8 @@ function livePreviewExtension(
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
-      const collapsed = savedCollapsedPositions(state, noteID) ?? new Set(collapsibleQuotePositions(state));
+      const collapsed = savedCollapsedPositions(state, noteID) ??
+        new Set(collapsibleQuotePositions(state).map((position) => collapseKeyForPosition(state, position)));
       return buildLivePreviewState(
         state,
         collapsed,
@@ -1395,22 +1330,20 @@ function livePreviewExtension(
       );
     },
     update(value, transaction) {
-      const collapsed = new Set<number>();
-      for (const position of value.collapsedQuotes) {
-        collapsed.add(transaction.changes.mapPos(position));
-      }
+      const collapsed = new Set(value.collapsedQuotes);
       for (const effect of transaction.effects) {
         if (effect.is(setAllQuotesCollapsed)) {
           collapsed.clear();
           if (effect.value) {
             for (const position of collapsibleQuotePositions(transaction.state)) {
-              collapsed.add(position);
+              collapsed.add(collapseKeyForPosition(transaction.state, position));
             }
           }
           continue;
         }
         if (effect.is(setQuoteCollapsed)) {
-          if (effect.value.collapsed) collapsed.add(effect.value.position);
+          const key = collapseKeyForPosition(transaction.state, effect.value.position);
+          if (effect.value.collapsed) collapsed.add(key);
           else expandToggleTree(
             transaction.state,
             effect.value.position,
@@ -1419,10 +1352,11 @@ function livePreviewExtension(
           continue;
         }
         if (!effect.is(toggleQuote)) continue;
-        if (collapsed.has(effect.value)) {
+        const key = collapseKeyForPosition(transaction.state, effect.value);
+        if (collapsed.has(key)) {
           expandToggleTree(transaction.state, effect.value, collapsed);
         }
-        else collapsed.add(effect.value);
+        else collapsed.add(key);
       }
       persistCollapsedPositions(transaction.state, noteID, collapsed);
       return buildLivePreviewState(transaction.state, collapsed, openWikilink, noteID, onError);
@@ -1664,23 +1598,6 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   return true;
 }
 
-function continuationPrefix(text: string): string | null {
-  const toggle = text.match(/^([ \t]*)>([ \t]?)/);
-  if (toggle) return `${toggle[1]}${" ".repeat(1 + toggle[2].length)}`;
-
-  const task = text.match(/^([ \t]*)(?:[-+*][ \t]+)?\[([ xX])\][ \t]+/);
-  if (task) return `${task[1]}${" ".repeat(task[0].length - task[1].length)}`;
-
-  const unordered = text.match(/^([ \t]*)([-+*])[ \t]+/);
-  if (unordered) return `${unordered[1]}${" ".repeat(unordered[0].length - unordered[1].length)}`;
-
-  const ordered = text.match(/^([ \t]*)(\d+[.)])[ \t]+/);
-  if (ordered) return `${ordered[1]}${" ".repeat(ordered[0].length - ordered[1].length)}`;
-
-  const indentation = text.match(/^[ \t]+/)?.[0];
-  return indentation ?? null;
-}
-
 function insertSoftObjectBreak(view: EditorView) {
   const range = view.state.selection.main;
   if (!range.empty) return false;
@@ -1814,8 +1731,6 @@ function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElemen
   return null;
 }
 
-type ObjectDropMode = "before" | "child" | "after";
-
 function dropModeForPoint(
   targetLine: HTMLElement,
   clientY: number,
@@ -1843,53 +1758,6 @@ function clearObjectDropPreview(target?: HTMLElement | null) {
   });
 }
 
-function movableLineIndent(text: string): number {
-  const toggle = toggleLine(text);
-  return toggle ? toggle.indent : lineIndent(text);
-}
-
-function movableBlockEnd(state: EditorState, startLineNumber: number): number {
-  const startLine = state.doc.line(startLineNumber);
-  const startIndent = movableLineIndent(startLine.text);
-  let endLineNumber = startLineNumber;
-
-  for (let lineNumber = startLineNumber + 1; lineNumber <= state.doc.lines; lineNumber++) {
-    const line = state.doc.line(lineNumber);
-    if (isSectionSeparatorLine(state, lineNumber)) break;
-    if (
-      line.text.trim() !== "" &&
-      lineStartsObject(line.text) &&
-      movableLineIndent(line.text) <= startIndent
-    ) break;
-    endLineNumber = lineNumber;
-  }
-
-  return endLineNumber;
-}
-
-function objectTextBlockEnd(state: EditorState, startLineNumber: number): number {
-  let endLineNumber = startLineNumber;
-
-  for (let lineNumber = startLineNumber + 1; lineNumber <= state.doc.lines; lineNumber++) {
-    if (!isObjectContinuationLine(state, lineNumber)) break;
-    endLineNumber = lineNumber;
-  }
-
-  return endLineNumber;
-}
-
-function reindentLine(text: string, delta: number): string {
-  if (text.trim() === "" || delta === 0) return text;
-  if (delta > 0) return `${" ".repeat(delta)}${text}`;
-  const removable = Math.min(text.match(/^ */)?.[0].length ?? 0, Math.abs(delta));
-  return text.slice(removable);
-}
-
-function reindentBlock(text: string, fromIndent: number, toIndent: number): string {
-  const delta = Math.max(0, toIndent) - fromIndent;
-  return text.split("\n").map((line) => reindentLine(line, delta)).join("\n");
-}
-
 function moveObjectBlock(
   view: EditorView,
   sourceLineNumber: number,
@@ -1901,47 +1769,14 @@ function moveObjectBlock(
   if (sourceLineNumber === targetLineNumber) return false;
 
   const state = view.state;
-  const sourceStart = state.doc.line(sourceLineNumber);
-  const sourceEnd = state.doc.line(movableBlockEnd(state, sourceLineNumber));
-  if (targetLineNumber >= sourceLineNumber && targetLineNumber <= sourceEnd.number) return false;
-
-  const targetLine = state.doc.line(targetLineNumber);
   const mode = forcedMode ?? dropModeForPoint(targetElement, clientY);
-  const targetIndent = movableLineIndent(targetLine.text);
-  const newIndent = mode === "child" ? targetIndent + 2 : targetIndent;
-  const targetEndNumber = mode === "after"
-    ? movableBlockEnd(state, targetLineNumber)
-    : mode === "child"
-      ? objectTextBlockEnd(state, targetLineNumber)
-      : targetLineNumber;
-  const targetEnd = state.doc.line(targetEndNumber);
-
   const doc = state.doc.toString();
-  const sourceFrom = sourceStart.from;
-  const sourceTo = sourceEnd.number < state.doc.lines ? sourceEnd.to + 1 : sourceEnd.to;
-  const rawBlock = doc.slice(sourceFrom, sourceTo).replace(/\n$/, "");
-  const movedBlock = reindentBlock(rawBlock, movableLineIndent(sourceStart.text), newIndent);
-  const insertionPoint = mode === "before"
-    ? targetLine.from
-    : targetEnd.number < state.doc.lines
-      ? targetEnd.to + 1
-      : targetEnd.to;
-
-  const withoutBlock = doc.slice(0, sourceFrom) + doc.slice(sourceTo);
-  const insertPos = sourceFrom < insertionPoint ? insertionPoint - (sourceTo - sourceFrom) : insertionPoint;
-  const prefix = insertPos > 0 && withoutBlock[insertPos - 1] !== "\n" ? "\n" : "";
-  const suffix = insertPos < withoutBlock.length && withoutBlock[insertPos] !== "\n" ? "\n" : "";
-  const movedBlockText = `${prefix}${movedBlock}${suffix}`;
-
-  const newDocLength = doc.length - (sourceTo - sourceFrom) + movedBlockText.length;
-  const cursorPos = Math.min((sourceFrom < insertionPoint ? insertionPoint - (sourceTo - sourceFrom) : insertionPoint) + prefix.length, newDocLength);
+  const next = moveObjectInMarkdown(doc, sourceLineNumber, targetLineNumber, mode);
+  if (next === doc) return false;
 
   view.dispatch({
-    changes: [
-      { from: sourceFrom, to: sourceTo, insert: "" },
-      { from: insertionPoint, insert: movedBlockText },
-    ],
-    selection: EditorSelection.cursor(cursorPos),
+    changes: { from: 0, to: state.doc.length, insert: next },
+    selection: EditorSelection.cursor(Math.min(state.doc.line(sourceLineNumber).from, next.length)),
   });
   view.focus();
   return true;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { markdownObjectTree, moveObjectInMarkdown } from "../src/objectTree.ts";
+import { markdownObjectTree, moveObject, moveObjectInMarkdown } from "../src/objectTree.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -95,5 +95,20 @@ test("moves objects after multiline object text", () => {
     "  first",
     "  ",
     "  second",
+  ].join("\n"));
+});
+
+test("moves objects by id", () => {
+  const markdown = [
+    "> A",
+    "> B",
+    "> C",
+  ].join("\n");
+  const tree = markdownObjectTree(markdown);
+
+  assert.equal(moveObject(markdown, tree[0].id, tree[2].id, "after"), [
+    "> B",
+    "> C",
+    "> A",
   ].join("\n"));
 });

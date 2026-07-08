@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type PointerEvent } from "react";
 import {
   markdownObjectTree,
-  moveObjectInMarkdown,
+  moveObject,
   type ObjectDropMode,
   type ObjectLine,
 } from "./objectTree";
@@ -21,9 +21,9 @@ function dropModeForPoint(target: HTMLElement, clientY: number): ObjectDropMode 
 
 function objectTreeRowAt(x: number, y: number): HTMLElement | null {
   for (const element of document.elementsFromPoint(x, y)) {
-    if (element instanceof HTMLElement && element.matches(".object-tree-row[data-object-line]")) return element;
+    if (element instanceof HTMLElement && element.matches(".object-tree-row[data-object-id]")) return element;
     if (element instanceof HTMLElement) {
-      const row = element.closest<HTMLElement>(".object-tree-row[data-object-line]");
+      const row = element.closest<HTMLElement>(".object-tree-row[data-object-id]");
       if (row) return row;
     }
   }
@@ -32,16 +32,16 @@ function objectTreeRowAt(x: number, y: number): HTMLElement | null {
 
 function ObjectTreeNode({
   node,
-  draggedLine,
+  draggedId,
   dropTarget,
   onPointerDragStart,
 }: {
   node: ObjectLine;
-  draggedLine: number | null;
-  dropTarget: { lineNumber: number; mode: ObjectDropMode } | null;
-  onPointerDragStart: (event: PointerEvent<HTMLElement>, lineNumber: number) => void;
+  draggedId: string | null;
+  dropTarget: { id: string; mode: ObjectDropMode } | null;
+  onPointerDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
 }) {
-  const currentDrop = dropTarget?.lineNumber === node.lineNumber ? dropTarget.mode : null;
+  const currentDrop = dropTarget?.id === node.id ? dropTarget.mode : null;
 
   return (
     <li>
@@ -49,16 +49,17 @@ function ObjectTreeNode({
         className={[
           "object-tree-row",
           `tag-${node.tag}`,
-          draggedLine === node.lineNumber ? "is-dragging" : "",
+          draggedId === node.id ? "is-dragging" : "",
           currentDrop ? `is-drop-${currentDrop}` : "",
         ].filter(Boolean).join(" ")}
+        data-object-id={node.id}
         data-object-line={node.lineNumber}
         data-drop-mode={currentDrop ?? undefined}
       >
         <span
           className="object-tree-handle"
           aria-hidden="true"
-          onPointerDown={(event) => onPointerDragStart(event, node.lineNumber)}
+          onPointerDown={(event) => onPointerDragStart(event, node.id)}
         >
           ⋮⋮
         </span>
@@ -84,7 +85,7 @@ function ObjectTreeNode({
             <ObjectTreeNode
               key={child.id}
               node={child}
-              draggedLine={draggedLine}
+              draggedId={draggedId}
               dropTarget={dropTarget}
               onPointerDragStart={onPointerDragStart}
             />
@@ -97,34 +98,34 @@ function ObjectTreeNode({
 
 export default function ObjectTreeView({ value, onChange }: Props) {
   const tree = useMemo(() => markdownObjectTree(value), [value]);
-  const [draggedLine, setDraggedLine] = useState<number | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ lineNumber: number; mode: ObjectDropMode } | null>(null);
-  const draggedLineRef = useRef<number | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; mode: ObjectDropMode } | null>(null);
+  const draggedIdRef = useRef<string | null>(null);
 
-  const finishDrop = (sourceLineNumber: number, targetLineNumber: number, mode: ObjectDropMode) => {
-    const next = moveObjectInMarkdown(value, sourceLineNumber, targetLineNumber, mode);
+  const finishDrop = (sourceId: string, targetId: string, mode: ObjectDropMode) => {
+    const next = moveObject(value, sourceId, targetId, mode);
     if (next !== value) onChange(next);
-    draggedLineRef.current = null;
-    setDraggedLine(null);
+    draggedIdRef.current = null;
+    setDraggedId(null);
     setDropTarget(null);
   };
 
-  const startPointerDrag = (event: PointerEvent<HTMLElement>, lineNumber: number) => {
+  const startPointerDrag = (event: PointerEvent<HTMLElement>, id: string) => {
     event.preventDefault();
     event.stopPropagation();
     const handle = event.currentTarget;
-    draggedLineRef.current = lineNumber;
-    setDraggedLine(lineNumber);
+    draggedIdRef.current = id;
+    setDraggedId(id);
     handle.setPointerCapture(event.pointerId);
 
     const move = (moveEvent: globalThis.PointerEvent) => {
       const target = objectTreeRowAt(moveEvent.clientX, moveEvent.clientY);
-      const targetLine = Number(target?.dataset.objectLine);
-      if (!target || !Number.isFinite(targetLine)) {
+      const targetId = target?.dataset.objectId;
+      if (!target || !targetId) {
         setDropTarget(null);
         return;
       }
-      setDropTarget({ lineNumber: targetLine, mode: dropModeForPoint(target, moveEvent.clientY) });
+      setDropTarget({ id: targetId, mode: dropModeForPoint(target, moveEvent.clientY) });
     };
 
     function cleanup() {
@@ -136,23 +137,23 @@ export default function ObjectTreeView({ value, onChange }: Props) {
     function finish(upEvent: globalThis.PointerEvent) {
       handle.releasePointerCapture(upEvent.pointerId);
       cleanup();
-      const sourceLine = draggedLineRef.current;
+      const sourceId = draggedIdRef.current;
       const target = objectTreeRowAt(upEvent.clientX, upEvent.clientY);
-      const targetLine = Number(target?.dataset.objectLine);
-      if (sourceLine !== null && target && Number.isFinite(targetLine)) {
-        finishDrop(sourceLine, targetLine, dropModeForPoint(target, upEvent.clientY));
+      const targetId = target?.dataset.objectId;
+      if (sourceId !== null && target && targetId) {
+        finishDrop(sourceId, targetId, dropModeForPoint(target, upEvent.clientY));
         return;
       }
 
-      draggedLineRef.current = null;
-      setDraggedLine(null);
+      draggedIdRef.current = null;
+      setDraggedId(null);
       setDropTarget(null);
     }
 
     function cancel() {
       cleanup();
-      draggedLineRef.current = null;
-      setDraggedLine(null);
+      draggedIdRef.current = null;
+      setDraggedId(null);
       setDropTarget(null);
     }
 
@@ -171,7 +172,7 @@ export default function ObjectTreeView({ value, onChange }: Props) {
             <ObjectTreeNode
               key={node.id}
               node={node}
-              draggedLine={draggedLine}
+              draggedId={draggedId}
               dropTarget={dropTarget}
               onPointerDragStart={startPointerDrag}
             />
