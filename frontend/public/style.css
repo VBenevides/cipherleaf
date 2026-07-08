@@ -1786,9 +1786,10 @@ a:focus-visible {
 }
 
 .object-tree-row {
+  position: relative;
   min-width: 0;
   display: grid;
-  grid-template-columns: 92px minmax(160px, 1fr) repeat(4, max-content);
+  grid-template-columns: 22px 92px minmax(160px, 1fr) repeat(4, max-content);
   align-items: center;
   gap: 8px;
   padding: 7px 9px;
@@ -1796,6 +1797,44 @@ a:focus-visible {
   border-radius: 7px;
   background: rgba(251, 250, 246, 0.68);
   font-size: 11px;
+}
+
+.object-tree-row.is-dragging {
+  opacity: 0.55;
+}
+
+.object-tree-row[data-drop-mode] {
+  outline: 2px solid var(--green-dark);
+  outline-offset: -2px;
+}
+
+.object-tree-row.is-drop-before {
+  box-shadow: inset 0 3px 0 var(--green-dark);
+}
+
+.object-tree-row.is-drop-after {
+  box-shadow: inset 0 -3px 0 var(--green-dark);
+}
+
+.object-tree-row.is-drop-child {
+  transform: translateX(18px);
+  box-shadow: inset 4px 0 0 var(--green-dark);
+}
+
+.object-tree-handle {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  cursor: grab;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.72;
+  user-select: none;
+}
+
+.object-tree-row:hover .object-tree-handle {
+  opacity: 1;
 }
 
 .object-tree-tags {
@@ -1841,6 +1880,7 @@ a:focus-visible {
   align-items: center;
   gap: 7px;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
   color: var(--ink);
 }
 

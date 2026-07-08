@@ -2503,7 +2503,7 @@ function App() {
                 />
               </div>
               <div className={`editor-view-pane ${view === "object" ? "active" : ""}`}>
-                <ObjectTreeView value={note.content} />
+                <ObjectTreeView value={note.content} onChange={(content) => editNote({ content })} />
               </div>
               <div className={`editor-view-pane ${view === "markdown" ? "active" : ""}`}>
                 <SourceMarkdownEditor

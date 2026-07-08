@@ -721,6 +721,107 @@ function lineIndent(text: string): number {
   return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
 }
 
+function objectHierarchyIndent(text: string): number {
+  const quote = text.match(/^([ \t]*)(>+)/);
+  return quote ? visualIndent(quote[1]) + (quote[2].length - 1) * 2 : lineIndent(text);
+}
+
+function lineStartsObject(text: string): boolean {
+  if (/^[ \t]*>/.test(text)) return true;
+  const source = text.trimStart();
+  return Boolean(
+    parseAttachmentMarkdown(source) ||
+      /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
+      /^(?:[-+*]\s+)?\[[ xX]\]\s+/.test(source) ||
+      /^[-*]\s+/.test(source) ||
+      /^\d+[.)]\s+/.test(source) ||
+      /^#{1,6}\s+/.test(source),
+  );
+}
+
+function objectContentIndent(text: string): number {
+  const quote = text.match(/^([ \t]*)(>+)([ \t]?)/);
+  if (quote) return visualIndent(quote[1]) + quote[2].length + visualIndent(quote[3]);
+
+  const marker = text.match(/^([ \t]*)((?:[-+*][ \t]+)?\[[ xX]\][ \t]+|[-*][ \t]+|\d+[.)][ \t]+)/);
+  if (marker) return visualIndent(marker[1]) + visualIndent(marker[2]);
+
+  return lineIndent(text);
+}
+
+function repeatedObjectPrefix(text: string): string | null {
+  const quote = text.match(/^([ \t]*)(>+)([ \t]?)/);
+  if (quote) return `${quote[1]}${quote[2]} `;
+
+  const task = text.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
+  if (task) return `${task[1]}${task[2] ?? ""}[ ] `;
+
+  const unordered = text.match(/^([ \t]*)([-+*])[ \t]+/);
+  if (unordered) return `${unordered[1]}${unordered[2]} `;
+
+  const ordered = text.match(/^([ \t]*)(\d+)([.)])[ \t]+/);
+  if (ordered) return `${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `;
+
+  const indentation = text.match(/^[ \t]+/)?.[0];
+  return indentation ?? null;
+}
+
+function parentObjectPrefixForContinuation(state: EditorState, lineNumber: number): string | null {
+  const line = state.doc.line(lineNumber);
+  if (lineStartsObject(line.text)) return null;
+
+  for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
+    const previous = state.doc.line(previousNumber);
+    if (previous.text.trim() === "") continue;
+    if (!lineStartsObject(previous.text)) continue;
+    if (line.text.trim() !== "" && lineIndent(line.text) < objectContentIndent(previous.text)) return null;
+    return repeatedObjectPrefix(previous.text);
+  }
+
+  return null;
+}
+
+function isObjectContinuationLine(state: EditorState, lineNumber: number): boolean {
+  if (lineNumber <= 1) return false;
+  const line = state.doc.line(lineNumber);
+  if (lineStartsObject(line.text)) return false;
+
+  if (line.text.trim() === "") {
+    const next = lineNumber < state.doc.lines ? state.doc.line(lineNumber + 1) : null;
+    if (!next || next.text.trim() === "" || lineStartsObject(next.text)) return false;
+  }
+
+  for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
+    const previous = state.doc.line(previousNumber);
+    if (previous.text.trim() === "") continue;
+    if (!lineStartsObject(previous.text)) continue;
+    if (line.text.trim() === "") {
+      const next = state.doc.line(lineNumber + 1);
+      return lineIndent(next.text) >= objectContentIndent(previous.text);
+    }
+    if (lineIndent(line.text) >= objectContentIndent(previous.text)) return true;
+    return false;
+  }
+
+  return false;
+}
+
+function isSectionSeparatorLine(state: EditorState, lineNumber: number): boolean {
+  const line = state.doc.line(lineNumber);
+  return line.text.trim() === "" && !isObjectContinuationLine(state, lineNumber);
+}
+
+function objectOwnerLineNumber(state: EditorState, lineNumber: number): number {
+  if (lineNumber <= 1 || !isObjectContinuationLine(state, lineNumber)) return lineNumber;
+
+  for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
+    const previous = state.doc.line(previousNumber);
+    if (lineStartsObject(previous.text)) return previousNumber;
+  }
+
+  return lineNumber;
+}
+
 function toggleLine(text: string): ToggleLine | null {
   const match = text.match(/^([ \t]*)>([ \t]?)(.*)$/);
   if (!match) return null;
@@ -767,9 +868,13 @@ function toggleSectionEnd(
     const line = state.doc.line(lineNumber);
     const text = line.text;
 
-    if (text.trim() === "") break;
+    if (isSectionSeparatorLine(state, lineNumber)) break;
 
-    if (lineIndent(text) <= startIndent) break;
+    if (
+      text.trim() !== "" &&
+      lineStartsObject(text) &&
+      objectHierarchyIndent(text) <= startIndent
+    ) break;
 
     endLineNumber = lineNumber;
   }
@@ -777,12 +882,34 @@ function toggleSectionEnd(
   return endLineNumber;
 }
 
+function toggleChildObjectLineNumbers(
+  state: EditorState,
+  startLineNumber: number,
+  startIndent: number,
+): number[] {
+  const children: number[] = [];
+
+  for (
+    let lineNumber = startLineNumber + 1;
+    lineNumber <= state.doc.lines;
+    lineNumber++
+  ) {
+    const line = state.doc.line(lineNumber);
+    if (isSectionSeparatorLine(state, lineNumber)) break;
+    if (!lineStartsObject(line.text)) continue;
+    if (objectHierarchyIndent(line.text) <= startIndent) break;
+    children.push(lineNumber);
+  }
+
+  return children;
+}
+
 function toggleHasChildren(
   state: EditorState,
   lineNumber: number,
   toggle: ToggleLine,
 ): boolean {
-  return toggleSectionEnd(state, lineNumber, toggle.indent) > lineNumber;
+  return toggleChildObjectLineNumbers(state, lineNumber, toggle.indent).length > 0;
 }
 
 function headingLevel(text: string): number | null {
@@ -882,8 +1009,9 @@ function buildLivePreviewState(
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
     const toggle = toggleLine(line.text);
+    const continuationLine = isObjectContinuationLine(state, lineNumber);
 
-    if (line.text.trim() !== "") {
+    if (line.text.trim() !== "" && !continuationLine) {
       decorations.push(
         Decoration.widget({
           widget: new DragHandleWidget(lineNumber),
@@ -1149,6 +1277,20 @@ function buildLivePreviewState(
         continue;
       }
 
+      lineNumber++;
+      continue;
+    }
+
+    if (continuationLine) {
+      decorateInlineMarkdown(
+        state,
+        lineNumber,
+        line.text,
+        line.from,
+        decorations,
+        atomicRanges,
+        openWikilink,
+      );
       lineNumber++;
       continue;
     }
@@ -1499,9 +1641,12 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const toggle = toggleLine(line.text);
   const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
   const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
+  const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
   if (!toggle && !list && indentation === "") return false;
 
-  const inserted = toggle
+  const inserted = continuationObjectPrefix
+    ? `\n${continuationObjectPrefix}`
+    : toggle
     ? `\n${indentation}> `
     : list
       ? `\n${indentation}${list[2]} `
@@ -1515,6 +1660,68 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
     selection: EditorSelection.cursor(range.head + inserted.length),
   });
 
+  view.focus();
+  return true;
+}
+
+function continuationPrefix(text: string): string | null {
+  const toggle = text.match(/^([ \t]*)>([ \t]?)/);
+  if (toggle) return `${toggle[1]}${" ".repeat(1 + toggle[2].length)}`;
+
+  const task = text.match(/^([ \t]*)(?:[-+*][ \t]+)?\[([ xX])\][ \t]+/);
+  if (task) return `${task[1]}${" ".repeat(task[0].length - task[1].length)}`;
+
+  const unordered = text.match(/^([ \t]*)([-+*])[ \t]+/);
+  if (unordered) return `${unordered[1]}${" ".repeat(unordered[0].length - unordered[1].length)}`;
+
+  const ordered = text.match(/^([ \t]*)(\d+[.)])[ \t]+/);
+  if (ordered) return `${ordered[1]}${" ".repeat(ordered[0].length - ordered[1].length)}`;
+
+  const indentation = text.match(/^[ \t]+/)?.[0];
+  return indentation ?? null;
+}
+
+function insertSoftObjectBreak(view: EditorView) {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+
+  const line = view.state.doc.lineAt(range.head);
+  const prefix = continuationPrefix(line.text);
+  if (prefix === null) return false;
+
+  const inserted = `\n${prefix}`;
+  view.dispatch({
+    changes: {
+      from: range.head,
+      insert: inserted,
+    },
+    selection: EditorSelection.cursor(range.head + inserted.length),
+  });
+  view.focus();
+  return true;
+}
+
+function multilineObjectPaste(view: EditorView, text: string) {
+  if (!text.includes("\n")) return false;
+  const range = view.state.selection.main;
+
+  const line = view.state.doc.lineAt(range.from);
+  const prefix = continuationPrefix(line.text);
+  if (prefix === null) return false;
+
+  const normalized = normalizeArrowText(text.replace(/\r\n?/g, "\n"));
+  const inserted = normalized.split("\n").map((part, index) =>
+    index === 0 ? part : `${prefix}${part}`
+  ).join("\n");
+
+  view.dispatch({
+    changes: {
+      from: range.from,
+      to: range.to,
+      insert: inserted,
+    },
+    selection: EditorSelection.cursor(range.from + inserted.length),
+  });
   view.focus();
   return true;
 }
@@ -1583,15 +1790,25 @@ function objectHandleElement(target: EventTarget | null): HTMLElement | null {
     : null;
 }
 
-function objectLineElementAt(x: number, y: number): HTMLElement | null {
+function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElement | null {
   const elements = document.elementsFromPoint(x, y);
   for (const element of elements) {
+    let line: HTMLElement | null = null;
     if (element instanceof HTMLElement && element.matches(".cm-live-object-line[data-object-line]")) {
-      return element;
+      line = element;
+    } else if (element instanceof HTMLElement) {
+      line = element.closest<HTMLElement>(".cm-live-object-line[data-object-line]");
     }
-    if (element instanceof HTMLElement) {
-      const line = element.closest<HTMLElement>(".cm-live-object-line[data-object-line]");
-      if (line) return line;
+
+    if (line) {
+      const lineNumber = Number(line.dataset.objectLine);
+      const ownerLineNumber = Number.isFinite(lineNumber)
+        ? objectOwnerLineNumber(view.state, lineNumber)
+        : lineNumber;
+      const owner = Number.isFinite(ownerLineNumber)
+        ? view.dom.querySelector<HTMLElement>(`.cm-live-object-line[data-object-line="${ownerLineNumber}"]`)
+        : null;
+      return owner ?? line;
     }
   }
   return null;
@@ -1638,8 +1855,23 @@ function movableBlockEnd(state: EditorState, startLineNumber: number): number {
 
   for (let lineNumber = startLineNumber + 1; lineNumber <= state.doc.lines; lineNumber++) {
     const line = state.doc.line(lineNumber);
-    if (line.text.trim() === "") break;
-    if (movableLineIndent(line.text) <= startIndent) break;
+    if (isSectionSeparatorLine(state, lineNumber)) break;
+    if (
+      line.text.trim() !== "" &&
+      lineStartsObject(line.text) &&
+      movableLineIndent(line.text) <= startIndent
+    ) break;
+    endLineNumber = lineNumber;
+  }
+
+  return endLineNumber;
+}
+
+function objectTextBlockEnd(state: EditorState, startLineNumber: number): number {
+  let endLineNumber = startLineNumber;
+
+  for (let lineNumber = startLineNumber + 1; lineNumber <= state.doc.lines; lineNumber++) {
+    if (!isObjectContinuationLine(state, lineNumber)) break;
     endLineNumber = lineNumber;
   }
 
@@ -1677,7 +1909,11 @@ function moveObjectBlock(
   const mode = forcedMode ?? dropModeForPoint(targetElement, clientY);
   const targetIndent = movableLineIndent(targetLine.text);
   const newIndent = mode === "child" ? targetIndent + 2 : targetIndent;
-  const targetEndNumber = mode === "after" ? movableBlockEnd(state, targetLineNumber) : targetLineNumber;
+  const targetEndNumber = mode === "after"
+    ? movableBlockEnd(state, targetLineNumber)
+    : mode === "child"
+      ? objectTextBlockEnd(state, targetLineNumber)
+      : targetLineNumber;
   const targetEnd = state.doc.line(targetEndNumber);
 
   const doc = state.doc.toString();
@@ -1812,6 +2048,10 @@ export default function LiveMarkdownEditor({
               run: (editor) => setAllSectionsCollapsed(editor, true),
             },
             {
+              key: "Shift-Enter",
+              run: (editor) => insertSoftObjectBreak(editor),
+            },
+            {
               key: "Enter",
               run: (editor) =>
                 acceptCompletion(editor) ||
@@ -1944,7 +2184,7 @@ export default function LiveMarkdownEditor({
                 lastX = moveEvent.clientX;
                 lastY = moveEvent.clientY;
                 updateGhost();
-                const targetLine = objectLineElementAt(lastX, lastY);
+                const targetLine = objectLineElementAt(pointerView, lastX, lastY);
                 if (targetLine !== previewTarget) {
                   clearObjectDropPreview(previewTarget);
                   previewTarget = targetLine;
@@ -1967,7 +2207,7 @@ export default function LiveMarkdownEditor({
                 document.removeEventListener("pointermove", move);
                 document.removeEventListener("pointerup", finish);
                 document.removeEventListener("pointercancel", finish);
-                const targetLine = objectLineElementAt(lastX, lastY);
+                const targetLine = objectLineElementAt(pointerView, lastX, lastY);
                 const targetLineNumber = Number(targetLine?.dataset.objectLine);
                 if (!targetLine || !Number.isFinite(targetLineNumber)) return;
                 moveObjectBlock(pointerView, sourceLine, targetLineNumber, lastY, targetLine, previewMode);
@@ -1979,7 +2219,12 @@ export default function LiveMarkdownEditor({
             },
             paste(event, pastedView) {
               const image = clipboardImage(event);
-              if (!image && !clipboardMayContainImage(event)) return false;
+              if (!image && !clipboardMayContainImage(event)) {
+                const text = event.clipboardData?.getData("text/plain") ?? "";
+                if (!multilineObjectPaste(pastedView, text)) return false;
+                event.preventDefault();
+                return true;
+              }
               event.preventDefault();
               const insertion = pastedView.state.selection.main.from;
               void (image ? Promise.resolve(image) : readClipboardImage())
