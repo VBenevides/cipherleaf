@@ -51,6 +51,8 @@ var (
 	tagPattern             = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9][A-Za-z0-9_-]{0,63})`)
 )
 
+const sharedAttachmentFolder = "shared"
+
 type Store struct {
 	mu       sync.RWMutex
 	root     string
@@ -669,6 +671,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
 		return Note{}, err
 	}
+	if err := s.pruneSharedAttachmentsLocked(); err != nil {
+		return Note{}, err
+	}
 	return current, nil
 }
 
@@ -692,11 +697,11 @@ func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create attachment ID: %w", err)
 	}
-	path := s.attachmentPathLocked(noteID, id)
+	path := s.sharedAttachmentPathLocked(id)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create attachment folder: %w", err)
 	}
-	if err := s.writeEnvelopeLocked(path, "attachment", noteID+":"+id, data); err != nil {
+	if err := s.writeEnvelopeLocked(path, "attachment", sharedAttachmentAAD(id), data); err != nil {
 		return "", fmt.Errorf("encrypt attachment: %w", err)
 	}
 	return id, nil
@@ -715,11 +720,15 @@ func (s *Store) GetAttachment(noteID, id string) ([]byte, error) {
 	if !validID(id) {
 		return nil, errors.New("invalid attachment ID")
 	}
-	data, err := s.readEnvelopeLocked(
-		s.attachmentPathLocked(noteID, id),
-		"attachment",
-		noteID+":"+id,
-	)
+	sharedPath := s.sharedAttachmentPathLocked(id)
+	data, err := s.readEnvelopeLocked(sharedPath, "attachment", sharedAttachmentAAD(id))
+	if _, statErr := os.Stat(sharedPath); errors.Is(statErr, os.ErrNotExist) {
+		data, err = s.readEnvelopeLocked(
+			s.attachmentPathLocked(noteID, id),
+			"attachment",
+			noteID+":"+id,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("decrypt attachment: %w", err)
 	}
@@ -744,6 +753,13 @@ func (s *Store) DeleteAttachment(noteID, id string) error {
 	}
 	if !validID(id) {
 		return errors.New("invalid attachment ID")
+	}
+	sharedPath := s.sharedAttachmentPathLocked(id)
+	if err := os.Remove(sharedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove encrypted shared attachment: %w", err)
+	}
+	if err := os.Remove(sharedPath + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove encrypted shared attachment backup: %w", err)
 	}
 	path := s.attachmentPathLocked(noteID, id)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -786,13 +802,57 @@ func (s *Store) pruneStaleAttachmentsLocked() error {
 		}
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || !validID(entry.Name()) {
+		if !entry.IsDir() || (entry.Name() != sharedAttachmentFolder && !validID(entry.Name())) {
 			return errors.New("attachments folder contains an invalid path")
+		}
+		if entry.Name() == sharedAttachmentFolder {
+			if err := s.pruneSharedAttachmentsLocked(); err != nil {
+				return err
+			}
+			continue
 		}
 		if _, found := notes[entry.Name()]; !found {
 			if err := os.RemoveAll(filepath.Join(attachmentRoot, entry.Name())); err != nil {
 				return fmt.Errorf("remove orphaned attachment folder: %w", err)
 			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) pruneSharedAttachmentsLocked() error {
+	referenced := make(map[string]struct{})
+	for _, summary := range s.manifest.Notes {
+		note, err := s.readNoteLocked(summary.ID)
+		if err != nil {
+			return err
+		}
+		for _, match := range attachmentReference.FindAllStringSubmatch(note.Content, -1) {
+			referenced[match[1]] = struct{}{}
+		}
+	}
+	directory := filepath.Join(s.root, "attachments", sharedAttachmentFolder)
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect shared attachments: %w", err)
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".enc") &&
+			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			return errors.New("shared attachments folder contains an invalid path")
+		}
+		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
+		if entry.IsDir() || !validID(name) {
+			return errors.New("shared attachments folder contains an invalid path")
+		}
+		if _, found := referenced[name]; found {
+			continue
+		}
+		if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+			return fmt.Errorf("remove stale shared attachment: %w", err)
 		}
 	}
 	return nil
@@ -866,6 +926,9 @@ func (s *Store) DeleteNote(id string) error {
 	}
 	if err := os.RemoveAll(filepath.Join(s.root, "attachments", id)); err != nil {
 		return fmt.Errorf("remove encrypted note attachments: %w", err)
+	}
+	if err := s.pruneSharedAttachmentsLocked(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1660,6 +1723,14 @@ func (s *Store) duplicateRemoteConflictLocked(source, id string) (NoteSummary, e
 }
 
 func replaceRemoteAttachments(source, localRoot, noteID string) error {
+	sharedSource := filepath.Join(source, "attachments", sharedAttachmentFolder)
+	if _, err := os.Stat(sharedSource); err == nil {
+		if err := copyAttachmentDirectory(sharedSource, filepath.Join(localRoot, "attachments", sharedAttachmentFolder)); err != nil {
+			return fmt.Errorf("copy shared attachments: %w", err)
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect remote shared attachments: %w", err)
+	}
 	target := filepath.Join(localRoot, "attachments", noteID)
 	if err := os.RemoveAll(target); err != nil {
 		return fmt.Errorf("replace local attachments: %w", err)
@@ -1718,13 +1789,15 @@ func (s *Store) exportAttachmentsLocked(destination string) error {
 		if len(parts) == 2 && strings.HasSuffix(parts[1], ".enc.bak") {
 			return nil
 		}
-		if len(parts) != 2 || !validID(parts[0]) ||
+		if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
 			!strings.HasSuffix(parts[1], ".enc") ||
 			!validID(strings.TrimSuffix(parts[1], ".enc")) {
 			return errors.New("local attachments folder contains an invalid path")
 		}
-		if _, found := s.findNoteLocked(parts[0]); !found {
-			return errors.New("local attachment belongs to a missing note")
+		if parts[0] != sharedAttachmentFolder {
+			if _, found := s.findNoteLocked(parts[0]); !found {
+				return errors.New("local attachment belongs to a missing note")
+			}
 		}
 		target := filepath.Join(targetRoot, relative)
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
@@ -1761,16 +1834,22 @@ func (s *Store) validateRemoteAttachmentsLocked(
 			return err
 		}
 		parts := strings.Split(filepath.ToSlash(relative), "/")
-		if len(parts) != 2 || !validID(parts[0]) ||
+		if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
 			!strings.HasSuffix(parts[1], ".enc") {
 			return errors.New("remote attachments folder contains an invalid path")
 		}
 		id := strings.TrimSuffix(parts[1], ".enc")
-		note, found := remoteNotes[parts[0]]
-		if !found || note.Deleted || !validID(id) {
-			return errors.New("remote attachment belongs to a missing note")
+		objectID := sharedAttachmentAAD(id)
+		if parts[0] != sharedAttachmentFolder {
+			note, found := remoteNotes[parts[0]]
+			if !found || note.Deleted || !validID(id) {
+				return errors.New("remote attachment belongs to a missing note")
+			}
+			objectID = parts[0] + ":" + id
+		} else if !validID(id) {
+			return errors.New("remote attachments folder contains an invalid path")
 		}
-		data, err := s.readEnvelopeFileLocked(path, "attachment", parts[0]+":"+id)
+		data, err := s.readEnvelopeFileLocked(path, "attachment", objectID)
 		if err != nil {
 			return fmt.Errorf("authenticate remote attachment: %w", err)
 		}
@@ -2211,6 +2290,14 @@ func (s *Store) notePathLocked(id string) string {
 
 func (s *Store) attachmentPathLocked(noteID, id string) string {
 	return filepath.Join(s.root, "attachments", noteID, id+".enc")
+}
+
+func (s *Store) sharedAttachmentPathLocked(id string) string {
+	return filepath.Join(s.root, "attachments", sharedAttachmentFolder, id+".enc")
+}
+
+func sharedAttachmentAAD(id string) string {
+	return sharedAttachmentFolder + ":" + id
 }
 
 func (s *Store) writeNoteLocked(note Note) (string, error) {

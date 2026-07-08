@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Annotation, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { redo, undo } from "@codemirror/commands";
 import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { minimalSetup } from "codemirror";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
@@ -50,6 +51,16 @@ export default function SourceMarkdownEditor({
           search({ top: false }),
           keymap.of([
             ...searchKeymap,
+            {
+              key: "Mod-z",
+              preventDefault: true,
+              run: (current) => undo(current),
+            },
+            {
+              key: "Ctrl-r",
+              preventDefault: true,
+              run: (current) => redo(current),
+            },
             {
               key: "Mod-h",
               preventDefault: true,

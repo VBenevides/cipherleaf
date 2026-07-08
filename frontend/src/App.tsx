@@ -24,10 +24,11 @@ import type {
 import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { errorText } from "./errors";
 import LiveMarkdownEditor from "./LiveMarkdownEditor";
+import ObjectTreeView from "./ObjectTreeView";
 import SourceMarkdownEditor from "./SourceMarkdownEditor";
 
 type VaultAction = "create" | "open" | "clone";
-type EditorView = "live" | "write";
+type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark";
 
@@ -2470,7 +2471,7 @@ function App() {
               </p>
             </div>
             <div className="view-tabs" role="tablist" aria-label="Editor view">
-              {(["live", "write"] as EditorView[]).map((item) => (
+              {(["live", "object", "markdown"] as EditorView[]).map((item) => (
                 <button
                   key={item}
                   role="tab"
@@ -2478,12 +2479,16 @@ function App() {
                   className={view === item ? "active" : ""}
                   onClick={() => setView(item)}
                 >
-                  {item === "live" ? "Live Preview" : "Source"}
+                  {item === "live"
+                    ? "Live Preview"
+                    : item === "object"
+                      ? "Object Tree"
+                      : "Markdown"}
                 </button>
               ))}
             </div>
             <div className={`document-body view-${view}`}>
-              {view === "live" && (
+              <div className={`editor-view-pane ${view === "live" ? "active" : ""}`}>
                 <LiveMarkdownEditor
                   key={note.id}
                   noteID={note.id}
@@ -2496,8 +2501,11 @@ function App() {
                   onIncreaseFontSize={increaseEditorFontSize}
                   scrollToOffset={scrollToOffset}
                 />
-              )}
-              {view === "write" && (
+              </div>
+              <div className={`editor-view-pane ${view === "object" ? "active" : ""}`}>
+                <ObjectTreeView value={note.content} />
+              </div>
+              <div className={`editor-view-pane ${view === "markdown" ? "active" : ""}`}>
                 <SourceMarkdownEditor
                   key={note.id}
                   noteID={note.id}
@@ -2505,7 +2513,7 @@ function App() {
                   onChange={(content) => editNote({ content })}
                   onError={(reason) => setError(errorText(reason))}
                 />
-              )}
+              </div>
             </div>
             <footer className="document-footer">
               <span>{note.content.trim() ? note.content.trim().split(/\s+/).length : 0} words</span>
