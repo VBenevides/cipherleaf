@@ -9,6 +9,7 @@ import {
   moveObjectInMarkdown,
   objectDepthByLine,
   parseCanonicalObjectDocument,
+  parseObjectDocument,
   prepareNoteContent,
 } from "../src/objectTree.ts";
 
@@ -27,8 +28,9 @@ test("builds typed objects with indentation and parents", () => {
   assert.equal(tree[0].tag, "section");
   assert.match(tree[0].uuid, uuidPattern);
   assert.deepEqual(tree[0].tags, ["section", "text"]);
-  assert.equal(tree[0].children[0].tag, "checkbox");
-  assert.deepEqual(tree[0].children[0].tags, ["section", "checkbox"]);
+  assert.equal(tree[0].children[0].tag, "section");
+  assert.deepEqual(tree[0].children[0].tags, ["section", "text"]);
+  assert.equal(tree[0].children[0].checked, false);
   assert.equal(tree[0].children[0].parentId, tree[0].uuid);
   assert.equal(tree[0].children[0].parentSectionId, tree[0].uuid);
   assert.equal(tree[0].children[0].children[0].tag, "bulletpoint");
@@ -60,12 +62,32 @@ test("merges indented continuation lines into object text", () => {
   assert.equal(tree[2].text, "Task\ncontinued task");
 });
 
+test("keeps unindented text lines as separate objects", () => {
+  const tree = markdownObjectTree([
+    "first",
+    "second",
+    "- bullet",
+    "- next bullet",
+    "  bullet continuation",
+  ].join("\n"));
+
+  assert.equal(tree.length, 4);
+  assert.equal(tree[0].tag, "text");
+  assert.equal(tree[0].text, "first");
+  assert.equal(tree[1].tag, "text");
+  assert.equal(tree[1].text, "second");
+  assert.equal(tree[2].tag, "bulletpoint");
+  assert.equal(tree[2].text, "bullet");
+  assert.equal(tree[3].tag, "bulletpoint");
+  assert.equal(tree[3].text, "next bullet\nbullet continuation");
+});
+
 test("assigns sibling sections to the nested section parent", () => {
   const tree = markdownObjectTree([
     "> Parent",
     ">> Nested",
     "   multiline",
-    "",
+    "   ",
     "   text",
     ">>> Sibling one",
     ">>> Sibling two",
@@ -156,6 +178,9 @@ test("renders canonical objects back to editable markdown", () => {
 test("renders nested section markers as structure and checkbox token as text", () => {
   const canonical = canonicalObjectDocumentFromMarkdown(">> [x] VM: Cobrar acesso");
 
+  assert.equal(canonical.objects[0].tag, "section");
+  assert.deepEqual(canonical.objects[0].tags, ["section", "text"]);
+  assert.equal(canonical.objects[0].checked, true);
   assert.equal(markdownFromCanonicalObjectDocument(canonical), ">> [x] VM: Cobrar acesso");
   assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, ">> [x] VM: Cobrar acesso");
 });
@@ -207,4 +232,22 @@ test("allows empty text and bullet objects", () => {
   assert.equal(tree[1].text, "");
   assert.equal(tree[2].tag, "bulletpoint");
   assert.equal(tree[2].text, "");
+});
+
+test("keeps plain blank lines as empty objects", () => {
+  const tree = markdownObjectTree(["a", "", "b"].join("\n"));
+
+  assert.equal(tree.length, 3);
+  assert.equal(tree[0].text, "a");
+  assert.equal(tree[1].tag, "text");
+  assert.equal(tree[1].text, "");
+  assert.equal(tree[2].text, "b");
+});
+
+test("tracks blank object lines by line number", () => {
+  const document = parseObjectDocument(["a", "", "b"].join("\n"));
+
+  assert.equal(document.byLine.get(2)?.tag, "text");
+  assert.equal(document.byLine.get(2)?.text, "");
+  assert.equal(document.byLine.get(2)?.lineNumber, 2);
 });

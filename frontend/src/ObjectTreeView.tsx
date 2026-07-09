@@ -73,7 +73,7 @@ function ObjectTreeNode({
           ))}
         </span>
         <span className="object-tree-text">
-          {node.tags.includes("checkbox") && (
+          {node.checked !== undefined && (
             <input type="checkbox" checked={Boolean(node.checked)} readOnly aria-label="Checkbox state" />
           )}
           {node.text || "(empty)"}

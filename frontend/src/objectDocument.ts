@@ -112,7 +112,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   const indent = outline
     ? visualIndent(outline[1]) + (outline[2].length - 1) * 2
     : lineIndent(raw);
-  const contentIndent = outline
+  let contentIndent = outline
     ? visualIndent(outline[1]) + outline[2].length + visualIndent(outline[3])
     : indent;
   const sourcePrefix = (text: string) => {
@@ -127,24 +127,10 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     return { tag: "image", tags, indent, contentIndent, text, startsObject: true, sourcePrefix: sourcePrefix(text) };
   }
 
-  const checkbox = source.match(/^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$/);
-  if (checkbox) {
-    tags.push("checkbox");
-    return {
-      tag: "checkbox",
-      tags,
-      indent,
-      contentIndent: contentIndent + source.length - checkbox[2].length,
-      text: checkbox[2].trim(),
-      checked: checkbox[1].toLowerCase() === "x",
-      startsObject: true,
-      sourcePrefix: sourcePrefix(checkbox[2].trim()),
-    };
-  }
-
   const bullet = source.match(/^([-*])(?:\s+(.*)|\s*)$/);
   if (bullet) {
-    const text = bullet[2]?.trim() ?? "";
+    const checked = bullet[2]?.match(/^\[([ xX])\]\s*(.*)$/);
+    const text = checked ? checked[2].trim() : bullet[2]?.trim() ?? "";
     tags.push("bulletpoint");
     return {
       tag: "bulletpoint",
@@ -152,6 +138,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       indent,
       contentIndent: contentIndent + source.length - text.length,
       text,
+      checked: checked ? checked[1].toLowerCase() === "x" : undefined,
       startsObject: true,
       sourcePrefix: sourcePrefix(text),
     };
@@ -159,7 +146,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
 
   const ordered = source.match(/^(\d+[.)])(?:\s+(.*)|\s*)$/);
   if (ordered) {
-    const text = ordered[2]?.trim() ?? "";
+    const checked = ordered[2]?.match(/^\[([ xX])\]\s*(.*)$/);
+    const text = checked ? checked[2].trim() : ordered[2]?.trim() ?? "";
     tags.push("bulletpoint");
     return {
       tag: "bulletpoint",
@@ -167,6 +155,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       indent,
       contentIndent: contentIndent + source.length - text.length,
       text,
+      checked: checked ? checked[1].toLowerCase() === "x" : undefined,
       startsObject: true,
       sourcePrefix: sourcePrefix(text),
     };
@@ -186,19 +175,39 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   tags.push("text");
+  const checkbox = source.match(/^\[([ xX])\]\s*(.*)$/);
+  const text = checkbox ? checkbox[2].trim() : source.trim();
+  const checkboxContentIndent = checkbox ? contentIndent + source.length - checkbox[2].length : null;
+  if (!outline && !checkbox) contentIndent = indent + 2;
   return {
     tag: outline ? "section" : "text",
     tags,
     indent,
-    contentIndent,
-    text: source.trim(),
-    startsObject: Boolean(outline) || raw === "",
-    sourcePrefix: sourcePrefix(source.trim()),
+    contentIndent: checkboxContentIndent ?? contentIndent,
+    text,
+    checked: checkbox ? checkbox[1].toLowerCase() === "x" : undefined,
+    startsObject: true,
+    sourcePrefix: sourcePrefix(text),
   };
 }
 
 export function lineStartsObject(raw: string): boolean {
   return classifyObjectLine(raw).startsObject;
+}
+
+function lineStartsExplicitObject(raw: string): boolean {
+  const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
+  const source = outline ? outline[4] : raw.trimStart();
+
+  return Boolean(
+    outline ||
+      parseAttachmentMarkdown(source) ||
+      /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
+      /^\[([ xX])\]\s*(.*)$/.test(source) ||
+      /^[-*](?:\s+.*|\s*)$/.test(source) ||
+      /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
+      /^#{1,6}\s+/.test(source),
+  );
 }
 
 export function objectContentIndent(raw: string): number {
@@ -256,19 +265,21 @@ function continuationText(raw: string, parent: ParsedObjectLine): string {
 export function isContinuationLine(lines: readonly string[], lineNumber: number): boolean {
   if (lineNumber <= 1) return false;
   const raw = lines[lineNumber - 1] ?? "";
-  if (lineStartsObject(raw)) return false;
+  if (!/^[ \t]/.test(raw)) return false;
+  if (raw.trim() !== "" && lineStartsExplicitObject(raw)) return false;
 
   if (raw.trim() === "") {
     const next = lines[lineNumber] ?? "";
-    if (next.trim() === "" || lineStartsObject(next)) return false;
+    if (next.trim() === "" || !/^[ \t]/.test(next) || lineStartsExplicitObject(next)) return false;
   }
 
   for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
     const previous = lines[previousNumber - 1] ?? "";
     if (previous.trim() === "") continue;
+    if (isContinuationLine(lines, previousNumber)) continue;
     const parsed = classifyObjectLine(previous);
     if (!parsed.startsObject) continue;
-    if (raw.trim() === "" && !lineStartsObject(raw)) {
+    if (raw.trim() === "") {
       const next = lines[lineNumber] ?? "";
       return lineIndent(next) >= parsed.contentIndent;
     }
@@ -288,6 +299,7 @@ export function objectOwnerLineNumber(lines: readonly string[], lineNumber: numb
 
   for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
     const previous = lines[previousNumber - 1] ?? "";
+    if (isContinuationLine(lines, previousNumber)) continue;
     if (lineStartsObject(previous)) return previousNumber;
   }
 
@@ -410,7 +422,7 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
 
   lines.forEach((raw, index) => {
     const lineNumber = index + 1;
-    if (raw.trim() === "") {
+    if (raw !== "" && raw.trim() === "") {
       const previous = stack[stack.length - 1] ?? null;
       const previousParsed = previous ? parsedById.get(previous.id) : null;
       const next = lines[index + 1] ?? "";
@@ -420,8 +432,9 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
         previous &&
         previousParsed &&
         next.trim() !== "" &&
-        lineIndent(next) >= previousParsed.contentIndent &&
-        !classifyObjectLine(next).startsObject
+        /^[ \t]/.test(next) &&
+        !lineStartsExplicitObject(next) &&
+        lineIndent(next) >= previousParsed.contentIndent
       ) {
         previous.text = `${previous.text}\n`;
         previous.lineEnd = lineNumber;
@@ -442,7 +455,9 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
     if (
       previous &&
       previousParsed &&
-      !classified.startsObject &&
+      previous.text !== "" &&
+      /^[ \t]/.test(raw) &&
+      !lineStartsExplicitObject(raw) &&
       classified.indent >= previousParsed.contentIndent
     ) {
       previous.text = `${previous.text}\n${continuationText(raw, previousParsed)}`;
@@ -485,7 +500,7 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
       childrenIds: [],
       sourcePrefix: classified.sourcePrefix,
       text: classified.text,
-      checked: classified.tag === "checkbox" ? classified.checked : undefined,
+      checked: classified.checked,
       children: [],
     };
 
@@ -661,7 +676,7 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
     ? `${">".repeat(Math.max(1, Math.floor(object.indent / 2) + 1))} `
     : `${" ".repeat(Math.max(0, object.indent))}${object.tag === "bulletpoint" ? "- " : ""}`);
   const prefixHasCheckbox = /\[[ xX]\]\s*$/.test(prefix);
-  const firstText = object.tag === "checkbox" && !prefixHasCheckbox
+  const firstText = object.checked !== undefined && !prefixHasCheckbox
     ? `[${object.checked ? "x" : " "}] ${textLines[0] ?? ""}`.trimEnd()
     : textLines[0] ?? "";
   const first = `${prefix}${firstText}`;

@@ -1299,7 +1299,7 @@ func TestLargeNoteIsCompressedBeforeEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := strings.Repeat("repeated markdown content\n", 50_000)
+	content := strings.Repeat(strings.TrimSpace(strings.Repeat("repeated markdown content ", 22))+"\n", 2_000)
 	if _, err := store.SaveNote(note.ID, note.Title, content); err != nil {
 		t.Fatal(err)
 	}

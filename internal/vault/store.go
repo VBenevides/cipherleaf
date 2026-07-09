@@ -3307,7 +3307,7 @@ type canonicalObjectNode struct {
 	Tag             string   `json:"tag"`
 	Tags            []string `json:"tags"`
 	Text            string   `json:"text"`
-	Checked         bool     `json:"checked,omitempty"`
+	Checked         *bool    `json:"checked,omitempty"`
 	Indent          int      `json:"indent"`
 	ContentIndent   int      `json:"contentIndent"`
 	ParentID        *string  `json:"parentId"`
@@ -3322,7 +3322,7 @@ type parsedCanonicalLine struct {
 	indent        int
 	contentIndent int
 	text          string
-	checked       bool
+	checked       *bool
 	startsObject  bool
 	sourcePrefix  string
 }
@@ -3354,7 +3354,7 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 
 	for index, raw := range lines {
 		lineNumber := index + 1
-		if strings.TrimSpace(raw) == "" {
+		if raw != "" && strings.TrimSpace(raw) == "" {
 			usedAsContinuation := false
 			if len(stack) > 0 {
 				previous := stack[len(stack)-1]
@@ -3363,8 +3363,7 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 				if index+1 < len(lines) {
 					next = lines[index+1]
 				}
-				nextParsed := classifyCanonicalMarkdownLine(next)
-				if strings.TrimSpace(next) != "" && lineVisualIndent(next) >= previousParsed.contentIndent && !nextParsed.startsObject {
+				if strings.TrimSpace(next) != "" && startsWithWhitespace(next) && !lineStartsExplicitCanonicalObject(next) && lineVisualIndent(next) >= previousParsed.contentIndent {
 					previous.Text += "\n"
 					usedAsContinuation = true
 				}
@@ -3380,7 +3379,7 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 		}
 		if previous != nil {
 			previousParsed := parsedByID[previous.ID]
-			if !parsed.startsObject && parsed.indent >= previousParsed.contentIndent {
+			if previous.Text != "" && startsWithWhitespace(raw) && !lineStartsExplicitCanonicalObject(raw) && parsed.indent >= previousParsed.contentIndent {
 				previous.Text += "\n" + strings.TrimSpace(raw)
 				continue
 			}
@@ -3467,17 +3466,25 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		text := strings.TrimSpace(source)
 		return parsedCanonicalLine{tag: "image", tags: append(tags, "image"), indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
-	if match := regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`).FindStringSubmatch(source); match != nil {
-		text := strings.TrimSpace(match[2])
-		return parsedCanonicalLine{tag: "checkbox", tags: append(tags, "checkbox"), indent: indent, contentIndent: contentIndent + len(source) - len(match[2]), text: text, checked: strings.EqualFold(match[1], "x"), startsObject: true, sourcePrefix: sourcePrefix(text)}
-	}
 	if match := regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`).FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
-		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
+		var checked *bool
+		if checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(match[2]); checkbox != nil {
+			text = strings.TrimSpace(checkbox[2])
+			value := strings.EqualFold(checkbox[1], "x")
+			checked = &value
+		}
+		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
 	if match := regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`).FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
-		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
+		var checked *bool
+		if checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(match[2]); checkbox != nil {
+			text = strings.TrimSpace(checkbox[2])
+			value := strings.EqualFold(checkbox[1], "x")
+			checked = &value
+		}
+		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
 	tags = append(tags, "text")
 	if strings.HasPrefix(source, "#") && regexp.MustCompile(`^#{1,6}\s+`).MatchString(source) {
@@ -3488,8 +3495,42 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		text := strings.TrimSpace(source)
 		return parsedCanonicalLine{tag: tag, tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
+	checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(source)
 	text := strings.TrimSpace(source)
-	return parsedCanonicalLine{tag: map[bool]string{true: "section", false: "text"}[outline != nil], tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: outline != nil || raw == "", sourcePrefix: sourcePrefix(text)}
+	checkboxContentIndent := -1
+	var checked *bool
+	if checkbox != nil {
+		text = strings.TrimSpace(checkbox[2])
+		checkboxContentIndent = contentIndent + len(source) - len(checkbox[2])
+		value := strings.EqualFold(checkbox[1], "x")
+		checked = &value
+	}
+	if outline == nil && checkbox == nil {
+		contentIndent = indent + 2
+	}
+	if checkboxContentIndent >= 0 {
+		contentIndent = checkboxContentIndent
+	}
+	return parsedCanonicalLine{tag: map[bool]string{true: "section", false: "text"}[outline != nil], tags: tags, indent: indent, contentIndent: contentIndent, text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+}
+
+func startsWithWhitespace(text string) bool {
+	return strings.HasPrefix(text, " ") || strings.HasPrefix(text, "\t")
+}
+
+func lineStartsExplicitCanonicalObject(raw string) bool {
+	outline := regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`).FindStringSubmatch(raw)
+	source := strings.TrimLeft(raw, " \t")
+	if outline != nil {
+		source = outline[4]
+	}
+	return outline != nil ||
+		regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`).MatchString(strings.TrimSpace(source)) ||
+		attachmentReference.MatchString(source) ||
+		regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`).MatchString(source) ||
+		regexp.MustCompile(`^[-*](?:\s+.*|\s*)$`).MatchString(source) ||
+		regexp.MustCompile(`^\d+[.)](?:\s+.*|\s*)$`).MatchString(source) ||
+		regexp.MustCompile(`^#{1,6}\s+`).MatchString(source)
 }
 
 func visualIndent(text string) int {
@@ -3540,8 +3581,8 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 		firstText = textLines[0]
 	}
 	prefixHasCheckbox := regexp.MustCompile(`\[[ xX]\]\s*$`).MatchString(object.SourcePrefix)
-	if object.Tag == "checkbox" && !prefixHasCheckbox {
-		if object.Checked {
+	if object.Checked != nil && !prefixHasCheckbox {
+		if *object.Checked {
 			firstText = strings.TrimRight("[x] "+firstText, " ")
 		} else {
 			firstText = strings.TrimRight("[ ] "+firstText, " ")

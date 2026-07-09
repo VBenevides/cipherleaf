@@ -37,6 +37,7 @@ import {
   tableCells,
 } from "./markdown";
 import {
+  classifyObjectLine,
   continuationPrefix,
   isContinuationLine,
   isSeparatorLine,
@@ -205,19 +206,19 @@ class TextWidget extends WidgetType {
   }
 }
 
-class IndentSpacerWidget extends WidgetType {
-  constructor(readonly columns: number) {
+class InlineSpacerWidget extends WidgetType {
+  constructor(readonly width: string) {
     super();
   }
 
-  eq(other: IndentSpacerWidget) {
-    return other.columns === this.columns;
+  eq(other: InlineSpacerWidget) {
+    return other.width === this.width;
   }
 
   toDOM() {
     const element = document.createElement("span");
     element.className = "cm-live-indent-spacer";
-    element.style.width = `${this.columns}ch`;
+    element.style.width = this.width;
     return element;
   }
 }
@@ -813,7 +814,10 @@ function parentObjectPrefixForContinuation(state: EditorState, lineNumber: numbe
     if (previous.text.trim() === "") continue;
     if (!lineStartsObject(previous.text)) continue;
     if (line.text.trim() !== "" && lineIndent(line.text) < objectContentIndent(previous.text)) return null;
-    return repeatedObjectPrefix(previous.text);
+    const previousObject = classifyObjectLine(previous.text);
+    return previousObject.tag === "section"
+      ? repeatedObjectPrefix(previous.text)
+      : previous.text.match(/^[ \t]*/)?.[0] ?? "";
   }
 
   return null;
@@ -829,6 +833,11 @@ function continuationOwnerContentIndent(lines: readonly string[], lineNumber: nu
   return objectContentIndent(lines[ownerLine - 1] ?? "");
 }
 
+function continuationOwnerLine(lines: readonly string[], lineNumber: number): number {
+  const ownerLine = objectOwnerLineNumber(lines, lineNumber);
+  return ownerLine > 0 && ownerLine !== lineNumber ? ownerLine : lineNumber;
+}
+
 function continuationPrefixSizeForIndent(raw: string, targetIndent: number): number {
   let offset = 0;
   let column = 0;
@@ -841,6 +850,18 @@ function continuationPrefixSizeForIndent(raw: string, targetIndent: number): num
   }
 
   return offset;
+}
+
+function continuationMarkerWidth(document: ObjectDocument, ownerLineNumber: number): string | null {
+  const owner = document.byLine.get(ownerLineNumber);
+  if (!owner) return null;
+
+  const widths: string[] = [];
+  if (owner.tag === "section") widths.push("var(--toggle-button-width)");
+  if (owner.checked !== undefined) widths.push("1.45em");
+  else if (owner.tag === "bulletpoint") widths.push("1.6em");
+
+  return widths.length > 0 ? `calc(${widths.join(" + ")})` : null;
 }
 
 function isSectionSeparatorLine(lines: readonly string[], lineNumber: number): boolean {
@@ -1062,7 +1083,7 @@ function buildLivePreviewState(
     const toggle = toggleLine(line.text);
     const continuationLine = isObjectContinuationLine(lines, lineNumber);
 
-    if (line.text.trim() !== "" && !continuationLine) {
+    if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationLine) {
       decorations.push(
         Decoration.widget({
           widget: new DragHandleWidget(lineNumber),
@@ -1341,9 +1362,16 @@ function buildLivePreviewState(
     if (continuationLine) {
       const indent = continuationOwnerContentIndent(lines, lineNumber);
       const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
+      const ownerLine = continuationOwnerLine(lines, lineNumber);
+      const markerWidth = continuationMarkerWidth(objectDocument, ownerLine);
       decorations.push(
         Decoration.line({
-          attributes: lineAttributes(lineNumber, "cm-live-object-continuation-line"),
+          attributes: objectLineAttributes(
+            lineNumber,
+            "cm-live-object-continuation-line",
+            "",
+            depthByLine.get(ownerLine) ?? 0,
+          ),
         }).range(line.from),
       );
       addHiddenRange(
@@ -1351,7 +1379,7 @@ function buildLivePreviewState(
         line.from + prefixSize,
         decorations,
         atomicRanges,
-        new IndentSpacerWidget(indent),
+        markerWidth ? new InlineSpacerWidget(markerWidth) : undefined,
       );
       decorateInlineMarkdown(
         state,
@@ -1761,19 +1789,20 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   if (!range.empty) return false;
 
   const line = view.state.doc.lineAt(range.head);
-  const toggle = toggleLine(line.text);
+  const object = classifyObjectLine(line.text);
   const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
+  const section = line.text.match(/^([ \t]*>+[ \t]?)/);
   const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
-  if (!toggle && !list && indentation === "") return false;
+  if (!lineStartsObject(line.text) && continuationObjectPrefix === null) return false;
 
   const inserted = continuationObjectPrefix
     ? `\n${continuationObjectPrefix}`
-    : toggle
-    ? `\n${indentation}> `
-    : list
-      ? `\n${indentation}${list[2]} `
-      : `\n${indentation}`;
+    : object.tag === "section"
+    ? `\n${section?.[1] ?? `${indentation}> `}`
+    : object.tag === "bulletpoint" && list
+    ? `\n${indentation}${list[2]} `
+    : `\n${indentation}`;
 
   view.dispatch({
     changes: {
@@ -1792,7 +1821,11 @@ function insertSoftObjectBreak(view: EditorView) {
   if (!range.empty) return false;
 
   const line = view.state.doc.lineAt(range.head);
-  const prefix = continuationPrefix(line.text);
+  const lines = view.state.doc.toString().split("\n");
+  const ownerLine = objectOwnerLineNumber(lines, line.number);
+  const prefix = ownerLine !== line.number && ownerLine > 0
+    ? " ".repeat(objectContentIndent(lines[ownerLine - 1] ?? ""))
+    : continuationPrefix(line.text);
   if (prefix === null) return false;
 
   const inserted = `\n${prefix}`;
