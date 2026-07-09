@@ -30,6 +30,8 @@ export interface MergeConflict {
     "remoteNoteId": string;
     "title": string;
     "message": string;
+    "localContent": string;
+    "remoteContent": string;
 }
 
 /**

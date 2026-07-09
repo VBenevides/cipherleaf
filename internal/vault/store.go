@@ -1506,7 +1506,7 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return false, err
 	}
-	remote, err := s.readRemoteSnapshotLocked(source, true)
+	remote, err := s.readRemoteSnapshotLocked(source, true, false)
 	if err != nil {
 		return false, err
 	}
@@ -1588,7 +1588,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 	if strings.TrimSpace(source) == "" {
 		return MergeResult{}, errors.New("remote snapshot source is required")
 	}
-	remote, err := s.readRemoteSnapshotLocked(source, false)
+	remote, err := s.readRemoteSnapshotLocked(source, false, false)
 	if err != nil {
 		return MergeResult{}, err
 	}
@@ -1666,18 +1666,22 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			remoteNote.CiphertextHash != "" &&
 			local.CiphertextHash != "" &&
 			remoteNote.CiphertextHash != local.CiphertextHash {
-			duplicate, err := s.duplicateRemoteConflictLocked(source, remoteNote)
+			localNote, err := s.readNoteFromSummaryAtLocked(s.root, local)
 			if err != nil {
 				return MergeResult{}, err
 			}
-			mergedNotes = append(mergedNotes, duplicate)
+			remote, err := s.readNoteFromSummaryAtLocked(source, remoteNote)
+			if err != nil {
+				return MergeResult{}, err
+			}
 			result.Conflicts = append(result.Conflicts, MergeConflict{
-				LocalNoteID:  local.ID,
-				RemoteNoteID: duplicate.ID,
-				Title:        local.Title,
-				Message:      "Local and remote edits conflicted; the remote version was preserved as a separate note.",
+				LocalNoteID:   local.ID,
+				RemoteNoteID:  remoteNote.ID,
+				Title:         local.Title,
+				Message:       "Local and remote edits conflicted. Resolve the final version before syncing.",
+				LocalContent:  derivedMarkdownContent(localNote.Content),
+				RemoteContent: derivedMarkdownContent(remote.Content),
 			})
-			result.PulledNotes++
 			result.UpToDate = false
 		} else if versionIsNewer(
 			remoteNote.Revision,
@@ -1790,40 +1794,6 @@ func copyRemoteNoteObject(source, localRoot, id string) error {
 		return fmt.Errorf("stage pulled encrypted note %s: %w", id, err)
 	}
 	return nil
-}
-
-func (s *Store) duplicateRemoteConflictLocked(source string, remoteSummary NoteSummary) (NoteSummary, error) {
-	remote, err := s.readNoteFromSummaryAtLocked(source, remoteSummary)
-	if err != nil {
-		return NoteSummary{}, err
-	}
-	newID, err := randomID(16)
-	if err != nil {
-		return NoteSummary{}, err
-	}
-	now := time.Now().UTC()
-	remote.ID = newID
-	remote.Title = remote.Title + " (remote conflict)"
-	remote.Order = s.nextNoteOrderLocked(remote.FolderID)
-	remote.CreatedAt = now.Format(time.RFC3339Nano)
-	remote.UpdatedAt = remote.CreatedAt
-	remote.ModifiedAt = now.Unix()
-	remote.Revision = 1
-	hash, err := s.writeNoteLocked(remote)
-	if err != nil {
-		return NoteSummary{}, err
-	}
-	sourceAttachments := filepath.Join(source, "attachments", remoteSummary.ID)
-	if _, err := os.Stat(sourceAttachments); err == nil {
-		if err := copyAttachmentDirectory(sourceAttachments, filepath.Join(s.root, "attachments", newID)); err != nil {
-			return NoteSummary{}, err
-		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return NoteSummary{}, fmt.Errorf("inspect remote conflict attachments: %w", err)
-	}
-	summary := summaryFromNote(remote)
-	summary.CiphertextHash = hash
-	return summary, nil
 }
 
 func replaceRemoteAttachments(source, localRoot, noteID string) error {
@@ -1968,6 +1938,7 @@ func (s *Store) validateRemoteAttachmentsLocked(
 func (s *Store) readRemoteSnapshotLocked(
 	source string,
 	verifyAllObjects bool,
+	validateDerivedMetadata bool,
 ) (authenticatedRemoteSnapshot, error) {
 	var remoteConfig vaultConfig
 	if err := readJSONFile(
@@ -2121,8 +2092,14 @@ func (s *Store) readRemoteSnapshotLocked(
 		if err != nil {
 			return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote encrypted note %s: %w", item.ID, err)
 		}
-		if err := validateRemoteNote(note, item, remoteFolders); err != nil {
+		if err := validateRemoteNote(note, item, remoteFolders, validateDerivedMetadata); err != nil {
 			return authenticatedRemoteSnapshot{}, err
+		}
+		if !validateDerivedMetadata {
+			derived := summaryFromNote(note)
+			summary.Tags = derived.Tags
+			summary.AttachmentIDs = derived.AttachmentIDs
+			summary.OutgoingLinks = derived.OutgoingLinks
 		}
 		remoteNotes[item.ID] = item
 		summary.CiphertextHash = item.CiphertextHash
@@ -2230,7 +2207,7 @@ func (s *Store) RestoreRemoteSnapshot(
 		}
 	}()
 	validator := &Store{vaultID: config.VaultID, key: key}
-	remote, err := validator.readRemoteSnapshotLocked(source, true)
+	remote, err := validator.readRemoteSnapshotLocked(source, true, true)
 	if err != nil {
 		return Session{}, fmt.Errorf("validate downloaded encrypted vault: %w", err)
 	}
@@ -3269,7 +3246,12 @@ func cloneNoteSummary(summary NoteSummary) *NoteSummary {
 	return &clone
 }
 
-func validateRemoteNote(note Note, item remoteSyncObject, folders []Folder) error {
+func validateRemoteNote(
+	note Note,
+	item remoteSyncObject,
+	folders []Folder,
+	validateDerivedMetadata bool,
+) error {
 	normalizedTitle, titleErr := normalizeTitle(note.Title)
 	if titleErr != nil || normalizedTitle != note.Title ||
 		!utf8.ValidString(note.Content) || len([]byte(note.Content)) > maxNoteBytes ||
@@ -3287,7 +3269,7 @@ func validateRemoteNote(note Note, item remoteSyncObject, folders []Folder) erro
 		(note.FolderID != "" && !folderIDExists(folders, note.FolderID)) {
 		return fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
 	}
-	if item.Summary != nil &&
+	if validateDerivedMetadata && item.Summary != nil &&
 		(!slices.Equal(extractTags(derivedMarkdownContent(note.Content)), item.Summary.Tags) ||
 			!slices.Equal(extractAttachmentIDs(derivedMarkdownContent(note.Content)), item.Summary.AttachmentIDs) ||
 			!slices.Equal(extractOutgoingLinks(derivedMarkdownContent(note.Content)), item.Summary.OutgoingLinks)) {

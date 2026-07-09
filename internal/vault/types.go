@@ -141,10 +141,12 @@ type MergeResult struct {
 }
 
 type MergeConflict struct {
-	LocalNoteID  string `json:"localNoteId"`
-	RemoteNoteID string `json:"remoteNoteId"`
-	Title        string `json:"title"`
-	Message      string `json:"message"`
+	LocalNoteID   string `json:"localNoteId"`
+	RemoteNoteID  string `json:"remoteNoteId"`
+	Title         string `json:"title"`
+	Message       string `json:"message"`
+	LocalContent  string `json:"localContent"`
+	RemoteContent string `json:"remoteContent"`
 }
 
 // FindMatch describes a single occurrence of a query inside a note.

@@ -81,6 +81,13 @@ type NoteCrumb = {
   title: string;
 };
 
+type ConflictResolution = {
+  conflict: MergeConflict;
+  localNote: Note;
+  mergedContent: string;
+  cloudHighlightLines: ReadonlySet<number>;
+};
+
 const AUTO_LOCK_MS = 15 * 60 * 1000;
 const AUTOSAVE_DELAY_MS = 10 * 1000;
 const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
@@ -110,6 +117,18 @@ function markdownForEditing(content: string): string {
 
 function canonicalContentFromMarkdown(markdown: string): string {
   return canonicalObjectDocumentTextFromMarkdown(markdown);
+}
+
+function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
+  const leftLines = left.split("\n");
+  const rightLines = right.split("\n");
+  const changed = new Set<number>();
+  for (let index = 0; index < rightLines.length; index++) {
+    if (rightLines[index] !== (leftLines[index] ?? "")) {
+      changed.add(index + 1);
+    }
+  }
+  return changed;
 }
 
 function openAppearanceDatabase(): Promise<IDBDatabase> {
@@ -300,6 +319,7 @@ function App() {
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
+  const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
@@ -1163,11 +1183,66 @@ function App() {
       if (result.merge.conflicts?.length) {
         bringWindowToFront("syncConflicts");
         setSyncConflicts(result.merge.conflicts);
+        void startConflictResolution(result.merge.conflicts[0]);
       }
     } catch (reason) {
       setError(errorText(reason));
     } finally {
       setSyncing(false);
+    }
+  };
+
+  async function startConflictResolution(conflict: MergeConflict) {
+    setError("");
+    try {
+      await persistCurrent();
+      const localNote = await VaultService.GetNote(conflict.localNoteId);
+      const localContent = conflict.localContent || markdownForEditing(localNote.content);
+      const remoteContent = conflict.remoteContent || "";
+      setConflictResolution({
+        conflict,
+        localNote,
+        mergedContent: localContent,
+        cloudHighlightLines: changedLineNumbers(localContent, remoteContent),
+      });
+      applyLoadedNote(null);
+      setNoteTrail([]);
+      setSidebarOpen(false);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  }
+
+  const saveResolvedConflict = async () => {
+    if (!conflictResolution) return;
+    const confirmed = await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Merge conflict",
+      title: "Save final version?",
+      message: "This saves the merged file as the final note version. The temporary local/cloud conflict copies will be discarded.",
+      confirmLabel: "Save merged file",
+      icon: "lock",
+    });
+    if (!confirmed) return;
+    setSaveState("saving");
+    try {
+      const saved = await VaultService.SaveNote(
+        conflictResolution.localNote.id,
+        conflictResolution.localNote.title,
+        canonicalContentFromMarkdown(conflictResolution.mergedContent),
+      );
+      setConflictResolution(null);
+      setSyncConflicts((current) =>
+        current.filter((item) => item.localNoteId !== conflictResolution.conflict.localNoteId),
+      );
+      await refreshNotes(saved.id);
+      applyLoadedNote(saved, "saved");
+      if (syncLinked) {
+        await syncNow();
+      }
+    } catch (reason) {
+      setSaveState("error");
+      setError(errorText(reason));
     }
   };
 
@@ -1944,6 +2019,59 @@ function App() {
     }
   };
 
+  const pullAndLinkGitHubVault = async () => {
+    if (!syncSettings) return;
+    const confirmed = await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "GitHub sync",
+      title: "Pull remote before linking?",
+      message: "This downloads the encrypted GitHub snapshot and merges it into this local vault. If a note conflicts, you will resolve it before anything is pushed.",
+      confirmLabel: "Pull and link",
+      icon: "lock",
+    });
+    if (!confirmed) return;
+    setSettingsBusy(true);
+    setConnectionResult(null);
+    try {
+      await persistCurrent();
+      const result: SyncResult = await VaultService.PullAndLinkGitHubVault(syncSettings);
+      const saved = await VaultService.GetSyncSettings();
+      setSyncSettings(saved);
+      setSyncLinked(saved.linked);
+      setLastSyncedAt(saved.lastSyncedAt);
+      await refreshFolders();
+      await refreshNotes();
+      const current = noteRef.current;
+      if (current) {
+        try {
+          applyLoadedNote(await VaultService.GetNote(current.id));
+        } catch {
+          applyLoadedNote(null);
+        }
+      }
+      setConnectionResult({
+        success: true,
+        message: result.message || "Remote changes were pulled and this vault is linked.",
+        warning: result.warning,
+        branch: result.branch || saved.branch,
+      });
+      if (result.merge.conflicts?.length) {
+        bringWindowToFront("syncConflicts");
+        setSyncConflicts(result.merge.conflicts);
+        void startConflictResolution(result.merge.conflicts[0]);
+      }
+    } catch (reason) {
+      setConnectionResult({
+        success: false,
+        message: errorText(reason),
+        warning: "",
+        branch: syncSettings.branch,
+      });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
   const unlinkGitHubSync = async () => {
     if (
       !(await requestAppConfirm({
@@ -2645,11 +2773,11 @@ function App() {
           </div>
           <button
             className="save-file-button"
-            disabled={!note || !dirty || saveState === "saving"}
-            title={!note ? "No note open" : "Save this note (Ctrl + S)"}
-            onClick={() => void persistCurrent()}
+            disabled={(!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+            title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
+            onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
           >
-            {saveState === "saving" ? "Encrypting…" : "Save file"}
+            {saveState === "saving" ? "Encrypting…" : conflictResolution ? "Save merged file" : "Save file"}
           </button>
           <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
             <span />
@@ -2657,7 +2785,7 @@ function App() {
           </div>
           <button
             className="save-and-sync-button"
-            disabled={!note || saveState === "saving" || syncing || !syncLinked}
+            disabled={!note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
             title={
               !note
                 ? "No note open"
@@ -2690,7 +2818,83 @@ function App() {
           </div>
         )}
 
-        {note ? (
+        {conflictResolution ? (
+          <>
+            <div className="document-heading conflict-heading">
+              <div>
+                <p className="eyebrow">Merge conflict</p>
+                <h2>{conflictResolution.localNote.title || "Untitled"}</h2>
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={saveState === "saving"}
+                onClick={() => void saveResolvedConflict()}
+              >
+                {saveState === "saving" ? "Encrypting…" : "Save merged file"}
+              </button>
+            </div>
+            <div className="conflict-editor-grid">
+              <section className="conflict-editor-pane">
+                <header>Local File</header>
+                <LiveMarkdownEditor
+                  key={`${conflictResolution.conflict.localNoteId}-local`}
+                  noteID={`${conflictResolution.conflict.localNoteId}-local`}
+                  value={conflictResolution.conflict.localContent}
+                  onChange={() => {}}
+                  onSave={() => {}}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  readOnly
+                  showToolbar={false}
+                />
+              </section>
+              <section className="conflict-editor-pane cloud">
+                <header>Cloud File</header>
+                <LiveMarkdownEditor
+                  key={`${conflictResolution.conflict.remoteNoteId}-cloud`}
+                  noteID={`${conflictResolution.conflict.remoteNoteId}-cloud`}
+                  value={conflictResolution.conflict.remoteContent}
+                  onChange={() => {}}
+                  onSave={() => {}}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  readOnly
+                  showToolbar={false}
+                  highlightLineNumbers={conflictResolution.cloudHighlightLines}
+                />
+              </section>
+              <section className="conflict-editor-pane merged">
+                <header>Merged File</header>
+                <LiveMarkdownEditor
+                  key={`${conflictResolution.conflict.localNoteId}-merged`}
+                  noteID={`${conflictResolution.conflict.localNoteId}-merged`}
+                  value={conflictResolution.mergedContent}
+                  onChange={(content) =>
+                    setConflictResolution((current) =>
+                      current ? { ...current, mergedContent: content } : current,
+                    )
+                  }
+                  onSave={() => void saveResolvedConflict()}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  showToolbar={false}
+                />
+              </section>
+            </div>
+            <footer className="document-footer">
+              <span>Resolve conflict</span>
+              <span>Local and cloud panes are read-only</span>
+              <span className="footer-encryption"><Icon name="lock" size={12} /> Encrypted at rest</span>
+            </footer>
+          </>
+        ) : note ? (
           <>
             <div className="document-heading">
               <input
@@ -3108,6 +3312,16 @@ function App() {
                   >
                     {settingsBusy ? "Working…" : "Test connection"}
                   </button>
+                  {!syncSettings.linked && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={settingsBusy}
+                      onClick={() => void pullAndLinkGitHubVault()}
+                    >
+                      Pull remote and link
+                    </button>
+                  )}
                   <button className="primary-button" disabled={settingsBusy}>
                     {settingsBusy
                       ? "Linking…"
@@ -3268,7 +3482,7 @@ function App() {
                   type="button"
                   onClick={() => {
                     setSyncConflicts([]);
-                    void selectNote(conflict.remoteNoteId);
+                    void startConflictResolution(conflict);
                   }}
                 >
                   <strong>{conflict.title}</strong>

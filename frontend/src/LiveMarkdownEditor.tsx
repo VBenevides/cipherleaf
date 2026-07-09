@@ -66,6 +66,9 @@ type LiveMarkdownEditorProps = {
   onDecreaseFontSize: () => void;
   onIncreaseFontSize: () => void;
   scrollToOffset?: number | null;
+  readOnly?: boolean;
+  showToolbar?: boolean;
+  highlightLineNumbers?: ReadonlySet<number>;
 };
 
 type LivePreviewState = {
@@ -1050,6 +1053,7 @@ function buildLivePreviewState(
   openWikilink: (title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
+  highlightLineNumbers: ReadonlySet<number>,
   context?: ObjectDocumentContext,
 ): LivePreviewState {
   const decorations: Range<Decoration>[] = [];
@@ -1065,7 +1069,12 @@ function buildLivePreviewState(
   const { lines, objectDocument } = prepared;
   const depthByLine = objectDepthByLine(objectDocument);
   const lineAttributes = (lineNumber: number, className = "", style?: string) =>
-    objectLineAttributes(lineNumber, className, style, depthByLine.get(lineNumber) ?? 0);
+    objectLineAttributes(
+      lineNumber,
+      [className, highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : ""].filter(Boolean).join(" "),
+      style,
+      depthByLine.get(lineNumber) ?? 0,
+    );
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
@@ -1474,6 +1483,7 @@ function livePreviewExtension(
   openWikilink: (title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
+  highlightLineNumbers: ReadonlySet<number>,
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
@@ -1490,6 +1500,7 @@ function livePreviewExtension(
         openWikilink,
         noteID,
         onError,
+        highlightLineNumbers,
         context,
       );
     },
@@ -1559,6 +1570,7 @@ function livePreviewExtension(
         openWikilink,
         noteID,
         onError,
+        highlightLineNumbers,
         cachedContext ?? (
           transaction.docChanged
             ? undefined
@@ -2005,6 +2017,9 @@ export default function LiveMarkdownEditor({
   onDecreaseFontSize,
   onIncreaseFontSize,
   scrollToOffset,
+  readOnly = false,
+  showToolbar = true,
+  highlightLineNumbers = new Set<number>(),
 }: LiveMarkdownEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -2018,6 +2033,7 @@ export default function LiveMarkdownEditor({
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
+    if (!showToolbar) return;
     const editorHost = host.current;
     if (!editorHost) return;
 
@@ -2038,7 +2054,7 @@ export default function LiveMarkdownEditor({
       setToolbarHost(null);
       toolbar.remove();
     };
-  }, []);
+  }, [showToolbar]);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -2162,10 +2178,13 @@ export default function LiveMarkdownEditor({
             override: [snippetCompletion],
           }),
           minimalSetup,
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           markdown(),
           liveMarkdownTheme,
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
+            if (readOnly) return false;
             let changeFrom = from;
             let changeTo = to;
             let inserted = text;
@@ -2206,6 +2225,7 @@ export default function LiveMarkdownEditor({
           }),
           EditorView.domEventHandlers({
             pointerdown(event, pointerView) {
+              if (readOnly) return false;
               const handle = objectHandleElement(event.target);
               const sourceLine = Number(handle?.dataset.objectLine);
               if (!handle || !Number.isFinite(sourceLine)) return false;
@@ -2266,6 +2286,7 @@ export default function LiveMarkdownEditor({
               return true;
             },
             paste(event, pastedView) {
+              if (readOnly) return false;
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) {
                 const text = event.clipboardData?.getData("text/plain") ?? "";
@@ -2301,6 +2322,7 @@ export default function LiveMarkdownEditor({
             (title) => onOpenWikilinkRef.current(title),
             noteID,
             (reason) => onErrorRef.current(reason),
+            highlightLineNumbers,
           ),
           EditorView.updateListener.of((update) => {
             if (

@@ -151,6 +151,10 @@ export function OpenVaultRemembered(path: string): $CancellablePromise<vault$0.S
     return $Call.ByID(910528891, path);
 }
 
+export function PullAndLinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<$models.SyncResult> {
+    return $Call.ByID(866409854, settings);
+}
+
 /**
  * PullNow pulls and merges the remote vault snapshot without pushing back.
  */
