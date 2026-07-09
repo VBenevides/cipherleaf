@@ -531,15 +531,10 @@ func (s *Store) MoveNote(id, folderID string) (Note, error) {
 	current.UpdatedAt = now.Format(time.RFC3339Nano)
 	current.ModifiedAt = nextModifiedAt(original.ModifiedAt)
 	current.Revision++
-	hash, err := s.writeNoteLocked(current)
-	if err != nil {
-		return Note{}, err
-	}
 	s.manifest.Notes[index] = summaryFromNote(current)
-	s.manifest.Notes[index].CiphertextHash = hash
+	s.manifest.Notes[index].CiphertextHash = originalSummary.CiphertextHash
 	if err := s.saveManifestLocked(); err != nil {
 		s.manifest.Notes[index] = originalSummary
-		_, _ = s.writeNoteLocked(original)
 		return Note{}, err
 	}
 	return current, nil
@@ -576,7 +571,6 @@ func (s *Store) ReorderNotes(folderID string, orderedIDs []string) error {
 	}
 
 	originalManifest := slices.Clone(s.manifest.Notes)
-	originalNotes := make(map[string]Note)
 	for order, id := range orderedIDs {
 		index, _ := s.findNoteLocked(id)
 		if s.manifest.Notes[index].Order == order {
@@ -586,22 +580,17 @@ func (s *Store) ReorderNotes(folderID string, orderedIDs []string) error {
 		if err != nil {
 			return err
 		}
-		originalNotes[id] = note
+		originalSummary := s.manifest.Notes[index]
 		note.Order = order
 		now := time.Now().UTC()
 		note.UpdatedAt = now.Format(time.RFC3339Nano)
 		note.ModifiedAt = nextModifiedAt(note.ModifiedAt)
 		note.Revision++
-		hash, err := s.writeNoteLocked(note)
-		if err != nil {
-			s.restoreReorderedNotesLocked(originalManifest, originalNotes)
-			return err
-		}
 		s.manifest.Notes[index] = summaryFromNote(note)
-		s.manifest.Notes[index].CiphertextHash = hash
+		s.manifest.Notes[index].CiphertextHash = originalSummary.CiphertextHash
 	}
 	if err := s.saveManifestLocked(); err != nil {
-		s.restoreReorderedNotesLocked(originalManifest, originalNotes)
+		s.manifest.Notes = originalManifest
 		return err
 	}
 	return nil
@@ -647,6 +636,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
+	originalSummary := s.manifest.Notes[index]
 	if current.Title == title && current.Content == content {
 		if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
 			return Note{}, err
@@ -656,15 +646,19 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		}
 		return current, nil
 	}
+	original := current
 	current.Title = title
 	current.Content = content
 	now := time.Now().UTC()
 	current.UpdatedAt = now.Format(time.RFC3339Nano)
 	current.ModifiedAt = nextModifiedAt(current.ModifiedAt)
 	current.Revision++
-	hash, err := s.writeNoteLocked(current)
-	if err != nil {
-		return Note{}, err
+	hash := originalSummary.CiphertextHash
+	if current.Content != original.Content {
+		hash, err = s.writeNoteLocked(current)
+		if err != nil {
+			return Note{}, err
+		}
 	}
 	s.manifest.Notes[index] = summaryFromNote(current)
 	s.manifest.Notes[index].CiphertextHash = hash
@@ -1103,6 +1097,15 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 		if summary.ID == noteID {
 			continue
 		}
+		if summary.OutgoingLinks != nil {
+			for _, link := range summary.OutgoingLinks {
+				if outgoingLinkMatches(link, target.ID, aliases) {
+					matches = append(matches, backlinkMetadataMatch(summary, link))
+					break
+				}
+			}
+			continue
+		}
 		note, err := s.readNoteLocked(summary.ID)
 		if err != nil {
 			return nil, err
@@ -1370,9 +1373,11 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 			existing.CiphertextHash == item.CiphertextHash &&
 			existing.Revision == item.Revision &&
 			existing.ModifiedAt == item.ModifiedAt &&
+			existing.Summary != nil &&
 			!existing.Deleted &&
 			sameRegularFileSize(source, target) {
 			expectedObjects[filepath.Clean(target)] = struct{}{}
+			existing.Summary = cloneNoteSummary(item)
 			inventory.Objects = append(inventory.Objects, existing)
 			continue
 		}
@@ -1400,6 +1405,7 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 			CiphertextHash: hashText,
 			Revision:       item.Revision,
 			ModifiedAt:     item.ModifiedAt,
+			Summary:        cloneNoteSummary(item),
 		})
 	}
 	if manifestChanged {
@@ -1642,7 +1648,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			remoteNote.CiphertextHash != "" &&
 			local.CiphertextHash != "" &&
 			remoteNote.CiphertextHash != local.CiphertextHash {
-			duplicate, err := s.duplicateRemoteConflictLocked(source, remoteNote.ID)
+			duplicate, err := s.duplicateRemoteConflictLocked(source, remoteNote)
 			if err != nil {
 				return MergeResult{}, err
 			}
@@ -1768,8 +1774,8 @@ func copyRemoteNoteObject(source, localRoot, id string) error {
 	return nil
 }
 
-func (s *Store) duplicateRemoteConflictLocked(source, id string) (NoteSummary, error) {
-	remote, err := s.readNoteAtLocked(source, id)
+func (s *Store) duplicateRemoteConflictLocked(source string, remoteSummary NoteSummary) (NoteSummary, error) {
+	remote, err := s.readNoteFromSummaryAtLocked(source, remoteSummary)
 	if err != nil {
 		return NoteSummary{}, err
 	}
@@ -1789,7 +1795,7 @@ func (s *Store) duplicateRemoteConflictLocked(source, id string) (NoteSummary, e
 	if err != nil {
 		return NoteSummary{}, err
 	}
-	sourceAttachments := filepath.Join(source, "attachments", id)
+	sourceAttachments := filepath.Join(source, "attachments", remoteSummary.ID)
 	if _, err := os.Stat(sourceAttachments); err == nil {
 		if err := copyAttachmentDirectory(sourceAttachments, filepath.Join(s.root, "attachments", newID)); err != nil {
 			return NoteSummary{}, err
@@ -2082,29 +2088,25 @@ func (s *Store) readRemoteSnapshotLocked(
 		if hex.EncodeToString(hash[:]) != item.CiphertextHash {
 			return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s does not match its inventory hash", item.ID)
 		}
-		note, err := s.readNoteAtLocked(source, item.ID)
+		var summary NoteSummary
+		var note Note
+		if item.Summary != nil {
+			summary = *cloneNoteSummary(*item.Summary)
+			if summary.ID != item.ID {
+				return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
+			}
+			note, err = s.readNoteFromSummaryAtLocked(source, summary)
+		} else {
+			note, err = s.readLegacyNoteAtLocked(source, item.ID)
+			summary = summaryFromNote(note)
+		}
 		if err != nil {
 			return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote encrypted note %s: %w", item.ID, err)
 		}
-		normalizedTitle, titleErr := normalizeTitle(note.Title)
-		if titleErr != nil || normalizedTitle != note.Title ||
-			!utf8.ValidString(note.Content) || len([]byte(note.Content)) > maxNoteBytes ||
-			note.Revision == 0 || note.ModifiedAt < 0 {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s contains invalid data", item.ID)
-		}
-		if _, err := time.Parse(time.RFC3339Nano, note.CreatedAt); err != nil {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s has an invalid creation time", item.ID)
-		}
-		if _, err := time.Parse(time.RFC3339Nano, note.UpdatedAt); err != nil {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s has an invalid update time", item.ID)
-		}
-		if note.Revision != item.Revision ||
-			note.ModifiedAt != item.ModifiedAt ||
-			(note.FolderID != "" && !folderIDExists(remoteFolders, note.FolderID)) {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
+		if err := validateRemoteNote(note, item, remoteFolders); err != nil {
+			return authenticatedRemoteSnapshot{}, err
 		}
 		remoteNotes[item.ID] = item
-		summary := summaryFromNote(note)
 		summary.CiphertextHash = item.CiphertextHash
 		noteSummaries = append(noteSummaries, summary)
 	}
@@ -2381,10 +2383,7 @@ func sharedAttachmentAAD(id string) string {
 }
 
 func (s *Store) writeNoteLocked(note Note) (string, error) {
-	plaintext, err := json.Marshal(note)
-	if err != nil {
-		return "", fmt.Errorf("encode note: %w", err)
-	}
+	plaintext := []byte(note.Content)
 	path := s.notePathLocked(note.ID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create note object folder: %w", err)
@@ -2394,7 +2393,7 @@ func (s *Store) writeNoteLocked(note Note) (string, error) {
 		return "", err
 	}
 	if err := s.writeEnvelopePayloadLocked(
-		path, "note", note.ID, payload, compression,
+		path, "note-content", note.ID, payload, compression,
 	); err != nil {
 		return "", err
 	}
@@ -2407,35 +2406,77 @@ func (s *Store) writeNoteLocked(note Note) (string, error) {
 }
 
 func (s *Store) readNoteLocked(id string) (Note, error) {
-	return s.readNoteAtLocked(s.root, id)
+	index, found := s.findNoteLocked(id)
+	if !found {
+		return Note{}, errors.New("note not found")
+	}
+	return s.readNoteFromSummaryAtLocked(s.root, s.manifest.Notes[index])
 }
 
-func (s *Store) readNoteAtLocked(root, id string) (Note, error) {
-	if !validID(id) {
+func (s *Store) readNoteFromSummaryAtLocked(root string, summary NoteSummary) (Note, error) {
+	if !validID(summary.ID) {
 		return Note{}, errors.New("invalid note ID")
+	}
+	content, legacy, err := s.readNoteContentAtLocked(root, summary.ID)
+	if err != nil {
+		return Note{}, err
+	}
+	if legacy != nil && summary.Title == "" {
+		return *legacy, nil
+	}
+	return noteFromSummary(summary, content), nil
+}
+
+func (s *Store) readLegacyNoteAtLocked(root, id string) (Note, error) {
+	content, legacy, err := s.readNoteContentAtLocked(root, id)
+	if err != nil {
+		return Note{}, err
+	}
+	if legacy == nil {
+		return Note{}, errors.New("encrypted note metadata is stored outside the note object")
+	}
+	legacy.Content = content
+	return *legacy, nil
+}
+
+func (s *Store) readNoteContentAtLocked(root, id string) (string, *Note, error) {
+	if !validID(id) {
+		return "", nil, errors.New("invalid note ID")
 	}
 	path := filepath.Join(root, "objects", id[:2], id+".enc")
 	var plaintext []byte
 	var err error
+	legacyEnvelope := false
 	if root == s.root {
-		plaintext, err = s.readEnvelopeLocked(path, "note", id)
+		plaintext, err = s.readEnvelopeLocked(path, "note-content", id)
 	} else {
-		plaintext, err = s.readEnvelopeFileLocked(path, "note", id)
+		plaintext, err = s.readEnvelopeFileLocked(path, "note-content", id)
+	}
+	if err != nil {
+		legacyEnvelope = true
+		if root == s.root {
+			plaintext, err = s.readEnvelopeLocked(path, "note", id)
+		} else {
+			plaintext, err = s.readEnvelopeFileLocked(path, "note", id)
+		}
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Note{}, ErrEncryptedFileAbsent
+			return "", nil, ErrEncryptedFileAbsent
 		}
-		return Note{}, fmt.Errorf("decrypt note %s: %w", id, err)
+		return "", nil, fmt.Errorf("decrypt note %s: %w", id, err)
 	}
 	var note Note
-	if err := json.Unmarshal(plaintext, &note); err != nil {
-		return Note{}, fmt.Errorf("decode note %s: %w", id, err)
+	if legacyEnvelope {
+		if err := json.Unmarshal(plaintext, &note); err == nil && note.ID == id && note.Title != "" {
+			return note.Content, &note, nil
+		}
+		return "", nil, fmt.Errorf("decode note %s: legacy metadata is invalid", id)
 	}
-	if note.ID != id || note.Title == "" {
-		return Note{}, errors.New("encrypted note metadata does not match its object")
+	if !utf8.Valid(plaintext) {
+		return "", nil, fmt.Errorf("decode note %s: content is not valid UTF-8", id)
 	}
-	return note, nil
+	return string(plaintext), nil, nil
 }
 
 func (s *Store) saveManifestLocked() error {
@@ -2611,7 +2652,7 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 		return nil, errors.New("encrypted object header is invalid")
 	}
 	if value.Compression != "" &&
-		(value.Compression != "gzip" || objectType != "note") {
+		(value.Compression != "gzip" || (objectType != "note" && objectType != "note-content")) {
 		return nil, errors.New("encrypted object compression is invalid")
 	}
 	nonce, err := base64.RawURLEncoding.DecodeString(value.Nonce)
@@ -3178,8 +3219,57 @@ func summaryFromNote(note Note) NoteSummary {
 	return NoteSummary{
 		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(note.Content),
-		AttachmentIDs: extractAttachmentIDs(note.Content),
+		AttachmentIDs: extractAttachmentIDs(note.Content), OutgoingLinks: extractOutgoingLinks(note.Content),
 	}
+}
+
+func noteFromSummary(summary NoteSummary, content string) Note {
+	return Note{
+		ID:         summary.ID,
+		Title:      summary.Title,
+		FolderID:   summary.FolderID,
+		Order:      summary.Order,
+		Content:    content,
+		CreatedAt:  summary.CreatedAt,
+		UpdatedAt:  summary.UpdatedAt,
+		ModifiedAt: summary.ModifiedAt,
+		Revision:   summary.Revision,
+	}
+}
+
+func cloneNoteSummary(summary NoteSummary) *NoteSummary {
+	clone := summary
+	clone.Tags = slices.Clone(summary.Tags)
+	clone.AttachmentIDs = slices.Clone(summary.AttachmentIDs)
+	clone.OutgoingLinks = slices.Clone(summary.OutgoingLinks)
+	return &clone
+}
+
+func validateRemoteNote(note Note, item remoteSyncObject, folders []Folder) error {
+	normalizedTitle, titleErr := normalizeTitle(note.Title)
+	if titleErr != nil || normalizedTitle != note.Title ||
+		!utf8.ValidString(note.Content) || len([]byte(note.Content)) > maxNoteBytes ||
+		note.Revision == 0 || note.ModifiedAt < 0 {
+		return fmt.Errorf("remote encrypted note %s contains invalid data", item.ID)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, note.CreatedAt); err != nil {
+		return fmt.Errorf("remote encrypted note %s has an invalid creation time", item.ID)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, note.UpdatedAt); err != nil {
+		return fmt.Errorf("remote encrypted note %s has an invalid update time", item.ID)
+	}
+	if note.Revision != item.Revision ||
+		note.ModifiedAt != item.ModifiedAt ||
+		(note.FolderID != "" && !folderIDExists(folders, note.FolderID)) {
+		return fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
+	}
+	if item.Summary != nil &&
+		(!slices.Equal(extractTags(note.Content), item.Summary.Tags) ||
+			!slices.Equal(extractAttachmentIDs(note.Content), item.Summary.AttachmentIDs) ||
+			!slices.Equal(extractOutgoingLinks(note.Content), item.Summary.OutgoingLinks)) {
+		return fmt.Errorf("remote encrypted note %s derived metadata is inconsistent", item.ID)
+	}
+	return nil
 }
 
 func sortSummaries(items []NoteSummary) {
@@ -3303,6 +3393,26 @@ func extractAttachmentIDs(content string) []string {
 	return ids
 }
 
+func extractOutgoingLinks(content string) []string {
+	seen := make(map[string]struct{})
+	for _, match := range wikilinkPattern.FindAllStringSubmatch(content, -1) {
+		link := normalizeOutgoingLink(match[1])
+		if link != "" {
+			seen[link] = struct{}{}
+		}
+	}
+	links := make([]string, 0, len(seen))
+	for link := range seen {
+		links = append(links, link)
+	}
+	slices.Sort(links)
+	return links
+}
+
+func normalizeOutgoingLink(link string) string {
+	return strings.ToLower(strings.TrimSpace(link))
+}
+
 func parseNoteReference(reference string) (label string, id string, ok bool) {
 	parts := strings.Split(reference, "|")
 	for _, part := range parts {
@@ -3327,6 +3437,29 @@ func backlinkMatch(summary NoteSummary, content string, from, to int, raw string
 		Offset:      from,
 		MatchLength: len(raw) + 4,
 	}
+}
+
+func backlinkMetadataMatch(summary NoteSummary, raw string) FindMatch {
+	return FindMatch{
+		NoteID:      summary.ID,
+		Title:       summary.Title,
+		Field:       "content",
+		Snippet:     "[[" + raw + "]]",
+		Offset:      0,
+		MatchLength: len(raw) + 4,
+	}
+}
+
+func outgoingLinkMatches(link, targetID string, aliases map[string]struct{}) bool {
+	label, id, hasID := parseNoteReference(link)
+	if hasID {
+		if id == targetID {
+			return true
+		}
+		link = normalizeOutgoingLink(label)
+	}
+	_, ok := aliases[link]
+	return ok
 }
 
 func nextModifiedAt(previous int64) int64 {

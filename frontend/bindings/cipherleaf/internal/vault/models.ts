@@ -69,6 +69,7 @@ export interface NoteSummary {
     "ciphertextHash"?: string;
     "tags"?: string[] | null;
     "attachmentIds": string[] | null;
+    "outgoingLinks": string[] | null;
 }
 
 /**

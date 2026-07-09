@@ -24,6 +24,7 @@ type NoteSummary struct {
 	CiphertextHash string   `json:"ciphertextHash,omitempty"`
 	Tags           []string `json:"tags,omitempty"`
 	AttachmentIDs  []string `json:"attachmentIds"`
+	OutgoingLinks  []string `json:"outgoingLinks"`
 }
 
 type Note struct {
@@ -107,11 +108,12 @@ type remoteSyncManifest struct {
 }
 
 type remoteSyncObject struct {
-	ID             string `json:"id"`
-	CiphertextHash string `json:"ciphertext_hash"`
-	Revision       uint64 `json:"revision"`
-	ModifiedAt     int64  `json:"modified_at"`
-	Deleted        bool   `json:"deleted"`
+	ID             string       `json:"id"`
+	CiphertextHash string       `json:"ciphertext_hash"`
+	Revision       uint64       `json:"revision"`
+	ModifiedAt     int64        `json:"modified_at"`
+	Deleted        bool         `json:"deleted"`
+	Summary        *NoteSummary `json:"summary,omitempty"`
 }
 
 type remoteFolderManifest struct {

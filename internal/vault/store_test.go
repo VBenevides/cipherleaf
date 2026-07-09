@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1047,6 +1048,74 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 }
 
+func TestNoteObjectStoresOnlyContentAndManifestMetadata(t *testing.T) {
+	store := NewStore()
+	session, err := store.Create(t.TempDir(), "secret-secret-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "# Body\n\n[[Target|note:0123456789abcdef0123456789abcdef]] #Project\n\nattachment:abcdefabcdefabcdefabcdefabcdefab"
+	if _, err := store.SaveNote(note.ID, "Renamed", content); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(session.Path, "objects", note.ID[:2], note.ID+".enc")
+	plaintext, err := store.readEnvelopeFileLocked(path, "note-content", note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(plaintext) != content {
+		t.Fatalf("note object plaintext = %q, want content only", plaintext)
+	}
+	summaries, err := store.ListNotes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(summaries))
+	}
+	summary := summaries[0]
+	if summary.Title != "Renamed" ||
+		!slices.Equal(summary.Tags, []string{"project"}) ||
+		!slices.Equal(summary.AttachmentIDs, []string{"abcdefabcdefabcdefabcdefabcdefab"}) ||
+		!slices.Equal(summary.OutgoingLinks, []string{"target|note:0123456789abcdef0123456789abcdef"}) {
+		t.Fatalf("summary metadata not populated: %#v", summary)
+	}
+}
+
+func TestListBacklinksUsesManifestOutgoingLinks(t *testing.T) {
+	store := NewStore()
+	session, err := store.Create(t.TempDir(), "secret-secret-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.CreateNote("Target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := store.CreateNote("Source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(source.ID, source.Title, "[[Target|note:"+target.ID+"]]"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(session.Path, "objects", source.ID[:2], source.ID+".enc")
+	if err := os.WriteFile(path, []byte("not an envelope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.ListBacklinks(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].NoteID != source.ID {
+		t.Fatalf("backlinks = %#v, want source match", matches)
+	}
+}
+
 func TestReplaceAcrossNotesRewritesAndUpdatesModifiedAt(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
@@ -1261,7 +1330,7 @@ func TestLargeNoteIsCompressedBeforeEncryption(t *testing.T) {
 	if err := os.WriteFile(path, tampered, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.readEnvelopeFileLocked(path, "note", note.ID); err == nil {
+	if _, err := store.readEnvelopeFileLocked(path, "note-content", note.ID); err == nil {
 		t.Fatal("compression header tampering unexpectedly authenticated")
 	}
 }
