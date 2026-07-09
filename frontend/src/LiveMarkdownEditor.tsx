@@ -204,6 +204,23 @@ class TextWidget extends WidgetType {
   }
 }
 
+class IndentSpacerWidget extends WidgetType {
+  constructor(readonly columns: number) {
+    super();
+  }
+
+  eq(other: IndentSpacerWidget) {
+    return other.columns === this.columns;
+  }
+
+  toDOM() {
+    const element = document.createElement("span");
+    element.className = "cm-live-indent-spacer";
+    element.style.width = `${this.columns}ch`;
+    return element;
+  }
+}
+
 class HorizontalRuleWidget extends WidgetType {
   constructor(readonly position: number) {
     super();
@@ -801,6 +818,26 @@ function isObjectContinuationLine(lines: readonly string[], lineNumber: number):
   return isContinuationLine(lines, lineNumber);
 }
 
+function continuationOwnerContentIndent(lines: readonly string[], lineNumber: number): number {
+  const ownerLine = objectOwnerLineNumber(lines, lineNumber);
+  if (ownerLine <= 0 || ownerLine === lineNumber) return 0;
+  return objectContentIndent(lines[ownerLine - 1] ?? "");
+}
+
+function continuationPrefixSizeForIndent(raw: string, targetIndent: number): number {
+  let offset = 0;
+  let column = 0;
+
+  while (offset < raw.length && column < targetIndent) {
+    const character = raw[offset];
+    if (character !== " " && character !== "\t") break;
+    column += character === "\t" ? 2 : 1;
+    offset++;
+  }
+
+  return offset;
+}
+
 function isSectionSeparatorLine(lines: readonly string[], lineNumber: number): boolean {
   return isSeparatorLine(lines, lineNumber);
 }
@@ -1289,11 +1326,25 @@ function buildLivePreviewState(
     }
 
     if (continuationLine) {
+      const indent = continuationOwnerContentIndent(lines, lineNumber);
+      const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
+      decorations.push(
+        Decoration.line({
+          attributes: { class: "cm-live-object-continuation-line" },
+        }).range(line.from),
+      );
+      addHiddenRange(
+        line.from,
+        line.from + prefixSize,
+        decorations,
+        atomicRanges,
+        new IndentSpacerWidget(indent),
+      );
       decorateInlineMarkdown(
         state,
         lineNumber,
-        line.text,
-        line.from,
+        line.text.slice(prefixSize),
+        line.from + prefixSize,
         decorations,
         atomicRanges,
         openWikilink,

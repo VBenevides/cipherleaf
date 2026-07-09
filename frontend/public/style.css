@@ -1917,6 +1917,11 @@ a:focus-visible {
   cursor: text;
 }
 
+.live-markdown-editor .cm-live-indent-spacer {
+  display: inline-block;
+  height: 1px;
+}
+
 .live-markdown-editor .cm-live-object-line:has(.cm-live-object-handle:hover),
 .live-markdown-editor .cm-live-object-line.is-dragging {
   outline: 1px solid rgba(94, 129, 172, 0.32);
