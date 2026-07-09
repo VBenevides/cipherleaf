@@ -790,12 +790,18 @@ func (s *Store) pruneStaleAttachmentsLocked() error {
 	notes := make(map[string]struct{}, len(s.manifest.Notes))
 	for _, summary := range s.manifest.Notes {
 		notes[summary.ID] = struct{}{}
-		note, err := s.readNoteLocked(summary.ID)
-		if err != nil {
-			return err
-		}
-		if err := s.pruneNoteAttachmentsLocked(summary.ID, note.Content); err != nil {
-			return err
+		if summary.AttachmentIDs != nil {
+			if err := s.pruneNoteAttachmentsByIDLocked(summary.ID, summary.AttachmentIDs); err != nil {
+				return err
+			}
+		} else {
+			note, err := s.readNoteLocked(summary.ID)
+			if err != nil {
+				return err
+			}
+			if err := s.pruneNoteAttachmentsLocked(summary.ID, note.Content); err != nil {
+				return err
+			}
 		}
 	}
 	for _, entry := range entries {
@@ -933,9 +939,13 @@ func (s *Store) sharedAttachmentIDsLocked() (map[string]struct{}, error) {
 }
 
 func (s *Store) pruneNoteAttachmentsLocked(noteID, content string) error {
-	referenced := make(map[string]struct{})
-	for _, match := range attachmentReference.FindAllStringSubmatch(content, -1) {
-		referenced[match[1]] = struct{}{}
+	return s.pruneNoteAttachmentsByIDLocked(noteID, extractAttachmentIDs(content))
+}
+
+func (s *Store) pruneNoteAttachmentsByIDLocked(noteID string, ids []string) error {
+	referenced := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		referenced[id] = struct{}{}
 	}
 	directory := filepath.Join(s.root, "attachments", noteID)
 	entries, err := os.ReadDir(directory)

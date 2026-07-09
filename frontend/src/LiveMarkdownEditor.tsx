@@ -424,6 +424,52 @@ async function copyImageToClipboard(image: HTMLImageElement) {
   await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
 }
 
+const attachmentDataCache = new Map<string, string>();
+const attachmentDataRequests = new Map<string, Promise<string>>();
+const maxCachedAttachments = 128;
+
+function attachmentCacheKey(noteID: string, attachmentID: string) {
+  return `${noteID}:${attachmentID}`;
+}
+
+function rememberAttachmentData(key: string, data: string) {
+  attachmentDataCache.delete(key);
+  attachmentDataCache.set(key, data);
+  while (attachmentDataCache.size > maxCachedAttachments) {
+    const oldest = attachmentDataCache.keys().next().value;
+    if (oldest === undefined) break;
+    attachmentDataCache.delete(oldest);
+  }
+}
+
+function cachedAttachmentData(noteID: string, attachmentID: string) {
+  const key = attachmentCacheKey(noteID, attachmentID);
+  const cached = attachmentDataCache.get(key);
+  if (cached !== undefined) {
+    attachmentDataCache.delete(key);
+    attachmentDataCache.set(key, cached);
+    return Promise.resolve(cached);
+  }
+  const pending = attachmentDataRequests.get(key);
+  if (pending) return pending;
+  const request = VaultService.GetAttachment(noteID, attachmentID)
+    .then((data) => {
+      rememberAttachmentData(key, data);
+      return data;
+    })
+    .finally(() => {
+      attachmentDataRequests.delete(key);
+    });
+  attachmentDataRequests.set(key, request);
+  return request;
+}
+
+function forgetAttachmentData(noteID: string, attachmentID: string) {
+  const key = attachmentCacheKey(noteID, attachmentID);
+  attachmentDataCache.delete(key);
+  attachmentDataRequests.delete(key);
+}
+
 class AttachmentWidget extends WidgetType {
   constructor(
     readonly noteID: string,
@@ -455,7 +501,7 @@ class AttachmentWidget extends WidgetType {
     image.style.maxWidth = "100%";
     image.draggable = false;
     image.setAttribute("aria-busy", "true");
-    void VaultService.GetAttachment(this.noteID, this.attachmentID)
+    void cachedAttachmentData(this.noteID, this.attachmentID)
       .then((data) => {
         image.src = `data:image/webp;base64,${data}`;
         image.removeAttribute("aria-busy");
@@ -551,6 +597,7 @@ class AttachmentWidget extends WidgetType {
           },
         });
         view.focus();
+        forgetAttachmentData(this.noteID, this.attachmentID);
         void VaultService.DeleteAttachment(this.noteID, this.attachmentID)
           .catch(this.onError);
       });

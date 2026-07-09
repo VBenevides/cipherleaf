@@ -22,6 +22,8 @@ var assets embed.FS
 var version string
 
 func main() {
+	startPprofServer()
+
 	appTitle := fmt.Sprintf("Cipherleaf - v%s", strings.TrimSpace(version))
 	vaultService := cipherleafapp.NewVaultService()
 	app := application.New(application.Options{
