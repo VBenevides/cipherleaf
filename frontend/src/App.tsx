@@ -25,12 +25,17 @@ import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { errorText } from "./errors";
 import LiveMarkdownEditor from "./LiveMarkdownEditor";
 import ObjectTreeView from "./ObjectTreeView";
+import {
+  canonicalObjectDocumentTextFromMarkdown,
+  prepareNoteContent,
+} from "./objectDocument";
 import SourceMarkdownEditor from "./SourceMarkdownEditor";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -76,6 +81,13 @@ type NoteCrumb = {
   title: string;
 };
 
+type ConflictResolution = {
+  conflict: MergeConflict;
+  localNote: Note;
+  mergedContent: string;
+  cloudHighlightLines: ReadonlySet<number>;
+};
+
 const AUTO_LOCK_MS = 15 * 60 * 1000;
 const AUTOSAVE_DELAY_MS = 10 * 1000;
 const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
@@ -86,6 +98,38 @@ type StoredEditorFont = {
   name: string;
   data: ArrayBuffer;
 };
+
+function noteForEditing(note: Note): { note: Note; migrated: boolean } {
+  const prepared = prepareNoteContent(note.content);
+  return {
+    note: { ...note, content: prepared.canonicalText },
+    migrated: prepared.migrated,
+  };
+}
+
+function noteForStorage(note: Note): Note {
+  return note;
+}
+
+function markdownForEditing(content: string): string {
+  return prepareNoteContent(content).markdown;
+}
+
+function canonicalContentFromMarkdown(markdown: string): string {
+  return canonicalObjectDocumentTextFromMarkdown(markdown);
+}
+
+function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
+  const leftLines = left.split("\n");
+  const rightLines = right.split("\n");
+  const changed = new Set<number>();
+  for (let index = 0; index < rightLines.length; index++) {
+    if (rightLines[index] !== (leftLines[index] ?? "")) {
+      changed.add(index + 1);
+    }
+  }
+  return changed;
+}
 
 function openAppearanceDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -275,6 +319,7 @@ function App() {
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
+  const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
@@ -284,6 +329,7 @@ function App() {
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
   const [scrollToOffset, setScrollToOffset] = useState<number | null>(null);
+  const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
     try {
       const saved = window.localStorage.getItem("cipherleaf-theme");
@@ -312,6 +358,7 @@ function App() {
   const suppressClickRef = useRef(false);
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
   const appDialogResolverRef = useRef<((value: string | boolean | null) => void) | null>(null);
+  const nextWindowLayerRef = useRef(160);
 
   useEffect(() => {
     noteRef.current = note;
@@ -557,9 +604,7 @@ function App() {
     try {
       if (!sameNote) {
         const fresh = await VaultService.GetNote(match.noteId);
-        setNote(fresh);
-        noteRef.current = fresh;
-        setDirty(false);
+        applyLoadedNote(fresh);
         const summaries = await VaultService.ListNotes();
         if (summaries) {
           setNotes(summaries);
@@ -581,7 +626,13 @@ function App() {
     setAppDialogValue("");
   };
 
+  const bringWindowToFront = useCallback((layer: WindowLayer) => {
+    nextWindowLayerRef.current += 1;
+    setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
+  }, []);
+
   const requestAppPrompt = (dialog: Extract<AppDialogState, { kind: "prompt" }>) => {
+    bringWindowToFront("appDialog");
     setAppDialogValue(dialog.initialValue ?? "");
     setAppDialog(dialog);
     return new Promise<string | null>((resolve) => {
@@ -590,6 +641,7 @@ function App() {
   };
 
   const requestAppConfirm = (dialog: Extract<AppDialogState, { kind: "confirm" }>) => {
+    bringWindowToFront("appDialog");
     setAppDialogValue("");
     setAppDialog(dialog);
     return new Promise<boolean>((resolve) => {
@@ -629,9 +681,7 @@ function App() {
       if (noteRef.current) {
         try {
           const fresh = await VaultService.GetNote(noteRef.current.id);
-          setNote(fresh);
-          noteRef.current = fresh;
-          setDirty(false);
+          applyLoadedNote(fresh);
         } catch {
           // note may have been removed
         }
@@ -712,11 +762,9 @@ function App() {
     const targetID = preferredID ?? noteRef.current?.id ?? result[0]?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
       const loaded = await VaultService.GetNote(targetID);
-      setNote(loaded);
-      setDirty(false);
-      setSaveState("idle");
+      applyLoadedNote(loaded);
     } else {
-      setNote(null);
+      applyLoadedNote(null);
     }
   };
 
@@ -772,25 +820,44 @@ function App() {
     );
   };
 
+  const applyLoadedNote = (loaded: Note | null, state: SaveState = "idle") => {
+    if (!loaded) {
+      noteRef.current = null;
+      dirtyRef.current = false;
+      setNote(null);
+      setDirty(false);
+      setSaveState(state);
+      return;
+    }
+    const prepared = noteForEditing(loaded);
+    noteRef.current = prepared.note;
+    dirtyRef.current = false;
+    setNote(prepared.note);
+    setDirty(false);
+    setSaveState(state);
+  };
+
   const persistCurrent = async (snapshot = noteRef.current) => {
     if (!snapshot || !dirtyRef.current) return snapshot;
     setSaveState("saving");
     try {
       const version = editVersion.current;
+      const stored = noteForStorage(snapshot);
       const saved = await VaultService.SaveNote(
-        snapshot.id,
-        snapshot.title,
-        snapshot.content,
+        stored.id,
+        stored.title,
+        stored.content,
       );
       updateSummary(saved);
       if (version === editVersion.current) {
-        noteRef.current = saved;
+        const prepared = noteForEditing(saved);
+        noteRef.current = prepared.note;
         dirtyRef.current = false;
-        setNote(saved);
+        setNote(prepared.note);
         setDirty(false);
         setSaveState("saved");
       }
-      return saved;
+      return noteForEditing(saved).note;
     } catch (reason) {
       setSaveState("error");
       setError(errorText(reason));
@@ -912,6 +979,7 @@ function App() {
 
   const prepareVaultPrompt = async (action: VaultAction, path: string) => {
     setVaultPath(path);
+    bringWindowToFront("vaultAction");
     setVaultAction(action);
     setVaultName("");
     setPassphrase("");
@@ -1064,10 +1132,13 @@ function App() {
       await refreshFolders();
       if (completedAction === "create") {
         const first = await VaultService.CreateNote("Welcome");
+        const welcomeContent = canonicalObjectDocumentTextFromMarkdown(
+          "# Welcome to your encrypted vault\n\nYour notes are encrypted before they touch the disk.\n\n* Write naturally in **Live Preview**\n* Add _emphasis_, **strong ideas**, and `[[double brackets]]`\n* [ ] Try the interactive checklist\n* Create a note with **Ctrl + N**\n\n> Collapsible project\n> [ ] First task\n>> [ ] Nested task—use Tab and Shift+Tab to change its level\n> [ ] Another task\n\nThis vault locks automatically after 15 minutes of inactivity.",
+        );
         const saved = await VaultService.SaveNote(
           first.id,
           first.title,
-          "# Welcome to your encrypted vault\n\nYour notes are encrypted before they touch the disk.\n\n* Write naturally in **Live Preview**\n* Add _emphasis_, **strong ideas**, and `[[double brackets]]`\n* [ ] Try the interactive checklist\n* Create a note with **Ctrl + N**\n\n> Collapsible project\n> [ ] First task\n>> [ ] Nested task—use Tab and Shift+Tab to change its level\n> [ ] Another task\n\nThis vault locks automatically after 15 minutes of inactivity.",
+          welcomeContent,
         );
         await refreshNotes(saved.id);
       } else {
@@ -1093,9 +1164,7 @@ function App() {
       if (note) {
         try {
           const fresh = await VaultService.GetNote(note.id);
-          setNote(fresh);
-          noteRef.current = fresh;
-          setDirty(false);
+          applyLoadedNote(fresh);
         } catch {
           // note may have been removed by the merge; leave as-is
         }
@@ -1112,8 +1181,93 @@ function App() {
         setSaveState("saved");
       }
       if (result.merge.conflicts?.length) {
+        bringWindowToFront("syncConflicts");
         setSyncConflicts(result.merge.conflicts);
+        void startConflictResolution(result.merge.conflicts[0]);
       }
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  async function startConflictResolution(conflict: MergeConflict) {
+    setError("");
+    try {
+      await persistCurrent();
+      const localNote = await VaultService.GetNote(conflict.localNoteId);
+      const localContent = conflict.localContent || markdownForEditing(localNote.content);
+      const remoteContent = conflict.remoteContent || "";
+      setConflictResolution({
+        conflict,
+        localNote,
+        mergedContent: localContent,
+        cloudHighlightLines: changedLineNumbers(localContent, remoteContent),
+      });
+      applyLoadedNote(null);
+      setNoteTrail([]);
+      setSidebarOpen(false);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  }
+
+  const saveResolvedConflict = async () => {
+    if (!conflictResolution) return;
+    const confirmed = await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Merge conflict",
+      title: "Save final version?",
+      message: "This saves the merged file as the final note version. The temporary local/cloud conflict copies will be discarded.",
+      confirmLabel: "Save merged file",
+      icon: "lock",
+    });
+    if (!confirmed) return;
+    setSaveState("saving");
+    try {
+      const saved = await VaultService.SaveNote(
+        conflictResolution.localNote.id,
+        conflictResolution.localNote.title,
+        canonicalContentFromMarkdown(conflictResolution.mergedContent),
+      );
+      setConflictResolution(null);
+      setSyncConflicts((current) =>
+        current.filter((item) => item.localNoteId !== conflictResolution.conflict.localNoteId),
+      );
+      await refreshNotes(saved.id);
+      applyLoadedNote(saved, "saved");
+      if (syncLinked) {
+        await syncNow();
+      }
+    } catch (reason) {
+      setSaveState("error");
+      setError(errorText(reason));
+    }
+  };
+
+  const forcePushLocalVault = async () => {
+    if (syncing || !syncConflicts.length) return;
+    const confirmed = await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Force push",
+      title: "Overwrite remote vault?",
+      message: "This replaces the cloud vault with your current local vault. Remote changes involved in the conflict will be lost.",
+      confirmLabel: "Force push local vault",
+      danger: true,
+      icon: "lock",
+    });
+    if (!confirmed) return;
+    setSyncing(true);
+    setError("");
+    try {
+      await persistCurrent();
+      const result = await VaultService.ForcePushNow();
+      setSyncConflicts([]);
+      const settings = await VaultService.GetSyncSettings();
+      setLastSyncedAt(settings.lastSyncedAt);
+      setSaveState("saved");
+      setError(result.warning || result.message || "Local vault force-pushed to cloud.");
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -1229,9 +1383,7 @@ function App() {
       const created = await VaultService.CreateNoteInFolder("Untitled", targetFolder);
       const result = (await VaultService.ListNotes()) ?? [];
       setNotes(result);
-      setNote(created);
-      setDirty(false);
-      setSaveState("idle");
+      applyLoadedNote(created);
       setSidebarOpen(false);
     } catch (reason) {
       setError(errorText(reason));
@@ -1316,6 +1468,7 @@ function App() {
   };
 
   const requestFolderPassword = (title: string, submitLabel: string) => {
+    bringWindowToFront("folderPassword");
     setFolderPassword("");
     setFolderPasswordVisible(false);
     setFolderPasswordPrompt({ title, submitLabel });
@@ -1413,7 +1566,7 @@ function App() {
           return;
         }
       }
-      setNote(loaded);
+      applyLoadedNote(loaded);
       if (options.replaceTrail) {
         setNoteTrail(options.replaceTrail);
       } else if (options.appendTrail && previous) {
@@ -1426,8 +1579,6 @@ function App() {
       } else {
         setNoteTrail([]);
       }
-      setDirty(false);
-      setSaveState("idle");
       setSidebarOpen(false);
     } catch (reason) {
       setError(errorText(reason));
@@ -1465,7 +1616,7 @@ function App() {
             (item) =>
               selectedFolderID === "all" || item.folderId === selectedFolderID,
           ) ?? remaining[0];
-        setNote(next ? await VaultService.GetNote(next.id) : null);
+        applyLoadedNote(next ? await VaultService.GetNote(next.id) : null);
       }
     } catch (reason) {
       setError(errorText(reason));
@@ -1479,9 +1630,7 @@ function App() {
       const moved = await VaultService.MoveNote(id, folderID);
       setNotes((await VaultService.ListNotes()) ?? []);
       if (noteRef.current?.id === id) {
-        setNote(moved);
-        setDirty(false);
-        setSaveState("saved");
+        applyLoadedNote(moved, "saved");
       }
       if (query) setNotes((await VaultService.SearchNotes(query)) ?? []);
     } catch (reason) {
@@ -1510,9 +1659,7 @@ function App() {
       await VaultService.ReorderNotes(target.folderId, ordered.map((item) => item.id));
       setNotes((await VaultService.ListNotes()) ?? []);
       if (noteRef.current?.id === id) {
-        setNote(await VaultService.GetNote(id));
-        setDirty(false);
-        setSaveState("saved");
+        applyLoadedNote(await VaultService.GetNote(id), "saved");
       }
     } catch (reason) {
       setError(errorText(reason));
@@ -1739,10 +1886,15 @@ function App() {
     [folders, note?.folderId],
   );
 
+  const noteMarkdown = useMemo(
+    () => note ? markdownForEditing(note.content) : "",
+    [note?.content],
+  );
+
   const contentWordCount = useMemo(() => {
-    const content = note?.content.trim() ?? "";
+    const content = noteMarkdown.trim();
     return content ? content.split(/\s+/).length : 0;
-  }, [note?.content]);
+  }, [noteMarkdown]);
 
   const openWikilinkTitle = async (title: string) => {
     try {
@@ -1755,6 +1907,7 @@ function App() {
 
   const openVaultSettings = async () => {
     setTitlebarMenu(null);
+    bringWindowToFront("vaultSettings");
     setVaultSettingsOpen(true);
     setSyncSettings(null);
     setSettingsBusy(true);
@@ -1854,6 +2007,59 @@ function App() {
         warning: linked.warning,
         branch: linked.branch,
       });
+    } catch (reason) {
+      setConnectionResult({
+        success: false,
+        message: errorText(reason),
+        warning: "",
+        branch: syncSettings.branch,
+      });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  const pullAndLinkGitHubVault = async () => {
+    if (!syncSettings) return;
+    const confirmed = await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "GitHub sync",
+      title: "Pull remote before linking?",
+      message: "This downloads the encrypted GitHub snapshot and merges it into this local vault. If a note conflicts, you will resolve it before anything is pushed.",
+      confirmLabel: "Pull and link",
+      icon: "lock",
+    });
+    if (!confirmed) return;
+    setSettingsBusy(true);
+    setConnectionResult(null);
+    try {
+      await persistCurrent();
+      const result: SyncResult = await VaultService.PullAndLinkGitHubVault(syncSettings);
+      const saved = await VaultService.GetSyncSettings();
+      setSyncSettings(saved);
+      setSyncLinked(saved.linked);
+      setLastSyncedAt(saved.lastSyncedAt);
+      await refreshFolders();
+      await refreshNotes();
+      const current = noteRef.current;
+      if (current) {
+        try {
+          applyLoadedNote(await VaultService.GetNote(current.id));
+        } catch {
+          applyLoadedNote(null);
+        }
+      }
+      setConnectionResult({
+        success: true,
+        message: result.message || "Remote changes were pulled and this vault is linked.",
+        warning: result.warning,
+        branch: result.branch || saved.branch,
+      });
+      if (result.merge.conflicts?.length) {
+        bringWindowToFront("syncConflicts");
+        setSyncConflicts(result.merge.conflicts);
+        void startConflictResolution(result.merge.conflicts[0]);
+      }
     } catch (reason) {
       setConnectionResult({
         success: false,
@@ -1985,7 +2191,7 @@ function App() {
         </aside>
 
         {vaultAction && (
-          <div className="modal-backdrop" role="presentation">
+          <div className="modal-backdrop vault-action-backdrop" role="presentation" style={{ zIndex: windowLayers.vaultAction }}>
             <form
               className={`vault-modal ${vaultAction === "clone" ? "clone-vault-modal" : ""}`}
               onSubmit={(event) => {
@@ -2270,6 +2476,7 @@ function App() {
                 </button>
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
+                  bringWindowToFront("appearanceSettings");
                   setAppearanceSettingsOpen(true);
                 }}>
                   Settings…
@@ -2566,11 +2773,11 @@ function App() {
           </div>
           <button
             className="save-file-button"
-            disabled={!note || !dirty || saveState === "saving"}
-            title={!note ? "No note open" : "Save this note (Ctrl + S)"}
-            onClick={() => void persistCurrent()}
+            disabled={(!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+            title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
+            onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
           >
-            {saveState === "saving" ? "Encrypting…" : "Save file"}
+            {saveState === "saving" ? "Encrypting…" : conflictResolution ? "Save merged file" : "Save file"}
           </button>
           <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
             <span />
@@ -2578,7 +2785,7 @@ function App() {
           </div>
           <button
             className="save-and-sync-button"
-            disabled={!note || saveState === "saving" || syncing || !syncLinked}
+            disabled={!note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
             title={
               !note
                 ? "No note open"
@@ -2611,7 +2818,83 @@ function App() {
           </div>
         )}
 
-        {note ? (
+        {conflictResolution ? (
+          <>
+            <div className="document-heading conflict-heading">
+              <div>
+                <p className="eyebrow">Merge conflict</p>
+                <h2>{conflictResolution.localNote.title || "Untitled"}</h2>
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={saveState === "saving"}
+                onClick={() => void saveResolvedConflict()}
+              >
+                {saveState === "saving" ? "Encrypting…" : "Save merged file"}
+              </button>
+            </div>
+            <div className="conflict-editor-grid">
+              <section className="conflict-editor-pane">
+                <header>Local File</header>
+                <LiveMarkdownEditor
+                  key={`${conflictResolution.conflict.localNoteId}-local`}
+                  noteID={`${conflictResolution.conflict.localNoteId}-local`}
+                  value={conflictResolution.conflict.localContent}
+                  onChange={() => {}}
+                  onSave={() => {}}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  readOnly
+                  showToolbar={false}
+                />
+              </section>
+              <section className="conflict-editor-pane cloud">
+                <header>Cloud File</header>
+                <LiveMarkdownEditor
+                  key={`${conflictResolution.conflict.remoteNoteId}-cloud`}
+                  noteID={`${conflictResolution.conflict.remoteNoteId}-cloud`}
+                  value={conflictResolution.conflict.remoteContent}
+                  onChange={() => {}}
+                  onSave={() => {}}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  readOnly
+                  showToolbar={false}
+                  highlightLineNumbers={conflictResolution.cloudHighlightLines}
+                />
+              </section>
+              <section className="conflict-editor-pane merged">
+                <header>Merged File</header>
+                <LiveMarkdownEditor
+                  key={`${conflictResolution.conflict.localNoteId}-merged`}
+                  noteID={`${conflictResolution.conflict.localNoteId}-merged`}
+                  value={conflictResolution.mergedContent}
+                  onChange={(content) =>
+                    setConflictResolution((current) =>
+                      current ? { ...current, mergedContent: content } : current,
+                    )
+                  }
+                  onSave={() => void saveResolvedConflict()}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  showToolbar={false}
+                />
+              </section>
+            </div>
+            <footer className="document-footer">
+              <span>Resolve conflict</span>
+              <span>Local and cloud panes are read-only</span>
+              <span className="footer-encryption"><Icon name="lock" size={12} /> Encrypted at rest</span>
+            </footer>
+          </>
+        ) : note ? (
           <>
             <div className="document-heading">
               <input
@@ -2653,8 +2936,8 @@ function App() {
                   <LiveMarkdownEditor
                     key={note.id}
                     noteID={note.id}
-                    value={note.content}
-                    onChange={(content) => editNote({ content })}
+                    value={noteMarkdown}
+                    onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
                     onSave={() => void persistCurrent()}
                     onError={(reason) => setError(errorText(reason))}
                     onOpenWikilink={(title) => void openWikilinkTitle(title)}
@@ -2666,7 +2949,7 @@ function App() {
               )}
               {view === "object" && (
                 <div className="editor-view-pane active">
-                  <ObjectTreeView value={note.content} onChange={(content) => editNote({ content }, true)} />
+                  <ObjectTreeView value={note.content} onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) }, true)} />
                 </div>
               )}
               {view === "markdown" && (
@@ -2674,8 +2957,8 @@ function App() {
                   <SourceMarkdownEditor
                     key={note.id}
                     noteID={note.id}
-                    value={note.content}
-                    onChange={(content) => editNote({ content })}
+                    value={noteMarkdown}
+                    onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
                     onError={(reason) => setError(errorText(reason))}
                   />
                 </div>
@@ -2751,59 +3034,8 @@ function App() {
           </div>
         </section>
       )}
-      {appDialog && (
-        <div className="modal-backdrop" role="presentation">
-          <form
-            className={`vault-modal app-dialog-modal${appDialog.kind === "confirm" && appDialog.danger ? " danger-dialog" : ""}`}
-            onSubmit={(event) => {
-              event.preventDefault();
-              closeAppDialog(appDialog.kind === "prompt" ? appDialogValue : true);
-            }}
-          >
-            <button
-              type="button"
-              className="icon-button modal-close"
-              aria-label="Cancel"
-              onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
-            >
-              <Icon name="x" />
-            </button>
-            <div className="modal-icon"><Icon name={appDialog.icon ?? "dots"} size={21} /></div>
-            <p className="eyebrow">{appDialog.eyebrow}</p>
-            <h2>{appDialog.title}</h2>
-            {appDialog.kind === "prompt" ? (
-              <label>
-                {appDialog.label}
-                <input
-                  autoFocus
-                  type="text"
-                  value={appDialogValue}
-                  onChange={(event) => setAppDialogValue(event.target.value)}
-                />
-              </label>
-            ) : (
-              <p className="app-dialog-message">{appDialog.message}</p>
-            )}
-            <div className="app-dialog-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className={appDialog.kind === "confirm" && appDialog.danger ? "danger-button" : "primary-button"}
-              >
-                {appDialog.kind === "prompt" ? appDialog.submitLabel : appDialog.confirmLabel}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
       {folderPasswordPrompt && (
-        <div className="modal-backdrop" role="presentation">
+        <div className="modal-backdrop folder-password-backdrop" role="presentation" style={{ zIndex: windowLayers.folderPassword }}>
           <form
             className="vault-modal folder-password-modal"
             onSubmit={(event) => {
@@ -2850,7 +3082,7 @@ function App() {
         </div>
       )}
       {appearanceSettingsOpen && (
-        <div className="modal-backdrop" role="presentation">
+        <div className="modal-backdrop appearance-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.appearanceSettings }}>
           <section
             className="vault-modal settings-modal appearance-settings-modal"
             role="dialog"
@@ -2938,7 +3170,7 @@ function App() {
         </div>
       )}
       {vaultSettingsOpen && (
-        <div className="modal-backdrop" role="presentation">
+        <div className="modal-backdrop vault-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.vaultSettings }}>
           <form
             className="vault-modal settings-modal"
             onSubmit={(event) => {
@@ -3046,6 +3278,16 @@ function App() {
                   </div>
                 )}
                 <div className="settings-actions">
+                  {syncConflicts.length > 0 && (
+                    <button
+                      type="button"
+                      className="secondary-button danger-button"
+                      disabled={settingsBusy || syncing}
+                      onClick={() => void forcePushLocalVault()}
+                    >
+                      Force push local
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="secondary-button"
@@ -3070,6 +3312,16 @@ function App() {
                   >
                     {settingsBusy ? "Working…" : "Test connection"}
                   </button>
+                  {!syncSettings.linked && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={settingsBusy}
+                      onClick={() => void pullAndLinkGitHubVault()}
+                    >
+                      Pull remote and link
+                    </button>
+                  )}
                   <button className="primary-button" disabled={settingsBusy}>
                     {settingsBusy
                       ? "Linking…"
@@ -3211,7 +3463,7 @@ function App() {
         </div>
       )}
       {syncConflicts.length > 0 && (
-        <div className="modal-backdrop" role="presentation">
+        <div className="modal-backdrop conflict-backdrop" role="presentation" style={{ zIndex: windowLayers.syncConflicts }}>
           <section className="vault-modal conflict-modal" role="dialog" aria-labelledby="conflict-title">
             <button
               type="button"
@@ -3230,13 +3482,23 @@ function App() {
                   type="button"
                   onClick={() => {
                     setSyncConflicts([]);
-                    void selectNote(conflict.remoteNoteId);
+                    void startConflictResolution(conflict);
                   }}
                 >
                   <strong>{conflict.title}</strong>
                   <span>{conflict.message}</span>
                 </button>
               ))}
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-button danger-button"
+                disabled={syncing}
+                onClick={() => void forcePushLocalVault()}
+              >
+                Force push local vault
+              </button>
             </div>
           </section>
         </div>
@@ -3330,6 +3592,57 @@ function App() {
         </div>
       )}
       {sidebarOpen && <button className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
+      {appDialog && (
+        <div className="modal-backdrop app-dialog-backdrop" role="presentation" style={{ zIndex: windowLayers.appDialog }}>
+          <form
+            className={`vault-modal app-dialog-modal${appDialog.kind === "confirm" && appDialog.danger ? " danger-dialog" : ""}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeAppDialog(appDialog.kind === "prompt" ? appDialogValue : true);
+            }}
+          >
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Cancel"
+              onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
+            >
+              <Icon name="x" />
+            </button>
+            <div className="modal-icon"><Icon name={appDialog.icon ?? "dots"} size={21} /></div>
+            <p className="eyebrow">{appDialog.eyebrow}</p>
+            <h2>{appDialog.title}</h2>
+            {appDialog.kind === "prompt" ? (
+              <label>
+                {appDialog.label}
+                <input
+                  autoFocus
+                  type="text"
+                  value={appDialogValue}
+                  onChange={(event) => setAppDialogValue(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p className="app-dialog-message">{appDialog.message}</p>
+            )}
+            <div className="app-dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={appDialog.kind === "confirm" && appDialog.danger ? "danger-button" : "primary-button"}
+              >
+                {appDialog.kind === "prompt" ? appDialog.submitLabel : appDialog.confirmLabel}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   );
 }

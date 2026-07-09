@@ -229,6 +229,64 @@ func TestMergeRestoresMissingAttachmentForEqualNoteVersion(t *testing.T) {
 	}
 }
 
+func TestMergeConflictReturnsBothVersionsWithoutDuplicatingRemote(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "correct horse battery staple"
+	first := NewStore()
+	if _, err := first.Create(t.TempDir(), secret); err != nil {
+		t.Fatal(err)
+	}
+	note, err := first.CreateNote("Shared note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.SaveNote(note.ID, note.Title, "base"); err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := first.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	second := NewStore()
+	if _, err := second.RestoreRemoteSnapshot(remote, t.TempDir(), "second", secret); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.SaveNote(note.ID, note.Title, "cloud edit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.SaveNote(note.ID, note.Title, "local edit"); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := second.MergeRemoteSnapshot(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Conflicts) != 1 {
+		t.Fatalf("conflicts = %#v, want one", merged.Conflicts)
+	}
+	conflict := merged.Conflicts[0]
+	if conflict.LocalNoteID != note.ID || conflict.RemoteNoteID != note.ID ||
+		conflict.LocalContent != "local edit" || conflict.RemoteContent != "cloud edit" {
+		t.Fatalf("conflict = %#v", conflict)
+	}
+	notes, err := second.ListNotes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].ID != note.ID {
+		t.Fatalf("merge created duplicate notes: %#v", notes)
+	}
+}
+
 func TestFolderLifecycleAndNoteMovement(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024
@@ -602,6 +660,70 @@ func TestRemoteSnapshotContainsOnlyEncryptedRepositoryLayout(t *testing.T) {
 	if _, err := store.ValidateRemoteSnapshot(snapshot); err == nil ||
 		!strings.Contains(err.Error(), "absent from its inventory") {
 		t.Fatalf("extra object validation error = %v", err)
+	}
+}
+
+func TestValidateRemoteSnapshotAllowsStaleDerivedSummaryForMatchingObjects(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Linked note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "content without derived metadata"); err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := store.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestPath := filepath.Join(remote, syncDirectory, syncManifestFile)
+	plaintext, err := store.readEnvelopeFileLocked(manifestPath, "sync-manifest", "sync-manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inventory remoteSyncManifest
+	if err := json.Unmarshal(plaintext, &inventory); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Objects) != 1 || inventory.Objects[0].Summary == nil {
+		t.Fatalf("remote inventory missing summary: %#v", inventory.Objects)
+	}
+	inventory.Objects[0].Summary.Tags = []string{"stale"}
+	encoded, err := json.Marshal(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.writeEnvelopeLocked(manifestPath, "sync-manifest", "sync-manifest", encoded); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := store.ValidateRemoteSnapshot(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matches {
+		t.Fatal("matching encrypted objects were rejected because summary metadata drifted")
+	}
+	if merged, err := store.MergeRemoteSnapshot(remote); err != nil {
+		t.Fatalf("merge rejected stale derived summary: %v", err)
+	} else if !merged.UpToDate {
+		t.Fatalf("merge changed a matching snapshot: %#v", merged)
+	}
+
+	store.mu.RLock()
+	_, err = store.readRemoteSnapshotLocked(remote, true, true)
+	store.mu.RUnlock()
+	if err == nil || !strings.Contains(err.Error(), "derived metadata is inconsistent") {
+		t.Fatalf("strict remote validation error = %v", err)
 	}
 }
 
@@ -1067,8 +1189,11 @@ func TestNoteObjectStoresOnlyContentAndManifestMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(plaintext) != content {
-		t.Fatalf("note object plaintext = %q, want content only", plaintext)
+	if !strings.Contains(string(plaintext), `"format": "cipherleaf.object-document"`) {
+		t.Fatalf("note object plaintext is not canonical json: %q", plaintext)
+	}
+	if derivedMarkdownContent(string(plaintext)) != content {
+		t.Fatalf("derived markdown = %q, want %q", derivedMarkdownContent(string(plaintext)), content)
 	}
 	summaries, err := store.ListNotes()
 	if err != nil {
@@ -1296,7 +1421,7 @@ func TestLargeNoteIsCompressedBeforeEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := strings.Repeat("repeated markdown content\n", 50_000)
+	content := strings.Repeat(strings.TrimSpace(strings.Repeat("repeated markdown content ", 22))+"\n", 2_000)
 	if _, err := store.SaveNote(note.ID, note.Title, content); err != nil {
 		t.Fatal(err)
 	}

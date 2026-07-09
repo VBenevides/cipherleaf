@@ -37,13 +37,14 @@ import {
   tableCells,
 } from "./markdown";
 import {
+  classifyObjectLine,
   continuationPrefix,
-  isContinuationLine,
   isSeparatorLine,
   lineIndent,
   lineStartsObject,
   moveObjectInMarkdown,
   objectContentIndent,
+  objectDepthByLine,
   objectHierarchyIndent,
   objectOwnerLineNumber as ownerLineNumberInLines,
   parseObjectDocument,
@@ -65,6 +66,9 @@ type LiveMarkdownEditorProps = {
   onDecreaseFontSize: () => void;
   onIncreaseFontSize: () => void;
   scrollToOffset?: number | null;
+  readOnly?: boolean;
+  showToolbar?: boolean;
+  highlightLineNumbers?: ReadonlySet<number>;
 };
 
 type LivePreviewState = {
@@ -204,19 +208,19 @@ class TextWidget extends WidgetType {
   }
 }
 
-class IndentSpacerWidget extends WidgetType {
-  constructor(readonly columns: number) {
+class InlineSpacerWidget extends WidgetType {
+  constructor(readonly width: string) {
     super();
   }
 
-  eq(other: IndentSpacerWidget) {
-    return other.columns === this.columns;
+  eq(other: InlineSpacerWidget) {
+    return other.width === this.width;
   }
 
   toDOM() {
     const element = document.createElement("span");
     element.className = "cm-live-indent-spacer";
-    element.style.width = `${this.columns}ch`;
+    element.style.width = this.width;
     return element;
   }
 }
@@ -319,7 +323,11 @@ class DragHandleWidget extends WidgetType {
     handle.dataset.objectLine = String(this.lineNumber);
     handle.title = "Drag object";
     handle.setAttribute("aria-label", "Drag object");
-    handle.textContent = "⋮⋮";
+    for (let index = 0; index < 6; index++) {
+      const dot = document.createElement("span");
+      dot.setAttribute("aria-hidden", "true");
+      handle.append(dot);
+    }
     return handle;
   }
 
@@ -756,6 +764,21 @@ function decorateInlineMarkdown(
   }
 }
 
+function decorateUnorderedListMarker(
+  from: number,
+  marker: "-" | "*",
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  addHiddenRange(
+    from,
+    from + 1,
+    decorations,
+    atomicRanges,
+    new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
+  );
+}
+
 function decorateTaskMarker(
   text: string,
   offset: number,
@@ -778,21 +801,6 @@ function decorateTaskMarker(
   return true;
 }
 
-function decorateUnorderedListMarker(
-  from: number,
-  marker: "-" | "*",
-  decorations: Range<Decoration>[],
-  atomicRanges: Range<Decoration>[],
-) {
-  addHiddenRange(
-    from,
-    from + 1,
-    decorations,
-    atomicRanges,
-    new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
-  );
-}
-
 type ToggleLine = {
   indent: number;
   prefixSize: number;
@@ -808,20 +816,18 @@ function parentObjectPrefixForContinuation(state: EditorState, lineNumber: numbe
     if (previous.text.trim() === "") continue;
     if (!lineStartsObject(previous.text)) continue;
     if (line.text.trim() !== "" && lineIndent(line.text) < objectContentIndent(previous.text)) return null;
-    return repeatedObjectPrefix(previous.text);
+    const previousObject = classifyObjectLine(previous.text);
+    return previousObject.tag === "section"
+      ? repeatedObjectPrefix(previous.text)
+      : previous.text.match(/^[ \t]*/)?.[0] ?? "";
   }
 
   return null;
 }
 
-function isObjectContinuationLine(lines: readonly string[], lineNumber: number): boolean {
-  return isContinuationLine(lines, lineNumber);
-}
-
-function continuationOwnerContentIndent(lines: readonly string[], lineNumber: number): number {
-  const ownerLine = objectOwnerLineNumber(lines, lineNumber);
-  if (ownerLine <= 0 || ownerLine === lineNumber) return 0;
-  return objectContentIndent(lines[ownerLine - 1] ?? "");
+function continuationOwnerObject(document: ObjectDocument, lineNumber: number) {
+  const owner = document.byLine.get(lineNumber);
+  return owner && owner.lineNumber !== lineNumber ? owner : null;
 }
 
 function continuationPrefixSizeForIndent(raw: string, targetIndent: number): number {
@@ -838,6 +844,18 @@ function continuationPrefixSizeForIndent(raw: string, targetIndent: number): num
   return offset;
 }
 
+function continuationMarkerWidth(document: ObjectDocument, ownerLineNumber: number): string | null {
+  const owner = document.byLine.get(ownerLineNumber);
+  if (!owner) return null;
+
+  const widths: string[] = [];
+  if (owner.tag === "section") widths.push("var(--toggle-button-width)");
+  if (owner.checked !== undefined) widths.push("1.45em");
+  else if (owner.tag === "bulletpoint") widths.push("1.6em");
+
+  return widths.length > 0 ? `calc(${widths.join(" + ")})` : null;
+}
+
 function isSectionSeparatorLine(lines: readonly string[], lineNumber: number): boolean {
   return isSeparatorLine(lines, lineNumber);
 }
@@ -847,33 +865,35 @@ function objectOwnerLineNumber(lines: readonly string[], lineNumber: number): nu
 }
 
 function toggleLine(text: string): ToggleLine | null {
-  const match = text.match(/^([ \t]*)>([ \t]?)(.*)$/);
+  const match = text.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
   if (!match) return null;
 
   return {
-    indent: visualIndent(match[1]),
-    prefixSize: match[1].length + 1 + match[2].length,
-    content: match[3],
+    indent: visualIndent(match[1]) + (match[2].length - 1) * 2,
+    prefixSize: match[1].length + match[2].length + match[3].length,
+    content: match[4],
   };
 }
 
-function toggleLineStyle(indent: number): string {
-  return `--toggle-padding-left: ${indent}ch;`;
+function toggleLineStyle(_indent: number): string {
+  return "--toggle-padding-left: calc(var(--live-object-depth, 0) * 22px);";
 }
 
-function listLineStyle(indent: number, markerWidth = "1.25em"): string {
-  return `--live-list-indent: ${indent}ch; --live-list-marker-width: ${markerWidth};`;
+function listLineStyle(_indent: number, markerWidth = "1.25em"): string {
+  return `--live-list-indent: calc(var(--live-object-depth, 0) * 22px); --live-list-marker-width: ${markerWidth}; --live-list-marker-offset: 0px;`;
 }
 
 function objectLineAttributes(
   lineNumber: number,
   className = "",
   style?: string,
+  depth = 0,
 ): Record<string, string> {
+  const depthStyle = `--live-object-depth: ${depth};`;
   return {
     class: ["cm-live-object-line", className].filter(Boolean).join(" "),
     "data-object-line": String(lineNumber),
-    ...(style ? { style } : {}),
+    style: style ? `${depthStyle} ${style}` : depthStyle,
   };
 }
 
@@ -1033,6 +1053,7 @@ function buildLivePreviewState(
   openWikilink: (title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
+  highlightLineNumbers: ReadonlySet<number>,
   context?: ObjectDocumentContext,
 ): LivePreviewState {
   const decorations: Range<Decoration>[] = [];
@@ -1046,13 +1067,21 @@ function buildLivePreviewState(
     };
   })();
   const { lines, objectDocument } = prepared;
+  const depthByLine = objectDepthByLine(objectDocument);
+  const lineAttributes = (lineNumber: number, className = "", style?: string) =>
+    objectLineAttributes(
+      lineNumber,
+      [className, highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : ""].filter(Boolean).join(" "),
+      style,
+      depthByLine.get(lineNumber) ?? 0,
+    );
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
     const toggle = toggleLine(line.text);
-    const continuationLine = isObjectContinuationLine(lines, lineNumber);
+    const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
 
-    if (line.text.trim() !== "" && !continuationLine) {
+    if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationOwner) {
       decorations.push(
         Decoration.widget({
           widget: new DragHandleWidget(lineNumber),
@@ -1098,7 +1127,7 @@ function buildLivePreviewState(
     if (attachment && !lineIsActive(state, lineNumber)) {
       decorations.push(
         Decoration.line({
-          attributes: objectLineAttributes(lineNumber, "cm-live-attachment-line"),
+          attributes: lineAttributes(lineNumber, "cm-live-attachment-line"),
         }).range(line.from),
       );
       addHiddenRange(
@@ -1136,11 +1165,11 @@ function buildLivePreviewState(
       const contentOffset = line.from + toggle.prefixSize;
 
       const isTask = !toggleAttachment && decorateTaskMarker(
-          toggle.content,
-          contentOffset,
-          decorations,
-          atomicRanges,
-        );
+        toggle.content,
+        contentOffset,
+        decorations,
+        atomicRanges,
+      );
 
       const toggleList = !toggleAttachment && !isTask &&
         toggle.content.match(/^([-*])\s+/);
@@ -1182,6 +1211,7 @@ function buildLivePreviewState(
             isTask || toggleList || toggleOrderedList
               ? `${toggleLineStyle(toggle.indent)} ${listLineStyle(0, toggleMarkerWidth)}`
               : toggleLineStyle(toggle.indent),
+            depthByLine.get(lineNumber) ?? 0,
           ),
         }).range(line.from),
       );
@@ -1245,7 +1275,7 @@ function buildLivePreviewState(
     if (isHorizontalRule(line.text)) {
       decorations.push(
         Decoration.line({
-          attributes: objectLineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
+          attributes: lineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
         }).range(line.from),
       );
       if (!lineIsActive(state, lineNumber)) {
@@ -1278,6 +1308,8 @@ function buildLivePreviewState(
               hasChildren ? "cm-live-heading-parent" : "",
               collapsed ? "cm-live-heading-collapsed" : "",
             ].filter(Boolean).join(" "),
+            undefined,
+            depthByLine.get(lineNumber) ?? 0,
           ),
         }).range(line.from),
       );
@@ -1325,12 +1357,18 @@ function buildLivePreviewState(
       continue;
     }
 
-    if (continuationLine) {
-      const indent = continuationOwnerContentIndent(lines, lineNumber);
+    if (continuationOwner) {
+      const indent = continuationOwner.contentIndent;
       const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
+      const markerWidth = continuationMarkerWidth(objectDocument, continuationOwner.lineNumber);
       decorations.push(
         Decoration.line({
-          attributes: { class: "cm-live-object-continuation-line" },
+          attributes: objectLineAttributes(
+            lineNumber,
+            "cm-live-object-continuation-line",
+            "",
+            depthByLine.get(continuationOwner.lineNumber) ?? 0,
+          ),
         }).range(line.from),
       );
       addHiddenRange(
@@ -1338,7 +1376,7 @@ function buildLivePreviewState(
         line.from + prefixSize,
         decorations,
         atomicRanges,
-        new IndentSpacerWidget(indent),
+        markerWidth ? new InlineSpacerWidget(markerWidth) : undefined,
       );
       decorateInlineMarkdown(
         state,
@@ -1367,6 +1405,7 @@ function buildLivePreviewState(
           lineNumber,
           "cm-live-task-line cm-live-list-line",
           listLineStyle(visualIndent(line.text.match(/^\s*/)?.[0] ?? ""), "1.45em"),
+          depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
     }
@@ -1385,6 +1424,7 @@ function buildLivePreviewState(
           lineNumber,
           "cm-live-list-line",
           listLineStyle(visualIndent(unorderedList[1])),
+          depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
     }
@@ -1404,6 +1444,7 @@ function buildLivePreviewState(
           lineNumber,
           "cm-live-list-line",
           listLineStyle(visualIndent(orderedList[1]), "2em"),
+          depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
     }
@@ -1411,7 +1452,7 @@ function buildLivePreviewState(
     if (!task && !unorderedList && !orderedList) {
       decorations.push(
         Decoration.line({
-          attributes: objectLineAttributes(lineNumber),
+          attributes: lineAttributes(lineNumber),
         }).range(line.from),
       );
     }
@@ -1442,6 +1483,7 @@ function livePreviewExtension(
   openWikilink: (title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
+  highlightLineNumbers: ReadonlySet<number>,
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
@@ -1458,6 +1500,7 @@ function livePreviewExtension(
         openWikilink,
         noteID,
         onError,
+        highlightLineNumbers,
         context,
       );
     },
@@ -1527,6 +1570,7 @@ function livePreviewExtension(
         openWikilink,
         noteID,
         onError,
+        highlightLineNumbers,
         cachedContext ?? (
           transaction.docChanged
             ? undefined
@@ -1745,19 +1789,20 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   if (!range.empty) return false;
 
   const line = view.state.doc.lineAt(range.head);
-  const toggle = toggleLine(line.text);
+  const object = classifyObjectLine(line.text);
   const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
+  const section = line.text.match(/^([ \t]*>+[ \t]?)/);
   const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
-  if (!toggle && !list && indentation === "") return false;
+  if (!lineStartsObject(line.text) && continuationObjectPrefix === null) return false;
 
   const inserted = continuationObjectPrefix
     ? `\n${continuationObjectPrefix}`
-    : toggle
-    ? `\n${indentation}> `
-    : list
-      ? `\n${indentation}${list[2]} `
-      : `\n${indentation}`;
+    : object.tag === "section"
+    ? `\n${section?.[1] ?? `${indentation}> `}`
+    : object.tag === "bulletpoint" && list
+    ? `\n${indentation}${list[2]} `
+    : `\n${indentation}`;
 
   view.dispatch({
     changes: {
@@ -1776,7 +1821,11 @@ function insertSoftObjectBreak(view: EditorView) {
   if (!range.empty) return false;
 
   const line = view.state.doc.lineAt(range.head);
-  const prefix = continuationPrefix(line.text);
+  const lines = view.state.doc.toString().split("\n");
+  const ownerLine = objectOwnerLineNumber(lines, line.number);
+  const prefix = ownerLine !== line.number && ownerLine > 0
+    ? " ".repeat(objectContentIndent(lines[ownerLine - 1] ?? ""))
+    : continuationPrefix(line.text);
   if (prefix === null) return false;
 
   const inserted = `\n${prefix}`;
@@ -1883,7 +1932,7 @@ function objectHandleElement(target: EventTarget | null): HTMLElement | null {
 
 function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElement | null {
   const elements = document.elementsFromPoint(x, y);
-  const lines = view.state.doc.toString().split("\n");
+  let objectDocument: ObjectDocument | null = null;
   for (const element of elements) {
     let line: HTMLElement | null = null;
     if (element instanceof HTMLElement && element.matches(".cm-live-object-line[data-object-line]")) {
@@ -1894,8 +1943,9 @@ function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElemen
 
     if (line) {
       const lineNumber = Number(line.dataset.objectLine);
+      if (!objectDocument) objectDocument = parseObjectDocument(view.state.doc.toString());
       const ownerLineNumber = Number.isFinite(lineNumber)
-        ? objectOwnerLineNumber(lines, lineNumber)
+        ? objectDocument.byLine.get(lineNumber)?.lineNumber ?? lineNumber
         : lineNumber;
       const owner = Number.isFinite(ownerLineNumber)
         ? view.dom.querySelector<HTMLElement>(`.cm-live-object-line[data-object-line="${ownerLineNumber}"]`)
@@ -1967,6 +2017,9 @@ export default function LiveMarkdownEditor({
   onDecreaseFontSize,
   onIncreaseFontSize,
   scrollToOffset,
+  readOnly = false,
+  showToolbar = true,
+  highlightLineNumbers = new Set<number>(),
 }: LiveMarkdownEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -1980,6 +2033,7 @@ export default function LiveMarkdownEditor({
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
+    if (!showToolbar) return;
     const editorHost = host.current;
     if (!editorHost) return;
 
@@ -2000,7 +2054,7 @@ export default function LiveMarkdownEditor({
       setToolbarHost(null);
       toolbar.remove();
     };
-  }, []);
+  }, [showToolbar]);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -2124,10 +2178,13 @@ export default function LiveMarkdownEditor({
             override: [snippetCompletion],
           }),
           minimalSetup,
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           markdown(),
           liveMarkdownTheme,
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
+            if (readOnly) return false;
             let changeFrom = from;
             let changeTo = to;
             let inserted = text;
@@ -2168,6 +2225,7 @@ export default function LiveMarkdownEditor({
           }),
           EditorView.domEventHandlers({
             pointerdown(event, pointerView) {
+              if (readOnly) return false;
               const handle = objectHandleElement(event.target);
               const sourceLine = Number(handle?.dataset.objectLine);
               if (!handle || !Number.isFinite(sourceLine)) return false;
@@ -2228,6 +2286,7 @@ export default function LiveMarkdownEditor({
               return true;
             },
             paste(event, pastedView) {
+              if (readOnly) return false;
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) {
                 const text = event.clipboardData?.getData("text/plain") ?? "";
@@ -2263,6 +2322,7 @@ export default function LiveMarkdownEditor({
             (title) => onOpenWikilinkRef.current(title),
             noteID,
             (reason) => onErrorRef.current(reason),
+            highlightLineNumbers,
           ),
           EditorView.updateListener.of((update) => {
             if (

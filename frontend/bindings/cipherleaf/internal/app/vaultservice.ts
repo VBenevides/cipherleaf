@@ -68,6 +68,14 @@ export function FindInNotes(query: string): $CancellablePromise<vault$0.FindMatc
 }
 
 /**
+ * ForcePushNow overwrites the linked remote branch with the current local
+ * encrypted vault snapshot after the user explicitly confirms conflict loss.
+ */
+export function ForcePushNow(): $CancellablePromise<githubsync$0.PushResult> {
+    return $Call.ByID(2357438882);
+}
+
+/**
  * vault from the OS keychain. It is a no-op when the vault is not linked to
  * a keychain entry.
  */
@@ -141,6 +149,10 @@ export function OpenVault(path: string, secret: string): $CancellablePromise<vau
  */
 export function OpenVaultRemembered(path: string): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(910528891, path);
+}
+
+export function PullAndLinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<$models.SyncResult> {
+    return $Call.ByID(866409854, settings);
 }
 
 /**

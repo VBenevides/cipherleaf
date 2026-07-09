@@ -602,6 +602,62 @@ func (s *VaultService) LinkGitHubVault(
 	return s.sync.LinkVault(context.Background(), vaultID, settings, s.store)
 }
 
+func (s *VaultService) PullAndLinkGitHubVault(
+	settings githubsync.SyncSettings,
+) (SyncResult, error) {
+	vaultID, err := s.unlockedVaultID()
+	if err != nil {
+		return SyncResult{}, err
+	}
+	downloaded, linkedSettings, err := s.sync.DownloadVault(context.Background(), settings)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	if downloaded.VaultID != vaultID {
+		return SyncResult{}, errors.New("the remote repository belongs to another vault")
+	}
+	result := SyncResult{
+		Linked:     true,
+		Message:    downloaded.Message,
+		Warning:    downloaded.Warning,
+		Branch:     downloaded.Branch,
+		LastCommit: downloaded.LastCommit,
+		Pull: githubsync.PullResult{
+			Linked:      true,
+			Message:     downloaded.Message,
+			Warning:     downloaded.Warning,
+			Branch:      downloaded.Branch,
+			LastCommit:  downloaded.LastCommit,
+			StagingPath: downloaded.CachePath,
+			Temporary:   false,
+		},
+	}
+	merge, err := s.store.MergeRemoteSnapshot(downloaded.CachePath)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	result.Merge = merge
+	if err := s.sync.ActivateDownloadedVault(linkedSettings); err != nil {
+		return SyncResult{}, err
+	}
+	if len(merge.Conflicts) > 0 {
+		result.Warning = "Remote changes were pulled. Resolve note conflicts before pushing."
+		return result, nil
+	}
+	push, err := s.sync.PushVault(context.Background(), vaultID, s.store)
+	if err != nil {
+		result.Warning = "Remote changes were pulled, but the push could not be completed: " + err.Error()
+		return result, nil
+	}
+	result.Push = push
+	result.LastCommit = push.LastCommit
+	result.Message = push.Message
+	if merge.UpToDate && push.UpToDate {
+		result.Message = "The vault is already in sync with GitHub."
+	}
+	return result, nil
+}
+
 func (s *VaultService) UnlinkGitHubSync() error {
 	vaultID, err := s.unlockedVaultID()
 	if err != nil {
@@ -638,6 +694,10 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 				return result, nil
 			}
 			result.Merge = merge
+			if len(merge.Conflicts) > 0 {
+				result.Warning = "Pull succeeded, but note conflicts must be resolved before pushing."
+				return result, nil
+			}
 		} else {
 			result.Merge = vault.MergeResult{UpToDate: true}
 		}
@@ -658,6 +718,16 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 		return result, nil
 	}
 	return SyncResult{}, errors.New("sync could not converge after the remote branch changed repeatedly")
+}
+
+// ForcePushNow overwrites the linked remote branch with the current local
+// encrypted vault snapshot after the user explicitly confirms conflict loss.
+func (s *VaultService) ForcePushNow() (githubsync.PushResult, error) {
+	vaultID, err := s.unlockedVaultID()
+	if err != nil {
+		return githubsync.PushResult{}, err
+	}
+	return s.sync.ForcePushVault(context.Background(), vaultID, s.store)
 }
 
 // PullNow pulls and merges the remote vault snapshot without pushing back.

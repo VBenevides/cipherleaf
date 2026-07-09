@@ -268,7 +268,7 @@ func (s *Store) CreateNoteInFolder(title, folderID string) (Note, error) {
 	now := time.Now().UTC()
 	nowRFC := now.Format(time.RFC3339Nano)
 	note := Note{
-		ID: id, Title: title, FolderID: folderID, Order: s.nextNoteOrderLocked(folderID), Content: "",
+		ID: id, Title: title, FolderID: folderID, Order: s.nextNoteOrderLocked(folderID), Content: canonicalizeNoteContent(""),
 		CreatedAt: nowRFC, UpdatedAt: nowRFC, ModifiedAt: now.Unix(), Revision: 1,
 	}
 	hash, err := s.writeNoteLocked(note)
@@ -283,7 +283,7 @@ func (s *Store) CreateNoteInFolder(title, folderID string) (Note, error) {
 		s.manifest.Notes = s.manifest.Notes[:len(s.manifest.Notes)-1]
 		return Note{}, err
 	}
-	return note, nil
+	return noteForClient(note), nil
 }
 
 func (s *Store) ListFolders() ([]Folder, error) {
@@ -537,7 +537,7 @@ func (s *Store) MoveNote(id, folderID string) (Note, error) {
 		s.manifest.Notes[index] = originalSummary
 		return Note{}, err
 	}
-	return current, nil
+	return noteForClient(current), nil
 }
 
 func (s *Store) ReorderNotes(folderID string, orderedIDs []string) error {
@@ -612,7 +612,11 @@ func (s *Store) GetNote(id string) (Note, error) {
 	if _, found := s.findNoteLocked(id); !found {
 		return Note{}, errors.New("note not found")
 	}
-	return s.readNoteLocked(id)
+	note, err := s.readNoteLocked(id)
+	if err != nil {
+		return Note{}, err
+	}
+	return noteForClient(note), nil
 }
 
 func (s *Store) SaveNote(id, title, content string) (Note, error) {
@@ -629,7 +633,8 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
-	if len(content) > maxNoteBytes {
+	storedContent := canonicalizeNoteContent(content)
+	if len(storedContent) > maxNoteBytes {
 		return Note{}, errors.New("note exceeds the 10 MiB limit")
 	}
 	current, err := s.readNoteLocked(id)
@@ -637,18 +642,19 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		return Note{}, err
 	}
 	originalSummary := s.manifest.Notes[index]
-	if current.Title == title && current.Content == content {
-		if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
+	contentMatches := current.Content == storedContent || derivedMarkdownContent(current.Content) == content
+	if current.Title == title && contentMatches {
+		if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
 			return Note{}, err
 		}
 		if err := s.pruneSharedAttachmentsForSaveLocked(); err != nil {
 			return Note{}, err
 		}
-		return current, nil
+		return noteForClient(current), nil
 	}
 	original := current
 	current.Title = title
-	current.Content = content
+	current.Content = storedContent
 	now := time.Now().UTC()
 	current.UpdatedAt = now.Format(time.RFC3339Nano)
 	current.ModifiedAt = nextModifiedAt(current.ModifiedAt)
@@ -665,13 +671,13 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err := s.saveManifestLocked(); err != nil {
 		return Note{}, err
 	}
-	if err := s.pruneNoteAttachmentsLocked(id, content); err != nil {
+	if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
 		return Note{}, err
 	}
 	if err := s.pruneSharedAttachmentsForSaveLocked(); err != nil {
 		return Note{}, err
 	}
-	return current, nil
+	return noteForClient(current), nil
 }
 
 // SaveAttachment encrypts a WebP image in the vault and returns its opaque ID.
@@ -911,7 +917,7 @@ func (s *Store) attachmentIDsForSummaryLocked(summary NoteSummary) ([]string, er
 	if err != nil {
 		return nil, err
 	}
-	return extractAttachmentIDs(note.Content), nil
+	return extractAttachmentIDs(derivedMarkdownContent(note.Content)), nil
 }
 
 func (s *Store) sharedAttachmentIDsLocked() (map[string]struct{}, error) {
@@ -939,7 +945,7 @@ func (s *Store) sharedAttachmentIDsLocked() (map[string]struct{}, error) {
 }
 
 func (s *Store) pruneNoteAttachmentsLocked(noteID, content string) error {
-	return s.pruneNoteAttachmentsByIDLocked(noteID, extractAttachmentIDs(content))
+	return s.pruneNoteAttachmentsByIDLocked(noteID, extractAttachmentIDs(derivedMarkdownContent(content)))
 }
 
 func (s *Store) pruneNoteAttachmentsByIDLocked(noteID string, ids []string) error {
@@ -1039,7 +1045,7 @@ func (s *Store) Search(query string) ([]NoteSummary, error) {
 		if err != nil {
 			return nil, err
 		}
-		if strings.Contains(strings.ToLower(note.Content), query) {
+		if strings.Contains(strings.ToLower(derivedMarkdownContent(note.Content)), query) {
 			result = append(result, item)
 		}
 	}
@@ -1120,19 +1126,20 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, match := range wikilinkPattern.FindAllStringSubmatchIndex(note.Content, -1) {
-			raw := note.Content[match[2]:match[3]]
+		content := derivedMarkdownContent(note.Content)
+		for _, match := range wikilinkPattern.FindAllStringSubmatchIndex(content, -1) {
+			raw := content[match[2]:match[3]]
 			label, id, hasID := parseNoteReference(raw)
 			key := strings.ToLower(strings.TrimSpace(raw))
 			if hasID {
 				if id == target.ID {
-					matches = append(matches, backlinkMatch(summary, note.Content, match[0], match[1], raw))
+					matches = append(matches, backlinkMatch(summary, content, match[0], match[1], raw))
 					break
 				}
 				key = strings.ToLower(label)
 			}
 			if _, ok := aliases[key]; ok {
-				matches = append(matches, backlinkMatch(summary, note.Content, match[0], match[1], raw))
+				matches = append(matches, backlinkMatch(summary, content, match[0], match[1], raw))
 				break
 			}
 		}
@@ -1185,7 +1192,8 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 		if err != nil {
 			return nil, err
 		}
-		lowerContent := strings.ToLower(note.Content)
+		content := derivedMarkdownContent(note.Content)
+		lowerContent := strings.ToLower(content)
 		cidx := 0
 		for count := 0; count < maxPerNote; count++ {
 			at := strings.Index(lowerContent[cidx:], query)
@@ -1197,7 +1205,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 				NoteID:      item.ID,
 				Title:       note.Title,
 				Field:       "content",
-				Snippet:     makeSnippet(note.Content, abs, len(query)),
+				Snippet:     makeSnippet(content, abs, len(query)),
 				Offset:      abs,
 				MatchLength: len(query),
 			})
@@ -1498,7 +1506,7 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return false, err
 	}
-	remote, err := s.readRemoteSnapshotLocked(source, true)
+	remote, err := s.readRemoteSnapshotLocked(source, true, false)
 	if err != nil {
 		return false, err
 	}
@@ -1580,7 +1588,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 	if strings.TrimSpace(source) == "" {
 		return MergeResult{}, errors.New("remote snapshot source is required")
 	}
-	remote, err := s.readRemoteSnapshotLocked(source, false)
+	remote, err := s.readRemoteSnapshotLocked(source, false, false)
 	if err != nil {
 		return MergeResult{}, err
 	}
@@ -1658,18 +1666,22 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			remoteNote.CiphertextHash != "" &&
 			local.CiphertextHash != "" &&
 			remoteNote.CiphertextHash != local.CiphertextHash {
-			duplicate, err := s.duplicateRemoteConflictLocked(source, remoteNote)
+			localNote, err := s.readNoteFromSummaryAtLocked(s.root, local)
 			if err != nil {
 				return MergeResult{}, err
 			}
-			mergedNotes = append(mergedNotes, duplicate)
+			remote, err := s.readNoteFromSummaryAtLocked(source, remoteNote)
+			if err != nil {
+				return MergeResult{}, err
+			}
 			result.Conflicts = append(result.Conflicts, MergeConflict{
-				LocalNoteID:  local.ID,
-				RemoteNoteID: duplicate.ID,
-				Title:        local.Title,
-				Message:      "Local and remote edits conflicted; the remote version was preserved as a separate note.",
+				LocalNoteID:   local.ID,
+				RemoteNoteID:  remoteNote.ID,
+				Title:         local.Title,
+				Message:       "Local and remote edits conflicted. Resolve the final version before syncing.",
+				LocalContent:  derivedMarkdownContent(localNote.Content),
+				RemoteContent: derivedMarkdownContent(remote.Content),
 			})
-			result.PulledNotes++
 			result.UpToDate = false
 		} else if versionIsNewer(
 			remoteNote.Revision,
@@ -1782,40 +1794,6 @@ func copyRemoteNoteObject(source, localRoot, id string) error {
 		return fmt.Errorf("stage pulled encrypted note %s: %w", id, err)
 	}
 	return nil
-}
-
-func (s *Store) duplicateRemoteConflictLocked(source string, remoteSummary NoteSummary) (NoteSummary, error) {
-	remote, err := s.readNoteFromSummaryAtLocked(source, remoteSummary)
-	if err != nil {
-		return NoteSummary{}, err
-	}
-	newID, err := randomID(16)
-	if err != nil {
-		return NoteSummary{}, err
-	}
-	now := time.Now().UTC()
-	remote.ID = newID
-	remote.Title = remote.Title + " (remote conflict)"
-	remote.Order = s.nextNoteOrderLocked(remote.FolderID)
-	remote.CreatedAt = now.Format(time.RFC3339Nano)
-	remote.UpdatedAt = remote.CreatedAt
-	remote.ModifiedAt = now.Unix()
-	remote.Revision = 1
-	hash, err := s.writeNoteLocked(remote)
-	if err != nil {
-		return NoteSummary{}, err
-	}
-	sourceAttachments := filepath.Join(source, "attachments", remoteSummary.ID)
-	if _, err := os.Stat(sourceAttachments); err == nil {
-		if err := copyAttachmentDirectory(sourceAttachments, filepath.Join(s.root, "attachments", newID)); err != nil {
-			return NoteSummary{}, err
-		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return NoteSummary{}, fmt.Errorf("inspect remote conflict attachments: %w", err)
-	}
-	summary := summaryFromNote(remote)
-	summary.CiphertextHash = hash
-	return summary, nil
 }
 
 func replaceRemoteAttachments(source, localRoot, noteID string) error {
@@ -1960,6 +1938,7 @@ func (s *Store) validateRemoteAttachmentsLocked(
 func (s *Store) readRemoteSnapshotLocked(
 	source string,
 	verifyAllObjects bool,
+	validateDerivedMetadata bool,
 ) (authenticatedRemoteSnapshot, error) {
 	var remoteConfig vaultConfig
 	if err := readJSONFile(
@@ -2113,8 +2092,14 @@ func (s *Store) readRemoteSnapshotLocked(
 		if err != nil {
 			return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote encrypted note %s: %w", item.ID, err)
 		}
-		if err := validateRemoteNote(note, item, remoteFolders); err != nil {
+		if err := validateRemoteNote(note, item, remoteFolders, validateDerivedMetadata); err != nil {
 			return authenticatedRemoteSnapshot{}, err
+		}
+		if !validateDerivedMetadata {
+			derived := summaryFromNote(note)
+			summary.Tags = derived.Tags
+			summary.AttachmentIDs = derived.AttachmentIDs
+			summary.OutgoingLinks = derived.OutgoingLinks
 		}
 		remoteNotes[item.ID] = item
 		summary.CiphertextHash = item.CiphertextHash
@@ -2222,7 +2207,7 @@ func (s *Store) RestoreRemoteSnapshot(
 		}
 	}()
 	validator := &Store{vaultID: config.VaultID, key: key}
-	remote, err := validator.readRemoteSnapshotLocked(source, true)
+	remote, err := validator.readRemoteSnapshotLocked(source, true, true)
 	if err != nil {
 		return Session{}, fmt.Errorf("validate downloaded encrypted vault: %w", err)
 	}
@@ -3226,10 +3211,11 @@ func noteReferencesFolder(notes []NoteSummary, folderID string) bool {
 }
 
 func summaryFromNote(note Note) NoteSummary {
+	derivedContent := derivedMarkdownContent(note.Content)
 	return NoteSummary{
 		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
-		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(note.Content),
-		AttachmentIDs: extractAttachmentIDs(note.Content), OutgoingLinks: extractOutgoingLinks(note.Content),
+		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(derivedContent),
+		AttachmentIDs: extractAttachmentIDs(derivedContent), OutgoingLinks: extractOutgoingLinks(derivedContent),
 	}
 }
 
@@ -3247,6 +3233,11 @@ func noteFromSummary(summary NoteSummary, content string) Note {
 	}
 }
 
+func noteForClient(note Note) Note {
+	note.Content = derivedMarkdownContent(note.Content)
+	return note
+}
+
 func cloneNoteSummary(summary NoteSummary) *NoteSummary {
 	clone := summary
 	clone.Tags = slices.Clone(summary.Tags)
@@ -3255,7 +3246,12 @@ func cloneNoteSummary(summary NoteSummary) *NoteSummary {
 	return &clone
 }
 
-func validateRemoteNote(note Note, item remoteSyncObject, folders []Folder) error {
+func validateRemoteNote(
+	note Note,
+	item remoteSyncObject,
+	folders []Folder,
+	validateDerivedMetadata bool,
+) error {
 	normalizedTitle, titleErr := normalizeTitle(note.Title)
 	if titleErr != nil || normalizedTitle != note.Title ||
 		!utf8.ValidString(note.Content) || len([]byte(note.Content)) > maxNoteBytes ||
@@ -3273,13 +3269,330 @@ func validateRemoteNote(note Note, item remoteSyncObject, folders []Folder) erro
 		(note.FolderID != "" && !folderIDExists(folders, note.FolderID)) {
 		return fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
 	}
-	if item.Summary != nil &&
-		(!slices.Equal(extractTags(note.Content), item.Summary.Tags) ||
-			!slices.Equal(extractAttachmentIDs(note.Content), item.Summary.AttachmentIDs) ||
-			!slices.Equal(extractOutgoingLinks(note.Content), item.Summary.OutgoingLinks)) {
+	if validateDerivedMetadata && item.Summary != nil &&
+		(!slices.Equal(extractTags(derivedMarkdownContent(note.Content)), item.Summary.Tags) ||
+			!slices.Equal(extractAttachmentIDs(derivedMarkdownContent(note.Content)), item.Summary.AttachmentIDs) ||
+			!slices.Equal(extractOutgoingLinks(derivedMarkdownContent(note.Content)), item.Summary.OutgoingLinks)) {
 		return fmt.Errorf("remote encrypted note %s derived metadata is inconsistent", item.ID)
 	}
 	return nil
+}
+
+type canonicalObjectDocument struct {
+	Format  string                `json:"format"`
+	Version int                   `json:"version"`
+	Objects []canonicalObjectNode `json:"objects"`
+}
+
+type canonicalObjectNode struct {
+	ID              string   `json:"id"`
+	Tag             string   `json:"tag"`
+	Tags            []string `json:"tags"`
+	Text            string   `json:"text"`
+	Checked         *bool    `json:"checked,omitempty"`
+	Indent          int      `json:"indent"`
+	ContentIndent   int      `json:"contentIndent"`
+	ParentID        *string  `json:"parentId"`
+	ParentSectionID *string  `json:"parentSectionId"`
+	ChildrenIDs     []string `json:"childrenIds"`
+	SourcePrefix    string   `json:"sourcePrefix,omitempty"`
+}
+
+type parsedCanonicalLine struct {
+	tag           string
+	tags          []string
+	indent        int
+	contentIndent int
+	text          string
+	checked       *bool
+	startsObject  bool
+	sourcePrefix  string
+}
+
+func canonicalizeNoteContent(content string) string {
+	if isCanonicalObjectDocument(content) {
+		return content
+	}
+	data, err := json.MarshalIndent(canonicalObjectDocumentFromMarkdown(content), "", "  ")
+	if err != nil {
+		return content
+	}
+	return string(data)
+}
+
+func isCanonicalObjectDocument(content string) bool {
+	var document canonicalObjectDocument
+	return json.Unmarshal([]byte(content), &document) == nil &&
+		document.Format == "cipherleaf.object-document" &&
+		document.Version == 1
+}
+
+func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument {
+	lines := strings.Split(content, "\n")
+	var objectPointers []*canonicalObjectNode
+	var stack []*canonicalObjectNode
+	var sectionStack []*canonicalObjectNode
+	parsedByID := map[string]parsedCanonicalLine{}
+
+	for index, raw := range lines {
+		lineNumber := index + 1
+		if raw != "" && strings.TrimSpace(raw) == "" {
+			usedAsContinuation := false
+			if len(stack) > 0 {
+				previous := stack[len(stack)-1]
+				previousParsed := parsedByID[previous.ID]
+				next := ""
+				if index+1 < len(lines) {
+					next = lines[index+1]
+				}
+				if strings.TrimSpace(next) != "" && startsWithWhitespace(next) && !lineStartsExplicitCanonicalObject(next) && lineVisualIndent(next) >= previousParsed.contentIndent {
+					previous.Text += "\n"
+					usedAsContinuation = true
+				}
+			}
+			if raw != "" || usedAsContinuation {
+				continue
+			}
+		}
+		parsed := classifyCanonicalMarkdownLine(raw)
+		previous := (*canonicalObjectNode)(nil)
+		if len(stack) > 0 {
+			previous = stack[len(stack)-1]
+		}
+		if previous != nil {
+			previousParsed := parsedByID[previous.ID]
+			if previous.Text != "" && startsWithWhitespace(raw) && !lineStartsExplicitCanonicalObject(raw) && parsed.indent >= previousParsed.contentIndent {
+				previous.Text += "\n" + strings.TrimSpace(raw)
+				continue
+			}
+		}
+		for len(stack) > 0 && stack[len(stack)-1].Indent >= parsed.indent {
+			stack = stack[:len(stack)-1]
+		}
+		for len(sectionStack) > 0 && sectionStack[len(sectionStack)-1].Indent >= parsed.indent {
+			sectionStack = sectionStack[:len(sectionStack)-1]
+		}
+		parent := (*canonicalObjectNode)(nil)
+		if len(stack) > 0 {
+			parent = stack[len(stack)-1]
+		}
+		parentSection := (*canonicalObjectNode)(nil)
+		if len(sectionStack) > 0 {
+			parentSection = sectionStack[len(sectionStack)-1]
+		}
+		parentPath := ""
+		if parent != nil {
+			parentPath = parent.ID + "/"
+		}
+		id := stableCanonicalObjectID(fmt.Sprintf("%s%s:%d:%s:%d", parentPath, parsed.tag, parsed.indent, parsed.text, lineNumber))
+		object := canonicalObjectNode{
+			ID: id, Tag: parsed.tag, Tags: slices.Clone(parsed.tags), Text: parsed.text, Checked: parsed.checked,
+			Indent: parsed.indent, ContentIndent: parsed.contentIndent, ChildrenIDs: []string{}, SourcePrefix: parsed.sourcePrefix,
+		}
+		if parent != nil {
+			parentID := parent.ID
+			object.ParentID = &parentID
+			parent.ChildrenIDs = append(parent.ChildrenIDs, id)
+		}
+		if parentSection != nil {
+			parentSectionID := parentSection.ID
+			object.ParentSectionID = &parentSectionID
+		}
+		objectPointer := &object
+		objectPointers = append(objectPointers, objectPointer)
+		stack = append(stack, objectPointer)
+		parsedByID[id] = parsed
+		if object.Tag == "section" {
+			sectionStack = append(sectionStack, objectPointer)
+		}
+	}
+	objects := make([]canonicalObjectNode, 0, len(objectPointers))
+	for _, object := range objectPointers {
+		objects = append(objects, *object)
+	}
+	return canonicalObjectDocument{Format: "cipherleaf.object-document", Version: 1, Objects: objects}
+}
+
+func stableCanonicalObjectID(input string) string {
+	hash := sha256.Sum256([]byte(input))
+	hexValue := hex.EncodeToString(hash[:])
+	return fmt.Sprintf("%s-%s-4%s-%s-%s", hexValue[:8], hexValue[8:12], hexValue[13:16], hexValue[16:20], hexValue[20:32])
+}
+
+func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
+	outline := regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`).FindStringSubmatch(raw)
+	source := strings.TrimLeft(raw, " \t")
+	tags := []string{}
+	indent := lineVisualIndent(raw)
+	contentIndent := indent
+	if outline != nil {
+		source = outline[4]
+		tags = append(tags, "section")
+		indent = visualIndent(outline[1]) + (len(outline[2])-1)*2
+		contentIndent = visualIndent(outline[1]) + len(outline[2]) + visualIndent(outline[3])
+	}
+	sourcePrefix := func(text string) string {
+		if text == "" {
+			return raw
+		}
+		index := strings.Index(raw, text)
+		if index >= 0 {
+			return raw[:index]
+		}
+		if contentIndent > len(raw) {
+			return raw
+		}
+		return raw[:contentIndent]
+	}
+	if regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`).MatchString(strings.TrimSpace(source)) || attachmentReference.MatchString(source) {
+		text := strings.TrimSpace(source)
+		return parsedCanonicalLine{tag: "image", tags: append(tags, "image"), indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
+	}
+	if match := regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`).FindStringSubmatch(source); match != nil {
+		text := strings.TrimSpace(match[2])
+		var checked *bool
+		if checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(match[2]); checkbox != nil {
+			text = strings.TrimSpace(checkbox[2])
+			value := strings.EqualFold(checkbox[1], "x")
+			checked = &value
+		}
+		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+	}
+	if match := regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`).FindStringSubmatch(source); match != nil {
+		text := strings.TrimSpace(match[2])
+		var checked *bool
+		if checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(match[2]); checkbox != nil {
+			text = strings.TrimSpace(checkbox[2])
+			value := strings.EqualFold(checkbox[1], "x")
+			checked = &value
+		}
+		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+	}
+	tags = append(tags, "text")
+	if strings.HasPrefix(source, "#") && regexp.MustCompile(`^#{1,6}\s+`).MatchString(source) {
+		tag := "text"
+		if outline != nil {
+			tag = "section"
+		}
+		text := strings.TrimSpace(source)
+		return parsedCanonicalLine{tag: tag, tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
+	}
+	checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(source)
+	text := strings.TrimSpace(source)
+	checkboxContentIndent := -1
+	var checked *bool
+	if checkbox != nil {
+		text = strings.TrimSpace(checkbox[2])
+		checkboxContentIndent = contentIndent + len(source) - len(checkbox[2])
+		value := strings.EqualFold(checkbox[1], "x")
+		checked = &value
+	}
+	if outline == nil && checkbox == nil {
+		contentIndent = indent + 2
+	}
+	if checkboxContentIndent >= 0 {
+		contentIndent = checkboxContentIndent
+	}
+	return parsedCanonicalLine{tag: map[bool]string{true: "section", false: "text"}[outline != nil], tags: tags, indent: indent, contentIndent: contentIndent, text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+}
+
+func startsWithWhitespace(text string) bool {
+	return strings.HasPrefix(text, " ") || strings.HasPrefix(text, "\t")
+}
+
+func lineStartsExplicitCanonicalObject(raw string) bool {
+	outline := regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`).FindStringSubmatch(raw)
+	source := strings.TrimLeft(raw, " \t")
+	if outline != nil {
+		source = outline[4]
+	}
+	return outline != nil ||
+		regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`).MatchString(strings.TrimSpace(source)) ||
+		attachmentReference.MatchString(source) ||
+		regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`).MatchString(source) ||
+		regexp.MustCompile(`^[-*](?:\s+.*|\s*)$`).MatchString(source) ||
+		regexp.MustCompile(`^\d+[.)](?:\s+.*|\s*)$`).MatchString(source) ||
+		regexp.MustCompile(`^#{1,6}\s+`).MatchString(source)
+}
+
+func visualIndent(text string) int {
+	return len(strings.ReplaceAll(text, "\t", "  "))
+}
+
+func lineVisualIndent(text string) int {
+	return visualIndent(text[:len(text)-len(strings.TrimLeft(text, " \t"))])
+}
+
+func derivedMarkdownContent(content string) string {
+	var document canonicalObjectDocument
+	if err := json.Unmarshal([]byte(content), &document); err != nil ||
+		document.Format != "cipherleaf.object-document" ||
+		document.Version != 1 {
+		return content
+	}
+	byID := make(map[string]canonicalObjectNode, len(document.Objects))
+	for _, object := range document.Objects {
+		byID[object.ID] = object
+	}
+	var roots []canonicalObjectNode
+	for _, object := range document.Objects {
+		if object.ParentID == nil {
+			roots = append(roots, object)
+		}
+	}
+	var lines []string
+	var appendObject func(canonicalObjectNode)
+	appendObject = func(object canonicalObjectNode) {
+		lines = append(lines, markdownLineForCanonicalObject(object))
+		for _, childID := range object.ChildrenIDs {
+			if child, found := byID[childID]; found {
+				appendObject(child)
+			}
+		}
+	}
+	for _, root := range roots {
+		appendObject(root)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func markdownLineForCanonicalObject(object canonicalObjectNode) string {
+	textLines := strings.Split(object.Text, "\n")
+	firstText := ""
+	if len(textLines) > 0 {
+		firstText = textLines[0]
+	}
+	prefixHasCheckbox := regexp.MustCompile(`\[[ xX]\]\s*$`).MatchString(object.SourcePrefix)
+	if object.Checked != nil && !prefixHasCheckbox {
+		if *object.Checked {
+			firstText = strings.TrimRight("[x] "+firstText, " ")
+		} else {
+			firstText = strings.TrimRight("[ ] "+firstText, " ")
+		}
+	}
+	hasSection := slices.Contains(object.Tags, "section")
+	marker := ""
+	switch object.Tag {
+	case "bulletpoint":
+		marker = "- "
+	}
+	prefix := object.SourcePrefix
+	if prefix == "" {
+		prefix = strings.Repeat(" ", max(0, object.Indent)) + marker
+	}
+	if hasSection && object.SourcePrefix == "" {
+		prefix = strings.Repeat(">", max(1, object.Indent/2+1)) + " " + marker
+	}
+	lines := []string{prefix + firstText}
+	continuationPrefix := strings.Repeat(" ", max(0, object.ContentIndent))
+	for _, line := range textLines[1:] {
+		if line == "" {
+			lines = append(lines, "")
+		} else {
+			lines = append(lines, continuationPrefix+line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func sortSummaries(items []NoteSummary) {

@@ -382,6 +382,24 @@ a:focus-visible {
   backdrop-filter: blur(7px);
 }
 
+.vault-action-backdrop {
+  z-index: 120;
+}
+
+.vault-settings-backdrop,
+.appearance-settings-backdrop {
+  z-index: 130;
+}
+
+.conflict-backdrop {
+  z-index: 140;
+}
+
+.folder-password-backdrop,
+.app-dialog-backdrop {
+  z-index: 160;
+}
+
 .vault-modal {
   position: relative;
   width: min(440px, 100%);
@@ -699,10 +717,6 @@ a:focus-visible {
   width: 14px;
   height: 14px;
   accent-color: var(--green);
-}
-
-.workspace > .modal-backdrop {
-  z-index: 110;
 }
 
 .settings-modal {
@@ -1785,6 +1799,58 @@ a:focus-visible {
   overflow: hidden;
 }
 
+.conflict-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.conflict-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.conflict-editor-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.conflict-editor-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fbfaf6;
+}
+
+.conflict-editor-pane > header {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.conflict-editor-pane .live-markdown-editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.live-markdown-editor .cm-live-conflict-diff {
+  background: rgba(255, 230, 0, 0.45);
+  box-shadow: inset 3px 0 0 #f5c400;
+}
+
 .document-body.view-split {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
@@ -1822,7 +1888,7 @@ a:focus-visible {
   display: grid;
   gap: 7px;
   margin: 0;
-  padding: 0 0 0 22px;
+  padding: 0;
   list-style: none;
 }
 
@@ -1837,6 +1903,7 @@ a:focus-visible {
   grid-template-columns: 22px 92px minmax(160px, 1fr) repeat(4, max-content);
   align-items: center;
   gap: 8px;
+  margin-left: calc(var(--object-depth, 0) * 22px);
   padding: 7px 9px;
   border: 1px solid var(--line-soft);
   border-radius: 7px;
@@ -1959,7 +2026,13 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-object-line {
   position: relative;
+  padding-left: calc(var(--live-object-depth, 0) * 22px);
   cursor: text;
+}
+
+.live-markdown-editor .cm-live-object-line.cm-live-list-line,
+.live-markdown-editor .cm-live-object-line.cm-live-toggle-line {
+  padding-left: initial;
 }
 
 .live-markdown-editor .cm-live-indent-spacer {
@@ -2017,20 +2090,27 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-object-handle {
   position: absolute;
-  left: -28px;
+  left: -40px;
   top: 50%;
-  width: 24px;
-  height: 1.6em;
+  width: 20px;
+  height: 20px;
   display: inline-grid;
-  place-items: center;
+  grid-template-columns: repeat(2, 3px);
+  grid-template-rows: repeat(3, 3px);
+  place-content: center;
+  gap: 3px;
   color: var(--muted);
   cursor: grab;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1;
   opacity: 0.72;
   transform: translateY(-50%);
   user-select: none;
+}
+
+.live-markdown-editor .cm-live-object-handle span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .live-markdown-editor .cm-live-object-line:hover .cm-live-object-handle,
@@ -2376,12 +2456,12 @@ a:focus-visible {
   padding-right: 0.35em;
   color: var(--green-dark);
   font-weight: 700;
-  text-align: right;
+  text-align: left;
 }
 
 .live-markdown-editor .cm-live-list-line {
-  padding-left: calc(var(--live-list-indent, 0ch) + var(--live-list-marker-width, 1.25em));
-  text-indent: calc(0px - var(--live-list-marker-width, 1.25em));
+  padding-left: var(--live-list-indent, 0px);
+  text-indent: 0;
 }
 
 .live-markdown-editor .cm-line.cm-live-toggle-line {
@@ -2896,6 +2976,13 @@ a:focus-visible {
   margin-top: 16px;
 }
 
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 .conflict-list button {
   display: grid;
   gap: 4px;
@@ -3115,6 +3202,15 @@ a:focus-visible {
     padding-right: 26px;
   }
 
+  .conflict-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+
+  .conflict-editor-pane {
+    min-height: 420px;
+  }
+
   .markdown-editor,
   .markdown-preview,
   .live-markdown-editor .cm-content {
@@ -3177,6 +3273,14 @@ a:focus-visible {
 
 :root[data-theme="dark"] .welcome-screen::before {
   opacity: 0.12;
+}
+
+:root[data-theme="dark"] .conflict-editor-pane {
+  background: var(--paper);
+}
+
+:root[data-theme="dark"] .live-markdown-editor .cm-live-conflict-diff {
+  background: rgba(255, 230, 0, 0.32);
 }
 
 :root[data-theme="dark"] .welcome-card h1,

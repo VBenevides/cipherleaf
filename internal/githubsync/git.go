@@ -284,6 +284,8 @@ func (p *GitHubSSHProvider) Link(
 			snapshot,
 			workingTree,
 			remoteReference,
+			emptyHooks,
+			environment,
 		)
 	}
 	if err != nil {
@@ -406,6 +408,23 @@ func (p *GitHubSSHProvider) Push(
 	settings SyncSettings,
 	snapshot RemoteSnapshotStore,
 ) (PushResult, error) {
+	return p.push(parent, settings, snapshot, false)
+}
+
+func (p *GitHubSSHProvider) ForcePush(
+	parent context.Context,
+	settings SyncSettings,
+	snapshot RemoteSnapshotStore,
+) (PushResult, error) {
+	return p.push(parent, settings, snapshot, true)
+}
+
+func (p *GitHubSSHProvider) push(
+	parent context.Context,
+	settings SyncSettings,
+	snapshot RemoteSnapshotStore,
+	force bool,
+) (PushResult, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return PushResult{}, errors.New("Git is not installed or is not available on PATH")
 	}
@@ -476,9 +495,15 @@ func (p *GitHubSSHProvider) Push(
 	pushArguments := []string{
 		"-c", "core.hooksPath=" + emptyHooks,
 		"-C", cachePath,
-		"push", "--quiet", "--no-verify", "origin",
-		"HEAD:refs/heads/" + settings.Branch,
+		"push", "--quiet", "--no-verify",
 	}
+	if force {
+		pushArguments = append(pushArguments, "--force-with-lease")
+	}
+	pushArguments = append(pushArguments,
+		"origin",
+		"HEAD:refs/heads/"+settings.Branch,
+	)
 	output, err := p.runner.Run(contextWithTimeout, "git", pushArguments, environment)
 	if err != nil {
 		if isNonFastForward(output) {
@@ -500,7 +525,7 @@ func (p *GitHubSSHProvider) Push(
 	}
 	return PushResult{
 		Linked:     true,
-		Message:    "The encrypted vault snapshot was pushed to GitHub.",
+		Message:    map[bool]string{true: "The local encrypted vault snapshot replaced the remote branch.", false: "The encrypted vault snapshot was pushed to GitHub."}[force],
 		Branch:     settings.Branch,
 		LastCommit: commit,
 		UpToDate:   false,
@@ -752,6 +777,8 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 	snapshot RemoteSnapshotStore,
 	workingTree string,
 	remoteReference string,
+	emptyHooks string,
+	environment []string,
 ) (string, error) {
 	reference := "origin/" + settings.Branch
 	if remoteReference == "" {
@@ -769,6 +796,54 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 	}
 	if err := p.prepareExistingCache(ctx, workingTree, settings.Branch, reference); err != nil {
 		return "", err
+	}
+	if err := snapshot.ExportRemoteSnapshot(workingTree); err != nil {
+		return "", err
+	}
+	if err := validateWorkingTreeLayout(workingTree); err != nil {
+		return "", err
+	}
+	if output, err := p.runner.Run(
+		ctx,
+		"git",
+		[]string{"-C", workingTree, "add", "-A", "--", "."},
+		localGitEnvironment(),
+	); err != nil {
+		_ = output
+		return "", errors.New("Git could not stage the encrypted vault snapshot")
+	}
+	staged, err := p.runner.Run(
+		ctx,
+		"git",
+		[]string{"-C", workingTree, "diff", "--cached", "--name-only"},
+		localGitEnvironment(),
+	)
+	if err != nil {
+		return "", errors.New("Git could not inspect the staged snapshot")
+	}
+	if len(bytes.TrimSpace(staged)) > 0 {
+		commitArguments := []string{
+			"-c", "core.hooksPath=" + emptyHooks,
+			"-c", "user.name=Cipherleaf",
+			"-c", "user.email=sync@cipherleaf.local",
+			"-C", workingTree,
+			"commit", "--quiet", "--no-gpg-sign", "--no-verify",
+			"-m", "Repair encrypted Cipherleaf vault metadata",
+		}
+		if output, err := p.runner.Run(ctx, "git", commitArguments, localGitEnvironment()); err != nil {
+			_ = output
+			return "", errors.New("Git could not commit the encrypted vault snapshot")
+		}
+		pushArguments := []string{
+			"-c", "core.hooksPath=" + emptyHooks,
+			"-C", workingTree,
+			"push", "--quiet", "--no-verify", "origin",
+			"HEAD:refs/heads/" + settings.Branch,
+		}
+		output, err := p.runner.Run(ctx, "git", pushArguments, environment)
+		if err != nil {
+			return "", transportError(ctx, output)
+		}
 	}
 	return p.resolveCommit(ctx, workingTree)
 }
