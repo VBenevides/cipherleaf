@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState, type PointerEvent } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import {
-  markdownObjectTree,
   moveObject,
+  parseCanonicalObjectDocument,
+  prepareNoteContent,
   type ObjectDropMode,
   type ObjectLine,
 } from "./objectTree";
@@ -32,11 +33,13 @@ function objectTreeRowAt(x: number, y: number): HTMLElement | null {
 
 function ObjectTreeNode({
   node,
+  depth,
   draggedId,
   dropTarget,
   onPointerDragStart,
 }: {
   node: ObjectLine;
+  depth: number;
   draggedId: string | null;
   dropTarget: { id: string; mode: ObjectDropMode } | null;
   onPointerDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
@@ -55,6 +58,7 @@ function ObjectTreeNode({
         data-object-id={node.id}
         data-object-line={node.lineNumber}
         data-drop-mode={currentDrop ?? undefined}
+        style={{ "--object-depth": depth } as CSSProperties}
       >
         <span
           className="object-tree-handle"
@@ -75,7 +79,7 @@ function ObjectTreeNode({
           {node.text || "(empty)"}
         </span>
         <span className="object-tree-meta">line {node.lineNumber}</span>
-        <span className="object-tree-meta">indent {node.indent}</span>
+        <span className="object-tree-meta">depth {depth}</span>
         <span className="object-tree-meta">parent {node.parentId ?? "root"}</span>
         <span className="object-tree-meta">section {node.parentSectionId ?? "root"}</span>
       </div>
@@ -85,6 +89,7 @@ function ObjectTreeNode({
             <ObjectTreeNode
               key={child.id}
               node={child}
+              depth={depth + 1}
               draggedId={draggedId}
               dropTarget={dropTarget}
               onPointerDragStart={onPointerDragStart}
@@ -97,14 +102,15 @@ function ObjectTreeNode({
 }
 
 export default function ObjectTreeView({ value, onChange }: Props) {
-  const tree = useMemo(() => markdownObjectTree(value), [value]);
+  const prepared = useMemo(() => prepareNoteContent(value), [value]);
+  const tree = useMemo(() => parseCanonicalObjectDocument(value).roots, [value]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; mode: ObjectDropMode } | null>(null);
   const draggedIdRef = useRef<string | null>(null);
 
   const finishDrop = (sourceId: string, targetId: string, mode: ObjectDropMode) => {
-    const next = moveObject(value, sourceId, targetId, mode);
-    if (next !== value) onChange(next);
+    const next = moveObject(prepared.markdown, sourceId, targetId, mode);
+    if (next !== prepared.markdown) onChange(next);
     draggedIdRef.current = null;
     setDraggedId(null);
     setDropTarget(null);
@@ -177,6 +183,7 @@ export default function ObjectTreeView({ value, onChange }: Props) {
             <ObjectTreeNode
               key={node.id}
               node={node}
+              depth={0}
               draggedId={draggedId}
               dropTarget={dropTarget}
               onPointerDragStart={startPointerDrag}

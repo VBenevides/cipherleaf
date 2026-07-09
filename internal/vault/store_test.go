@@ -1067,8 +1067,11 @@ func TestNoteObjectStoresOnlyContentAndManifestMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(plaintext) != content {
-		t.Fatalf("note object plaintext = %q, want content only", plaintext)
+	if !strings.Contains(string(plaintext), `"format": "cipherleaf.object-document"`) {
+		t.Fatalf("note object plaintext is not canonical json: %q", plaintext)
+	}
+	if derivedMarkdownContent(string(plaintext)) != content {
+		t.Fatalf("derived markdown = %q, want %q", derivedMarkdownContent(string(plaintext)), content)
 	}
 	summaries, err := store.ListNotes()
 	if err != nil {

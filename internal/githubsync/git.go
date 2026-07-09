@@ -406,6 +406,23 @@ func (p *GitHubSSHProvider) Push(
 	settings SyncSettings,
 	snapshot RemoteSnapshotStore,
 ) (PushResult, error) {
+	return p.push(parent, settings, snapshot, false)
+}
+
+func (p *GitHubSSHProvider) ForcePush(
+	parent context.Context,
+	settings SyncSettings,
+	snapshot RemoteSnapshotStore,
+) (PushResult, error) {
+	return p.push(parent, settings, snapshot, true)
+}
+
+func (p *GitHubSSHProvider) push(
+	parent context.Context,
+	settings SyncSettings,
+	snapshot RemoteSnapshotStore,
+	force bool,
+) (PushResult, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return PushResult{}, errors.New("Git is not installed or is not available on PATH")
 	}
@@ -476,9 +493,15 @@ func (p *GitHubSSHProvider) Push(
 	pushArguments := []string{
 		"-c", "core.hooksPath=" + emptyHooks,
 		"-C", cachePath,
-		"push", "--quiet", "--no-verify", "origin",
-		"HEAD:refs/heads/" + settings.Branch,
+		"push", "--quiet", "--no-verify",
 	}
+	if force {
+		pushArguments = append(pushArguments, "--force-with-lease")
+	}
+	pushArguments = append(pushArguments,
+		"origin",
+		"HEAD:refs/heads/"+settings.Branch,
+	)
 	output, err := p.runner.Run(contextWithTimeout, "git", pushArguments, environment)
 	if err != nil {
 		if isNonFastForward(output) {
@@ -500,7 +523,7 @@ func (p *GitHubSSHProvider) Push(
 	}
 	return PushResult{
 		Linked:     true,
-		Message:    "The encrypted vault snapshot was pushed to GitHub.",
+		Message:    map[bool]string{true: "The local encrypted vault snapshot replaced the remote branch.", false: "The encrypted vault snapshot was pushed to GitHub."}[force],
 		Branch:     settings.Branch,
 		LastCommit: commit,
 		UpToDate:   false,

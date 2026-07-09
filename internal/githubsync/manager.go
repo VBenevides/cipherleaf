@@ -36,6 +36,14 @@ type SyncProvider interface {
 	) (PullResult, error)
 }
 
+type ForcePushProvider interface {
+	ForcePush(
+		ctx context.Context,
+		settings SyncSettings,
+		snapshot RemoteSnapshotStore,
+	) (PushResult, error)
+}
+
 func NewManager(settings SettingsStore, connection ConnectionTester) *Manager {
 	return &Manager{settings: settings, connection: connection}
 }
@@ -191,6 +199,35 @@ func (m *Manager) PushVault(
 		return PushResult{}, errors.New("GitHub synchronization provider is not available")
 	}
 	result, err := m.provider.Push(ctx, settings, snapshot)
+	if err != nil {
+		return PushResult{}, err
+	}
+	m.recordSync(vaultID)
+	return result, nil
+}
+
+func (m *Manager) ForcePushVault(
+	ctx context.Context,
+	vaultID string,
+	snapshot RemoteSnapshotStore,
+) (PushResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	settings, err := m.settings.Load(vaultID)
+	if err != nil {
+		if errors.Is(err, ErrSettingsNotFound) {
+			return PushResult{}, errors.New("link this vault to GitHub before pushing")
+		}
+		return PushResult{}, err
+	}
+	if !settings.Linked {
+		return PushResult{}, errors.New("link this vault to GitHub before pushing")
+	}
+	provider, ok := m.provider.(ForcePushProvider)
+	if !ok {
+		return PushResult{}, errors.New("GitHub synchronization provider does not support force push")
+	}
+	result, err := provider.ForcePush(ctx, settings, snapshot)
 	if err != nil {
 		return PushResult{}, err
 	}

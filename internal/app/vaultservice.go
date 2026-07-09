@@ -660,6 +660,16 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 	return SyncResult{}, errors.New("sync could not converge after the remote branch changed repeatedly")
 }
 
+// ForcePushNow overwrites the linked remote branch with the current local
+// encrypted vault snapshot after the user explicitly confirms conflict loss.
+func (s *VaultService) ForcePushNow() (githubsync.PushResult, error) {
+	vaultID, err := s.unlockedVaultID()
+	if err != nil {
+		return githubsync.PushResult{}, err
+	}
+	return s.sync.ForcePushVault(context.Background(), vaultID, s.store)
+}
+
 // PullNow pulls and merges the remote vault snapshot without pushing back.
 func (s *VaultService) PullNow() (vault.MergeResult, error) {
 	vaultID, err := s.unlockedVaultID()

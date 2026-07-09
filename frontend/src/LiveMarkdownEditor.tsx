@@ -44,6 +44,7 @@ import {
   lineStartsObject,
   moveObjectInMarkdown,
   objectContentIndent,
+  objectDepthByLine,
   objectHierarchyIndent,
   objectOwnerLineNumber as ownerLineNumberInLines,
   parseObjectDocument,
@@ -319,7 +320,11 @@ class DragHandleWidget extends WidgetType {
     handle.dataset.objectLine = String(this.lineNumber);
     handle.title = "Drag object";
     handle.setAttribute("aria-label", "Drag object");
-    handle.textContent = "⋮⋮";
+    for (let index = 0; index < 6; index++) {
+      const dot = document.createElement("span");
+      dot.setAttribute("aria-hidden", "true");
+      handle.append(dot);
+    }
     return handle;
   }
 
@@ -756,6 +761,21 @@ function decorateInlineMarkdown(
   }
 }
 
+function decorateUnorderedListMarker(
+  from: number,
+  marker: "-" | "*",
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+) {
+  addHiddenRange(
+    from,
+    from + 1,
+    decorations,
+    atomicRanges,
+    new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
+  );
+}
+
 function decorateTaskMarker(
   text: string,
   offset: number,
@@ -776,21 +796,6 @@ function decorateTaskMarker(
     ),
   );
   return true;
-}
-
-function decorateUnorderedListMarker(
-  from: number,
-  marker: "-" | "*",
-  decorations: Range<Decoration>[],
-  atomicRanges: Range<Decoration>[],
-) {
-  addHiddenRange(
-    from,
-    from + 1,
-    decorations,
-    atomicRanges,
-    new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
-  );
 }
 
 type ToggleLine = {
@@ -847,33 +852,35 @@ function objectOwnerLineNumber(lines: readonly string[], lineNumber: number): nu
 }
 
 function toggleLine(text: string): ToggleLine | null {
-  const match = text.match(/^([ \t]*)>([ \t]?)(.*)$/);
+  const match = text.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
   if (!match) return null;
 
   return {
-    indent: visualIndent(match[1]),
-    prefixSize: match[1].length + 1 + match[2].length,
-    content: match[3],
+    indent: visualIndent(match[1]) + (match[2].length - 1) * 2,
+    prefixSize: match[1].length + match[2].length + match[3].length,
+    content: match[4],
   };
 }
 
-function toggleLineStyle(indent: number): string {
-  return `--toggle-padding-left: ${indent}ch;`;
+function toggleLineStyle(_indent: number): string {
+  return "--toggle-padding-left: calc(var(--live-object-depth, 0) * 22px);";
 }
 
-function listLineStyle(indent: number, markerWidth = "1.25em"): string {
-  return `--live-list-indent: ${indent}ch; --live-list-marker-width: ${markerWidth};`;
+function listLineStyle(_indent: number, markerWidth = "1.25em"): string {
+  return `--live-list-indent: calc(var(--live-object-depth, 0) * 22px); --live-list-marker-width: ${markerWidth}; --live-list-marker-offset: 0px;`;
 }
 
 function objectLineAttributes(
   lineNumber: number,
   className = "",
   style?: string,
+  depth = 0,
 ): Record<string, string> {
+  const depthStyle = `--live-object-depth: ${depth};`;
   return {
     class: ["cm-live-object-line", className].filter(Boolean).join(" "),
     "data-object-line": String(lineNumber),
-    ...(style ? { style } : {}),
+    style: style ? `${depthStyle} ${style}` : depthStyle,
   };
 }
 
@@ -1046,6 +1053,9 @@ function buildLivePreviewState(
     };
   })();
   const { lines, objectDocument } = prepared;
+  const depthByLine = objectDepthByLine(objectDocument);
+  const lineAttributes = (lineNumber: number, className = "", style?: string) =>
+    objectLineAttributes(lineNumber, className, style, depthByLine.get(lineNumber) ?? 0);
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
@@ -1098,7 +1108,7 @@ function buildLivePreviewState(
     if (attachment && !lineIsActive(state, lineNumber)) {
       decorations.push(
         Decoration.line({
-          attributes: objectLineAttributes(lineNumber, "cm-live-attachment-line"),
+          attributes: lineAttributes(lineNumber, "cm-live-attachment-line"),
         }).range(line.from),
       );
       addHiddenRange(
@@ -1136,11 +1146,11 @@ function buildLivePreviewState(
       const contentOffset = line.from + toggle.prefixSize;
 
       const isTask = !toggleAttachment && decorateTaskMarker(
-          toggle.content,
-          contentOffset,
-          decorations,
-          atomicRanges,
-        );
+        toggle.content,
+        contentOffset,
+        decorations,
+        atomicRanges,
+      );
 
       const toggleList = !toggleAttachment && !isTask &&
         toggle.content.match(/^([-*])\s+/);
@@ -1182,6 +1192,7 @@ function buildLivePreviewState(
             isTask || toggleList || toggleOrderedList
               ? `${toggleLineStyle(toggle.indent)} ${listLineStyle(0, toggleMarkerWidth)}`
               : toggleLineStyle(toggle.indent),
+            depthByLine.get(lineNumber) ?? 0,
           ),
         }).range(line.from),
       );
@@ -1245,7 +1256,7 @@ function buildLivePreviewState(
     if (isHorizontalRule(line.text)) {
       decorations.push(
         Decoration.line({
-          attributes: objectLineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
+          attributes: lineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
         }).range(line.from),
       );
       if (!lineIsActive(state, lineNumber)) {
@@ -1278,6 +1289,8 @@ function buildLivePreviewState(
               hasChildren ? "cm-live-heading-parent" : "",
               collapsed ? "cm-live-heading-collapsed" : "",
             ].filter(Boolean).join(" "),
+            undefined,
+            depthByLine.get(lineNumber) ?? 0,
           ),
         }).range(line.from),
       );
@@ -1330,7 +1343,7 @@ function buildLivePreviewState(
       const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
       decorations.push(
         Decoration.line({
-          attributes: { class: "cm-live-object-continuation-line" },
+          attributes: lineAttributes(lineNumber, "cm-live-object-continuation-line"),
         }).range(line.from),
       );
       addHiddenRange(
@@ -1367,6 +1380,7 @@ function buildLivePreviewState(
           lineNumber,
           "cm-live-task-line cm-live-list-line",
           listLineStyle(visualIndent(line.text.match(/^\s*/)?.[0] ?? ""), "1.45em"),
+          depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
     }
@@ -1385,6 +1399,7 @@ function buildLivePreviewState(
           lineNumber,
           "cm-live-list-line",
           listLineStyle(visualIndent(unorderedList[1])),
+          depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
     }
@@ -1404,6 +1419,7 @@ function buildLivePreviewState(
           lineNumber,
           "cm-live-list-line",
           listLineStyle(visualIndent(orderedList[1]), "2em"),
+          depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
     }
@@ -1411,7 +1427,7 @@ function buildLivePreviewState(
     if (!task && !unorderedList && !orderedList) {
       decorations.push(
         Decoration.line({
-          attributes: objectLineAttributes(lineNumber),
+          attributes: lineAttributes(lineNumber),
         }).range(line.from),
       );
     }
