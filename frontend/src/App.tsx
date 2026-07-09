@@ -35,6 +35,7 @@ type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -308,6 +309,7 @@ function App() {
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
   const [scrollToOffset, setScrollToOffset] = useState<number | null>(null);
+  const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
     try {
       const saved = window.localStorage.getItem("cipherleaf-theme");
@@ -336,6 +338,7 @@ function App() {
   const suppressClickRef = useRef(false);
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
   const appDialogResolverRef = useRef<((value: string | boolean | null) => void) | null>(null);
+  const nextWindowLayerRef = useRef(160);
 
   useEffect(() => {
     noteRef.current = note;
@@ -603,7 +606,13 @@ function App() {
     setAppDialogValue("");
   };
 
+  const bringWindowToFront = useCallback((layer: WindowLayer) => {
+    nextWindowLayerRef.current += 1;
+    setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
+  }, []);
+
   const requestAppPrompt = (dialog: Extract<AppDialogState, { kind: "prompt" }>) => {
+    bringWindowToFront("appDialog");
     setAppDialogValue(dialog.initialValue ?? "");
     setAppDialog(dialog);
     return new Promise<string | null>((resolve) => {
@@ -612,6 +621,7 @@ function App() {
   };
 
   const requestAppConfirm = (dialog: Extract<AppDialogState, { kind: "confirm" }>) => {
+    bringWindowToFront("appDialog");
     setAppDialogValue("");
     setAppDialog(dialog);
     return new Promise<boolean>((resolve) => {
@@ -949,6 +959,7 @@ function App() {
 
   const prepareVaultPrompt = async (action: VaultAction, path: string) => {
     setVaultPath(path);
+    bringWindowToFront("vaultAction");
     setVaultAction(action);
     setVaultName("");
     setPassphrase("");
@@ -1150,6 +1161,7 @@ function App() {
         setSaveState("saved");
       }
       if (result.merge.conflicts?.length) {
+        bringWindowToFront("syncConflicts");
         setSyncConflicts(result.merge.conflicts);
       }
     } catch (reason) {
@@ -1381,6 +1393,7 @@ function App() {
   };
 
   const requestFolderPassword = (title: string, submitLabel: string) => {
+    bringWindowToFront("folderPassword");
     setFolderPassword("");
     setFolderPasswordVisible(false);
     setFolderPasswordPrompt({ title, submitLabel });
@@ -1819,6 +1832,7 @@ function App() {
 
   const openVaultSettings = async () => {
     setTitlebarMenu(null);
+    bringWindowToFront("vaultSettings");
     setVaultSettingsOpen(true);
     setSyncSettings(null);
     setSettingsBusy(true);
@@ -2049,7 +2063,7 @@ function App() {
         </aside>
 
         {vaultAction && (
-          <div className="modal-backdrop vault-action-backdrop" role="presentation">
+          <div className="modal-backdrop vault-action-backdrop" role="presentation" style={{ zIndex: windowLayers.vaultAction }}>
             <form
               className={`vault-modal ${vaultAction === "clone" ? "clone-vault-modal" : ""}`}
               onSubmit={(event) => {
@@ -2334,6 +2348,7 @@ function App() {
                 </button>
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
+                  bringWindowToFront("appearanceSettings");
                   setAppearanceSettingsOpen(true);
                 }}>
                   Settings…
@@ -2815,59 +2830,8 @@ function App() {
           </div>
         </section>
       )}
-      {appDialog && (
-        <div className="modal-backdrop app-dialog-backdrop" role="presentation">
-          <form
-            className={`vault-modal app-dialog-modal${appDialog.kind === "confirm" && appDialog.danger ? " danger-dialog" : ""}`}
-            onSubmit={(event) => {
-              event.preventDefault();
-              closeAppDialog(appDialog.kind === "prompt" ? appDialogValue : true);
-            }}
-          >
-            <button
-              type="button"
-              className="icon-button modal-close"
-              aria-label="Cancel"
-              onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
-            >
-              <Icon name="x" />
-            </button>
-            <div className="modal-icon"><Icon name={appDialog.icon ?? "dots"} size={21} /></div>
-            <p className="eyebrow">{appDialog.eyebrow}</p>
-            <h2>{appDialog.title}</h2>
-            {appDialog.kind === "prompt" ? (
-              <label>
-                {appDialog.label}
-                <input
-                  autoFocus
-                  type="text"
-                  value={appDialogValue}
-                  onChange={(event) => setAppDialogValue(event.target.value)}
-                />
-              </label>
-            ) : (
-              <p className="app-dialog-message">{appDialog.message}</p>
-            )}
-            <div className="app-dialog-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className={appDialog.kind === "confirm" && appDialog.danger ? "danger-button" : "primary-button"}
-              >
-                {appDialog.kind === "prompt" ? appDialog.submitLabel : appDialog.confirmLabel}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
       {folderPasswordPrompt && (
-        <div className="modal-backdrop folder-password-backdrop" role="presentation">
+        <div className="modal-backdrop folder-password-backdrop" role="presentation" style={{ zIndex: windowLayers.folderPassword }}>
           <form
             className="vault-modal folder-password-modal"
             onSubmit={(event) => {
@@ -2914,7 +2878,7 @@ function App() {
         </div>
       )}
       {appearanceSettingsOpen && (
-        <div className="modal-backdrop appearance-settings-backdrop" role="presentation">
+        <div className="modal-backdrop appearance-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.appearanceSettings }}>
           <section
             className="vault-modal settings-modal appearance-settings-modal"
             role="dialog"
@@ -3002,7 +2966,7 @@ function App() {
         </div>
       )}
       {vaultSettingsOpen && (
-        <div className="modal-backdrop vault-settings-backdrop" role="presentation">
+        <div className="modal-backdrop vault-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.vaultSettings }}>
           <form
             className="vault-modal settings-modal"
             onSubmit={(event) => {
@@ -3285,7 +3249,7 @@ function App() {
         </div>
       )}
       {syncConflicts.length > 0 && (
-        <div className="modal-backdrop conflict-backdrop" role="presentation">
+        <div className="modal-backdrop conflict-backdrop" role="presentation" style={{ zIndex: windowLayers.syncConflicts }}>
           <section className="vault-modal conflict-modal" role="dialog" aria-labelledby="conflict-title">
             <button
               type="button"
@@ -3414,6 +3378,57 @@ function App() {
         </div>
       )}
       {sidebarOpen && <button className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
+      {appDialog && (
+        <div className="modal-backdrop app-dialog-backdrop" role="presentation" style={{ zIndex: windowLayers.appDialog }}>
+          <form
+            className={`vault-modal app-dialog-modal${appDialog.kind === "confirm" && appDialog.danger ? " danger-dialog" : ""}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeAppDialog(appDialog.kind === "prompt" ? appDialogValue : true);
+            }}
+          >
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Cancel"
+              onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
+            >
+              <Icon name="x" />
+            </button>
+            <div className="modal-icon"><Icon name={appDialog.icon ?? "dots"} size={21} /></div>
+            <p className="eyebrow">{appDialog.eyebrow}</p>
+            <h2>{appDialog.title}</h2>
+            {appDialog.kind === "prompt" ? (
+              <label>
+                {appDialog.label}
+                <input
+                  autoFocus
+                  type="text"
+                  value={appDialogValue}
+                  onChange={(event) => setAppDialogValue(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p className="app-dialog-message">{appDialog.message}</p>
+            )}
+            <div className="app-dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={appDialog.kind === "confirm" && appDialog.danger ? "danger-button" : "primary-button"}
+              >
+                {appDialog.kind === "prompt" ? appDialog.submitLabel : appDialog.confirmLabel}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   );
 }

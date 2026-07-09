@@ -719,10 +719,6 @@ a:focus-visible {
   accent-color: var(--green);
 }
 
-.workspace > .modal-backdrop {
-  z-index: 110;
-}
-
 .settings-modal {
   width: min(650px, 100%);
   max-height: min(760px, calc(100vh - 48px));
