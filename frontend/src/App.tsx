@@ -50,6 +50,26 @@ type FolderPasswordPrompt = {
   title: string;
   submitLabel: string;
 };
+type AppDialogIcon = "dots" | "file" | "folder" | "lock" | "trash";
+type AppDialogState =
+  | {
+      kind: "prompt";
+      eyebrow: string;
+      title: string;
+      label: string;
+      submitLabel: string;
+      initialValue?: string;
+      icon?: AppDialogIcon;
+    }
+  | {
+      kind: "confirm";
+      eyebrow: string;
+      title: string;
+      message: string;
+      confirmLabel: string;
+      danger?: boolean;
+      icon?: AppDialogIcon;
+    };
 
 type NoteCrumb = {
   id: string;
@@ -247,6 +267,8 @@ function App() {
   const [folderPasswordPrompt, setFolderPasswordPrompt] = useState<FolderPasswordPrompt | null>(null);
   const [folderPassword, setFolderPassword] = useState("");
   const [folderPasswordVisible, setFolderPasswordVisible] = useState(false);
+  const [appDialog, setAppDialog] = useState<AppDialogState | null>(null);
+  const [appDialogValue, setAppDialogValue] = useState("");
   const [syncSettings, setSyncSettings] = useState<SyncSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
@@ -289,6 +311,7 @@ function App() {
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
+  const appDialogResolverRef = useRef<((value: string | boolean | null) => void) | null>(null);
 
   useEffect(() => {
     noteRef.current = note;
@@ -551,6 +574,29 @@ function App() {
     }
   };
 
+  const closeAppDialog = (value: string | boolean | null) => {
+    appDialogResolverRef.current?.(value);
+    appDialogResolverRef.current = null;
+    setAppDialog(null);
+    setAppDialogValue("");
+  };
+
+  const requestAppPrompt = (dialog: Extract<AppDialogState, { kind: "prompt" }>) => {
+    setAppDialogValue(dialog.initialValue ?? "");
+    setAppDialog(dialog);
+    return new Promise<string | null>((resolve) => {
+      appDialogResolverRef.current = (value) => resolve(typeof value === "string" ? value : null);
+    });
+  };
+
+  const requestAppConfirm = (dialog: Extract<AppDialogState, { kind: "confirm" }>) => {
+    setAppDialogValue("");
+    setAppDialog(dialog);
+    return new Promise<boolean>((resolve) => {
+      appDialogResolverRef.current = (value) => resolve(value === true);
+    });
+  };
+
   const runGlobalReplace = async () => {
     if (!globalSearchQuery.trim()) return;
     const noteIDs = Array.from(new Set(globalSearchMatches.map((m) => m.noteId)));
@@ -558,7 +604,18 @@ function App() {
       noteIDs.length === 0
         ? `Replace "${globalSearchQuery}" with "${globalSearchReplacement}" across every note?`
         : `Replace "${globalSearchQuery}" with "${globalSearchReplacement}" in ${noteIDs.length} note${noteIDs.length === 1 ? "" : "s"}?`;
-    if (!window.confirm(confirmMessage)) return;
+    if (
+      !(await requestAppConfirm({
+        kind: "confirm",
+        eyebrow: "Global replace",
+        title: "Replace matches",
+        message: confirmMessage,
+        confirmLabel: "Replace",
+        icon: "dots",
+      }))
+    ) {
+      return;
+    }
     setGlobalSearchBusy(true);
     setGlobalSearchError("");
     try {
@@ -1126,7 +1183,15 @@ function App() {
     setTitlebarMenu(null);
     if (!session || session.locked) return;
     const currentName = session.path.split(/[\\/]/).filter(Boolean).pop() ?? "";
-    const newName = window.prompt("Rename vault folder to:", currentName);
+    const newName = await requestAppPrompt({
+      kind: "prompt",
+      eyebrow: "Vault",
+      title: "Rename vault",
+      label: "Vault folder name",
+      submitLabel: "Rename vault",
+      initialValue: currentName,
+      icon: "file",
+    });
     if (newName === null) return;
     const trimmed = newName.trim();
     if (!trimmed) {
@@ -1174,11 +1239,19 @@ function App() {
   };
 
   const createFolder = async () => {
-    const name = window.prompt("Folder name");
-    if (!name?.trim()) return;
+    const name = await requestAppPrompt({
+      kind: "prompt",
+      eyebrow: "Folder",
+      title: "New folder",
+      label: "Folder name",
+      submitLabel: "Create folder",
+      icon: "folder",
+    });
+    const trimmed = name?.trim();
+    if (!trimmed) return;
     setError("");
     try {
-      const created = await VaultService.CreateFolder(name);
+      const created = await VaultService.CreateFolder(trimmed);
       await refreshFolders();
       setSelectedFolderID(created.id);
     } catch (reason) {
@@ -1187,11 +1260,20 @@ function App() {
   };
 
   const renameFolder = async (folder: Folder) => {
-    const name = window.prompt("Rename folder", folder.name);
-    if (!name?.trim() || name.trim() === folder.name) return;
+    const name = await requestAppPrompt({
+      kind: "prompt",
+      eyebrow: "Folder",
+      title: "Rename folder",
+      label: "Folder name",
+      submitLabel: "Rename folder",
+      initialValue: folder.name,
+      icon: "folder",
+    });
+    const trimmed = name?.trim();
+    if (!trimmed || trimmed === folder.name) return;
     setError("");
     try {
-      await VaultService.RenameFolder(folder.id, name);
+      await VaultService.RenameFolder(folder.id, trimmed);
       await refreshFolders();
     } catch (reason) {
       setError(errorText(reason));
@@ -1199,7 +1281,19 @@ function App() {
   };
 
   const deleteFolder = async (folder: Folder) => {
-    if (!window.confirm(`Delete the empty folder “${folder.name}”?`)) return;
+    if (
+      !(await requestAppConfirm({
+        kind: "confirm",
+        eyebrow: "Delete folder",
+        title: "Delete empty folder",
+        message: `Delete the empty folder “${folder.name}”?`,
+        confirmLabel: "Delete folder",
+        danger: true,
+        icon: "trash",
+      }))
+    ) {
+      return;
+    }
     setError("");
     try {
       await VaultService.DeleteFolder(folder.id);
@@ -1341,7 +1435,20 @@ function App() {
   };
 
   const deleteNote = async (id = note?.id, title = note?.title) => {
-    if (!id || !window.confirm(`Delete “${title || "Untitled"}”? This cannot be undone.`)) return;
+    if (!id) return;
+    if (
+      !(await requestAppConfirm({
+        kind: "confirm",
+        eyebrow: "Delete note",
+        title: "Delete note",
+        message: `Delete “${title || "Untitled"}”? This cannot be undone.`,
+        confirmLabel: "Delete note",
+        danger: true,
+        icon: "trash",
+      }))
+    ) {
+      return;
+    }
     try {
       if (noteRef.current?.id !== id) await persistCurrent();
       await VaultService.DeleteNote(id);
@@ -1760,7 +1867,17 @@ function App() {
   };
 
   const unlinkGitHubSync = async () => {
-    if (!window.confirm("Remove this vault’s GitHub settings from this device? The local vault, SSH key, and repository will not be deleted.")) {
+    if (
+      !(await requestAppConfirm({
+        kind: "confirm",
+        eyebrow: "GitHub sync",
+        title: "Unlink GitHub sync",
+        message: "Remove this vault’s GitHub settings from this device? The local vault, SSH key, and repository will not be deleted.",
+        confirmLabel: "Unlink sync",
+        danger: true,
+        icon: "trash",
+      }))
+    ) {
       return;
     }
     setSettingsBusy(true);
@@ -2633,6 +2750,57 @@ function App() {
             )}
           </div>
         </section>
+      )}
+      {appDialog && (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            className={`vault-modal app-dialog-modal${appDialog.kind === "confirm" && appDialog.danger ? " danger-dialog" : ""}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeAppDialog(appDialog.kind === "prompt" ? appDialogValue : true);
+            }}
+          >
+            <button
+              type="button"
+              className="icon-button modal-close"
+              aria-label="Cancel"
+              onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
+            >
+              <Icon name="x" />
+            </button>
+            <div className="modal-icon"><Icon name={appDialog.icon ?? "dots"} size={21} /></div>
+            <p className="eyebrow">{appDialog.eyebrow}</p>
+            <h2>{appDialog.title}</h2>
+            {appDialog.kind === "prompt" ? (
+              <label>
+                {appDialog.label}
+                <input
+                  autoFocus
+                  type="text"
+                  value={appDialogValue}
+                  onChange={(event) => setAppDialogValue(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p className="app-dialog-message">{appDialog.message}</p>
+            )}
+            <div className="app-dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => closeAppDialog(appDialog.kind === "prompt" ? null : false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={appDialog.kind === "confirm" && appDialog.danger ? "danger-button" : "primary-button"}
+              >
+                {appDialog.kind === "prompt" ? appDialog.submitLabel : appDialog.confirmLabel}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
       {folderPasswordPrompt && (
         <div className="modal-backdrop" role="presentation">

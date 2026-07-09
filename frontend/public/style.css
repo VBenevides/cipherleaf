@@ -210,7 +210,8 @@ a:focus-visible {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   min-height: 43px;
   border-radius: 8px;
   padding: 0 19px;
@@ -246,8 +247,23 @@ a:focus-visible {
   background: rgba(255, 255, 255, 0.75);
 }
 
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #fffaf7;
+  background: var(--red);
+  box-shadow: 0 9px 22px rgba(150, 64, 48, 0.14);
+}
+
+.danger-button:hover {
+  background: #9b4638;
+}
+
 .primary-button:active,
-.secondary-button:active {
+.secondary-button:active,
+.danger-button:active {
   transform: translateY(1px);
 }
 
@@ -639,6 +655,35 @@ a:focus-visible {
 .vault-modal .primary-button {
   width: 100%;
   margin-top: 7px;
+}
+
+.app-dialog-message {
+  margin: 16px 0 22px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.app-dialog-actions .primary-button,
+.app-dialog-actions .danger-button {
+  width: auto;
+  margin-top: 0;
+}
+
+.app-dialog-actions .secondary-button {
+  min-width: 96px;
+}
+
+.app-dialog-actions .primary-button,
+.app-dialog-actions .danger-button {
+  min-width: 128px;
 }
 
 .remember-secret-row {
