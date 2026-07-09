@@ -39,7 +39,6 @@ import {
 import {
   classifyObjectLine,
   continuationPrefix,
-  isContinuationLine,
   isSeparatorLine,
   lineIndent,
   lineStartsObject,
@@ -823,19 +822,9 @@ function parentObjectPrefixForContinuation(state: EditorState, lineNumber: numbe
   return null;
 }
 
-function isObjectContinuationLine(lines: readonly string[], lineNumber: number): boolean {
-  return isContinuationLine(lines, lineNumber);
-}
-
-function continuationOwnerContentIndent(lines: readonly string[], lineNumber: number): number {
-  const ownerLine = objectOwnerLineNumber(lines, lineNumber);
-  if (ownerLine <= 0 || ownerLine === lineNumber) return 0;
-  return objectContentIndent(lines[ownerLine - 1] ?? "");
-}
-
-function continuationOwnerLine(lines: readonly string[], lineNumber: number): number {
-  const ownerLine = objectOwnerLineNumber(lines, lineNumber);
-  return ownerLine > 0 && ownerLine !== lineNumber ? ownerLine : lineNumber;
+function continuationOwnerObject(document: ObjectDocument, lineNumber: number) {
+  const owner = document.byLine.get(lineNumber);
+  return owner && owner.lineNumber !== lineNumber ? owner : null;
 }
 
 function continuationPrefixSizeForIndent(raw: string, targetIndent: number): number {
@@ -1081,9 +1070,9 @@ function buildLivePreviewState(
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
     const toggle = toggleLine(line.text);
-    const continuationLine = isObjectContinuationLine(lines, lineNumber);
+    const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
 
-    if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationLine) {
+    if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationOwner) {
       decorations.push(
         Decoration.widget({
           widget: new DragHandleWidget(lineNumber),
@@ -1359,18 +1348,17 @@ function buildLivePreviewState(
       continue;
     }
 
-    if (continuationLine) {
-      const indent = continuationOwnerContentIndent(lines, lineNumber);
+    if (continuationOwner) {
+      const indent = continuationOwner.contentIndent;
       const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
-      const ownerLine = continuationOwnerLine(lines, lineNumber);
-      const markerWidth = continuationMarkerWidth(objectDocument, ownerLine);
+      const markerWidth = continuationMarkerWidth(objectDocument, continuationOwner.lineNumber);
       decorations.push(
         Decoration.line({
           attributes: objectLineAttributes(
             lineNumber,
             "cm-live-object-continuation-line",
             "",
-            depthByLine.get(ownerLine) ?? 0,
+            depthByLine.get(continuationOwner.lineNumber) ?? 0,
           ),
         }).range(line.from),
       );
@@ -1932,7 +1920,7 @@ function objectHandleElement(target: EventTarget | null): HTMLElement | null {
 
 function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElement | null {
   const elements = document.elementsFromPoint(x, y);
-  const lines = view.state.doc.toString().split("\n");
+  let objectDocument: ObjectDocument | null = null;
   for (const element of elements) {
     let line: HTMLElement | null = null;
     if (element instanceof HTMLElement && element.matches(".cm-live-object-line[data-object-line]")) {
@@ -1943,8 +1931,9 @@ function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElemen
 
     if (line) {
       const lineNumber = Number(line.dataset.objectLine);
+      if (!objectDocument) objectDocument = parseObjectDocument(view.state.doc.toString());
       const ownerLineNumber = Number.isFinite(lineNumber)
-        ? objectOwnerLineNumber(lines, lineNumber)
+        ? objectDocument.byLine.get(lineNumber)?.lineNumber ?? lineNumber
         : lineNumber;
       const owner = Number.isFinite(ownerLineNumber)
         ? view.dom.querySelector<HTMLElement>(`.cm-live-object-line[data-object-line="${ownerLineNumber}"]`)
