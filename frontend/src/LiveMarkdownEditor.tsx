@@ -71,6 +71,8 @@ type LivePreviewState = {
   collapsedQuotes: ReadonlySet<string>;
   decorations: DecorationSet;
   atomicRanges: DecorationSet;
+  lines: readonly string[];
+  objectDocument: ObjectDocument;
 };
 
 type ObjectDocumentContext = {
@@ -1380,6 +1382,8 @@ function buildLivePreviewState(
     collapsedQuotes: nextCollapsed,
     decorations: Decoration.set(decorations, true),
     atomicRanges: Decoration.set(atomicRanges, true),
+    lines,
+    objectDocument,
   };
 }
 
@@ -1411,11 +1415,18 @@ function livePreviewExtension(
       let cachedContext: ObjectDocumentContext | null = null;
       const collapseContext = () => {
         if (!cachedContext) {
-          const docText = transaction.state.doc.toString();
-          cachedContext = {
-            lines: docText.split("\n"),
-            objectDocument: parseObjectDocument(docText),
-          };
+          if (transaction.docChanged) {
+            const docText = transaction.state.doc.toString();
+            cachedContext = {
+              lines: docText.split("\n"),
+              objectDocument: parseObjectDocument(docText),
+            };
+          } else {
+            cachedContext = {
+              lines: value.lines,
+              objectDocument: value.objectDocument,
+            };
+          }
         }
         return cachedContext;
       };
@@ -1465,7 +1476,11 @@ function livePreviewExtension(
         openWikilink,
         noteID,
         onError,
-        cachedContext ?? undefined,
+        cachedContext ?? (
+          transaction.docChanged
+            ? undefined
+            : { lines: value.lines, objectDocument: value.objectDocument }
+        ),
       );
     },
     provide(currentField) {

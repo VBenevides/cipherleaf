@@ -125,7 +125,12 @@ export default function ObjectTreeView({ value, onChange }: Props) {
         setDropTarget(null);
         return;
       }
-      setDropTarget({ id: targetId, mode: dropModeForPoint(target, moveEvent.clientY) });
+      const mode = dropModeForPoint(target, moveEvent.clientY);
+      setDropTarget((current) =>
+        current?.id === targetId && current.mode === mode
+          ? current
+          : { id: targetId, mode },
+      );
     };
 
     function cleanup() {

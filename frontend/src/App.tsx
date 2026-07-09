@@ -292,8 +292,11 @@ function App() {
 
   useEffect(() => {
     noteRef.current = note;
+  }, [note]);
+
+  useEffect(() => {
     dirtyRef.current = dirty;
-  }, [note, dirty]);
+  }, [dirty]);
 
   useEffect(() => {
     const stringify = (value: unknown) => {
@@ -740,12 +743,11 @@ function App() {
 
   useEffect(() => {
     if (!dirty || !note) return;
-    const snapshot = note;
     const timer = window.setTimeout(() => {
-      void persistCurrent(snapshot);
+      void persistCurrent();
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [dirty, note?.id, note?.title, note?.content]);
+  }, [dirty, note?.id]);
 
   useEffect(() => {
     if (!session || session.locked) return;
@@ -1497,11 +1499,35 @@ function App() {
     } as ContextMenuState);
   };
 
-  const editNote = (patch: Partial<Pick<Note, "title" | "content">>) => {
-    setNote((current) => (current ? { ...current, ...patch } : current));
+  const markDirty = () => {
     editVersion.current++;
-    setDirty(true);
-    setSaveState("idle");
+    dirtyRef.current = true;
+    setDirty((current) => current ? current : true);
+    setSaveState((current) => current === "idle" ? current : "idle");
+  };
+
+  const editNote = (
+    patch: Partial<Pick<Note, "title" | "content">>,
+    syncState = "title" in patch,
+  ) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const next = { ...current, ...patch };
+    noteRef.current = next;
+    markDirty();
+    if (syncState) {
+      setNote(next);
+    }
+  };
+
+  const syncDraftNote = () => {
+    const draft = noteRef.current;
+    if (draft) setNote(draft);
+  };
+
+  const setEditorView = (nextView: EditorView) => {
+    syncDraftNote();
+    setView(nextView);
   };
 
   useEffect(() => {
@@ -2494,7 +2520,7 @@ function App() {
                   role="tab"
                   aria-selected={view === item}
                   className={view === item ? "active" : ""}
-                  onClick={() => setView(item)}
+                  onClick={() => setEditorView(item)}
                 >
                   {item === "live"
                     ? "Live Preview"
@@ -2523,7 +2549,7 @@ function App() {
               )}
               {view === "object" && (
                 <div className="editor-view-pane active">
-                  <ObjectTreeView value={note.content} onChange={(content) => editNote({ content })} />
+                  <ObjectTreeView value={note.content} onChange={(content) => editNote({ content }, true)} />
                 </div>
               )}
               {view === "markdown" && (
