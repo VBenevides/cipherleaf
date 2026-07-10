@@ -42,6 +42,7 @@ const (
 var (
 	defaultKDF             = secure.KDFParams{Time: 3, Memory: 64 * 1024, Threads: 2}
 	ErrLocked              = errors.New("vault is locked")
+	ErrFolderLocked        = errors.New("folder is locked")
 	ErrVaultAlreadyExists  = errors.New("a vault already exists in this folder")
 	ErrVaultFolderExists   = errors.New("a folder with that vault name already exists")
 	ErrVaultNotFound       = errors.New("no encrypted vault exists in this folder")
@@ -54,13 +55,14 @@ var (
 const sharedAttachmentFolder = "shared"
 
 type Store struct {
-	mu          sync.RWMutex
-	root        string
-	vaultID     string
-	key         []byte
-	secret      []byte
-	manifest    manifest
-	searchIndex map[string]string
+	mu                sync.RWMutex
+	root              string
+	vaultID           string
+	key               []byte
+	secret            []byte
+	manifest          manifest
+	searchIndex       map[string]string
+	authorizedFolders map[string]struct{}
 }
 
 func NewStore() *Store {
@@ -242,7 +244,12 @@ func (s *Store) ListNotes() ([]NoteSummary, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return nil, err
 	}
-	result := slices.Clone(s.manifest.Notes)
+	result := make([]NoteSummary, 0, len(s.manifest.Notes))
+	for _, note := range s.manifest.Notes {
+		if s.requireNoteAccessibleLocked(note) == nil {
+			result = append(result, note)
+		}
+	}
 	sortSummaries(result)
 	return result, nil
 }
@@ -259,6 +266,9 @@ func (s *Store) CreateNoteInFolder(title, folderID string) (Note, error) {
 	}
 	if !s.folderExistsLocked(folderID) {
 		return Note{}, errors.New("folder not found")
+	}
+	if err := s.requireFolderAccessibleLocked(folderID); err != nil {
+		return Note{}, err
 	}
 	title, err := normalizeTitle(title)
 	if err != nil {
@@ -399,10 +409,25 @@ func (s *Store) LockFolder(id, password string) (Folder, error) {
 	if err != nil {
 		return Folder{}, err
 	}
-	return s.updateFolderLocked(id, func(folder *Folder) {
-		folder.Locked = true
-		folder.LockPasswordHash = verifier
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return Folder{}, err
+	}
+	index, found := s.findFolderLocked(id)
+	if !found {
+		return Folder{}, errors.New("folder not found")
+	}
+	original := s.manifest.Folders[index]
+	s.manifest.Folders[index].Locked = true
+	s.manifest.Folders[index].LockPasswordHash = verifier
+	s.manifest.Folders[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.saveManifestLocked(); err != nil {
+		s.manifest.Folders[index] = original
+		return Folder{}, err
+	}
+	delete(s.authorizedFolders, id)
+	return s.manifest.Folders[index], nil
 }
 
 func (s *Store) UnlockFolder(id, password string) (Folder, error) {
@@ -426,12 +451,13 @@ func (s *Store) UnlockFolder(id, password string) (Folder, error) {
 		s.manifest.Folders[index] = original
 		return Folder{}, err
 	}
+	delete(s.authorizedFolders, id)
 	return s.manifest.Folders[index], nil
 }
 
 func (s *Store) CheckFolderPassword(id, password string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
 		return err
 	}
@@ -442,6 +468,27 @@ func (s *Store) CheckFolderPassword(id, password string) error {
 	if !verifyFolderPassword(s.manifest.Folders[index].LockPasswordHash, password) {
 		return errors.New("folder password is incorrect")
 	}
+	if s.authorizedFolders == nil {
+		s.authorizedFolders = make(map[string]struct{})
+	}
+	s.authorizedFolders[id] = struct{}{}
+	return nil
+}
+
+func (s *Store) LockFolderSession(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	folder, found := s.folderByIDLocked(id)
+	if !found {
+		return errors.New("folder not found")
+	}
+	if !folder.Locked {
+		return errors.New("folder is not locked")
+	}
+	delete(s.authorizedFolders, id)
 	return nil
 }
 
@@ -520,6 +567,12 @@ func (s *Store) MoveNote(id, folderID string) (Note, error) {
 	if !s.folderExistsLocked(folderID) {
 		return Note{}, errors.New("folder not found")
 	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return Note{}, err
+	}
+	if err := s.requireFolderAccessibleLocked(folderID); err != nil {
+		return Note{}, err
+	}
 	current, err := s.readNoteLocked(id)
 	if err != nil {
 		return Note{}, err
@@ -552,6 +605,9 @@ func (s *Store) ReorderNotes(folderID string, orderedIDs []string) error {
 	}
 	if !s.folderExistsLocked(folderID) {
 		return errors.New("folder not found")
+	}
+	if err := s.requireFolderAccessibleLocked(folderID); err != nil {
+		return err
 	}
 	folderCount := 0
 	seen := make(map[string]struct{}, len(orderedIDs))
@@ -616,6 +672,10 @@ func (s *Store) GetNote(id string) (Note, error) {
 	if _, found := s.findNoteLocked(id); !found {
 		return Note{}, errors.New("note not found")
 	}
+	index, _ := s.findNoteLocked(id)
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return Note{}, err
+	}
 	note, err := s.readNoteLocked(id)
 	if err != nil {
 		return Note{}, err
@@ -632,6 +692,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	index, found := s.findNoteLocked(id)
 	if !found {
 		return Note{}, errors.New("note not found")
+	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return Note{}, err
 	}
 	title, err := normalizeTitle(title)
 	if err != nil {
@@ -695,6 +758,10 @@ func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
 	if _, found := s.findNoteLocked(noteID); !found {
 		return "", errors.New("note not found")
 	}
+	noteIndex, _ := s.findNoteLocked(noteID)
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[noteIndex]); err != nil {
+		return "", err
+	}
 	if len(data) == 0 || len(data) > maxAttachmentBytes {
 		return "", errors.New("image must be between 1 byte and 10 MiB")
 	}
@@ -724,6 +791,10 @@ func (s *Store) GetAttachment(noteID, id string) ([]byte, error) {
 	}
 	if _, found := s.findNoteLocked(noteID); !found {
 		return nil, errors.New("note not found")
+	}
+	noteIndex, _ := s.findNoteLocked(noteID)
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[noteIndex]); err != nil {
+		return nil, err
 	}
 	if !validID(id) {
 		return nil, errors.New("invalid attachment ID")
@@ -758,6 +829,10 @@ func (s *Store) DeleteAttachment(noteID, id string) error {
 	}
 	if _, found := s.findNoteLocked(noteID); !found {
 		return errors.New("note not found")
+	}
+	noteIndex, _ := s.findNoteLocked(noteID)
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[noteIndex]); err != nil {
+		return err
 	}
 	if !validID(id) {
 		return errors.New("invalid attachment ID")
@@ -995,6 +1070,9 @@ func (s *Store) DeleteNote(id string) error {
 	if !found {
 		return errors.New("note not found")
 	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return err
+	}
 	original := s.manifest.Notes
 	originalDeleted := slices.Clone(s.manifest.DeletedNotes)
 	item := original[index]
@@ -1037,12 +1115,20 @@ func (s *Store) Search(query string) ([]NoteSummary, error) {
 	}
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
-		result := slices.Clone(s.manifest.Notes)
+		result := make([]NoteSummary, 0, len(s.manifest.Notes))
+		for _, note := range s.manifest.Notes {
+			if s.requireNoteAccessibleLocked(note) == nil {
+				result = append(result, note)
+			}
+		}
 		sortSummaries(result)
 		return result, nil
 	}
 	result := make([]NoteSummary, 0)
 	for _, item := range s.manifest.Notes {
+		if s.requireNoteAccessibleLocked(item) != nil {
+			continue
+		}
 		if strings.Contains(strings.ToLower(item.Title), query) {
 			result = append(result, item)
 			continue
@@ -1068,6 +1154,9 @@ func (s *Store) ResolveNoteReference(reference string) (NoteSummary, error) {
 	reference = strings.TrimSpace(reference)
 	if label, id, ok := parseNoteReference(reference); ok {
 		if index, found := s.findNoteLocked(id); found {
+			if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+				return NoteSummary{}, err
+			}
 			return s.manifest.Notes[index], nil
 		}
 		reference = label
@@ -1075,12 +1164,18 @@ func (s *Store) ResolveNoteReference(reference string) (NoteSummary, error) {
 	if strings.HasPrefix(reference, "note:") {
 		id := strings.TrimPrefix(reference, "note:")
 		if index, found := s.findNoteLocked(id); found {
+			if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+				return NoteSummary{}, err
+			}
 			return s.manifest.Notes[index], nil
 		}
 		return NoteSummary{}, errors.New("note reference not found")
 	}
 	normalized := strings.ToLower(reference)
 	for _, item := range s.manifest.Notes {
+		if s.requireNoteAccessibleLocked(item) != nil {
+			continue
+		}
 		if strings.ToLower(item.Title) == normalized {
 			return item, nil
 		}
@@ -1105,6 +1200,9 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 		return nil, errors.New("note not found")
 	}
 	target := s.manifest.Notes[targetIndex]
+	if err := s.requireNoteAccessibleLocked(target); err != nil {
+		return nil, err
+	}
 	aliases := map[string]struct{}{
 		strings.ToLower(target.Title): {},
 		"note:" + target.ID:           {},
@@ -1117,6 +1215,9 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 	var matches []FindMatch
 	for _, summary := range s.manifest.Notes {
 		if summary.ID == noteID {
+			continue
+		}
+		if s.requireNoteAccessibleLocked(summary) != nil {
 			continue
 		}
 		if summary.OutgoingLinks != nil {
@@ -1174,6 +1275,9 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 	sortSummaries(items)
 	results := make([]FindMatch, 0)
 	for _, item := range items {
+		if s.requireNoteAccessibleLocked(item) != nil {
+			continue
+		}
 		haystack := strings.ToLower(item.Title)
 		idx := 0
 		for count := 0; count < maxPerNote; count++ {
@@ -1280,6 +1384,12 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 			if _, ok := allowed[item.ID]; !ok {
 				continue
 			}
+		}
+		if err := s.requireNoteAccessibleLocked(item); err != nil {
+			if restricted {
+				return ReplaceResult{}, err
+			}
+			continue
 		}
 		note, err := s.readNoteLocked(item.ID)
 		if err != nil {
@@ -2326,6 +2436,7 @@ func (s *Store) clearLocked() {
 	s.vaultID = ""
 	s.manifest = manifest{}
 	s.searchIndex = nil
+	s.authorizedFolders = nil
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
@@ -2368,6 +2479,27 @@ func (s *Store) findNoteLocked(id string) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+func (s *Store) requireNoteAccessibleLocked(note NoteSummary) error {
+	return s.requireFolderAccessibleLocked(note.FolderID)
+}
+
+func (s *Store) requireFolderAccessibleLocked(id string) error {
+	if id == "" {
+		return nil
+	}
+	folder, found := s.folderByIDLocked(id)
+	if !found {
+		return errors.New("folder not found")
+	}
+	if !folder.Locked {
+		return nil
+	}
+	if _, authorized := s.authorizedFolders[id]; !authorized {
+		return ErrFolderLocked
+	}
+	return nil
 }
 
 func (s *Store) findFolderLocked(id string) (int, bool) {

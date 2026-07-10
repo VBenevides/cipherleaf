@@ -402,6 +402,10 @@ func (s *VaultService) CheckFolderPassword(id, password string) error {
 	return s.store.CheckFolderPassword(id, password)
 }
 
+func (s *VaultService) LockFolderSession(id string) error {
+	return s.store.LockFolderSession(id)
+}
+
 func (s *VaultService) SetFolderSortMode(id, mode string) (vault.Folder, error) {
 	return s.store.SetFolderSortMode(id, mode)
 }

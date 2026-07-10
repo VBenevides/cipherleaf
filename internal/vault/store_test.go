@@ -76,6 +76,75 @@ func TestVaultLifecycleStoresNoPlaintext(t *testing.T) {
 	}
 }
 
+func TestLockedFolderRequiresBackendAuthorization(t *testing.T) {
+	store := NewStore()
+	root := t.TempDir()
+	if _, err := store.Create(root, "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	public, err := store.CreateNote("Public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := store.CreateFolder("Private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private, err := store.CreateNoteInFolder("Private title", folder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(private.ID, private.Title, "private content"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LockFolder(folder.ID, "folder password"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.GetNote(private.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() error = %v, want ErrFolderLocked", err)
+	}
+	notes, err := store.ListNotes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].ID != public.ID {
+		t.Fatalf("ListNotes() = %#v, want only public note", notes)
+	}
+	if matches, err := store.FindInNotes("private", 10); err != nil || len(matches) != 0 {
+		t.Fatalf("FindInNotes() = %#v, %v; want no locked-folder matches", matches, err)
+	}
+	if matches, err := store.Search("private"); err != nil || len(matches) != 0 {
+		t.Fatalf("Search() = %#v, %v; want no locked-folder matches", matches, err)
+	}
+	if err := store.CheckFolderPassword(folder.ID, "wrong password"); err == nil {
+		t.Fatal("incorrect folder password was accepted")
+	}
+	if err := store.CheckFolderPassword(folder.ID, "folder password"); err != nil {
+		t.Fatal(err)
+	}
+	if note, err := store.GetNote(private.ID); err != nil || note.Content != "private content" {
+		t.Fatalf("GetNote() = %#v, %v", note, err)
+	}
+	if err := store.LockFolderSession(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(private.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() after session lock error = %v, want ErrFolderLocked", err)
+	}
+	if err := store.CheckFolderPassword(folder.ID, "folder password"); err != nil {
+		t.Fatal(err)
+	}
+
+	store.Lock()
+	if _, err := store.Open(root, "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(private.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() after reopening error = %v, want ErrFolderLocked", err)
+	}
+}
+
 func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

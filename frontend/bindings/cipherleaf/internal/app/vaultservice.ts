@@ -131,6 +131,10 @@ export function LockFolder(id: string, password: string): $CancellablePromise<va
     return $Call.ByID(1628193172, id, password);
 }
 
+export function LockFolderSession(id: string): $CancellablePromise<void> {
+    return $Call.ByID(3716022032, id);
+}
+
 export function LockVault(): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(3801710036);
 }

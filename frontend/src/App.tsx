@@ -1525,6 +1525,7 @@ function App() {
       await VaultService.LockFolder(folder.id, password);
       if (selectedFolderID === folder.id) setSelectedFolderID("all");
       await refreshFolders();
+      await refreshNotes();
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -1539,11 +1540,13 @@ function App() {
         setNoteTrail([]);
       }
       if (selectedFolderID === folder.id) setSelectedFolderID("all");
+      await VaultService.LockFolderSession(folder.id);
       setUnlockedFolderIDs((current) => {
         const next = new Set(current);
         next.delete(folder.id);
         return next;
       });
+      await refreshNotes();
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -1561,6 +1564,7 @@ function App() {
         return next;
       });
       await refreshFolders();
+      await refreshNotes();
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -1583,6 +1587,7 @@ function App() {
       try {
         await VaultService.CheckFolderPassword(folder.id, password);
         setUnlockedFolderIDs((current) => new Set(current).add(folder.id));
+        await refreshNotes();
       } catch (reason) {
         setError(errorText(reason));
         return;
@@ -1604,19 +1609,16 @@ function App() {
     setError("");
     try {
       await persistCurrent();
-      const loaded = await VaultService.GetNote(id);
-      const folder = folderByID.get(loaded.folderId);
-      if (folder?.locked && !unlockedFolderIDs.has(folder.id)) {
-        const password = await requestFolderPassword(`Unlock “${folder.name}”`, "Unlock folder");
+      const summary = notes.find((item) => item.id === id);
+      const lockedFolder = summary && folderByID.get(summary.folderId);
+      if (lockedFolder?.locked && !unlockedFolderIDs.has(lockedFolder.id)) {
+        const password = await requestFolderPassword(`Unlock “${lockedFolder.name}”`, "Unlock folder");
         if (password === null) return;
-        try {
-          await VaultService.CheckFolderPassword(folder.id, password);
-          setUnlockedFolderIDs((current) => new Set(current).add(folder.id));
-        } catch (reason) {
-          setError(errorText(reason));
-          return;
-        }
+        await VaultService.CheckFolderPassword(lockedFolder.id, password);
+        setUnlockedFolderIDs((current) => new Set(current).add(lockedFolder.id));
+        await refreshNotes();
       }
+      const loaded = await VaultService.GetNote(id);
       applyLoadedNote(loaded);
       if (options.replaceTrail) {
         setNoteTrail(options.replaceTrail);
