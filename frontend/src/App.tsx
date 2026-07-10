@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -24,13 +26,10 @@ import type {
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { errorText } from "./errors";
-import LiveMarkdownEditor from "./LiveMarkdownEditor";
-import ObjectTreeView from "./ObjectTreeView";
 import {
   canonicalObjectDocumentTextFromMarkdown,
   prepareNoteContent,
 } from "./objectDocument";
-import SourceMarkdownEditor from "./SourceMarkdownEditor";
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 
 type VaultAction = "create" | "open" | "clone";
@@ -89,6 +88,14 @@ type ConflictResolution = {
   mergedContent: string;
   cloudHighlightLines: ReadonlySet<number>;
 };
+
+const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
+const ObjectTreeView = lazy(() => import("./ObjectTreeView"));
+const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
+
+function EditorLoading() {
+  return <div className="settings-loading">Loading editor...</div>;
+}
 
 const AUTO_LOCK_MS = 15 * 60 * 1000;
 const AUTOSAVE_DELAY_MS = 10 * 1000;
@@ -2879,60 +2886,62 @@ function App() {
                 {saveState === "saving" ? "Encrypting…" : "Save merged file"}
               </button>
             </div>
-            <div className="conflict-editor-grid">
-              <section className="conflict-editor-pane">
-                <header>Local File</header>
-                <LiveMarkdownEditor
-                  key={`${conflictResolution.conflict.localNoteId}-local`}
-                  noteID={`${conflictResolution.conflict.localNoteId}-local`}
-                  value={conflictResolution.conflict.localContent}
-                  onChange={() => {}}
-                  onSave={() => {}}
-                  onError={(reason) => setError(errorText(reason))}
-                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
-                  onDecreaseFontSize={decreaseEditorFontSize}
-                  onIncreaseFontSize={increaseEditorFontSize}
-                  readOnly
-                  showToolbar={false}
-                />
-              </section>
-              <section className="conflict-editor-pane cloud">
-                <header>Cloud File</header>
-                <LiveMarkdownEditor
-                  key={`${conflictResolution.conflict.remoteNoteId}-cloud`}
-                  noteID={`${conflictResolution.conflict.remoteNoteId}-cloud`}
-                  value={conflictResolution.conflict.remoteContent}
-                  onChange={() => {}}
-                  onSave={() => {}}
-                  onError={(reason) => setError(errorText(reason))}
-                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
-                  onDecreaseFontSize={decreaseEditorFontSize}
-                  onIncreaseFontSize={increaseEditorFontSize}
-                  readOnly
-                  showToolbar={false}
-                  highlightLineNumbers={conflictResolution.cloudHighlightLines}
-                />
-              </section>
-              <section className="conflict-editor-pane merged">
-                <header>Merged File</header>
-                <LiveMarkdownEditor
-                  key={`${conflictResolution.conflict.localNoteId}-merged`}
-                  noteID={`${conflictResolution.conflict.localNoteId}-merged`}
-                  value={conflictResolution.mergedContent}
-                  onChange={(content) =>
-                    setConflictResolution((current) =>
-                      current ? { ...current, mergedContent: content } : current,
-                    )
-                  }
-                  onSave={() => void saveResolvedConflict()}
-                  onError={(reason) => setError(errorText(reason))}
-                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
-                  onDecreaseFontSize={decreaseEditorFontSize}
-                  onIncreaseFontSize={increaseEditorFontSize}
-                  showToolbar={false}
-                />
-              </section>
-            </div>
+            <Suspense fallback={<EditorLoading />}>
+              <div className="conflict-editor-grid">
+                <section className="conflict-editor-pane">
+                  <header>Local File</header>
+                  <LiveMarkdownEditor
+                    key={`${conflictResolution.conflict.localNoteId}-local`}
+                    noteID={`${conflictResolution.conflict.localNoteId}-local`}
+                    value={conflictResolution.conflict.localContent}
+                    onChange={() => {}}
+                    onSave={() => {}}
+                    onError={(reason) => setError(errorText(reason))}
+                    onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                    onDecreaseFontSize={decreaseEditorFontSize}
+                    onIncreaseFontSize={increaseEditorFontSize}
+                    readOnly
+                    showToolbar={false}
+                  />
+                </section>
+                <section className="conflict-editor-pane cloud">
+                  <header>Cloud File</header>
+                  <LiveMarkdownEditor
+                    key={`${conflictResolution.conflict.remoteNoteId}-cloud`}
+                    noteID={`${conflictResolution.conflict.remoteNoteId}-cloud`}
+                    value={conflictResolution.conflict.remoteContent}
+                    onChange={() => {}}
+                    onSave={() => {}}
+                    onError={(reason) => setError(errorText(reason))}
+                    onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                    onDecreaseFontSize={decreaseEditorFontSize}
+                    onIncreaseFontSize={increaseEditorFontSize}
+                    readOnly
+                    showToolbar={false}
+                    highlightLineNumbers={conflictResolution.cloudHighlightLines}
+                  />
+                </section>
+                <section className="conflict-editor-pane merged">
+                  <header>Merged File</header>
+                  <LiveMarkdownEditor
+                    key={`${conflictResolution.conflict.localNoteId}-merged`}
+                    noteID={`${conflictResolution.conflict.localNoteId}-merged`}
+                    value={conflictResolution.mergedContent}
+                    onChange={(content) =>
+                      setConflictResolution((current) =>
+                        current ? { ...current, mergedContent: content } : current,
+                      )
+                    }
+                    onSave={() => void saveResolvedConflict()}
+                    onError={(reason) => setError(errorText(reason))}
+                    onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                    onDecreaseFontSize={decreaseEditorFontSize}
+                    onIncreaseFontSize={increaseEditorFontSize}
+                    showToolbar={false}
+                  />
+                </section>
+              </div>
+            </Suspense>
             <footer className="document-footer">
               <span>Resolve conflict</span>
               <span>Local and cloud panes are read-only</span>
@@ -2975,43 +2984,45 @@ function App() {
                 </button>
               ))}
             </div>
-            <div className={`document-body view-${view}`}>
-              {view === "live" && (
-                <div className="editor-view-pane active">
-                  <LiveMarkdownEditor
-                    key={note.id}
-                    noteID={note.id}
-                    value={noteMarkdown}
-                    onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
-                    onSave={() => void persistCurrent()}
-                    onError={(reason) => setError(errorText(reason))}
-                    onOpenWikilink={(title) => void openWikilinkTitle(title)}
-                    onDecreaseFontSize={decreaseEditorFontSize}
-                    onIncreaseFontSize={increaseEditorFontSize}
-                    searchTarget={globalSearchTarget}
-                    onSearchTargetApplied={() => setGlobalSearchTarget(null)}
-                    caretOffset={noteCaretOffsetsRef.current.get(note.id) ?? 0}
-                    onCaretChange={(offset) => noteCaretOffsetsRef.current.set(note.id, offset)}
-                  />
-                </div>
-              )}
-              {view === "object" && (
-                <div className="editor-view-pane active">
-                  <ObjectTreeView value={note.content} onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) }, true)} />
-                </div>
-              )}
-              {view === "markdown" && (
-                <div className="editor-view-pane active">
-                  <SourceMarkdownEditor
-                    key={note.id}
-                    noteID={note.id}
-                    value={noteMarkdown}
-                    onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
-                    onError={(reason) => setError(errorText(reason))}
-                  />
-                </div>
-              )}
-            </div>
+            <Suspense fallback={<EditorLoading />}>
+              <div className={`document-body view-${view}`}>
+                {view === "live" && (
+                  <div className="editor-view-pane active">
+                    <LiveMarkdownEditor
+                      key={note.id}
+                      noteID={note.id}
+                      value={noteMarkdown}
+                      onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
+                      onSave={() => void persistCurrent()}
+                      onError={(reason) => setError(errorText(reason))}
+                      onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                      onDecreaseFontSize={decreaseEditorFontSize}
+                      onIncreaseFontSize={increaseEditorFontSize}
+                      searchTarget={globalSearchTarget}
+                      onSearchTargetApplied={() => setGlobalSearchTarget(null)}
+                      caretOffset={noteCaretOffsetsRef.current.get(note.id) ?? 0}
+                      onCaretChange={(offset) => noteCaretOffsetsRef.current.set(note.id, offset)}
+                    />
+                  </div>
+                )}
+                {view === "object" && (
+                  <div className="editor-view-pane active">
+                    <ObjectTreeView value={note.content} onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) }, true)} />
+                  </div>
+                )}
+                {view === "markdown" && (
+                  <div className="editor-view-pane active">
+                    <SourceMarkdownEditor
+                      key={note.id}
+                      noteID={note.id}
+                      value={noteMarkdown}
+                      onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
+                      onError={(reason) => setError(errorText(reason))}
+                    />
+                  </div>
+                )}
+              </div>
+            </Suspense>
             <footer className="document-footer">
               <span>{contentWordCount} words</span>
               <span>Revision {note.revision}</span>
