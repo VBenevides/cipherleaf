@@ -7,6 +7,7 @@ import {
   type ChangeEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { Events } from "@wailsio/runtime";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type {
   FindMatch,
@@ -354,6 +355,7 @@ function App() {
   const editVersion = useRef(0);
   const noteRef = useRef<Note | null>(null);
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
+  const globalSearchRequestRef = useRef(0);
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
@@ -551,23 +553,32 @@ function App() {
   }, []);
 
   const runGlobalSearch = useCallback(async (query: string) => {
+    const request = ++globalSearchRequestRef.current;
     const trimmed = query.trim();
     if (!trimmed) {
       setGlobalSearchMatches([]);
+      setGlobalSearchBusy(false);
       return;
     }
     setGlobalSearchBusy(true);
     setGlobalSearchError("");
     try {
       const results = await VaultService.FindInNotes(trimmed);
-      setGlobalSearchMatches(results ?? []);
+      const lockedFolderIDs = new Set(
+        folders
+          .filter((folder) => folder.locked && !unlockedFolderIDs.has(folder.id))
+          .map((folder) => folder.id),
+      );
+      if (request !== globalSearchRequestRef.current) return;
+      setGlobalSearchMatches((results ?? []).filter((match) => !lockedFolderIDs.has(match.folderId)));
     } catch (reason) {
+      if (request !== globalSearchRequestRef.current) return;
       setGlobalSearchError(errorText(reason));
       setGlobalSearchMatches([]);
     } finally {
-      setGlobalSearchBusy(false);
+      if (request === globalSearchRequestRef.current) setGlobalSearchBusy(false);
     }
-  }, []);
+  }, [folders, unlockedFolderIDs]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -605,14 +616,9 @@ function App() {
     const sameNote = noteRef.current?.id === match.noteId;
     try {
       if (!sameNote) {
-        const fresh = await VaultService.GetNote(match.noteId);
-        applyLoadedNote(fresh);
-        const summaries = await VaultService.ListNotes();
-        if (summaries) {
-          setNotes(summaries);
-        }
+        await selectNote(match.noteId);
       }
-      if (match.field === "content") {
+      if (match.field === "content" && noteRef.current?.id === match.noteId) {
         const target = targetForMatch(match, globalSearchQuery);
         if (target) {
           setEditorView("live");
@@ -870,6 +876,22 @@ function App() {
       throw reason;
     }
   };
+
+  const quitApplication = async () => {
+    try {
+      await persistCurrent();
+      await VaultService.QuitApplication();
+    } catch {
+      // persistCurrent already presents the actionable error.
+    }
+  };
+
+  const quitApplicationRef = useRef(quitApplication);
+  quitApplicationRef.current = quitApplication;
+
+  useEffect(() => Events.On("cipherleaf:close-requested", () => {
+    void quitApplicationRef.current();
+  }), []);
 
   useEffect(() => {
     if (!dirty || !note) return;
@@ -1375,12 +1397,7 @@ function App() {
   const closeApplication = async () => {
     setTitlebarMenu(null);
     setError("");
-    try {
-      await persistCurrent();
-      await VaultService.QuitApplication();
-    } catch {
-      // persistCurrent already presents the actionable error.
-    }
+    await quitApplication();
   };
 
   const createNote = async () => {

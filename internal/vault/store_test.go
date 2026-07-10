@@ -1109,9 +1109,9 @@ func TestValidateConfigRejectsExcessiveKDFResources(t *testing.T) {
 		t.Fatal("1 GiB KDF profile unexpectedly accepted")
 	}
 	config.Key.KDF.MemoryKiB = 64 * 1024
-	config.Key.KDF.Time = 10
+	config.Key.KDF.Time = 2
 	if err := validateConfig(config); err == nil {
-		t.Fatal("10-pass KDF profile unexpectedly accepted")
+		t.Fatal("unsupported KDF profile unexpectedly accepted")
 	}
 	config.Key.KDF.Time = 3
 	config.Key.KDF.Parallelism = 16
@@ -1146,7 +1146,7 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 	var titleMatches, contentMatches int
 	for _, m := range matches {
-		if m.NoteID != alpha.ID || m.Offset < 0 {
+		if m.NoteID != alpha.ID || m.FolderID != alpha.FolderID || m.Offset < 0 {
 			continue
 		}
 		if m.Field == "title" {
@@ -1308,6 +1308,39 @@ func TestReplaceAcrossNotesRewritesAndUpdatesModifiedAt(t *testing.T) {
 	if removed.ReplacedNotes != 1 ||
 		strings.Contains(strings.ToLower(withoutReplacement.Content), "redacted") {
 		t.Fatalf("empty replacement failed: result=%#v note=%#v", removed, withoutReplacement)
+	}
+}
+
+func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Replace schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "> visible text"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ReplaceAcrossNotes("text", "words", []string{note.ID}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Content != "> visible words" {
+		t.Fatalf("visible content = %q, want replaced Markdown", updated.Content)
+	}
+
+	raw, err := store.readNoteLocked(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isCanonicalObjectDocument(raw.Content) {
+		t.Fatalf("replace corrupted canonical content: %q", raw.Content)
 	}
 }
 

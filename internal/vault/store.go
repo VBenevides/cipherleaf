@@ -1178,6 +1178,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			results = append(results, FindMatch{
 				NoteID:      item.ID,
 				Title:       item.Title,
+				FolderID:    item.FolderID,
 				Field:       "title",
 				Snippet:     makeSnippet(item.Title, idx+at, len(query)),
 				Offset:      idx + at,
@@ -1204,6 +1205,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			results = append(results, FindMatch{
 				NoteID:      item.ID,
 				Title:       note.Title,
+				FolderID:    item.FolderID,
 				Field:       "content",
 				Snippet:     makeSnippet(content, abs, len(query)),
 				Offset:      abs,
@@ -1279,10 +1281,11 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 			newTitle = replaceInsensitive(note.Title, find, replace)
 			titleChanged = newTitle != note.Title
 		}
+		content := derivedMarkdownContent(note.Content)
 		newContent := note.Content
-		count := strings.Count(strings.ToLower(note.Content), strings.ToLower(find))
+		count := strings.Count(strings.ToLower(content), strings.ToLower(find))
 		if count > 0 {
-			newContent = replaceInsensitive(note.Content, find, replace)
+			newContent = canonicalizeNoteContent(replaceInsensitive(content, find, replace))
 		}
 		if !titleChanged && count == 0 {
 			continue
@@ -2753,12 +2756,15 @@ func validateConfig(config vaultConfig) error {
 		return errors.New("vault configuration is invalid")
 	}
 	kdf := config.Key.KDF
-	if kdf.Name != "Argon2id" || kdf.Time == 0 || kdf.Time > 5 ||
-		kdf.MemoryKiB < 8*1024 || kdf.MemoryKiB > 256*1024 ||
-		kdf.Parallelism == 0 || kdf.Parallelism > 4 {
+	if kdf.Name != "Argon2id" || !supportedKDFProfile(kdf) {
 		return errors.New("vault KDF configuration is invalid or unsafe")
 	}
 	return nil
+}
+
+func supportedKDFProfile(kdf kdfConfiguration) bool {
+	return (kdf.Time == 3 && kdf.MemoryKiB == 64*1024 && kdf.Parallelism == 2) ||
+		(kdf.Time == 1 && kdf.MemoryKiB == 8*1024 && kdf.Parallelism == 2)
 }
 
 func prepareRoot(root string) (string, error) {

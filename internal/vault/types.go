@@ -153,6 +153,7 @@ type MergeConflict struct {
 type FindMatch struct {
 	NoteID      string `json:"noteId"`
 	Title       string `json:"title"`
+	FolderID    string `json:"folderId"`
 	Field       string `json:"field"`
 	Snippet     string `json:"snippet"`
 	Offset      int    `json:"offset"`

@@ -7,6 +7,7 @@
 export interface FindMatch {
     "noteId": string;
     "title": string;
+    "folderId": string;
     "field": string;
     "snippet": string;
     "offset": number;
