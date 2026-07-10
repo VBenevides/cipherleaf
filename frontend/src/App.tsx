@@ -353,6 +353,7 @@ function App() {
   const sidebarSearchRef = useRef<HTMLInputElement | null>(null);
   const editVersion = useRef(0);
   const noteRef = useRef<Note | null>(null);
+  const noteCaretOffsetsRef = useRef(new Map<string, number>());
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
@@ -966,6 +967,7 @@ function App() {
 
   const resetToLocked = (locked: Session) => {
     unlockedRef.current = false;
+    noteCaretOffsetsRef.current.clear();
     setUnlockedFolderIDs(new Set());
     setSession(locked);
     setFolders([]);
@@ -2952,6 +2954,8 @@ function App() {
                     onIncreaseFontSize={increaseEditorFontSize}
                     searchTarget={globalSearchTarget}
                     onSearchTargetApplied={() => setGlobalSearchTarget(null)}
+                    caretOffset={noteCaretOffsetsRef.current.get(note.id) ?? 0}
+                    onCaretChange={(offset) => noteCaretOffsetsRef.current.set(note.id, offset)}
                   />
                 </div>
               )}

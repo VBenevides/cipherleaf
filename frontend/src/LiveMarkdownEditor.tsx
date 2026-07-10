@@ -73,6 +73,8 @@ type LiveMarkdownEditorProps = {
   onIncreaseFontSize: () => void;
   searchTarget?: SearchTarget | null;
   onSearchTargetApplied?: () => void;
+  caretOffset?: number | null;
+  onCaretChange?: (offset: number) => void;
   readOnly?: boolean;
   showToolbar?: boolean;
   highlightLineNumbers?: ReadonlySet<number>;
@@ -2025,6 +2027,8 @@ export default function LiveMarkdownEditor({
   onIncreaseFontSize,
   searchTarget = null,
   onSearchTargetApplied,
+  caretOffset = null,
+  onCaretChange,
   readOnly = false,
   showToolbar = true,
   highlightLineNumbers = new Set<number>(),
@@ -2038,6 +2042,7 @@ export default function LiveMarkdownEditor({
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
+  const onCaretChangeRef = useRef(onCaretChange);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
@@ -2072,7 +2077,8 @@ export default function LiveMarkdownEditor({
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
-  }, [onChange, onSave, onError, onOpenWikilink, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied]);
+    onCaretChangeRef.current = onCaretChange;
+  }, [onChange, onSave, onError, onOpenWikilink, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -2337,17 +2343,29 @@ export default function LiveMarkdownEditor({
             ) {
               onChangeRef.current(update.state.doc.toString());
             }
+            if (update.selectionSet || update.docChanged) {
+              onCaretChangeRef.current?.(update.state.selection.main.head);
+            }
           }),
         ],
       }),
     });
 
     view.current = editor;
+    if (typeof caretOffset === "number" && Number.isFinite(caretOffset)) {
+      const position = Math.max(0, Math.min(Math.floor(caretOffset), editor.state.doc.length));
+      editor.dispatch({
+        selection: EditorSelection.cursor(position),
+        effects: EditorView.scrollIntoView(position, { y: "center" }),
+      });
+      editor.focus();
+    }
     if (normalizedValue !== value) {
       queueMicrotask(() => onChangeRef.current(normalizedValue));
     }
 
     return () => {
+      onCaretChangeRef.current?.(editor.state.selection.main.head);
       editor.destroy();
       view.current = null;
     };
