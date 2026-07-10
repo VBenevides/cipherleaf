@@ -8,6 +8,7 @@ import (
 
 	cipherleafapp "cipherleaf/internal/app"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // Wails uses Go's `embed` package to embed the frontend files into the binary.
@@ -41,7 +42,7 @@ func main() {
 	})
 	vaultService.SetApp(app)
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     appTitle,
 		Width:     1280,
 		Height:    800,
@@ -57,6 +58,10 @@ func main() {
 		Permissions: map[application.PermissionType]application.Permission{
 			application.PermissionClipboardRead: application.PermissionAllow,
 		},
+	})
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		event.Cancel()
+		window.EmitEvent("cipherleaf:close-requested")
 	})
 
 	if err := app.Run(); err != nil {

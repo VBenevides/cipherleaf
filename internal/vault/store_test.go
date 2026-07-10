@@ -1109,9 +1109,9 @@ func TestValidateConfigRejectsExcessiveKDFResources(t *testing.T) {
 		t.Fatal("1 GiB KDF profile unexpectedly accepted")
 	}
 	config.Key.KDF.MemoryKiB = 64 * 1024
-	config.Key.KDF.Time = 10
+	config.Key.KDF.Time = 2
 	if err := validateConfig(config); err == nil {
-		t.Fatal("10-pass KDF profile unexpectedly accepted")
+		t.Fatal("unsupported KDF profile unexpectedly accepted")
 	}
 	config.Key.KDF.Time = 3
 	config.Key.KDF.Parallelism = 16
@@ -1146,7 +1146,7 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 	var titleMatches, contentMatches int
 	for _, m := range matches {
-		if m.NoteID != alpha.ID || m.Offset < 0 {
+		if m.NoteID != alpha.ID || m.FolderID != alpha.FolderID || m.Offset < 0 {
 			continue
 		}
 		if m.Field == "title" {
@@ -1167,6 +1167,49 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("unexpected match in beta: %#v", matches)
+	}
+}
+
+func TestFindInNotesUsesSessionSearchIndex(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "secret-secret-secret"
+	root := t.TempDir()
+	store := NewStore()
+	if _, err := store.Create(root, secret); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Indexed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Searchable session content"); err != nil {
+		t.Fatal(err)
+	}
+	store.Lock()
+
+	reopened := NewStore()
+	if _, err := reopened.Open(root, secret); err != nil {
+		t.Fatal(err)
+	}
+	path := reopened.notePathLocked(note.ID)
+	if err := os.WriteFile(path, []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := reopened.FindInNotes("session", 20)
+	if err != nil || len(matches) != 1 || matches[0].NoteID != note.ID {
+		t.Fatalf("indexed search = %#v, %v", matches, err)
+	}
+	reopened.Lock()
+	if reopened.searchIndex != nil {
+		t.Fatal("search index remains after lock")
 	}
 }
 
@@ -1308,6 +1351,39 @@ func TestReplaceAcrossNotesRewritesAndUpdatesModifiedAt(t *testing.T) {
 	if removed.ReplacedNotes != 1 ||
 		strings.Contains(strings.ToLower(withoutReplacement.Content), "redacted") {
 		t.Fatalf("empty replacement failed: result=%#v note=%#v", removed, withoutReplacement)
+	}
+}
+
+func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Replace schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "> visible text"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ReplaceAcrossNotes("text", "words", []string{note.ID}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Content != "> visible words" {
+		t.Fatalf("visible content = %q, want replaced Markdown", updated.Content)
+	}
+
+	raw, err := store.readNoteLocked(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isCanonicalObjectDocument(raw.Content) {
+		t.Fatalf("replace corrupted canonical content: %q", raw.Content)
 	}
 }
 

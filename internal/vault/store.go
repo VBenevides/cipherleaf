@@ -54,12 +54,13 @@ var (
 const sharedAttachmentFolder = "shared"
 
 type Store struct {
-	mu       sync.RWMutex
-	root     string
-	vaultID  string
-	key      []byte
-	secret   []byte
-	manifest manifest
+	mu          sync.RWMutex
+	root        string
+	vaultID     string
+	key         []byte
+	secret      []byte
+	manifest    manifest
+	searchIndex map[string]string
 }
 
 func NewStore() *Store {
@@ -171,6 +172,7 @@ func (s *Store) Create(root, passphrase string) (Session, error) {
 		Folders:       []Folder{},
 		Notes:         []NoteSummary{},
 	}
+	s.searchIndex = make(map[string]string)
 	if err := s.saveManifestLocked(); err != nil {
 		s.clearLocked()
 		removeFileAndBackup(filepath.Join(root, manifestFilename))
@@ -214,6 +216,7 @@ func (s *Store) Open(root, passphrase string) (Session, error) {
 		s.clearLocked()
 		return Session{}, fmt.Errorf("open encrypted manifest: %w", err)
 	}
+	_ = s.rebuildSearchIndexLocked()
 	return s.sessionLocked(), nil
 }
 
@@ -283,6 +286,7 @@ func (s *Store) CreateNoteInFolder(title, folderID string) (Note, error) {
 		s.manifest.Notes = s.manifest.Notes[:len(s.manifest.Notes)-1]
 		return Note{}, err
 	}
+	s.updateSearchIndexLocked(id, "")
 	return noteForClient(note), nil
 }
 
@@ -671,6 +675,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err := s.saveManifestLocked(); err != nil {
 		return Note{}, err
 	}
+	s.updateSearchIndexLocked(id, derivedMarkdownContent(current.Content))
 	if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
 		return Note{}, err
 	}
@@ -1007,6 +1012,7 @@ func (s *Store) DeleteNote(id string) error {
 		s.manifest.DeletedNotes = originalDeleted
 		return err
 	}
+	delete(s.searchIndex, id)
 	path := s.notePathLocked(id)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove encrypted note: %w", err)
@@ -1178,6 +1184,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			results = append(results, FindMatch{
 				NoteID:      item.ID,
 				Title:       item.Title,
+				FolderID:    item.FolderID,
 				Field:       "title",
 				Snippet:     makeSnippet(item.Title, idx+at, len(query)),
 				Offset:      idx + at,
@@ -1188,11 +1195,14 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 				break
 			}
 		}
-		note, err := s.readNoteLocked(item.ID)
-		if err != nil {
-			return nil, err
+		content, indexed := s.searchIndex[item.ID]
+		if !indexed {
+			note, err := s.readNoteLocked(item.ID)
+			if err != nil {
+				return nil, err
+			}
+			content = derivedMarkdownContent(note.Content)
 		}
-		content := derivedMarkdownContent(note.Content)
 		lowerContent := strings.ToLower(content)
 		cidx := 0
 		for count := 0; count < maxPerNote; count++ {
@@ -1203,7 +1213,8 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			abs := cidx + at
 			results = append(results, FindMatch{
 				NoteID:      item.ID,
-				Title:       note.Title,
+				Title:       item.Title,
+				FolderID:    item.FolderID,
 				Field:       "content",
 				Snippet:     makeSnippet(content, abs, len(query)),
 				Offset:      abs,
@@ -1263,6 +1274,7 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 	restricted := len(noteIDs) > 0
 
 	result := ReplaceResult{}
+	indexedContent := make(map[string]string)
 	for index, item := range s.manifest.Notes {
 		if restricted {
 			if _, ok := allowed[item.ID]; !ok {
@@ -1279,10 +1291,11 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 			newTitle = replaceInsensitive(note.Title, find, replace)
 			titleChanged = newTitle != note.Title
 		}
+		content := derivedMarkdownContent(note.Content)
 		newContent := note.Content
-		count := strings.Count(strings.ToLower(note.Content), strings.ToLower(find))
+		count := strings.Count(strings.ToLower(content), strings.ToLower(find))
 		if count > 0 {
-			newContent = replaceInsensitive(note.Content, find, replace)
+			newContent = canonicalizeNoteContent(replaceInsensitive(content, find, replace))
 		}
 		if !titleChanged && count == 0 {
 			continue
@@ -1309,12 +1322,18 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 		}
 		s.manifest.Notes[index] = summaryFromNote(updated)
 		s.manifest.Notes[index].CiphertextHash = hash
+		if count > 0 {
+			indexedContent[updated.ID] = derivedMarkdownContent(updated.Content)
+		}
 		result.Replacements += count + titleCount
 		result.ReplacedNotes++
 	}
 	if result.ReplacedNotes > 0 {
 		if err := s.saveManifestLocked(); err != nil {
 			return ReplaceResult{}, err
+		}
+		for id, content := range indexedContent {
+			s.updateSearchIndexLocked(id, content)
 		}
 	}
 	return result, nil
@@ -1781,6 +1800,8 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 	if err := s.saveManifestLocked(); err != nil {
 		return MergeResult{}, fmt.Errorf("save merged manifest: %w", err)
 	}
+	s.searchIndex = nil
+	_ = s.rebuildSearchIndexLocked()
 	return result, nil
 }
 
@@ -2276,6 +2297,8 @@ func (s *Store) RestoreRemoteSnapshot(
 	s.key = key
 	s.secret = []byte(passphrase)
 	s.manifest = remote.Manifest
+	s.searchIndex = nil
+	_ = s.rebuildSearchIndexLocked()
 	keyOwnedByStore = true
 	validator.key = nil
 	return s.sessionLocked(), nil
@@ -2302,6 +2325,26 @@ func (s *Store) clearLocked() {
 	s.root = ""
 	s.vaultID = ""
 	s.manifest = manifest{}
+	s.searchIndex = nil
+}
+
+func (s *Store) updateSearchIndexLocked(id, content string) {
+	if s.searchIndex != nil {
+		s.searchIndex[id] = content
+	}
+}
+
+func (s *Store) rebuildSearchIndexLocked() error {
+	index := make(map[string]string, len(s.manifest.Notes))
+	for _, item := range s.manifest.Notes {
+		note, err := s.readNoteLocked(item.ID)
+		if err != nil {
+			return err
+		}
+		index[item.ID] = derivedMarkdownContent(note.Content)
+	}
+	s.searchIndex = index
+	return nil
 }
 
 // UnlockedSecret returns a copy of the secret currently holding the vault
@@ -2753,12 +2796,15 @@ func validateConfig(config vaultConfig) error {
 		return errors.New("vault configuration is invalid")
 	}
 	kdf := config.Key.KDF
-	if kdf.Name != "Argon2id" || kdf.Time == 0 || kdf.Time > 5 ||
-		kdf.MemoryKiB < 8*1024 || kdf.MemoryKiB > 256*1024 ||
-		kdf.Parallelism == 0 || kdf.Parallelism > 4 {
+	if kdf.Name != "Argon2id" || !supportedKDFProfile(kdf) {
 		return errors.New("vault KDF configuration is invalid or unsafe")
 	}
 	return nil
+}
+
+func supportedKDFProfile(kdf kdfConfiguration) bool {
+	return (kdf.Time == 3 && kdf.MemoryKiB == 64*1024 && kdf.Parallelism == 2) ||
+		(kdf.Time == 1 && kdf.MemoryKiB == 8*1024 && kdf.Parallelism == 2)
 }
 
 func prepareRoot(root string) (string, error) {
