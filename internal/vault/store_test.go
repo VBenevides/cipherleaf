@@ -1170,6 +1170,49 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 }
 
+func TestFindInNotesUsesSessionSearchIndex(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "secret-secret-secret"
+	root := t.TempDir()
+	store := NewStore()
+	if _, err := store.Create(root, secret); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Indexed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Searchable session content"); err != nil {
+		t.Fatal(err)
+	}
+	store.Lock()
+
+	reopened := NewStore()
+	if _, err := reopened.Open(root, secret); err != nil {
+		t.Fatal(err)
+	}
+	path := reopened.notePathLocked(note.ID)
+	if err := os.WriteFile(path, []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := reopened.FindInNotes("session", 20)
+	if err != nil || len(matches) != 1 || matches[0].NoteID != note.ID {
+		t.Fatalf("indexed search = %#v, %v", matches, err)
+	}
+	reopened.Lock()
+	if reopened.searchIndex != nil {
+		t.Fatal("search index remains after lock")
+	}
+}
+
 func TestNoteObjectStoresOnlyContentAndManifestMetadata(t *testing.T) {
 	store := NewStore()
 	session, err := store.Create(t.TempDir(), "secret-secret-secret")
