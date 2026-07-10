@@ -2220,6 +2220,7 @@ a:focus-visible {
 :root[data-editor-font="custom"] .live-markdown-editor .cm-editor,
 :root[data-editor-font="custom"] .live-markdown-editor .cm-editor * {
   font-family: "CipherleafEditorFont", monospace !important;
+  font-synthesis: weight;
 }
 
 .live-markdown-editor .cm-editor.cm-focused {
