@@ -36,7 +36,7 @@ type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "calendar" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -275,6 +275,16 @@ function folderName(path: string): string {
   return parts[parts.length - 1] ?? "Encrypted vault";
 }
 
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function isSameDay(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate();
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -338,6 +348,10 @@ function App() {
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
   const [globalSearchTarget, setGlobalSearchTarget] = useState<SearchTarget | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
+  const [calendarSelected, setCalendarSelected] = useState(() => new Date());
+  const [today, setToday] = useState(() => new Date());
   const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
     try {
@@ -374,6 +388,11 @@ function App() {
   useEffect(() => {
     noteRef.current = note;
   }, [note]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setToday(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -983,6 +1002,15 @@ function App() {
       window.removeEventListener("blur", close);
     };
   }, [titlebarMenu]);
+
+  useEffect(() => {
+    if (!calendarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCalendarOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [calendarOpen]);
 
   const autoLock = async () => {
     try {
@@ -1950,6 +1978,21 @@ function App() {
     return content ? content.split(/\s+/).length : 0;
   }, [noteMarkdown]);
 
+  const calendarDays = useMemo(() => {
+    const firstDay = calendarMonth.getDay();
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), index - firstDay + 1);
+      return { date, inMonth: date.getMonth() === calendarMonth.getMonth() };
+    });
+  }, [calendarMonth]);
+
+  const calendarTitle = calendarMonth.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  const compactDay = String(today.getDate()).padStart(2, "0");
+  const compactMonth = today.toLocaleDateString(undefined, { month: "short" }).toUpperCase();
+
   const openWikilinkTitle = async (title: string) => {
     try {
       const linked = await VaultService.ResolveNoteReference(title);
@@ -2580,6 +2623,20 @@ function App() {
             <strong>Cipherleaf</strong>
             <span>{folderName(session.path)}</span>
           </div>
+          <button
+            type="button"
+            className="calendar-button"
+            aria-label={`Open calendar for ${today.toLocaleDateString(undefined, { dateStyle: "full" })}`}
+            title="Open calendar"
+            onClick={() => {
+              setCalendarMonth(startOfMonth(calendarSelected));
+              bringWindowToFront("calendar");
+              setCalendarOpen(true);
+            }}
+          >
+            <span>{compactDay}</span>
+            <small>{compactMonth}</small>
+          </button>
           <button className="icon-button sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar">
             <Icon name="x" />
           </button>
@@ -3571,6 +3628,103 @@ function App() {
                 onClick={() => void forcePushLocalVault()}
               >
                 Force push local vault
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {calendarOpen && (
+        <div
+          className="modal-backdrop calendar-backdrop"
+          role="presentation"
+          style={{ zIndex: windowLayers.calendar }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setCalendarOpen(false);
+          }}
+        >
+          <section className="vault-modal calendar-modal" role="dialog" aria-modal="true" aria-labelledby="calendar-title">
+            <button type="button" className="icon-button modal-close" aria-label="Close calendar" onClick={() => setCalendarOpen(false)}>
+              <Icon name="x" />
+            </button>
+            <p className="eyebrow">Calendar</p>
+            <div className="calendar-controls">
+              <button
+                type="button"
+                className="calendar-arrow"
+                aria-label="Previous month"
+                onClick={() => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
+              >
+                ‹
+              </button>
+              <h2 id="calendar-title">{calendarTitle}</h2>
+              <button
+                type="button"
+                className="calendar-arrow"
+                aria-label="Next month"
+                onClick={() => setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
+              >
+                ›
+              </button>
+            </div>
+            <div className="calendar-selectors">
+              <label>
+                <span>Month</span>
+                <select
+                  value={calendarMonth.getMonth()}
+                  onChange={(event) => setCalendarMonth((current) => new Date(current.getFullYear(), Number(event.target.value), 1))}
+                >
+                  {Array.from({ length: 12 }, (_, month) => (
+                    <option key={month} value={month}>
+                      {new Date(2000, month, 1).toLocaleDateString(undefined, { month: "long" })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Year</span>
+                <select
+                  value={calendarMonth.getFullYear()}
+                  onChange={(event) => setCalendarMonth((current) => new Date(Number(event.target.value), current.getMonth(), 1))}
+                >
+                  {Array.from({ length: 201 }, (_, index) => calendarMonth.getFullYear() - 100 + index).map((year) => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="calendar-weekdays" aria-hidden="true">
+              {Array.from({ length: 7 }, (_, day) => (
+                <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString(undefined, { weekday: "narrow" })}</span>
+              ))}
+            </div>
+            <div className="calendar-grid">
+              {calendarDays.map(({ date, inMonth }) => (
+                <button
+                  type="button"
+                  key={date.toISOString()}
+                  className={`calendar-day${inMonth ? "" : " outside-month"}${isSameDay(date, today) ? " today" : ""}${isSameDay(date, calendarSelected) ? " selected" : ""}`}
+                  aria-label={date.toLocaleDateString(undefined, { dateStyle: "full" })}
+                  aria-pressed={isSameDay(date, calendarSelected)}
+                  onClick={() => {
+                    setCalendarSelected(date);
+                    if (!inMonth) setCalendarMonth(startOfMonth(date));
+                  }}
+                >
+                  {date.getDate()}
+                </button>
+              ))}
+            </div>
+            <div className="calendar-footer">
+              <span>{calendarSelected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setCalendarSelected(today);
+                  setCalendarMonth(startOfMonth(today));
+                }}
+              >
+                Today
               </button>
             </div>
           </section>
