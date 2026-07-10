@@ -1851,6 +1851,12 @@ a:focus-visible {
   box-shadow: inset 3px 0 0 #f5c400;
 }
 
+.live-markdown-editor .cm-live-search-highlight {
+  background: rgba(255, 230, 0, 0.58);
+  border-radius: 2px;
+  box-shadow: inset 0 -1px 0 #d6a900;
+}
+
 .document-body.view-split {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
@@ -3282,6 +3288,11 @@ a:focus-visible {
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-conflict-diff {
   background: rgba(255, 230, 0, 0.32);
+}
+
+:root[data-theme="dark"] .live-markdown-editor .cm-live-search-highlight {
+  background: rgba(255, 230, 0, 0.42);
+  box-shadow: inset 0 -1px 0 #f5c400;
 }
 
 :root[data-theme="dark"] .welcome-card h1,

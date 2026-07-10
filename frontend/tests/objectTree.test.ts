@@ -185,6 +185,27 @@ test("renders nested section markers as structure and checkbox token as text", (
   assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, ">> [x] VM: Cobrar acesso");
 });
 
+test("uses canonical defaults when a source prefix is omitted", () => {
+  const canonical = {
+    format: "cipherleaf.object-document" as const,
+    version: 1 as const,
+    objects: [{
+      id: "section",
+      tag: "section" as const,
+      tags: ["section", "text"] as const,
+      text: "Stored heading",
+      indent: 0,
+      contentIndent: 2,
+      parentId: null,
+      parentSectionId: null,
+      childrenIds: [],
+      sourcePrefix: "",
+    }],
+  };
+
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "> Stored heading");
+});
+
 test("soft object breaks use object content indentation", () => {
   assert.equal(continuationPrefix(">> [x] VM: cobrar acesso"), "       ");
   assert.equal(continuationPrefix("  > [ ] Task"), "        ");

@@ -30,6 +30,7 @@ import {
   prepareNoteContent,
 } from "./objectDocument";
 import SourceMarkdownEditor from "./SourceMarkdownEditor";
+import { targetForMatch, type SearchTarget } from "./searchTarget";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -328,7 +329,7 @@ function App() {
   const [globalSearchMatches, setGlobalSearchMatches] = useState<FindMatch[]>([]);
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
-  const [scrollToOffset, setScrollToOffset] = useState<number | null>(null);
+  const [globalSearchTarget, setGlobalSearchTarget] = useState<SearchTarget | null>(null);
   const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
     try {
@@ -611,8 +612,11 @@ function App() {
         }
       }
       if (match.field === "content") {
-        setScrollToOffset(match.offset);
-        window.setTimeout(() => setScrollToOffset(null), 500);
+        const target = targetForMatch(match, globalSearchQuery);
+        if (target) {
+          setEditorView("live");
+          setGlobalSearchTarget(target);
+        }
       }
     } catch (reason) {
       setError(errorText(reason));
@@ -821,6 +825,7 @@ function App() {
   };
 
   const applyLoadedNote = (loaded: Note | null, state: SaveState = "idle") => {
+    setGlobalSearchTarget(null);
     if (!loaded) {
       noteRef.current = null;
       dirtyRef.current = false;
@@ -973,6 +978,7 @@ function App() {
     setRememberError("");
     setSidebarOpen(false);
     setSaveState("idle");
+    setGlobalSearchTarget(null);
     setSyncLinked(false);
     setLastSyncedAt(0);
   };
@@ -1767,6 +1773,7 @@ function App() {
     const current = noteRef.current;
     if (!current) return;
     const next = { ...current, ...patch };
+    if ("content" in patch) setGlobalSearchTarget(null);
     noteRef.current = next;
     markDirty();
     if (syncState) {
@@ -2943,7 +2950,8 @@ function App() {
                     onOpenWikilink={(title) => void openWikilinkTitle(title)}
                     onDecreaseFontSize={decreaseEditorFontSize}
                     onIncreaseFontSize={increaseEditorFontSize}
-                    scrollToOffset={scrollToOffset}
+                    searchTarget={globalSearchTarget}
+                    onSearchTargetApplied={() => setGlobalSearchTarget(null)}
                   />
                 </div>
               )}

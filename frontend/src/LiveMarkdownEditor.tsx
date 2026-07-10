@@ -53,6 +53,12 @@ import {
   type ObjectDropMode,
   type ObjectDocument,
 } from "./objectDocument";
+import {
+  rangeForActiveDocument,
+  searchHighlightField,
+  searchTargetTransaction,
+  type SearchTarget,
+} from "./searchTarget";
 import { SNIPPETS, expandSnippetWithContext } from "./snippets";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
@@ -65,7 +71,8 @@ type LiveMarkdownEditorProps = {
   onOpenWikilink: (title: string) => void;
   onDecreaseFontSize: () => void;
   onIncreaseFontSize: () => void;
-  scrollToOffset?: number | null;
+  searchTarget?: SearchTarget | null;
+  onSearchTargetApplied?: () => void;
   readOnly?: boolean;
   showToolbar?: boolean;
   highlightLineNumbers?: ReadonlySet<number>;
@@ -2016,7 +2023,8 @@ export default function LiveMarkdownEditor({
   onOpenWikilink,
   onDecreaseFontSize,
   onIncreaseFontSize,
-  scrollToOffset,
+  searchTarget = null,
+  onSearchTargetApplied,
   readOnly = false,
   showToolbar = true,
   highlightLineNumbers = new Set<number>(),
@@ -2029,7 +2037,7 @@ export default function LiveMarkdownEditor({
   const onOpenWikilinkRef = useRef(onOpenWikilink);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
-  const pendingScroll = useRef<number | null>(scrollToOffset ?? null);
+  const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
@@ -2063,13 +2071,8 @@ export default function LiveMarkdownEditor({
     onOpenWikilinkRef.current = onOpenWikilink;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
-  }, [onChange, onSave, onError, onOpenWikilink, onDecreaseFontSize, onIncreaseFontSize]);
-
-  useEffect(() => {
-    if (typeof scrollToOffset === "number") {
-      pendingScroll.current = scrollToOffset;
-    }
-  }, [scrollToOffset]);
+    onSearchTargetAppliedRef.current = onSearchTargetApplied;
+  }, [onChange, onSave, onError, onOpenWikilink, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -2324,6 +2327,7 @@ export default function LiveMarkdownEditor({
             (reason) => onErrorRef.current(reason),
             highlightLineNumbers,
           ),
+          searchHighlightField,
           EditorView.updateListener.of((update) => {
             if (
               update.docChanged &&
@@ -2332,18 +2336,6 @@ export default function LiveMarkdownEditor({
               )
             ) {
               onChangeRef.current(update.state.doc.toString());
-            }
-            if (pendingScroll.current !== null) {
-              const target = pendingScroll.current;
-              pendingScroll.current = null;
-              const doc = update.state.doc;
-              if (target >= 0 && target <= doc.length) {
-                update.view.dispatch({
-                  selection: { anchor: target },
-                  effects: EditorView.scrollIntoView(target, { y: "center" }),
-                });
-                update.view.focus();
-              }
             }
           }),
         ],
@@ -2375,6 +2367,21 @@ export default function LiveMarkdownEditor({
       queueMicrotask(() => onChangeRef.current(normalizedValue));
     }
   }, [value]);
+
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor) return;
+    const range = rangeForActiveDocument(
+      searchTarget,
+      noteID,
+      editor.state.doc.toString(),
+      value,
+    );
+    if (!range) return;
+    editor.dispatch(searchTargetTransaction(range));
+    editor.focus();
+    onSearchTargetAppliedRef.current?.();
+  }, [noteID, searchTarget, value]);
 
   const runWithEditor = (action: (editor: EditorView) => void) => {
     if (view.current) action(view.current);
