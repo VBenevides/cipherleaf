@@ -687,6 +687,15 @@ function lineIsActive(state: EditorState, lineNumber: number): boolean {
   });
 }
 
+function selectionStaysOnSameLines(before: EditorState, after: EditorState): boolean {
+  if (before.selection.ranges.length !== after.selection.ranges.length) return false;
+  return before.selection.ranges.every((range, index) => {
+    const next = after.selection.ranges[index];
+    return before.doc.lineAt(range.from).number === after.doc.lineAt(next.from).number &&
+      before.doc.lineAt(range.to).number === after.doc.lineAt(next.to).number;
+  });
+}
+
 function addHiddenRange(
   from: number,
   to: number,
@@ -1569,7 +1578,8 @@ function livePreviewExtension(
         }
         else collapsed.add(key);
       }
-      if (!transaction.docChanged && !transaction.selection && !collapseChanged) {
+      if (!transaction.docChanged && !collapseChanged &&
+        (!transaction.selection || selectionStaysOnSameLines(transaction.startState, transaction.state))) {
         return value;
       }
       if (collapseChanged) persistCollapsedPositions(transaction.state, noteID, collapsed);
