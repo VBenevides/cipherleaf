@@ -599,10 +599,16 @@ func (p *GitHubSSHProvider) Pull(
 			UpToDate:    true,
 		}, nil
 	}
-	if err := clearMaterializedSnapshot(cachePath); err != nil {
+	changed, err := p.changedRemotePaths(
+		contextWithTimeout,
+		cachePath,
+		previousCommit,
+		reference,
+	)
+	if err != nil {
 		return PullResult{}, err
 	}
-	if err := p.materializeExistingRepository(contextWithTimeout, cachePath, reference); err != nil {
+	if err := p.materializeChangedRepository(contextWithTimeout, cachePath, reference, changed); err != nil {
 		return PullResult{}, err
 	}
 	if err := p.prepareExistingCache(
@@ -697,15 +703,6 @@ func (p *GitHubSSHProvider) ensureLinkedCache(
 		return "", err
 	}
 	return cachePath, nil
-}
-
-func clearMaterializedSnapshot(root string) error {
-	for _, relative := range []string{"vault.json", "sync", "objects", "attachments"} {
-		if err := os.RemoveAll(filepath.Join(root, relative)); err != nil {
-			return errors.New("could not refresh the encrypted Git cache")
-		}
-	}
-	return nil
 }
 
 func (p *GitHubSSHProvider) initializeEmptyRepository(
@@ -883,6 +880,72 @@ func (p *GitHubSSHProvider) materializeExistingRepository(
 	return nil
 }
 
+type changedRemotePath struct {
+	path    string
+	deleted bool
+}
+
+func (p *GitHubSSHProvider) changedRemotePaths(
+	ctx context.Context,
+	workingTree string,
+	from string,
+	to string,
+) ([]changedRemotePath, error) {
+	remotePaths, err := p.runner.Run(
+		ctx,
+		"git",
+		[]string{"-C", workingTree, "ls-tree", "-rz", "--name-only", to},
+		localGitEnvironment(),
+	)
+	if err != nil {
+		return nil, errors.New("Git could not inspect the updated repository")
+	}
+	if _, err := parseRemotePaths(remotePaths); err != nil {
+		return nil, err
+	}
+	diff, err := p.runner.Run(
+		ctx,
+		"git",
+		[]string{"-C", workingTree, "diff", "--name-status", "-z", from, to, "--"},
+		localGitEnvironment(),
+	)
+	if err != nil {
+		return nil, errors.New("Git could not inspect encrypted repository changes")
+	}
+	return parseChangedRemotePaths(diff)
+}
+
+func (p *GitHubSSHProvider) materializeChangedRepository(
+	ctx context.Context,
+	workingTree string,
+	reference string,
+	changed []changedRemotePath,
+) error {
+	checkout := make([]string, 0, len(changed))
+	for _, item := range changed {
+		if item.deleted {
+			if err := os.Remove(filepath.Join(workingTree, item.path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return errors.New("could not remove an obsolete encrypted Git cache file")
+			}
+			continue
+		}
+		checkout = append(checkout, item.path)
+	}
+	for len(checkout) > 0 {
+		count := min(len(checkout), 256)
+		arguments := append([]string{"-C", workingTree, "checkout", "--force", reference, "--"}, checkout[:count]...)
+		if output, err := p.runner.Run(ctx, "git", arguments, localGitEnvironment()); err != nil {
+			_ = output
+			return errors.New("Git could not materialize updated encrypted files")
+		}
+		checkout = checkout[count:]
+	}
+	if err := protectChangedSnapshot(workingTree, changed); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (p *GitHubSSHProvider) prepareExistingCache(
 	ctx context.Context,
 	workingTree string,
@@ -984,12 +1047,8 @@ func parseRemotePaths(data []byte) ([]string, error) {
 		path := string(item)
 		if _, exact := required[path]; exact {
 			required[path] = true
-		} else {
-			match := remoteObjectPath.FindStringSubmatch(path)
-			validObject := len(match) == 3 && match[1] == match[2][:2]
-			if !validObject && !remoteAttachmentPath.MatchString(path) {
-				return nil, errors.New("the non-empty repository contains an unknown or unsafe layout")
-			}
+		} else if !validRemotePath(path) {
+			return nil, errors.New("the non-empty repository contains an unknown or unsafe layout")
 		}
 		paths = append(paths, path)
 	}
@@ -999,6 +1058,58 @@ func parseRemotePaths(data []byte) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+func validRemotePath(path string) bool {
+	if path == "vault.json" || path == "sync/manifest.enc" || path == "sync/folders.enc" {
+		return true
+	}
+	match := remoteObjectPath.FindStringSubmatch(path)
+	return (len(match) == 3 && match[1] == match[2][:2]) || remoteAttachmentPath.MatchString(path)
+}
+
+func parseChangedRemotePaths(data []byte) ([]changedRemotePath, error) {
+	fields := bytes.Split(data, []byte{0})
+	result := make([]changedRemotePath, 0, len(fields)/2)
+	for index := 0; index < len(fields); {
+		if len(fields[index]) == 0 {
+			break
+		}
+		status := string(fields[index])
+		index++
+		if index >= len(fields) {
+			return nil, errors.New("Git returned malformed encrypted repository changes")
+		}
+		if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
+			if index+1 >= len(fields) {
+				return nil, errors.New("Git returned malformed encrypted repository changes")
+			}
+			oldPath, newPath := string(fields[index]), string(fields[index+1])
+			index += 2
+			if !validRemotePath(oldPath) || !validRemotePath(newPath) {
+				return nil, errors.New("the encrypted repository contains an unknown or unsafe layout")
+			}
+			if strings.HasPrefix(status, "R") {
+				result = append(result, changedRemotePath{path: oldPath, deleted: true})
+			}
+			result = append(result, changedRemotePath{path: newPath})
+			continue
+		}
+		path := string(fields[index])
+		index++
+		if !validRemotePath(path) {
+			return nil, errors.New("the encrypted repository contains an unknown or unsafe layout")
+		}
+		switch status {
+		case "A", "M", "T":
+			result = append(result, changedRemotePath{path: path})
+		case "D":
+			result = append(result, changedRemotePath{path: path, deleted: true})
+		default:
+			return nil, errors.New("Git returned an unsupported encrypted repository change")
+		}
+	}
+	return result, nil
 }
 
 func readRemoteVaultID(root string) (string, error) {
@@ -1085,6 +1196,24 @@ func protectMaterializedSnapshot(root string) error {
 		}
 		return nil
 	})
+}
+
+func protectChangedSnapshot(root string, changed []changedRemotePath) error {
+	for _, item := range changed {
+		if item.deleted {
+			continue
+		}
+		path := filepath.Join(root, item.path)
+		if err := os.Chmod(path, 0o600); err != nil {
+			return errors.New("could not protect the encrypted Git cache")
+		}
+		for directory := filepath.Dir(path); directory != root; directory = filepath.Dir(directory) {
+			if err := os.Chmod(directory, 0o700); err != nil {
+				return errors.New("could not protect the encrypted Git cache")
+			}
+		}
+	}
+	return nil
 }
 
 func installCache(source, destination string) error {
