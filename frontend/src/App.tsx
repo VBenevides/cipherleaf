@@ -1523,6 +1523,25 @@ function App() {
     }
   };
 
+  const lockUnlockedFolder = async (folder: Folder) => {
+    setError("");
+    try {
+      if (noteRef.current?.folderId === folder.id) {
+        await persistCurrent();
+        applyLoadedNote(null);
+        setNoteTrail([]);
+      }
+      if (selectedFolderID === folder.id) setSelectedFolderID("all");
+      setUnlockedFolderIDs((current) => {
+        const next = new Set(current);
+        next.delete(folder.id);
+        return next;
+      });
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
   const removeFolderLock = async (folder: Folder) => {
     const password = await requestFolderPassword(`Remove lock from “${folder.name}”`, "Remove lock");
     if (password === null) return;
@@ -3430,6 +3449,18 @@ function App() {
                       <Icon name="eye" size={14} />
                       {folder.hidden ? "Show notes" : "Hide notes"}
                     </button>
+                    {folder.locked && unlockedFolderIDs.has(folder.id) && (
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setContextMenu(null);
+                          void lockUnlockedFolder(folder);
+                        }}
+                      >
+                        <Icon name="lock" size={14} />
+                        Lock folder
+                      </button>
+                    )}
                     <button
                       role="menuitem"
                       onClick={() => {
