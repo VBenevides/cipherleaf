@@ -1982,6 +1982,19 @@ a:focus-visible {
   font-size: 10px;
 }
 
+.sync-notification {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 39px;
+  padding: 5px 17px;
+  color: #356244;
+  border-bottom: 1px solid #c9dfcf;
+  background: #edf7ef;
+  font-size: 10px;
+}
+
 .document-heading {
   padding: 32px clamp(30px, 5.4vw, 76px) 17px;
 }

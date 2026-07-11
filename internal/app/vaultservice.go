@@ -713,7 +713,9 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 		result.Pull = pull
 		result.Branch = pull.Branch
 		result.LastCommit = pull.LastCommit
-		if pull.StagingPath != "" {
+		if pull.UpToDate {
+			result.Merge = vault.MergeResult{UpToDate: true}
+		} else if pull.StagingPath != "" {
 			merge, mergeErr := s.store.MergeRemoteSnapshot(pull.StagingPath)
 			if pull.Temporary {
 				_ = os.RemoveAll(pull.StagingPath)

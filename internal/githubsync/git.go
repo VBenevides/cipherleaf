@@ -520,11 +520,10 @@ func (p *GitHubSSHProvider) push(
 	if err != nil {
 		return PushResult{}, err
 	}
-	if err := p.pruneEncryptedCache(
+	if err := p.recordPushedTip(
 		contextWithTimeout,
 		cachePath,
 		settings,
-		environment,
 	); err != nil {
 		return PushResult{}, err
 	}
@@ -591,9 +590,6 @@ func (p *GitHubSSHProvider) Pull(
 		return PullResult{}, err
 	}
 	if previousCommit == remoteCommit {
-		if err := p.compactEncryptedCache(contextWithTimeout, cachePath); err != nil {
-			return PullResult{}, err
-		}
 		return PullResult{
 			Linked:      true,
 			Message:     "The encrypted GitHub snapshot is unchanged.",
@@ -628,9 +624,6 @@ func (p *GitHubSSHProvider) Pull(
 	if err != nil {
 		return PullResult{}, err
 	}
-	if err := p.compactEncryptedCache(contextWithTimeout, cachePath); err != nil {
-		return PullResult{}, err
-	}
 	return PullResult{
 		Linked:      true,
 		Message:     "The encrypted vault snapshot was pulled from GitHub.",
@@ -642,36 +635,21 @@ func (p *GitHubSSHProvider) Pull(
 	}, nil
 }
 
-// pruneEncryptedCache makes the just-pushed tip the shallow boundary, expires
-// reflogs, and removes unreachable encrypted history from the local cache.
-func (p *GitHubSSHProvider) pruneEncryptedCache(
+// recordPushedTip records the pushed tip locally. Expensive cache
+// compaction is intentionally left to Git's automatic maintenance instead of
+// blocking every foreground sync.
+func (p *GitHubSSHProvider) recordPushedTip(
 	ctx context.Context,
 	cachePath string,
 	settings SyncSettings,
-	environment []string,
 ) error {
 	output, err := p.runner.Run(ctx, "git", []string{
 		"-C", cachePath,
-		"fetch", "--quiet", "--prune", "--depth=1", "origin",
-		"+refs/heads/" + settings.Branch + ":refs/remotes/origin/" + settings.Branch,
-	}, environment)
+		"update-ref", "refs/remotes/origin/" + settings.Branch, "HEAD",
+	}, localGitEnvironment())
 	if err != nil {
 		_ = output
-		return errors.New("the vault was pushed, but its encrypted Git cache could not be pruned")
-	}
-	return p.compactEncryptedCache(ctx, cachePath)
-}
-
-func (p *GitHubSSHProvider) compactEncryptedCache(ctx context.Context, cachePath string) error {
-	commands := [][]string{
-		{"-C", cachePath, "reflog", "expire", "--expire=now", "--all"},
-		{"-C", cachePath, "gc", "--quiet", "--prune=now"},
-	}
-	for _, arguments := range commands {
-		if output, err := p.runner.Run(ctx, "git", arguments, localGitEnvironment()); err != nil {
-			_ = output
-			return errors.New("Git could not compact the encrypted cache")
-		}
+		return errors.New("the vault was pushed, but its local Git reference could not be updated")
 	}
 	return nil
 }

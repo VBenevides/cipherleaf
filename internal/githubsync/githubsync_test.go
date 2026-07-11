@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -223,6 +224,36 @@ type successfulConnectionTester struct {
 
 type countingGitTransport struct {
 	showCalls int
+}
+
+type recordingGitTransport struct {
+	arguments [][]string
+}
+
+func (r *recordingGitTransport) Run(
+	_ context.Context,
+	_ string,
+	args []string,
+	_ []string,
+) ([]byte, error) {
+	r.arguments = append(r.arguments, slices.Clone(args))
+	return nil, nil
+}
+
+func TestRecordPushedTipUsesNoNetworkOrGarbageCollection(t *testing.T) {
+	runner := &recordingGitTransport{}
+	provider := &GitHubSSHProvider{runner: runner}
+	settings := SyncSettings{Branch: "main"}
+	if err := provider.recordPushedTip(context.Background(), "/cache", settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.arguments) != 1 {
+		t.Fatalf("commands = %d, want 1", len(runner.arguments))
+	}
+	joined := strings.Join(runner.arguments[0], " ")
+	if joined != "-C /cache update-ref refs/remotes/origin/main HEAD" {
+		t.Fatalf("command = %q", joined)
+	}
 }
 
 func (c *countingGitTransport) Run(
@@ -507,14 +538,14 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	if deleted.UpToDate {
 		t.Fatal("deleting the final note unexpectedly produced an up-to-date push")
 	}
-	cacheCommitCount := strings.TrimSpace(runGitTestCommand(
+	cacheRemoteTip := strings.TrimSpace(runGitTestCommand(
 		t,
 		"",
 		"-C", provider.cacheRepositoryPath(settings),
-		"rev-list", "--count", "HEAD",
+		"rev-parse", "origin/main",
 	))
-	if cacheCommitCount != "1" {
-		t.Fatalf("encrypted Git cache retained %s reachable commits, want 1", cacheCommitCount)
+	if cacheRemoteTip != deleted.LastCommit {
+		t.Fatalf("cached remote tip = %q, want pushed commit %q", cacheRemoteTip, deleted.LastCommit)
 	}
 	tree = runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
 	if strings.Contains(tree, note.ID+".enc") {

@@ -25,6 +25,7 @@ import type {
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
+import { syncFinishedMessage } from "./syncTiming";
 import { errorText } from "./errors";
 import {
   canonicalObjectDocumentTextFromMarkdown,
@@ -357,6 +358,7 @@ function App() {
   const [cloneRepositoryPrivate, setCloneRepositoryPrivate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [syncNotification, setSyncNotification] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
@@ -875,9 +877,16 @@ function App() {
     }
     if (!linked) return false;
     setSyncing(true);
+    setSyncNotification("");
     try {
+      const syncStartedAt = performance.now();
       const result = await VaultService.SyncNow();
-      if (result.warning) setError(result.warning);
+      const syncElapsed = performance.now() - syncStartedAt;
+      if (result.warning) {
+        setError(result.warning);
+      } else {
+        setSyncNotification(syncFinishedMessage(syncElapsed));
+      }
       const settings = await VaultService.GetSyncSettings();
       setLastSyncedAt(settings.lastSyncedAt);
     } catch (reason) {
@@ -1286,9 +1295,12 @@ function App() {
   const syncNow = async () => {
     if (syncing) return;
     setSyncing(true);
+    setSyncNotification("");
     try {
       await persistCurrent();
+      const syncStartedAt = performance.now();
       const result: SyncResult = await VaultService.SyncNow();
+      const syncElapsed = performance.now() - syncStartedAt;
       await refreshNotes();
       await refreshFolders();
       const note = noteRef.current;
@@ -1310,6 +1322,7 @@ function App() {
         setError(result.warning);
       } else if (result.message) {
         setSaveState("saved");
+        setSyncNotification(syncFinishedMessage(syncElapsed));
       }
       if (result.merge.conflicts?.length) {
         bringWindowToFront("syncConflicts");
@@ -3081,6 +3094,15 @@ function App() {
           <div className="error-banner" role="alert">
             <span>{error}</span>
             <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+        )}
+
+        {syncNotification && (
+          <div className="sync-notification" role="status" aria-live="polite">
+            <span>{syncNotification}</span>
+            <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
               <Icon name="x" size={16} />
             </button>
           </div>
