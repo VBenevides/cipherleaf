@@ -1878,3 +1878,31 @@ func TestUnlockedSecretAvailability(t *testing.T) {
 		t.Fatal("UnlockedSecret should be false after Lock")
 	}
 }
+
+func TestDerivedMarkdownContentPreservesCodeObjects(t *testing.T) {
+	parentID := "parent"
+	closed := true
+	document := canonicalObjectDocument{
+		Format:  "cipherleaf.object-document",
+		Version: 1,
+		Objects: []canonicalObjectNode{
+			{
+				ID: "parent", Tag: "section", Tags: []string{"section", "text"}, Text: "arsars",
+				ChildrenIDs: []string{"code"}, SourcePrefix: "> ",
+			},
+			{
+				ID: "code", Tag: "code", Tags: []string{"code"}, Text: "def main():\n    pass",
+				ParentID: &parentID, ChildrenIDs: []string{}, SourcePrefix: "  ```python",
+				Language: "python", Closed: &closed, Indent: 2, ContentIndent: 2,
+			},
+		},
+	}
+	content, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "> arsars\n  ```python\ndef main():\n    pass\n  ```"
+	if got := derivedMarkdownContent(string(content)); got != want {
+		t.Fatalf("derived markdown = %q, want %q", got, want)
+	}
+}

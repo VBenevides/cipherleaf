@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language-data": "^6.5.2",
     "@wailsio/runtime": "3.0.0-alpha.95",
     "codemirror": "^6.0.2",
     "react": "^18.2.0",
