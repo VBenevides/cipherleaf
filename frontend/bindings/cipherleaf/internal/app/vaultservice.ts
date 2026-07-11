@@ -143,6 +143,13 @@ export function MoveNote(id: string, folderID: string): $CancellablePromise<vaul
     return $Call.ByID(4129360186, id, folderID);
 }
 
+/**
+ * OpenGitTerminal opens the system terminal at this vault's encrypted Git checkout.
+ */
+export function OpenGitTerminal(): $CancellablePromise<void> {
+    return $Call.ByID(3947699405);
+}
+
 export function OpenVault(path: string, secret: string): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(1998151597, path, secret);
 }

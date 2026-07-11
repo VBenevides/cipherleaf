@@ -199,6 +199,11 @@ func NewGitHubSSHProvider(runtimeDir, cacheRoot string) *GitHubSSHProvider {
 	}
 }
 
+// GitWorkingDirectory returns the persistent local checkout for a linked vault.
+func (p *GitHubSSHProvider) GitWorkingDirectory(settings SyncSettings) string {
+	return filepath.Join(p.cacheRoot, settings.VaultID)
+}
+
 func DefaultCacheRoot() string {
 	root, err := os.UserCacheDir()
 	if err != nil || strings.TrimSpace(root) == "" {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -668,6 +669,22 @@ func (s *VaultService) UnlinkGitHubSync() error {
 		return err
 	}
 	return s.sync.RemoveSettings(vaultID)
+}
+
+// OpenGitTerminal opens the system terminal at this vault's encrypted Git checkout.
+func (s *VaultService) OpenGitTerminal() error {
+	vaultID, err := s.unlockedVaultID()
+	if err != nil {
+		return err
+	}
+	directory, err := s.sync.GitWorkingDirectory(vaultID)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(directory, ".git")); err != nil {
+		return errors.New("the linked Git checkout is not available on this device yet")
+	}
+	return openTerminal(directory)
 }
 
 // SyncNow performs a manual pull-merge-push against the linked GitHub

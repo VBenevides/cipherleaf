@@ -44,6 +44,10 @@ type ForcePushProvider interface {
 	) (PushResult, error)
 }
 
+type GitWorkingDirectoryProvider interface {
+	GitWorkingDirectory(settings SyncSettings) string
+}
+
 func NewManager(settings SettingsStore, connection ConnectionTester) *Manager {
 	return &Manager{settings: settings, connection: connection}
 }
@@ -67,6 +71,21 @@ func (m *Manager) GetSettings(vaultID string) (SyncSettings, error) {
 		return DefaultSettings(vaultID), nil
 	}
 	return value, err
+}
+
+// GitWorkingDirectory returns the persistent checkout used for a linked vault.
+func (m *Manager) GitWorkingDirectory(vaultID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	settings, err := m.settings.Load(vaultID)
+	if err != nil || !settings.Linked {
+		return "", errors.New("link this vault to GitHub before opening its Git checkout")
+	}
+	provider, ok := m.provider.(GitWorkingDirectoryProvider)
+	if !ok {
+		return "", errors.New("GitHub synchronization provider does not expose a Git checkout")
+	}
+	return provider.GitWorkingDirectory(settings), nil
 }
 
 type RemoteSnapshotStore interface {

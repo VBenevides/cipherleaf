@@ -2208,6 +2208,29 @@ function App() {
     }
   };
 
+  const openGitTerminal = async () => {
+    setSettingsBusy(true);
+    setConnectionResult(null);
+    try {
+      await VaultService.OpenGitTerminal();
+      setConnectionResult({
+        success: true,
+        message: "Opened a terminal in this vault's encrypted Git checkout.",
+        warning: "Manual Git changes can affect the next Cipherleaf sync.",
+        branch: syncSettings?.branch ?? "main",
+      });
+    } catch (reason) {
+      setConnectionResult({
+        success: false,
+        message: errorText(reason),
+        warning: "",
+        branch: syncSettings?.branch ?? "main",
+      });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
   const forgetRememberedSecret = async () => {
     setSettingsBusy(true);
     try {
@@ -3430,6 +3453,16 @@ function App() {
                   >
                     {settingsBusy ? "Working…" : "Test connection"}
                   </button>
+                  {syncSettings.linked && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={settingsBusy}
+                      onClick={() => void openGitTerminal()}
+                    >
+                      Open Git terminal
+                    </button>
+                  )}
                   {!syncSettings.linked && (
                     <button
                       type="button"
