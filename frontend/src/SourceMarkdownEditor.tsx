@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Annotation, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
 import { redo, undo } from "@codemirror/commands";
 import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { minimalSetup } from "codemirror";
@@ -58,7 +59,7 @@ export default function SourceMarkdownEditor({
         doc: value,
         extensions: [
           minimalSetup,
-          markdown(),
+          markdown({ codeLanguages: languages }),
           search({ top: false }),
           keymap.of([
             ...searchKeymap,

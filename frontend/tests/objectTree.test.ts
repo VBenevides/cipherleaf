@@ -44,6 +44,83 @@ test("recognizes image objects", () => {
   assert.equal(tree[0].tag, "image");
 });
 
+test("keeps fenced code as one typed object", () => {
+  const tree = markdownObjectTree([
+    "```typescript",
+    "const value = {",
+    "    nested: true,",
+    "};",
+    "",
+    "```",
+    "after",
+  ].join("\n"));
+
+  assert.equal(tree.length, 2);
+  assert.equal(tree[0].tag, "code");
+  assert.deepEqual(tree[0].tags, ["code"]);
+  assert.equal(tree[0].language, "typescript");
+  assert.equal(tree[0].text, "const value = {\n    nested: true,\n};\n");
+  assert.equal(tree[0].lineEnd, 6);
+  assert.equal(tree[1].text, "after");
+});
+
+test("moves a complete code block without changing its contents", () => {
+  const markdown = [
+    "> Parent",
+    "```js",
+    "    console.log('kept');",
+    "```",
+  ].join("\n");
+
+  assert.equal(moveObjectInMarkdown(markdown, 2, 1, "child"), [
+    "> Parent",
+    "  ```js",
+    "    console.log('kept');",
+    "  ```",
+  ].join("\n"));
+});
+
+test("preserves nested code indentation when moving its parent", () => {
+  const markdown = [
+    "> Target",
+    "> Moving",
+    "  ```python",
+    "    print('kept')",
+    "  ```",
+  ].join("\n");
+
+  assert.equal(moveObjectInMarkdown(markdown, 2, 1, "child"), [
+    "> Target",
+    "  > Moving",
+    "    ```python",
+    "    print('kept')",
+    "    ```",
+  ].join("\n"));
+});
+
+test("round trips code language and content through canonical objects", () => {
+  const markdown = ["  ```rust", "fn main() {}", "  ```"].join("\n");
+  const canonical = canonicalObjectDocumentFromMarkdown(markdown);
+
+  assert.equal(canonical.objects[0].tag, "code");
+  assert.equal(canonical.objects[0].language, "rust");
+  assert.equal(canonical.objects[0].closed, true);
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+});
+
+test("does not add a closing fence while an indented code block is being typed", () => {
+  const markdown = [
+    "> arsars",
+    "  ```python",
+    "def main():",
+  ].join("\n");
+  const canonical = canonicalObjectDocumentFromMarkdown(markdown);
+
+  assert.equal(canonical.objects[1].tag, "code");
+  assert.equal(canonical.objects[1].closed, false);
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+});
+
 test("merges indented continuation lines into object text", () => {
   const tree = markdownObjectTree([
     "> Quote",

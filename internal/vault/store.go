@@ -3860,6 +3860,8 @@ type canonicalObjectNode struct {
 	ParentSectionID *string  `json:"parentSectionId"`
 	ChildrenIDs     []string `json:"childrenIds"`
 	SourcePrefix    string   `json:"sourcePrefix,omitempty"`
+	Language        string   `json:"language,omitempty"`
+	Closed          *bool    `json:"closed,omitempty"`
 }
 
 type parsedCanonicalLine struct {
@@ -4121,6 +4123,18 @@ func derivedMarkdownContent(content string) string {
 }
 
 func markdownLineForCanonicalObject(object canonicalObjectNode) string {
+	if object.Tag == "code" {
+		indent := regexp.MustCompile(`^[ \t]*`).FindString(object.SourcePrefix)
+		lines := []string{indent + "```" + object.Language}
+		if object.Text != "" {
+			lines = append(lines, strings.Split(object.Text, "\n")...)
+		}
+		if object.Closed == nil || *object.Closed {
+			lines = append(lines, indent+"```")
+		}
+		return strings.Join(lines, "\n")
+	}
+
 	textLines := strings.Split(object.Text, "\n")
 	firstText := ""
 	if len(textLines) > 0 {

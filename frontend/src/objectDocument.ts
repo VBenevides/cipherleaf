@@ -1,6 +1,6 @@
 import { parseAttachmentMarkdown } from "./markdown.ts";
 
-export type ObjectTag = "section" | "bulletpoint" | "checkbox" | "text" | "image";
+export type ObjectTag = "section" | "bulletpoint" | "checkbox" | "text" | "image" | "code";
 export type ObjectDropMode = "before" | "child" | "after";
 
 export type ParsedObjectLine = {
@@ -10,6 +10,7 @@ export type ParsedObjectLine = {
   contentIndent: number;
   text: string;
   checked?: boolean;
+  language?: string;
   startsObject: boolean;
   sourcePrefix: string;
 };
@@ -35,6 +36,8 @@ export type ObjectLine = {
   sourcePrefix: string;
   text: string;
   checked?: boolean;
+  language?: string;
+  closed?: boolean;
   children: ObjectLine[];
 };
 
@@ -51,6 +54,8 @@ export type CanonicalObjectNode = {
   tags: ObjectTag[];
   text: string;
   checked?: boolean;
+  language?: string;
+  closed?: boolean;
   indent: number;
   contentIndent: number;
   parentId: string | null;
@@ -106,6 +111,21 @@ function stableUuid(input: string): string {
 }
 
 export function classifyObjectLine(raw: string): ParsedObjectLine {
+  const fence = raw.match(/^([ \t]*)```([^\s`]*)[ \t]*$/);
+  if (fence && fence[2]) {
+    const indent = visualIndent(fence[1]);
+    return {
+      tag: "code",
+      tags: ["code"],
+      indent,
+      contentIndent: indent,
+      text: "",
+      language: fence[2],
+      startsObject: true,
+      sourcePrefix: `${fence[1]}` + "```" + fence[2],
+    };
+  }
+
   const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
   const source = outline ? outline[4] : raw.trimStart();
   const tags: ObjectTag[] = outline ? ["section"] : [];
@@ -206,7 +226,8 @@ function lineStartsExplicitObject(raw: string): boolean {
       /^\[([ xX])\]\s*(.*)$/.test(source) ||
       /^[-*](?:\s+.*|\s*)$/.test(source) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
-      /^#{1,6}\s+/.test(source),
+      /^#{1,6}\s+/.test(source) ||
+      /^```[^\s`]+[ \t]*$/.test(source),
   );
 }
 
@@ -316,6 +337,13 @@ export function objectTextBlockEnd(lines: readonly string[], startLineNumber: nu
 }
 
 export function objectBlockEnd(lines: readonly string[], startLineNumber: number): number {
+  if (classifyObjectLine(lines[startLineNumber - 1] ?? "").tag === "code") {
+    for (let lineNumber = startLineNumber + 1; lineNumber <= lines.length; lineNumber++) {
+      if (/^[ \t]*```[ \t]*$/.test(lines[lineNumber - 1] ?? "")) return lineNumber;
+    }
+    return lines.length;
+  }
+
   const startIndent = classifyObjectLine(lines[startLineNumber - 1] ?? "").indent;
   let endLineNumber = startLineNumber;
 
@@ -338,7 +366,21 @@ export function reindentLine(text: string, delta: number): string {
 
 export function reindentLines(lines: readonly string[], fromIndent: number, toIndent: number): string[] {
   const delta = Math.max(0, toIndent) - fromIndent;
-  return lines.map((line) => reindentLine(line, delta));
+  let inCode = false;
+  return lines.map((line) => {
+    if (!inCode && classifyObjectLine(line).tag === "code") {
+      inCode = true;
+      return reindentLine(line, delta);
+    }
+    if (inCode) {
+      if (/^[ \t]*```[ \t]*$/.test(line)) {
+        inCode = false;
+        return reindentLine(line, delta);
+      }
+      return line;
+    }
+    return reindentLine(line, delta);
+  });
 }
 
 export function moveObjectInMarkdown(
@@ -379,11 +421,8 @@ export function moveObjectInMarkdown(
   const insertionIndex = sourceStartIndex < rawInsertionIndex
     ? rawInsertionIndex - (sourceEndIndex - sourceStartIndex)
     : rawInsertionIndex;
-  const reindented = reindentLines(
-    movingLines,
-    classifyObjectLine(lines[sourceStartIndex] ?? "").indent,
-    newIndent,
-  );
+  const source = classifyObjectLine(lines[sourceStartIndex] ?? "");
+  const reindented = reindentLines(movingLines, source.indent, newIndent);
 
   remaining.splice(Math.max(0, insertionIndex), 0, ...reindented);
   return remaining.join("\n");
@@ -411,6 +450,8 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
   const parsedById = new Map<string, ParsedObjectLine>();
   const byId = new Map<string, ObjectLine>();
   const byLine = new Map<number, ObjectLine>();
+  let activeCode: ObjectLine | null = null;
+  let activeCodeLines: string[] = [];
   const lines = markdown.split("\n");
   const lineStarts: number[] = [];
   let offset = 0;
@@ -422,6 +463,23 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
 
   lines.forEach((raw, index) => {
     const lineNumber = index + 1;
+    if (activeCode) {
+      activeCode.lineEnd = lineNumber;
+      activeCode.to = lineStarts[index] + raw.length;
+      byLine.set(lineNumber, activeCode);
+      if (/^[ \t]*```[ \t]*$/.test(raw)) {
+        activeCode.closed = true;
+        activeCode = null;
+        activeCodeLines = [];
+      } else {
+        activeCodeLines.push(raw);
+        activeCode.text = activeCodeLines.join("\n");
+        activeCode.textLineEnd = lineNumber;
+        activeCode.textTo = lineStarts[index] + raw.length;
+      }
+      return;
+    }
+
     if (raw !== "" && raw.trim() === "") {
       const previous = stack[stack.length - 1] ?? null;
       const previousParsed = previous ? parsedById.get(previous.id) : null;
@@ -501,6 +559,8 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
       sourcePrefix: classified.sourcePrefix,
       text: classified.text,
       checked: classified.checked,
+      language: classified.language,
+      closed: classified.tag === "code" ? false : undefined,
       children: [],
     };
 
@@ -517,6 +577,10 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
     stack.push(item);
     parsedById.set(item.id, classified);
     if (item.tag === "section") sectionStack.push(item);
+    if (item.tag === "code") {
+      activeCode = item;
+      activeCodeLines = [];
+    }
   });
 
   return { objects, roots, byId, byLine };
@@ -562,6 +626,8 @@ export function canonicalObjectDocumentFromMarkdown(markdown: string): Canonical
       tags: [...object.tags],
       text: object.text,
       checked: object.checked,
+      language: object.language,
+      closed: object.closed,
       indent: object.indent,
       contentIndent: object.contentIndent,
       parentId: object.parentId,
@@ -581,7 +647,7 @@ export function canonicalObjectDocumentTextFromMarkdown(markdown: string): strin
 }
 
 function isObjectTag(value: unknown): value is ObjectTag {
-  return value === "section" || value === "bulletpoint" || value === "checkbox" || value === "text" || value === "image";
+  return value === "section" || value === "bulletpoint" || value === "checkbox" || value === "text" || value === "image" || value === "code";
 }
 
 function validCanonicalObjectDocument(value: unknown): value is CanonicalObjectDocument {
@@ -604,6 +670,8 @@ function validCanonicalObjectDocument(value: unknown): value is CanonicalObjectD
     object.childrenIds.every((id) => typeof id === "string") &&
     (object.sourcePrefix === undefined || typeof object.sourcePrefix === "string") &&
     (object.checked === undefined || typeof object.checked === "boolean")
+    && (object.language === undefined || typeof object.language === "string")
+    && (object.closed === undefined || typeof object.closed === "boolean")
   );
 }
 
@@ -648,6 +716,8 @@ export function objectDocumentFromCanonicalObjectDocument(document: CanonicalObj
       sourcePrefix: node.sourcePrefix ?? "",
       text: node.text,
       checked: node.checked,
+      language: node.language,
+      closed: node.closed,
       children: [],
     };
     objects.push(item);
@@ -671,6 +741,16 @@ export function parseCanonicalObjectDocument(content: string): ObjectDocument {
 }
 
 function markdownLineForObject(object: CanonicalObjectNode): string {
+  if (object.tag === "code") {
+    const indent = object.sourcePrefix?.match(/^[ \t]*/)?.[0] ?? " ".repeat(Math.max(0, object.indent));
+    const lines = [
+      `${indent}` + "```" + (object.language ?? "text"),
+      ...(object.text ? object.text.split("\n") : []),
+    ];
+    if (object.closed !== false) lines.push(`${indent}` + "```");
+    return lines.join("\n");
+  }
+
   const textLines = object.text.split("\n");
   const prefix = object.sourcePrefix || (object.tags.includes("section")
     ? `${">".repeat(Math.max(1, Math.floor(object.indent / 2) + 1))} `

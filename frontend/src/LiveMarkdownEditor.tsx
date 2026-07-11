@@ -18,6 +18,7 @@ import {
   type DecorationSet,
 } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
 import { minimalSetup } from "codemirror";
 import { redo, undo } from "@codemirror/commands";
 import {
@@ -353,6 +354,39 @@ class DragHandleWidget extends WidgetType {
 
   ignoreEvent() {
     return false;
+  }
+}
+
+class CopyCodeWidget extends WidgetType {
+  constructor(readonly code: string) {
+    super();
+  }
+
+  eq(other: CopyCodeWidget) {
+    return other.code === this.code;
+  }
+
+  toDOM() {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cm-live-code-copy";
+    button.textContent = "Copy";
+    button.title = "Copy code";
+    button.setAttribute("aria-label", "Copy code");
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void navigator.clipboard.writeText(this.code).then(() => {
+        button.textContent = "Copied";
+        window.setTimeout(() => { button.textContent = "Copy"; }, 1200);
+      }).catch(() => { button.textContent = "Copy failed"; });
+    });
+    return button;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -1119,6 +1153,26 @@ function buildLivePreviewState(
       );
     }
 
+    const codeObject = objectDocument.byLine.get(lineNumber);
+    if (codeObject?.tag === "code") {
+      const edge = lineNumber === codeObject.lineNumber
+        ? "cm-live-code-fence-open"
+        : lineNumber > codeObject.textLineEnd
+          ? "cm-live-code-fence-close"
+          : "cm-live-code-content";
+      decorations.push(Decoration.line({
+        attributes: lineAttributes(lineNumber, `cm-live-code-block ${edge}`),
+      }).range(line.from));
+      if (lineNumber === codeObject.lineNumber) {
+        decorations.push(Decoration.widget({
+          widget: new CopyCodeWidget(codeObject.text),
+          side: 1,
+        }).range(line.to));
+      }
+      lineNumber++;
+      continue;
+    }
+
     if (
       lineNumber < state.doc.lines &&
       line.text.includes("|") &&
@@ -1814,6 +1868,72 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
   return true;
 }
 
+function changeCodeIndent(view: EditorView, direction: 1 | -1) {
+  const document = parseObjectDocument(view.state.doc.toString());
+  const lineNumbers = new Set<number>();
+
+  for (const range of view.state.selection.ranges) {
+    const first = view.state.doc.lineAt(range.from).number;
+    const last = view.state.doc.lineAt(range.to).number;
+    for (let lineNumber = first; lineNumber <= last; lineNumber++) {
+      const owner = document.byLine.get(lineNumber);
+      if (owner?.tag === "code" && lineNumber > owner.lineNumber && lineNumber <= owner.textLineEnd) {
+        lineNumbers.add(lineNumber);
+      }
+    }
+  }
+
+  if (lineNumbers.size === 0) return false;
+  const changes: { from: number; to?: number; insert: string }[] = [];
+  for (const lineNumber of lineNumbers) {
+    const line = view.state.doc.line(lineNumber);
+    if (direction === 1) {
+      changes.push({ from: line.from, insert: "    " });
+    } else {
+      const spaces = line.text.match(/^ {1,4}/)?.[0];
+      if (spaces) changes.push({ from: line.from, to: line.from + spaces.length, insert: "" });
+    }
+  }
+
+  if (changes.length === 0) return true;
+  view.dispatch({ changes });
+  return true;
+}
+
+function closeCodeAfterBlankLine(view: EditorView) {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const line = view.state.doc.lineAt(range.head);
+  const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
+  if (owner?.tag !== "code" || line.number <= owner.lineNumber || line.text.trim() || range.head !== line.to) {
+    return false;
+  }
+
+  const indent = view.state.doc.line(owner.lineNumber).text.match(/^[ \t]*/)?.[0] ?? "";
+  if (owner.lineEnd > owner.textLineEnd) {
+    const closing = view.state.doc.line(owner.lineEnd);
+    if (closing.number === line.number + 1) {
+      view.dispatch({ selection: EditorSelection.cursor(closing.to) });
+    } else {
+      const inserted = `\n${indent}` + "```";
+      view.dispatch({
+        changes: [
+          { from: range.head, insert: inserted },
+          { from: closing.from, to: closing.to, insert: "" },
+        ],
+        selection: EditorSelection.cursor(range.head + inserted.length),
+      });
+    }
+  } else {
+    const inserted = `\n${indent}` + "```";
+    view.dispatch({
+      changes: { from: range.head, insert: inserted },
+      selection: EditorSelection.cursor(range.head + inserted.length),
+    });
+  }
+  return true;
+}
+
 function insertNewlineAtOutlineDepth(view: EditorView) {
   const range = view.state.selection.main;
   if (!range.empty) return false;
@@ -1828,6 +1948,8 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
 
   const inserted = continuationObjectPrefix
     ? `\n${continuationObjectPrefix}`
+    : object.tag === "code"
+    ? "\n"
     : object.tag === "section"
     ? `\n${section?.[1] ?? `${indentation}> `}`
     : object.tag === "bulletpoint" && list
@@ -2150,15 +2272,16 @@ export default function LiveMarkdownEditor({
               run: (editor) =>
                 acceptCompletion(editor) ||
                 expandSnippetBeforeCursor(editor) ||
+                closeCodeAfterBlankLine(editor) ||
                 insertNewlineAtOutlineDepth(editor),
             },
             {
               key: "Tab",
-              run: (editor) => changeOutlineDepth(editor, 1),
+              run: (editor) => changeCodeIndent(editor, 1) || changeOutlineDepth(editor, 1),
             },
             {
               key: "Shift-Tab",
-              run: (editor) => changeOutlineDepth(editor, -1),
+              run: (editor) => changeCodeIndent(editor, -1) || changeOutlineDepth(editor, -1),
             },
             {
               key: "Mod-s",
@@ -2210,7 +2333,7 @@ export default function LiveMarkdownEditor({
           minimalSetup,
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
-          markdown(),
+          markdown({ codeLanguages: languages }),
           liveMarkdownTheme,
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
