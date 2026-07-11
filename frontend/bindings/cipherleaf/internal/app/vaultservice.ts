@@ -35,8 +35,8 @@ export function CopyVaultSecret(secret: string): $CancellablePromise<void> {
     return $Call.ByID(3868872474, secret);
 }
 
-export function CreateFolder(name: string): $CancellablePromise<vault$0.Folder> {
-    return $Call.ByID(239305947, name);
+export function CreateFolder(name: string, parentID: string): $CancellablePromise<vault$0.Folder> {
+    return $Call.ByID(239305947, name, parentID);
 }
 
 export function CreateNote(title: string): $CancellablePromise<vault$0.Note> {
@@ -127,6 +127,10 @@ export function ListNotes(): $CancellablePromise<vault$0.NoteSummary[] | null> {
     return $Call.ByID(888598820);
 }
 
+export function ListRecentVaultPaths(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(1694639620);
+}
+
 export function LockFolder(id: string, password: string): $CancellablePromise<vault$0.Folder> {
     return $Call.ByID(1628193172, id, password);
 }
@@ -137,6 +141,10 @@ export function LockFolderSession(id: string): $CancellablePromise<void> {
 
 export function LockVault(): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(3801710036);
+}
+
+export function MoveFolder(id: string, parentID: string): $CancellablePromise<vault$0.Folder> {
+    return $Call.ByID(4062408878, id, parentID);
 }
 
 export function MoveNote(id: string, folderID: string): $CancellablePromise<vault$0.Note> {

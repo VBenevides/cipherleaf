@@ -1608,6 +1608,76 @@ a:focus-visible {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.vault-selector {
+  position: relative;
+  margin-top: 7px;
+}
+
+.vault-selector-button,
+.vault-selector-menu button {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  color: #747067;
+  border: 1px solid #d4cfc2;
+  background: rgba(255, 255, 255, 0.43);
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+}
+
+.vault-selector-button {
+  height: 29px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 7px;
+}
+
+.vault-selector-button span,
+.vault-selector-menu button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-selector-button small {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.vault-selector-button:hover,
+.vault-selector-menu button:hover,
+.vault-selector-menu button.active {
+  color: var(--green-dark);
+  border-color: #aeb8aa;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.vault-selector-menu {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #d4cfc2;
+  border-radius: 7px;
+  box-shadow: 0 8px 20px rgba(50, 55, 48, 0.16);
+}
+
+.vault-selector-menu button {
+  height: 29px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+}
+
+.vault-selector-menu button + button {
+  border-top: 1px solid #e0dbd0;
+}
+
 .editor-shell {
   grid-column: 2;
   grid-row: 2;
@@ -3516,6 +3586,9 @@ a:focus-visible {
 
 :root[data-theme="dark"] .search-box,
 :root[data-theme="dark"] .lock-button,
+:root[data-theme="dark"] .vault-selector-button,
+:root[data-theme="dark"] .vault-selector-menu,
+:root[data-theme="dark"] .vault-selector-menu button,
 :root[data-theme="dark"] .folder-list-item:hover,
 :root[data-theme="dark"] .folder-list-item.active,
 :root[data-theme="dark"] .note-list-item:hover,
@@ -3523,6 +3596,10 @@ a:focus-visible {
   color: var(--ink);
   border-color: var(--line);
   background: rgba(76, 86, 106, 0.36);
+}
+
+:root[data-theme="dark"] .vault-selector-menu button + button {
+  border-color: var(--line);
 }
 
 :root[data-theme="dark"] .search-box input,
@@ -3620,7 +3697,7 @@ a:focus-visible {
 .global-search-scrim {
   position: fixed;
   inset: 0;
-  z-index: 9000;
+  z-index: 150;
   background: rgba(20, 20, 24, 0.45);
   display: flex;
   align-items: flex-start;

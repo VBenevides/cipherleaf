@@ -311,17 +311,30 @@ func (s *Store) ListFolders() ([]Folder, error) {
 	return result, nil
 }
 
-func (s *Store) CreateFolder(name string) (Folder, error) {
+func (s *Store) CreateFolder(name string, parentIDs ...string) (Folder, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
+		return Folder{}, err
+	}
+	parentID := ""
+	if len(parentIDs) > 0 {
+		parentID = parentIDs[0]
+	}
+	if len(parentIDs) > 1 {
+		return Folder{}, errors.New("only one parent folder is allowed")
+	}
+	if !s.folderExistsLocked(parentID) {
+		return Folder{}, errors.New("parent folder not found")
+	}
+	if err := s.requireFolderAccessibleLocked(parentID); err != nil {
 		return Folder{}, err
 	}
 	name, err := normalizeFolderName(name)
 	if err != nil {
 		return Folder{}, err
 	}
-	if s.folderNameExistsLocked(name, "") {
+	if s.folderNameExistsLocked(name, parentID, "") {
 		return Folder{}, errors.New("a folder with this name already exists")
 	}
 	id, err := randomID(16)
@@ -329,7 +342,7 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 		return Folder{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	folder := Folder{ID: id, Name: name, Order: s.nextFolderOrderLocked(), SortMode: "manual", CreatedAt: now, UpdatedAt: now}
+	folder := Folder{ID: id, Name: name, ParentID: parentID, Order: s.nextFolderOrderLocked(parentID), SortMode: "manual", CreatedAt: now, UpdatedAt: now}
 	s.manifest.Folders = append(s.manifest.Folders, folder)
 	if err := s.saveManifestLocked(); err != nil {
 		s.manifest.Folders = s.manifest.Folders[:len(s.manifest.Folders)-1]
@@ -352,7 +365,7 @@ func (s *Store) RenameFolder(id, name string) (Folder, error) {
 	if err != nil {
 		return Folder{}, err
 	}
-	if s.folderNameExistsLocked(name, id) {
+	if s.folderNameExistsLocked(name, s.manifest.Folders[index].ParentID, id) {
 		return Folder{}, errors.New("a folder with this name already exists")
 	}
 	original := s.manifest.Folders[index]
@@ -398,6 +411,50 @@ func (s *Store) ReorderFolders(orderedIDs []string) error {
 	return nil
 }
 
+// MoveFolder places a folder under a new parent. A folder cannot be nested
+// within itself or one of its descendants.
+func (s *Store) MoveFolder(id, parentID string) (Folder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return Folder{}, err
+	}
+	index, found := s.findFolderLocked(id)
+	if !found {
+		return Folder{}, errors.New("folder not found")
+	}
+	if id == parentID {
+		return Folder{}, errors.New("a folder cannot contain itself")
+	}
+	if !s.folderExistsLocked(parentID) {
+		return Folder{}, errors.New("parent folder not found")
+	}
+	if s.folderIsDescendantLocked(parentID, id) {
+		return Folder{}, errors.New("a folder cannot contain one of its ancestors")
+	}
+	if err := s.requireFolderAccessibleLocked(id); err != nil {
+		return Folder{}, err
+	}
+	if err := s.requireFolderAccessibleLocked(parentID); err != nil {
+		return Folder{}, err
+	}
+	if s.manifest.Folders[index].ParentID == parentID {
+		return s.manifest.Folders[index], nil
+	}
+	if s.folderNameExistsLocked(s.manifest.Folders[index].Name, parentID, id) {
+		return Folder{}, errors.New("a folder with this name already exists")
+	}
+	original := s.manifest.Folders[index]
+	s.manifest.Folders[index].ParentID = parentID
+	s.manifest.Folders[index].Order = s.nextFolderOrderLocked(parentID)
+	s.manifest.Folders[index].UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.saveManifestLocked(); err != nil {
+		s.manifest.Folders[index] = original
+		return Folder{}, err
+	}
+	return s.manifest.Folders[index], nil
+}
+
 func (s *Store) SetFolderHidden(id string, hidden bool) (Folder, error) {
 	return s.updateFolderLocked(id, func(folder *Folder) {
 		folder.Hidden = hidden
@@ -426,7 +483,11 @@ func (s *Store) LockFolder(id, password string) (Folder, error) {
 		s.manifest.Folders[index] = original
 		return Folder{}, err
 	}
-	delete(s.authorizedFolders, id)
+	for authorizedID := range s.authorizedFolders {
+		if authorizedID == id || s.folderIsDescendantLocked(authorizedID, id) {
+			delete(s.authorizedFolders, authorizedID)
+		}
+	}
 	return s.manifest.Folders[index], nil
 }
 
@@ -488,7 +549,11 @@ func (s *Store) LockFolderSession(id string) error {
 	if !folder.Locked {
 		return errors.New("folder is not locked")
 	}
-	delete(s.authorizedFolders, id)
+	for authorizedID := range s.authorizedFolders {
+		if authorizedID == id || s.folderIsDescendantLocked(authorizedID, id) {
+			delete(s.authorizedFolders, authorizedID)
+		}
+	}
 	return nil
 }
 
@@ -532,6 +597,11 @@ func (s *Store) DeleteFolder(id string) error {
 	for _, note := range s.manifest.Notes {
 		if note.FolderID == id {
 			return errors.New("folder is not empty; move or delete its notes first")
+		}
+	}
+	for _, folder := range s.manifest.Folders {
+		if folder.ParentID == id {
+			return errors.New("folder is not empty; move or delete its subfolders first")
 		}
 	}
 	original := s.manifest.Folders
@@ -1881,7 +1951,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			}
 			found = true
 			updated, _ := time.Parse(time.RFC3339Nano, local.UpdatedAt)
-			if deleted.ModifiedAt <= updated.Unix() || noteReferencesFolder(mergedNotes, deleted.ID) {
+			if deleted.ModifiedAt <= updated.Unix() || noteReferencesFolder(mergedNotes, deleted.ID) || folderHasChild(mergedFolders, deleted.ID) {
 				acceptTombstone = false
 				break
 			}
@@ -1899,6 +1969,9 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 		}
 	}
 	sortFolders(mergedFolders)
+	if err := validateFolderHierarchy(mergedFolders); err != nil {
+		return MergeResult{}, fmt.Errorf("merged folder hierarchy %w", err)
+	}
 
 	if result.UpToDate {
 		return result, nil
@@ -2120,7 +2193,6 @@ func (s *Store) readRemoteSnapshotLocked(
 	remoteFolders := slices.Clone(folderManifest.Folders)
 	sortFolders(remoteFolders)
 	seenFolders := make(map[string]struct{}, len(remoteFolders))
-	seenFolderNames := make(map[string]struct{}, len(remoteFolders))
 	for _, folder := range remoteFolders {
 		if !validID(folder.ID) {
 			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains an invalid folder ID")
@@ -2138,12 +2210,10 @@ func (s *Store) readRemoteSnapshotLocked(
 		if _, duplicate := seenFolders[folder.ID]; duplicate {
 			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains a duplicate folder")
 		}
-		nameKey := strings.ToLower(folder.Name)
-		if _, duplicate := seenFolderNames[nameKey]; duplicate {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains duplicate folder names")
-		}
 		seenFolders[folder.ID] = struct{}{}
-		seenFolderNames[nameKey] = struct{}{}
+	}
+	if err := validateFolderHierarchy(remoteFolders); err != nil {
+		return authenticatedRemoteSnapshot{}, fmt.Errorf("remote folder metadata %w", err)
 	}
 	remoteDeletedFolders := slices.Clone(folderManifest.Deleted)
 	sortTombstones(remoteDeletedFolders)
@@ -2486,18 +2556,22 @@ func (s *Store) requireNoteAccessibleLocked(note NoteSummary) error {
 }
 
 func (s *Store) requireFolderAccessibleLocked(id string) error {
-	if id == "" {
-		return nil
-	}
-	folder, found := s.folderByIDLocked(id)
-	if !found {
-		return errors.New("folder not found")
-	}
-	if !folder.Locked {
-		return nil
-	}
-	if _, authorized := s.authorizedFolders[id]; !authorized {
-		return ErrFolderLocked
+	seen := make(map[string]struct{})
+	for id != "" {
+		if _, duplicate := seen[id]; duplicate {
+			return errors.New("folder hierarchy contains a cycle")
+		}
+		seen[id] = struct{}{}
+		folder, found := s.folderByIDLocked(id)
+		if !found {
+			return errors.New("folder not found")
+		}
+		if folder.Locked {
+			if _, authorized := s.authorizedFolders[id]; !authorized {
+				return ErrFolderLocked
+			}
+		}
+		id = folder.ParentID
 	}
 	return nil
 }
@@ -2527,11 +2601,30 @@ func (s *Store) folderExistsLocked(id string) bool {
 	return found
 }
 
-func (s *Store) folderNameExistsLocked(name, excludingID string) bool {
+func (s *Store) folderNameExistsLocked(name, parentID, excludingID string) bool {
 	for _, folder := range s.manifest.Folders {
-		if folder.ID != excludingID && strings.EqualFold(folder.Name, name) {
+		if folder.ID != excludingID && folder.ParentID == parentID && strings.EqualFold(folder.Name, name) {
 			return true
 		}
+	}
+	return false
+}
+
+func (s *Store) folderIsDescendantLocked(id, ancestorID string) bool {
+	seen := make(map[string]struct{})
+	for id != "" {
+		if id == ancestorID {
+			return true
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return true
+		}
+		seen[id] = struct{}{}
+		folder, found := s.folderByIDLocked(id)
+		if !found {
+			return false
+		}
+		id = folder.ParentID
 	}
 	return false
 }
@@ -2696,6 +2789,9 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 		if folder.Locked && folder.LockPasswordHash == "" {
 			return manifest{}, errors.New("manifest contains a locked folder without a verifier")
 		}
+	}
+	if err := validateFolderHierarchy(result.Folders); err != nil {
+		return manifest{}, fmt.Errorf("manifest %w", err)
 	}
 	for _, item := range result.Notes {
 		if !validID(item.ID) {
@@ -3801,14 +3897,60 @@ func sortFolders(items []Folder) {
 	})
 }
 
-func (s *Store) nextFolderOrderLocked() int {
+func (s *Store) nextFolderOrderLocked(parentID string) int {
 	next := 0
 	for _, folder := range s.manifest.Folders {
-		if folder.Order >= next {
+		if folder.ParentID == parentID && folder.Order >= next {
 			next = folder.Order + 1
 		}
 	}
 	return next
+}
+
+func folderHasChild(folders []Folder, parentID string) bool {
+	for _, folder := range folders {
+		if folder.ParentID == parentID {
+			return true
+		}
+	}
+	return false
+}
+
+func validateFolderHierarchy(folders []Folder) error {
+	byID := make(map[string]Folder, len(folders))
+	names := make(map[string]struct{}, len(folders))
+	for _, folder := range folders {
+		if _, duplicate := byID[folder.ID]; duplicate {
+			return errors.New("contains a duplicate folder")
+		}
+		byID[folder.ID] = folder
+		nameKey := folder.ParentID + "\x00" + strings.ToLower(folder.Name)
+		if _, duplicate := names[nameKey]; duplicate {
+			return errors.New("contains duplicate folder names")
+		}
+		names[nameKey] = struct{}{}
+	}
+	for _, folder := range folders {
+		if folder.ParentID == "" {
+			continue
+		}
+		if folder.ParentID == folder.ID {
+			return errors.New("contains a folder that parents itself")
+		}
+		if _, found := byID[folder.ParentID]; !found {
+			return errors.New("contains a folder with a missing parent")
+		}
+		seen := map[string]struct{}{folder.ID: {}}
+		for parentID := folder.ParentID; parentID != ""; {
+			if _, duplicate := seen[parentID]; duplicate {
+				return errors.New("contains a folder hierarchy cycle")
+			}
+			seen[parentID] = struct{}{}
+			parent := byID[parentID]
+			parentID = parent.ParentID
+		}
+	}
+	return nil
 }
 
 func normalizeSortMode(mode string) string {
