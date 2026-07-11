@@ -228,6 +228,7 @@ type countingGitTransport struct {
 
 type recordingGitTransport struct {
 	arguments [][]string
+	output    []byte
 }
 
 func (r *recordingGitTransport) Run(
@@ -237,7 +238,22 @@ func (r *recordingGitTransport) Run(
 	_ []string,
 ) ([]byte, error) {
 	r.arguments = append(r.arguments, slices.Clone(args))
-	return nil, nil
+	return r.output, nil
+}
+
+func TestStageChangedSnapshotUsesChangedPathsOnly(t *testing.T) {
+	runner := &recordingGitTransport{output: []byte(" M sync/manifest.enc\x00?? objects/aa/" + strings.Repeat("a", 32) + ".enc\x00")}
+	provider := &GitHubSSHProvider{runner: runner}
+	if err := provider.stageChangedSnapshot(context.Background(), "/cache"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.arguments) != 2 {
+		t.Fatalf("commands = %d, want status and add", len(runner.arguments))
+	}
+	add := strings.Join(runner.arguments[1], " ")
+	if strings.Contains(add, " -- .") || !strings.Contains(add, "sync/manifest.enc") || !strings.Contains(add, "objects/aa/") {
+		t.Fatalf("incremental add command = %q", add)
+	}
 }
 
 func TestRecordPushedTipUsesNoNetworkOrGarbageCollection(t *testing.T) {
@@ -377,6 +393,61 @@ func (successfulDownloadProvider) Pull(
 	_ SyncSettings,
 ) (PullResult, error) {
 	return PullResult{}, errors.New("not used")
+}
+
+type revisionSnapshot struct{ revision string }
+
+func (s *revisionSnapshot) SnapshotRevision() (string, error) { return s.revision, nil }
+func (s *revisionSnapshot) ExportRemoteSnapshot(string) error { return nil }
+func (s *revisionSnapshot) ValidateRemoteSnapshot(string) (bool, error) {
+	return true, nil
+}
+
+type countingPushProvider struct {
+	successfulDownloadProvider
+	pushes int
+}
+
+func (p *countingPushProvider) Push(
+	_ context.Context,
+	settings SyncSettings,
+	_ RemoteSnapshotStore,
+) (PushResult, error) {
+	p.pushes++
+	return PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("c", 40)}, nil
+}
+
+func TestManagerSkipsPushForUnchangedSnapshotRevision(t *testing.T) {
+	vaultID := strings.Repeat("a", 32)
+	settingsStore := NewFileSettingsStore(t.TempDir())
+	settings := DefaultSettings(vaultID)
+	settings.Linked = true
+	settings.RepositorySSH = "git@github.com:acme/notes.git"
+	settings.PrivateKeyPath = "/key"
+	settings.RepositoryPrivate = true
+	settings.LastSnapshotRev = "same"
+	settings.LastCommit = strings.Repeat("b", 40)
+	if err := settingsStore.Save(settings); err != nil {
+		t.Fatal(err)
+	}
+	provider := &countingPushProvider{}
+	manager := NewManager(settingsStore, &successfulConnectionTester{})
+	manager.provider = provider
+	snapshot := &revisionSnapshot{revision: "same"}
+	result, err := manager.PushVault(context.Background(), vaultID, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UpToDate || provider.pushes != 0 {
+		t.Fatalf("unchanged result = %#v, pushes = %d", result, provider.pushes)
+	}
+	snapshot.revision = "changed"
+	if _, err := manager.PushVault(context.Background(), vaultID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if provider.pushes != 1 {
+		t.Fatalf("changed snapshot pushes = %d, want 1", provider.pushes)
+	}
 }
 
 func TestManagerDownloadsThenActivatesVaultSettings(t *testing.T) {

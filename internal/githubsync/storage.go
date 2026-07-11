@@ -34,6 +34,8 @@ type diskSettings struct {
 	RepositoryPrivate bool   `json:"repository_private"`
 	Linked            bool   `json:"linked"`
 	LastSyncedAt      int64  `json:"last_synced_at"`
+	LastSnapshotRev   string `json:"last_snapshot_rev,omitempty"`
+	LastCommit        string `json:"last_commit,omitempty"`
 }
 
 func NewFileSettingsStore(root string) *FileSettingsStore {
@@ -158,6 +160,8 @@ func toDiskSettings(value SyncSettings) diskSettings {
 		RepositoryPrivate: value.RepositoryPrivate,
 		Linked:            value.Linked,
 		LastSyncedAt:      value.LastSyncedAt,
+		LastSnapshotRev:   value.LastSnapshotRev,
+		LastCommit:        value.LastCommit,
 	}
 }
 
@@ -172,5 +176,7 @@ func fromDiskSettings(value diskSettings) SyncSettings {
 		RepositoryPrivate: value.RepositoryPrivate,
 		Linked:            value.Linked,
 		LastSyncedAt:      value.LastSyncedAt,
+		LastSnapshotRev:   value.LastSnapshotRev,
+		LastCommit:        value.LastCommit,
 	}
 }

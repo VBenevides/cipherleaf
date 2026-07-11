@@ -34,6 +34,8 @@ type SyncSettings struct {
 	RepositoryPrivate bool   `json:"repositoryPrivate"`
 	Linked            bool   `json:"linked"`
 	LastSyncedAt      int64  `json:"lastSyncedAt"`
+	LastSnapshotRev   string `json:"lastSnapshotRev"`
+	LastCommit        string `json:"lastCommit"`
 }
 
 type ConnectionResult struct {

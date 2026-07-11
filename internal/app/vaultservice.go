@@ -23,12 +23,20 @@ import (
 )
 
 type VaultService struct {
-	mu      sync.RWMutex
-	app     *application.App
-	store   *vault.Store
-	recent  *appsession.RecentVaultStore
-	secrets *secretstore.Store
-	sync    *githubsync.Manager
+	mu             sync.RWMutex
+	app            *application.App
+	store          *vault.Store
+	recent         *appsession.RecentVaultStore
+	secrets        *secretstore.Store
+	sync           *githubsync.Manager
+	syncWorkerOnce sync.Once
+	syncJobs       chan syncJob
+}
+
+type syncJob struct{ done chan syncJobResult }
+type syncJobResult struct {
+	result SyncResult
+	err    error
 }
 
 // RememberTTL is the default duration a vault secret stays in the OS keychain
@@ -53,6 +61,14 @@ type SyncResult struct {
 	Pull       githubsync.PullResult `json:"pull"`
 	Push       githubsync.PushResult `json:"push"`
 	Merge      vault.MergeResult     `json:"merge"`
+	Timings    SyncTimings           `json:"timings"`
+}
+
+type SyncTimings struct {
+	PullMilliseconds  int64 `json:"pullMilliseconds"`
+	MergeMilliseconds int64 `json:"mergeMilliseconds"`
+	PushMilliseconds  int64 `json:"pushMilliseconds"`
+	TotalMilliseconds int64 `json:"totalMilliseconds"`
 }
 
 func NewVaultService() *VaultService {
@@ -699,6 +715,23 @@ func (s *VaultService) OpenGitTerminal() error {
 // repository. Local notes newer than their remote counterpart are preserved;
 // remote notes newer than local replace the local copy.
 func (s *VaultService) SyncNow() (SyncResult, error) {
+	s.syncWorkerOnce.Do(func() {
+		s.syncJobs = make(chan syncJob, 1)
+		go func() {
+			for job := range s.syncJobs {
+				result, err := s.syncNow()
+				job.done <- syncJobResult{result: result, err: err}
+			}
+		}()
+	})
+	job := syncJob{done: make(chan syncJobResult, 1)}
+	s.syncJobs <- job
+	completed := <-job.done
+	return completed.result, completed.err
+}
+
+func (s *VaultService) syncNow() (SyncResult, error) {
+	startedAt := time.Now()
 	vaultID, err := s.unlockedVaultID()
 	if err != nil {
 		return SyncResult{}, err
@@ -706,13 +739,16 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result := SyncResult{Linked: true}
+		phaseStartedAt := time.Now()
 		pull, pullErr := s.sync.PullVault(context.Background(), vaultID)
 		if pullErr != nil {
 			return SyncResult{}, pullErr
 		}
 		result.Pull = pull
+		result.Timings.PullMilliseconds = time.Since(phaseStartedAt).Milliseconds()
 		result.Branch = pull.Branch
 		result.LastCommit = pull.LastCommit
+		phaseStartedAt = time.Now()
 		if pull.UpToDate {
 			result.Merge = vault.MergeResult{UpToDate: true}
 		} else if pull.StagingPath != "" {
@@ -732,6 +768,9 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 		} else {
 			result.Merge = vault.MergeResult{UpToDate: true}
 		}
+		result.Timings.MergeMilliseconds = time.Since(phaseStartedAt).Milliseconds()
+		phaseStartedAt = time.Now()
+		beforePushRevision, _ := s.store.SnapshotRevision()
 		push, pushErr := s.sync.PushVault(context.Background(), vaultID, s.store)
 		if errors.Is(pushErr, githubsync.ErrRemoteAdvanced) && attempt+1 < maxAttempts {
 			continue
@@ -740,8 +779,16 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 			result.Warning = "Pull succeeded, but the push could not be completed: " + pushErr.Error()
 			return result, nil
 		}
+		afterPushRevision, _ := s.store.SnapshotRevision()
+		if beforePushRevision != "" && afterPushRevision != beforePushRevision && attempt+1 < maxAttempts {
+			continue
+		}
 		result.Push = push
-		result.LastCommit = push.LastCommit
+		result.Timings.PushMilliseconds = time.Since(phaseStartedAt).Milliseconds()
+		result.Timings.TotalMilliseconds = time.Since(startedAt).Milliseconds()
+		if push.LastCommit != "" {
+			result.LastCommit = push.LastCommit
+		}
 		result.Message = push.Message
 		if result.Merge.UpToDate && push.UpToDate {
 			result.Message = "The vault is already in sync with GitHub."

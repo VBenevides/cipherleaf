@@ -458,9 +458,7 @@ func (p *GitHubSSHProvider) push(
 	if err := validateWorkingTreeLayout(cachePath); err != nil {
 		return PushResult{}, err
 	}
-	pathspecs := []string{"-C", cachePath, "add", "-A", "--", "."}
-	if output, err := p.runner.Run(contextWithTimeout, "git", pathspecs, localGitEnvironment()); err != nil {
-		_ = output
+	if err := p.stageChangedSnapshot(contextWithTimeout, cachePath); err != nil {
 		return PushResult{}, errors.New("Git could not stage the encrypted vault snapshot")
 	}
 	staged, err := p.runner.Run(
@@ -534,6 +532,35 @@ func (p *GitHubSSHProvider) push(
 		LastCommit: commit,
 		UpToDate:   false,
 	}, nil
+}
+
+func (p *GitHubSSHProvider) stageChangedSnapshot(ctx context.Context, cachePath string) error {
+	output, err := p.runner.Run(ctx, "git", []string{
+		"-C", cachePath, "status", "--porcelain=v1", "-z", "--untracked-files=all",
+	}, localGitEnvironment())
+	if err != nil {
+		return err
+	}
+	entries := bytes.Split(output, []byte{0})
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if len(entry) < 4 || entry[2] != ' ' {
+			continue
+		}
+		path := string(entry[3:])
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	for len(paths) > 0 {
+		count := min(len(paths), 256)
+		arguments := append([]string{"-C", cachePath, "add", "-A", "--"}, paths[:count]...)
+		if _, err := p.runner.Run(ctx, "git", arguments, localGitEnvironment()); err != nil {
+			return err
+		}
+		paths = paths[count:]
+	}
+	return nil
 }
 
 // Pull fetches the remote branch into the persistent encrypted cache and only

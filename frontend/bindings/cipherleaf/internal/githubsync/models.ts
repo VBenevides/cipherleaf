@@ -58,4 +58,6 @@ export interface SyncSettings {
     "repositoryPrivate": boolean;
     "linked": boolean;
     "lastSyncedAt": number;
+    "lastSnapshotRev": string;
+    "lastCommit": string;
 }

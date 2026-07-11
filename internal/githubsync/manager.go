@@ -93,6 +93,18 @@ type RemoteSnapshotStore interface {
 	ValidateRemoteSnapshot(source string) (bool, error)
 }
 
+type snapshotRevisionStore interface {
+	SnapshotRevision() (string, error)
+}
+
+func snapshotRevision(snapshot RemoteSnapshotStore) (string, error) {
+	versioned, ok := snapshot.(snapshotRevisionStore)
+	if !ok {
+		return "", nil
+	}
+	return versioned.SnapshotRevision()
+}
+
 func (m *Manager) LinkVault(
 	ctx context.Context,
 	vaultID string,
@@ -113,6 +125,8 @@ func (m *Manager) LinkVault(
 		return LinkResult{}, err
 	}
 	validated.Linked = true
+	validated.LastCommit = result.LastCommit
+	validated.LastSnapshotRev, _ = snapshotRevision(snapshot)
 	if err := m.settings.Save(validated); err != nil {
 		return LinkResult{}, err
 	}
@@ -217,11 +231,24 @@ func (m *Manager) PushVault(
 	if m.provider == nil {
 		return PushResult{}, errors.New("GitHub synchronization provider is not available")
 	}
+	revision, err := snapshotRevision(snapshot)
+	if err != nil {
+		return PushResult{}, err
+	}
+	if revision != "" && revision == settings.LastSnapshotRev && settings.LastCommit != "" {
+		return PushResult{
+			Linked: true, Branch: settings.Branch,
+			Message: "The local vault is already in sync with GitHub.", UpToDate: true,
+		}, nil
+	}
 	result, err := m.provider.Push(ctx, settings, snapshot)
 	if err != nil {
 		return PushResult{}, err
 	}
-	m.recordSync(vaultID)
+	settings.LastSyncedAt = time.Now().UTC().Unix()
+	settings.LastSnapshotRev = revision
+	settings.LastCommit = result.LastCommit
+	_ = m.settings.Save(settings)
 	return result, nil
 }
 

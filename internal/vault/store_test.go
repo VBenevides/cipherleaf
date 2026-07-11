@@ -76,6 +76,32 @@ func TestVaultLifecycleStoresNoPlaintext(t *testing.T) {
 	}
 }
 
+func BenchmarkSnapshotRevision(b *testing.B) {
+	for _, noteCount := range []int{0, 100, 1000} {
+		b.Run(fmt.Sprintf("notes_%d", noteCount), func(b *testing.B) {
+			store := NewStore()
+			if _, err := store.Create(b.TempDir(), "benchmark-secret"); err != nil {
+				b.Fatal(err)
+			}
+			for index := 0; index < noteCount; index++ {
+				note, err := store.CreateNote(fmt.Sprintf("Note %d", index))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := store.SaveNote(note.ID, note.Title, "benchmark content"); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := store.SnapshotRevision(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func TestLockedFolderRequiresBackendAuthorization(t *testing.T) {
 	store := NewStore()
 	root := t.TempDir()
