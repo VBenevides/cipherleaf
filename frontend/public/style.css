@@ -2858,6 +2858,10 @@ a:focus-visible {
   );
 }
 
+.live-markdown-editor .cm-live-toggle-line .cm-live-list-marker {
+  margin-left: 1.35em;
+}
+
 .live-markdown-editor .cm-live-horizontal-rule-line {
   min-height: 1.8em;
   display: flex;
