@@ -98,7 +98,7 @@ function EditorLoading() {
 }
 
 const AUTO_LOCK_MS = 15 * 60 * 1000;
-const AUTOSAVE_DELAY_MS = 10 * 1000;
+const AUTOSAVE_DELAY_MS = 60 * 1000;
 const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
 const EDITOR_FONT_STORE = "appearance";
 const EDITOR_FONT_KEY = "editor-font";
@@ -338,6 +338,7 @@ function App() {
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
+  const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -925,7 +926,7 @@ function App() {
       void persistCurrent();
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [dirty, note?.id]);
+  }, [autosaveVersion, dirty, note?.id]);
 
   useEffect(() => {
     if (!session || session.locked) return;
@@ -1836,6 +1837,7 @@ function App() {
 
   const markDirty = () => {
     editVersion.current++;
+    setAutosaveVersion(editVersion.current);
     dirtyRef.current = true;
     setDirty((current) => current ? current : true);
     setSaveState((current) => current === "idle" ? current : "idle");

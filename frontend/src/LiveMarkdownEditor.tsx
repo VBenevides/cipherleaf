@@ -126,6 +126,17 @@ function persistCollapsedPositions(_state: EditorState, noteID: string, collapse
 }
 
 const externalDocumentUpdate = Annotation.define<boolean>();
+
+function preservedSelection(editor: EditorView, length: number) {
+  const selection = editor.state.selection;
+  return EditorSelection.create(
+    selection.ranges.map((range) => EditorSelection.range(
+      Math.min(range.anchor, length),
+      Math.min(range.head, length),
+    )),
+    selection.mainIndex,
+  );
+}
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
 });
@@ -2389,6 +2400,7 @@ export default function LiveMarkdownEditor({
 
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: normalizedValue },
+      selection: preservedSelection(editor, normalizedValue.length),
       annotations: externalDocumentUpdate.of(true),
     });
     if (normalizedValue !== value) {

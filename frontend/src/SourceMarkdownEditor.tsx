@@ -23,6 +23,17 @@ type Props = {
 
 const externalDocumentUpdate = Annotation.define<boolean>();
 
+function preservedSelection(editor: EditorView, length: number) {
+  const selection = editor.state.selection;
+  return EditorSelection.create(
+    selection.ranges.map((range) => EditorSelection.range(
+      Math.min(range.anchor, length),
+      Math.min(range.head, length),
+    )),
+    selection.mainIndex,
+  );
+}
+
 export default function SourceMarkdownEditor({
   noteID,
   value,
@@ -124,6 +135,7 @@ export default function SourceMarkdownEditor({
     if (!editor || editor.state.doc.toString() === value) return;
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: value },
+      selection: preservedSelection(editor, value.length),
       annotations: externalDocumentUpdate.of(true),
     });
   }, [value]);
