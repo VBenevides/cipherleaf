@@ -41,4 +41,6 @@ export interface SyncTimings {
     "mergeMilliseconds": number;
     "pushMilliseconds": number;
     "totalMilliseconds": number;
+    "transportMilliseconds": number;
+    "localMilliseconds": number;
 }

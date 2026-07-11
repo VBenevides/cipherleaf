@@ -3,6 +3,8 @@ package githubsync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,7 +171,7 @@ func prepareSSHFiles(runtimeDir string) (string, string, error) {
 		return knownHosts, wrapper, nil
 	}
 	wrapper := filepath.Join(runtimeDir, "cipherleaf-ssh")
-	script := "#!/bin/sh\nexec ssh -i \"$CIPHERLEAF_SSH_KEY\" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$CIPHERLEAF_KNOWN_HOSTS\" \"$@\"\n"
+	script := "#!/bin/sh\nexec ssh -i \"$CIPHERLEAF_SSH_KEY\" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$CIPHERLEAF_KNOWN_HOSTS\" -o ControlMaster=auto -o ControlPersist=30 -o ControlPath=\"$CIPHERLEAF_SSH_CONTROL_PATH\" \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
 		return "", "", errors.New("could not prepare the secure SSH command")
 	}
@@ -188,6 +190,8 @@ type GitHubSSHProvider struct {
 	runtimeDir string
 	cacheRoot  string
 	timeout    time.Duration
+	prefetchMu sync.Mutex
+	prefetched map[string]time.Time
 }
 
 func NewGitHubSSHProvider(runtimeDir, cacheRoot string) *GitHubSSHProvider {
@@ -196,7 +200,32 @@ func NewGitHubSSHProvider(runtimeDir, cacheRoot string) *GitHubSSHProvider {
 		runtimeDir: runtimeDir,
 		cacheRoot:  cacheRoot,
 		timeout:    2 * time.Minute,
+		prefetched: make(map[string]time.Time),
 	}
+}
+
+func (p *GitHubSSHProvider) Prefetch(ctx context.Context, settings SyncSettings) error {
+	knownHosts, wrapper, err := prepareSSHFiles(p.runtimeDir)
+	if err != nil {
+		return err
+	}
+	cachePath := p.cacheRepositoryPath(settings)
+	if _, err := os.Stat(filepath.Join(cachePath, ".git")); err != nil {
+		return nil
+	}
+	contextWithTimeout, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+	output, err := p.runner.Run(contextWithTimeout, "git", []string{
+		"-C", cachePath, "fetch", "--quiet", "--prune", "--depth=1", "origin",
+		"+refs/heads/" + settings.Branch + ":refs/remotes/origin/" + settings.Branch,
+	}, secureGitEnvironment(settings, knownHosts, wrapper))
+	if err != nil {
+		return transportError(contextWithTimeout, output)
+	}
+	p.prefetchMu.Lock()
+	p.prefetched[cachePath] = time.Now()
+	p.prefetchMu.Unlock()
+	return nil
 }
 
 // GitWorkingDirectory returns the persistent local checkout for a linked vault.
@@ -430,6 +459,7 @@ func (p *GitHubSSHProvider) push(
 	snapshot RemoteSnapshotStore,
 	force bool,
 ) (PushResult, error) {
+	localStartedAt := time.Now()
 	if _, err := exec.LookPath("git"); err != nil {
 		return PushResult{}, errors.New("Git is not installed or is not available on PATH")
 	}
@@ -507,7 +537,10 @@ func (p *GitHubSSHProvider) push(
 		"origin",
 		"HEAD:refs/heads/"+settings.Branch,
 	)
+	localMilliseconds := time.Since(localStartedAt).Milliseconds()
+	transportStartedAt := time.Now()
 	output, err := p.runner.Run(contextWithTimeout, "git", pushArguments, environment)
+	transportMilliseconds := time.Since(transportStartedAt).Milliseconds()
 	if err != nil {
 		if isNonFastForward(output) {
 			return PushResult{}, ErrRemoteAdvanced
@@ -526,11 +559,13 @@ func (p *GitHubSSHProvider) push(
 		return PushResult{}, err
 	}
 	return PushResult{
-		Linked:     true,
-		Message:    map[bool]string{true: "The local encrypted vault snapshot replaced the remote branch.", false: "The encrypted vault snapshot was pushed to GitHub."}[force],
-		Branch:     settings.Branch,
-		LastCommit: commit,
-		UpToDate:   false,
+		Linked:                true,
+		Message:               map[bool]string{true: "The local encrypted vault snapshot replaced the remote branch.", false: "The encrypted vault snapshot was pushed to GitHub."}[force],
+		Branch:                settings.Branch,
+		LastCommit:            commit,
+		UpToDate:              false,
+		LocalMilliseconds:     localMilliseconds,
+		TransportMilliseconds: transportMilliseconds,
 	}, nil
 }
 
@@ -603,12 +638,16 @@ func (p *GitHubSSHProvider) Pull(
 		"fetch", "--quiet", "--prune", "--depth=1", "origin",
 		"+refs/heads/" + settings.Branch + ":refs/remotes/origin/" + settings.Branch,
 	}
-	output, err := p.runner.Run(
-		contextWithTimeout,
-		"git",
-		fetchArguments,
-		environment,
-	)
+	p.prefetchMu.Lock()
+	prefetchedAt, prefetched := p.prefetched[cachePath]
+	delete(p.prefetched, cachePath)
+	p.prefetchMu.Unlock()
+	transportStartedAt := time.Now()
+	var output []byte
+	if !prefetched || time.Since(prefetchedAt) > 30*time.Second {
+		output, err = p.runner.Run(contextWithTimeout, "git", fetchArguments, environment)
+	}
+	transportMilliseconds := time.Since(transportStartedAt).Milliseconds()
 	if err != nil {
 		return PullResult{}, transportError(contextWithTimeout, output)
 	}
@@ -618,13 +657,14 @@ func (p *GitHubSSHProvider) Pull(
 	}
 	if previousCommit == remoteCommit {
 		return PullResult{
-			Linked:      true,
-			Message:     "The encrypted GitHub snapshot is unchanged.",
-			Branch:      settings.Branch,
-			LastCommit:  remoteCommit,
-			StagingPath: cachePath,
-			Temporary:   false,
-			UpToDate:    true,
+			Linked:                true,
+			Message:               "The encrypted GitHub snapshot is unchanged.",
+			Branch:                settings.Branch,
+			LastCommit:            remoteCommit,
+			StagingPath:           cachePath,
+			Temporary:             false,
+			UpToDate:              true,
+			TransportMilliseconds: transportMilliseconds,
 		}, nil
 	}
 	changed, err := p.changedRemotePaths(
@@ -652,13 +692,14 @@ func (p *GitHubSSHProvider) Pull(
 		return PullResult{}, err
 	}
 	return PullResult{
-		Linked:      true,
-		Message:     "The encrypted vault snapshot was pulled from GitHub.",
-		Branch:      settings.Branch,
-		LastCommit:  commit,
-		StagingPath: cachePath,
-		Temporary:   false,
-		UpToDate:    false,
+		Linked:                true,
+		Message:               "The encrypted vault snapshot was pulled from GitHub.",
+		Branch:                settings.Branch,
+		LastCommit:            commit,
+		StagingPath:           cachePath,
+		Temporary:             false,
+		UpToDate:              false,
+		TransportMilliseconds: transportMilliseconds,
 	}, nil
 }
 
@@ -1006,10 +1047,12 @@ func (p *GitHubSSHProvider) resolveReference(
 }
 
 func secureGitEnvironment(settings SyncSettings, knownHosts, wrapper string) []string {
+	controlID := sha256.Sum256([]byte(settings.VaultID + "\x00" + settings.RepositorySSH + "\x00" + settings.PrivateKeyPath))
 	return append(localGitEnvironment(),
 		"GIT_SSH="+wrapper,
 		"CIPHERLEAF_SSH_KEY="+settings.PrivateKeyPath,
 		"CIPHERLEAF_KNOWN_HOSTS="+knownHosts,
+		"CIPHERLEAF_SSH_CONTROL_PATH="+filepath.Join(filepath.Dir(wrapper), "mux-"+hex.EncodeToString(controlID[:8])),
 	)
 }
 

@@ -187,6 +187,57 @@ func TestMergedEnvironmentRemovesGitOverrides(t *testing.T) {
 	}
 }
 
+func TestSecureGitEnvironmentIsolatesMultiplexSockets(t *testing.T) {
+	first := SyncSettings{VaultID: "vault-one", RepositorySSH: "git@github.com:a/one.git", PrivateKeyPath: "/key"}
+	second := first
+	second.VaultID = "vault-two"
+	firstEnv := strings.Join(secureGitEnvironment(first, "/known", "/runtime/wrapper"), "\n")
+	secondEnv := strings.Join(secureGitEnvironment(second, "/known", "/runtime/wrapper"), "\n")
+	if !strings.Contains(firstEnv, "CIPHERLEAF_SSH_CONTROL_PATH=/runtime/mux-") || firstEnv == secondEnv {
+		t.Fatalf("multiplex environments are missing or not isolated:\n%s\n%s", firstEnv, secondEnv)
+	}
+}
+
+func BenchmarkGitHubSSHConnection(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip("SSH multiplexing uses the Unix wrapper")
+	}
+	repository := os.Getenv("CIPHERLEAF_BENCH_REPOSITORY")
+	key := os.Getenv("CIPHERLEAF_BENCH_SSH_KEY")
+	if repository == "" || key == "" {
+		b.Skip("set CIPHERLEAF_BENCH_REPOSITORY and CIPHERLEAF_BENCH_SSH_KEY")
+	}
+	runtimeDir := b.TempDir()
+	knownHosts, wrapper, err := prepareSSHFiles(runtimeDir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	settings := SyncSettings{VaultID: "connection-benchmark", RepositorySSH: repository, PrivateKeyPath: key}
+	environment := secureGitEnvironment(settings, knownHosts, wrapper)
+	controlPath := ""
+	for _, value := range environment {
+		if strings.HasPrefix(value, "CIPHERLEAF_SSH_CONTROL_PATH=") {
+			controlPath = strings.TrimPrefix(value, "CIPHERLEAF_SSH_CONTROL_PATH=")
+		}
+	}
+	runner := ExecCommandRunner{}
+	b.Run("cold", func(b *testing.B) {
+		for b.Loop() {
+			_ = os.Remove(controlPath)
+			if _, err := runner.Run(context.Background(), "git", []string{"ls-remote", repository, "HEAD"}, environment); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("reused", func(b *testing.B) {
+		for b.Loop() {
+			if _, err := runner.Run(context.Background(), "git", []string{"ls-remote", repository, "HEAD"}, environment); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 func TestParseRemotePathsAcceptsEncryptedAttachments(t *testing.T) {
 	objectID := strings.Repeat("a", 32)
 	attachmentID := strings.Repeat("b", 32)

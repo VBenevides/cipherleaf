@@ -65,10 +65,12 @@ type SyncResult struct {
 }
 
 type SyncTimings struct {
-	PullMilliseconds  int64 `json:"pullMilliseconds"`
-	MergeMilliseconds int64 `json:"mergeMilliseconds"`
-	PushMilliseconds  int64 `json:"pushMilliseconds"`
-	TotalMilliseconds int64 `json:"totalMilliseconds"`
+	PullMilliseconds      int64 `json:"pullMilliseconds"`
+	MergeMilliseconds     int64 `json:"mergeMilliseconds"`
+	PushMilliseconds      int64 `json:"pushMilliseconds"`
+	TotalMilliseconds     int64 `json:"totalMilliseconds"`
+	TransportMilliseconds int64 `json:"transportMilliseconds"`
+	LocalMilliseconds     int64 `json:"localMilliseconds"`
 }
 
 func NewVaultService() *VaultService {
@@ -718,9 +720,31 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 	s.syncWorkerOnce.Do(func() {
 		s.syncJobs = make(chan syncJob, 1)
 		go func() {
-			for job := range s.syncJobs {
-				result, err := s.syncNow()
-				job.done <- syncJobResult{result: result, err: err}
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case job := <-s.syncJobs:
+					time.Sleep(150 * time.Millisecond)
+					waiters := []chan syncJobResult{job.done}
+				drain:
+					for {
+						select {
+						case queued := <-s.syncJobs:
+							waiters = append(waiters, queued.done)
+						default:
+							break drain
+						}
+					}
+					result, err := s.syncNow()
+					for _, waiter := range waiters {
+						waiter <- syncJobResult{result: result, err: err}
+					}
+				case <-ticker.C:
+					if vaultID, err := s.unlockedVaultID(); err == nil {
+						_ = s.sync.PrefetchVault(context.Background(), vaultID)
+					}
+				}
 			}
 		}()
 	})
@@ -785,6 +809,8 @@ func (s *VaultService) syncNow() (SyncResult, error) {
 		}
 		result.Push = push
 		result.Timings.PushMilliseconds = time.Since(phaseStartedAt).Milliseconds()
+		result.Timings.TransportMilliseconds = pull.TransportMilliseconds + push.TransportMilliseconds
+		result.Timings.LocalMilliseconds = push.LocalMilliseconds + result.Timings.MergeMilliseconds
 		result.Timings.TotalMilliseconds = time.Since(startedAt).Milliseconds()
 		if push.LastCommit != "" {
 			result.LastCommit = push.LastCommit

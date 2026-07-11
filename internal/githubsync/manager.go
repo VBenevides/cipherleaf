@@ -48,6 +48,24 @@ type GitWorkingDirectoryProvider interface {
 	GitWorkingDirectory(settings SyncSettings) string
 }
 
+type RemotePrefetchProvider interface {
+	Prefetch(ctx context.Context, settings SyncSettings) error
+}
+
+func (m *Manager) PrefetchVault(ctx context.Context, vaultID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	settings, err := m.settings.Load(vaultID)
+	if err != nil || !settings.Linked {
+		return err
+	}
+	provider, ok := m.provider.(RemotePrefetchProvider)
+	if !ok {
+		return nil
+	}
+	return provider.Prefetch(ctx, settings)
+}
+
 func NewManager(settings SettingsStore, connection ConnectionTester) *Manager {
 	return &Manager{settings: settings, connection: connection}
 }

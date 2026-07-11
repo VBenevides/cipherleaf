@@ -29,6 +29,7 @@ export interface PullResult {
     "stagingPath": string;
     "temporary": boolean;
     "upToDate": boolean;
+    "transportMilliseconds": number;
 }
 
 /**
@@ -42,6 +43,8 @@ export interface PushResult {
     "branch": string;
     "lastCommit": string;
     "upToDate": boolean;
+    "localMilliseconds": number;
+    "transportMilliseconds": number;
 }
 
 /**

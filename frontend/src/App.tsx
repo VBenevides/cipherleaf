@@ -882,6 +882,7 @@ function App() {
       const syncStartedAt = performance.now();
       const result = await VaultService.SyncNow();
       const syncElapsed = performance.now() - syncStartedAt;
+      if (import.meta.env.DEV) console.debug("Cipherleaf sync timings", result.timings);
       if (result.warning) {
         setError(result.warning);
       } else {
@@ -1301,6 +1302,7 @@ function App() {
       const syncStartedAt = performance.now();
       const result: SyncResult = await VaultService.SyncNow();
       const syncElapsed = performance.now() - syncStartedAt;
+      if (import.meta.env.DEV) console.debug("Cipherleaf sync timings", result.timings);
       await refreshNotes();
       await refreshFolders();
       const note = noteRef.current;
