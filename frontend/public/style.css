@@ -3686,6 +3686,43 @@ a:focus-visible {
   background: rgba(46, 52, 64, 0.96);
 }
 
+:root[data-theme="dark"] .graph-view {
+  background: var(--canvas);
+}
+
+:root[data-theme="dark"] .sidebar-collapse-toggle,
+:root[data-theme="dark"] .app-menubar-title,
+:root[data-theme="dark"] .graph-view-button,
+:root[data-theme="dark"] .notes-heading,
+:root[data-theme="dark"] .notes-sort-select,
+:root[data-theme="dark"] .folder-list-item,
+:root[data-theme="dark"] .tag-list-item,
+:root[data-theme="dark"] .note-list-item,
+:root[data-theme="dark"] .encrypted-status,
+:root[data-theme="dark"] .lock-button,
+:root[data-theme="dark"] .vault-selector-button,
+:root[data-theme="dark"] .vault-selector-menu button,
+:root[data-theme="dark"] .titlebar-menu > button,
+:root[data-theme="dark"] .breadcrumbs,
+:root[data-theme="dark"] .save-status,
+:root[data-theme="dark"] .sync-status,
+:root[data-theme="dark"] .last-sync-label,
+:root[data-theme="dark"] .document-heading p,
+:root[data-theme="dark"] .view-tabs button,
+:root[data-theme="dark"] .markdown-toolbar button {
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .folder-list-item > small,
+:root[data-theme="dark"] .note-list-item small,
+:root[data-theme="dark"] .breadcrumbs b {
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .breadcrumbs strong {
+  color: var(--ink);
+}
+
 :root[data-theme="dark"] .graph-view-button,
 :root[data-theme="dark"] .lock-button,
 :root[data-theme="dark"] .vault-selector-button,
