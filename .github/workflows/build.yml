@@ -75,7 +75,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libgtk-4-dev libwebkitgtk-6.0-dev upx-ucl
+          sudo apt-get install -y build-essential libgtk-4-dev libwebkitgtk-6.0-dev
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
@@ -87,9 +87,6 @@ jobs:
         run: |
           mv bin/cipherleaf "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
           chmod +x "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
-
-      - name: Compress binary
-        run: upx --best --lzma "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
 
       - uses: actions/upload-artifact@v4
         with:
