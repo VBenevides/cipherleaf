@@ -36,7 +36,7 @@ type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "calendar" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "calendar" | "globalSearch" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -416,6 +416,11 @@ function App() {
   const appDialogResolverRef = useRef<((value: string | boolean | null) => void) | null>(null);
   const nextWindowLayerRef = useRef(160);
 
+  const bringWindowToFront = useCallback((layer: WindowLayer) => {
+    nextWindowLayerRef.current += 1;
+    setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
+  }, []);
+
   useEffect(() => {
     noteRef.current = note;
   }, [note]);
@@ -653,12 +658,13 @@ function App() {
         window.setTimeout(() => sidebarSearchRef.current?.focus(), 0);
         return;
       }
+      bringWindowToFront("globalSearch");
       setGlobalSearchReplace(isReplace);
       setGlobalSearchOpen(true);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [session?.locked]);
+  }, [bringWindowToFront, session?.locked]);
 
   useEffect(() => {
     if (!globalSearchOpen) return;
@@ -693,11 +699,6 @@ function App() {
     setAppDialog(null);
     setAppDialogValue("");
   };
-
-  const bringWindowToFront = useCallback((layer: WindowLayer) => {
-    nextWindowLayerRef.current += 1;
-    setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
-  }, []);
 
   const requestAppPrompt = (dialog: Extract<AppDialogState, { kind: "prompt" }>) => {
     bringWindowToFront("appDialog");
@@ -1989,12 +1990,13 @@ function App() {
     const addChildren = (parentID: string, depth: number) => {
       for (const folder of children.get(parentID) ?? []) {
         rows.push({ folder, depth });
+        if (folder.locked && !unlockedFolderIDs.has(folder.id)) continue;
         addChildren(folder.id, depth + 1);
       }
     };
     addChildren("", 0);
     return rows;
-  }, [folders]);
+  }, [folders, unlockedFolderIDs]);
 
   const publicNotes = useMemo(
     () => notes.filter((item) => {
@@ -3946,6 +3948,7 @@ function App() {
       {globalSearchOpen && (
         <div
           className="global-search-scrim"
+          style={{ zIndex: windowLayers.globalSearch }}
           onClick={(event) => {
             if (event.target === event.currentTarget) {
               setGlobalSearchOpen(false);
