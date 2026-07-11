@@ -3725,6 +3725,7 @@ a:focus-visible {
 
 :root[data-theme="dark"] .graph-view-button,
 :root[data-theme="dark"] .lock-button,
+:root[data-theme="dark"] .calendar-button,
 :root[data-theme="dark"] .vault-selector-button,
 :root[data-theme="dark"] .vault-selector-menu,
 :root[data-theme="dark"] .vault-selector-menu button,
