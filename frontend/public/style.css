@@ -1492,6 +1492,9 @@ a:focus-visible {
 }
 
 .note-list-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
+  contain: layout paint style;
   width: 100%;
   min-height: 47px;
   display: flex;
@@ -1979,6 +1982,19 @@ a:focus-visible {
   color: #814a44;
   border-bottom: 1px solid #ecd2cc;
   background: #fbefec;
+  font-size: 10px;
+}
+
+.sync-notification {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 39px;
+  padding: 5px 17px;
+  color: #356244;
+  border-bottom: 1px solid #c9dfcf;
+  background: #edf7ef;
   font-size: 10px;
 }
 
@@ -3803,15 +3819,19 @@ a:focus-visible {
 
 .sync-overlay {
   position: fixed;
-  inset: 0;
+  right: 20px;
+  bottom: 20px;
   z-index: 10000;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(20, 20, 24, 0.55);
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: rgba(20, 20, 24, 0.82);
   backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 
 .sync-spinner {

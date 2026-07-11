@@ -25,6 +25,7 @@ import type {
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
+import { syncFinishedMessage } from "./syncTiming";
 import { errorText } from "./errors";
 import {
   canonicalObjectDocumentTextFromMarkdown,
@@ -357,6 +358,7 @@ function App() {
   const [cloneRepositoryPrivate, setCloneRepositoryPrivate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [syncNotification, setSyncNotification] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
@@ -845,12 +847,14 @@ function App() {
     return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [vaultMenuOpen]);
 
-  const refreshNotes = async (preferredID?: string) => {
+  const refreshNotes = async (preferredID?: string, preferredNote?: Note) => {
     const result = (await VaultService.ListNotes()) ?? [];
     setNotes(result);
     const targetID = preferredID ?? noteRef.current?.id ?? result[0]?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
-      const loaded = await VaultService.GetNote(targetID);
+      const loaded = preferredNote?.id === targetID
+        ? preferredNote
+        : await VaultService.GetNote(targetID);
       applyLoadedNote(loaded);
     } else {
       applyLoadedNote(null);
@@ -875,9 +879,17 @@ function App() {
     }
     if (!linked) return false;
     setSyncing(true);
+    setSyncNotification("");
     try {
+      const syncStartedAt = performance.now();
       const result = await VaultService.SyncNow();
-      if (result.warning) setError(result.warning);
+      const syncElapsed = performance.now() - syncStartedAt;
+      if (import.meta.env.DEV) console.debug("Cipherleaf sync timings", result.timings);
+      if (result.warning) {
+        setError(result.warning);
+      } else {
+        setSyncNotification(syncFinishedMessage(syncElapsed));
+      }
       const settings = await VaultService.GetSyncSettings();
       setLastSyncedAt(settings.lastSyncedAt);
     } catch (reason) {
@@ -1271,7 +1283,7 @@ function App() {
           first.title,
           welcomeContent,
         );
-        await refreshNotes(saved.id);
+        await refreshNotes(saved.id, saved);
       } else {
         await refreshNotes();
       }
@@ -1286,9 +1298,13 @@ function App() {
   const syncNow = async () => {
     if (syncing) return;
     setSyncing(true);
+    setSyncNotification("");
     try {
       await persistCurrent();
+      const syncStartedAt = performance.now();
       const result: SyncResult = await VaultService.SyncNow();
+      const syncElapsed = performance.now() - syncStartedAt;
+      if (import.meta.env.DEV) console.debug("Cipherleaf sync timings", result.timings);
       await refreshNotes();
       await refreshFolders();
       const note = noteRef.current;
@@ -1310,6 +1326,7 @@ function App() {
         setError(result.warning);
       } else if (result.message) {
         setSaveState("saved");
+        setSyncNotification(syncFinishedMessage(syncElapsed));
       }
       if (result.merge.conflicts?.length) {
         bringWindowToFront("syncConflicts");
@@ -1366,7 +1383,7 @@ function App() {
       setSyncConflicts((current) =>
         current.filter((item) => item.localNoteId !== conflictResolution.conflict.localNoteId),
       );
-      await refreshNotes(saved.id);
+      await refreshNotes(saved.id, saved);
       applyLoadedNote(saved, "saved");
       if (syncLinked) {
         await syncNow();
@@ -3081,6 +3098,15 @@ function App() {
           <div className="error-banner" role="alert">
             <span>{error}</span>
             <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+        )}
+
+        {syncNotification && (
+          <div className="sync-notification" role="status" aria-live="polite">
+            <span>{syncNotification}</span>
+            <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
               <Icon name="x" size={16} />
             </button>
           </div>

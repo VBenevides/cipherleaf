@@ -76,6 +76,32 @@ func TestVaultLifecycleStoresNoPlaintext(t *testing.T) {
 	}
 }
 
+func BenchmarkSnapshotRevision(b *testing.B) {
+	for _, noteCount := range []int{0, 100, 1000} {
+		b.Run(fmt.Sprintf("notes_%d", noteCount), func(b *testing.B) {
+			store := NewStore()
+			if _, err := store.Create(b.TempDir(), "benchmark-secret"); err != nil {
+				b.Fatal(err)
+			}
+			for index := 0; index < noteCount; index++ {
+				note, err := store.CreateNote(fmt.Sprintf("Note %d", index))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := store.SaveNote(note.ID, note.Title, "benchmark content"); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := store.SnapshotRevision(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func TestLockedFolderRequiresBackendAuthorization(t *testing.T) {
 	store := NewStore()
 	root := t.TempDir()
@@ -921,6 +947,78 @@ func BenchmarkChangedLargeNoteSync(b *testing.B) {
 			}
 		})
 	}
+}
+
+func benchmarkVault(b *testing.B, noteCount int) (*Store, Note) {
+	b.Helper()
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	b.Cleanup(func() { defaultKDF = previous })
+	store := NewStore()
+	if _, err := store.Create(b.TempDir(), "benchmark-secret"); err != nil {
+		b.Fatal(err)
+	}
+	var target Note
+	for index := 0; index < noteCount; index++ {
+		note, err := store.CreateNote(fmt.Sprintf("Note %05d", index))
+		if err != nil {
+			b.Fatal(err)
+		}
+		note, err = store.SaveNote(note.ID, note.Title, fmt.Sprintf("searchable content %d", index))
+		if err != nil {
+			b.Fatal(err)
+		}
+		target = note
+	}
+	return store, target
+}
+
+func BenchmarkStoreHotPaths(b *testing.B) {
+	for _, noteCount := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("lookup_%d", noteCount), func(b *testing.B) {
+			store, target := benchmarkVault(b, noteCount)
+			b.ResetTimer()
+			for b.Loop() {
+				store.mu.RLock()
+				_, _ = store.findNoteLocked(target.ID)
+				store.mu.RUnlock()
+			}
+		})
+		b.Run(fmt.Sprintf("search_%d", noteCount), func(b *testing.B) {
+			store, _ := benchmarkVault(b, noteCount)
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := store.FindInNotes("searchable", 5); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+	b.Run("save_1000", func(b *testing.B) {
+		store, target := benchmarkVault(b, 1000)
+		b.ResetTimer()
+		for index := 0; b.Loop(); index++ {
+			if _, err := store.SaveNote(target.ID, target.Title, fmt.Sprintf("changed %d", index)); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("shared_attachment_cleanup", func(b *testing.B) {
+		store, target := benchmarkVault(b, 200)
+		webp := append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("benchmark pixels")...)
+		for range 200 {
+			if _, err := store.SaveAttachment(target.ID, webp); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := store.SaveNote(target.ID, target.Title, target.Content); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func TestRemoteSnapshotRejectsVaultIDMismatch(t *testing.T) {

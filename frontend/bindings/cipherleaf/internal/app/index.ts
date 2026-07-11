@@ -9,5 +9,6 @@ export {
 export type {
     CloneVaultResult,
     LastSession,
-    SyncResult
+    SyncResult,
+    SyncTimings
 } from "./models.js";

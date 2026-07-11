@@ -55,18 +55,44 @@ var (
 const sharedAttachmentFolder = "shared"
 
 type Store struct {
-	mu                sync.RWMutex
-	root              string
-	vaultID           string
-	key               []byte
-	secret            []byte
-	manifest          manifest
-	searchIndex       map[string]string
-	authorizedFolders map[string]struct{}
+	mu                       sync.RWMutex
+	root                     string
+	vaultID                  string
+	key                      []byte
+	secret                   []byte
+	manifest                 manifest
+	searchIndex              map[string]string
+	normalizedSearchIndex    map[string]string
+	authorizedFolders        map[string]struct{}
+	exportBaselines          map[string]manifest
+	exportDirty              map[string]struct{}
+	exportIncremental        bool
+	noteIndexes              map[string]int
+	folderIndexes            map[string]int
+	sharedAttachmentRefs     map[string]int
+	pendingSharedAttachments map[string]struct{}
+	savedManifestHash        [sha256.Size]byte
+	hasSavedManifestHash     bool
 }
 
 func NewStore() *Store {
 	return &Store{}
+}
+
+// SnapshotRevision identifies the current provider-neutral vault contents.
+// It is cheap to compare and changes whenever persisted sync metadata changes.
+func (s *Store) SnapshotRevision() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(s.manifest)
+	if err != nil {
+		return "", fmt.Errorf("encode snapshot revision: %w", err)
+	}
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:]), nil
 }
 
 // ReadVaultID returns the vault identifier stored in the configuration file
@@ -175,6 +201,7 @@ func (s *Store) Create(root, passphrase string) (Session, error) {
 		Notes:         []NoteSummary{},
 	}
 	s.searchIndex = make(map[string]string)
+	s.normalizedSearchIndex = make(map[string]string)
 	if err := s.saveManifestLocked(); err != nil {
 		s.clearLocked()
 		removeFileAndBackup(filepath.Join(root, manifestFilename))
@@ -784,12 +811,13 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
 			return Note{}, err
 		}
-		if err := s.pruneSharedAttachmentsForSaveLocked(); err != nil {
+		if err := s.prunePendingSharedAttachmentsLocked(); err != nil {
 			return Note{}, err
 		}
 		return noteForClient(current), nil
 	}
 	original := current
+	s.ensureSharedAttachmentRefsLocked()
 	current.Title = title
 	current.Content = storedContent
 	now := time.Now().UTC()
@@ -808,11 +836,12 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err := s.saveManifestLocked(); err != nil {
 		return Note{}, err
 	}
+	s.updateSharedAttachmentRefsLocked(originalSummary.AttachmentIDs, s.manifest.Notes[index].AttachmentIDs)
 	s.updateSearchIndexLocked(id, derivedMarkdownContent(current.Content))
 	if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
 		return Note{}, err
 	}
-	if err := s.pruneSharedAttachmentsForSaveLocked(); err != nil {
+	if err := s.prunePendingSharedAttachmentsLocked(); err != nil {
 		return Note{}, err
 	}
 	return noteForClient(current), nil
@@ -849,6 +878,10 @@ func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
 	if err := s.writeEnvelopeLocked(path, "attachment", sharedAttachmentAAD(id), data); err != nil {
 		return "", fmt.Errorf("encrypt attachment: %w", err)
 	}
+	if s.pendingSharedAttachments == nil {
+		s.pendingSharedAttachments = make(map[string]struct{})
+	}
+	s.pendingSharedAttachments[id] = struct{}{}
 	return id, nil
 }
 
@@ -1025,6 +1058,57 @@ func (s *Store) pruneSharedAttachmentsForSaveLocked() error {
 	return s.pruneSharedAttachmentsByIDLocked(candidates)
 }
 
+func (s *Store) ensureSharedAttachmentRefsLocked() {
+	if s.sharedAttachmentRefs != nil {
+		return
+	}
+	s.sharedAttachmentRefs = make(map[string]int)
+	for _, summary := range s.manifest.Notes {
+		for _, id := range summary.AttachmentIDs {
+			s.sharedAttachmentRefs[id]++
+		}
+	}
+}
+
+func (s *Store) updateSharedAttachmentRefsLocked(before, after []string) {
+	beforeSet := make(map[string]struct{}, len(before))
+	afterSet := make(map[string]struct{}, len(after))
+	for _, id := range before {
+		beforeSet[id] = struct{}{}
+	}
+	for _, id := range after {
+		afterSet[id] = struct{}{}
+	}
+	for id := range beforeSet {
+		if _, kept := afterSet[id]; !kept && s.sharedAttachmentRefs[id] > 0 {
+			s.sharedAttachmentRefs[id]--
+		}
+	}
+	for id := range afterSet {
+		if _, existed := beforeSet[id]; !existed {
+			s.sharedAttachmentRefs[id]++
+		}
+	}
+}
+
+func (s *Store) prunePendingSharedAttachmentsLocked() error {
+	if len(s.pendingSharedAttachments) == 0 {
+		return nil
+	}
+	s.ensureSharedAttachmentRefsLocked()
+	for id := range s.pendingSharedAttachments {
+		if s.sharedAttachmentRefs[id] == 0 {
+			path := s.sharedAttachmentPathLocked(id)
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			_ = os.Remove(path + ".bak")
+		}
+		delete(s.pendingSharedAttachments, id)
+	}
+	return nil
+}
+
 func (s *Store) pruneSharedAttachmentsByIDLocked(candidates map[string]struct{}) error {
 	if len(candidates) == 0 {
 		return nil
@@ -1161,6 +1245,7 @@ func (s *Store) DeleteNote(id string) error {
 		return err
 	}
 	delete(s.searchIndex, id)
+	delete(s.normalizedSearchIndex, id)
 	path := s.notePathLocked(id)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove encrypted note: %w", err)
@@ -1377,7 +1462,10 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			}
 			content = derivedMarkdownContent(note.Content)
 		}
-		lowerContent := strings.ToLower(content)
+		lowerContent, normalized := s.normalizedSearchIndex[item.ID]
+		if !normalized {
+			lowerContent = strings.ToLower(content)
+		}
 		cidx := 0
 		for count := 0; count < maxPerNote; count++ {
 			at := strings.Index(lowerContent[cidx:], query)
@@ -1543,13 +1631,89 @@ func replaceInsensitive(haystack, find, replace string) string {
 // layout. It deliberately excludes the local manifest and all backup files.
 func (s *Store) ExportRemoteSnapshot(destination string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	if err := s.pruneStaleAttachmentsLocked(); err != nil {
+		s.mu.Unlock()
 		return err
 	}
+	s.mu.Unlock()
+	for attempt := 0; attempt < 3; attempt++ {
+		s.mu.RLock()
+		if err := s.requireUnlocked(); err != nil {
+			s.mu.RUnlock()
+			return err
+		}
+		manifestData, err := json.Marshal(s.manifest)
+		if err != nil {
+			s.mu.RUnlock()
+			return err
+		}
+		captured := cloneManifest(s.manifest)
+		revision := sha256.Sum256(manifestData)
+		destinationKey := filepath.Clean(destination)
+		baseline, incremental := s.exportBaselines[destinationKey]
+		dirty := changedSnapshotNoteIDs(baseline, captured)
+		snapshot := &Store{
+			root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key), manifest: captured,
+			exportDirty: dirty, exportIncremental: incremental,
+		}
+		s.mu.RUnlock()
+		if err := snapshot.exportRemoteSnapshot(destination); err != nil {
+			return err
+		}
+		current, err := s.SnapshotRevision()
+		if err != nil {
+			return err
+		}
+		if current == hex.EncodeToString(revision[:]) {
+			s.mu.Lock()
+			if s.exportBaselines == nil {
+				s.exportBaselines = make(map[string]manifest)
+			}
+			s.exportBaselines[destinationKey] = captured
+			s.mu.Unlock()
+			return nil
+		}
+	}
+	return errors.New("vault changed repeatedly while preparing its sync snapshot")
+}
+
+func changedSnapshotNoteIDs(before, after manifest) map[string]struct{} {
+	dirty := make(map[string]struct{})
+	previous := make(map[string]NoteSummary, len(before.Notes))
+	for _, note := range before.Notes {
+		previous[note.ID] = note
+	}
+	for _, note := range after.Notes {
+		old, found := previous[note.ID]
+		if !found || old.Revision != note.Revision || old.CiphertextHash != note.CiphertextHash ||
+			!slices.Equal(old.AttachmentIDs, note.AttachmentIDs) {
+			dirty[note.ID] = struct{}{}
+		}
+		delete(previous, note.ID)
+	}
+	for id := range previous {
+		dirty[id] = struct{}{}
+	}
+	return dirty
+}
+
+func cloneManifest(source manifest) manifest {
+	result := source
+	result.Folders = slices.Clone(source.Folders)
+	result.DeletedNotes = slices.Clone(source.DeletedNotes)
+	result.DeletedFolders = slices.Clone(source.DeletedFolders)
+	result.Notes = make([]NoteSummary, len(source.Notes))
+	for index, note := range source.Notes {
+		result.Notes[index] = *cloneNoteSummary(note)
+	}
+	return result
+}
+
+func (s *Store) exportRemoteSnapshot(destination string) error {
 	if strings.TrimSpace(destination) == "" {
 		return errors.New("remote snapshot destination is required")
 	}
@@ -1581,10 +1745,10 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 		Objects:       make([]remoteSyncObject, 0, len(items)+len(s.manifest.DeletedNotes)),
 	}
 	expectedObjects := make(map[string]struct{}, len(items))
-	manifestChanged := false
 	for _, item := range items {
 		source := s.notePathLocked(item.ID)
 		target := filepath.Join(destination, "objects", item.ID[:2], item.ID+".enc")
+		_, dirty := s.exportDirty[item.ID]
 		if existing, found := existingObjects[item.ID]; found &&
 			item.CiphertextHash != "" &&
 			existing.CiphertextHash == item.CiphertextHash &&
@@ -1592,7 +1756,7 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 			existing.ModifiedAt == item.ModifiedAt &&
 			existing.Summary != nil &&
 			!existing.Deleted &&
-			sameRegularFileSize(source, target) {
+			((s.exportIncremental && !dirty) || (!s.exportIncremental && sameRegularFileSize(source, target))) {
 			expectedObjects[filepath.Clean(target)] = struct{}{}
 			existing.Summary = cloneNoteSummary(item)
 			inventory.Objects = append(inventory.Objects, existing)
@@ -1614,7 +1778,6 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 		if item.CiphertextHash != hashText {
 			if index, found := s.findNoteLocked(item.ID); found {
 				s.manifest.Notes[index].CiphertextHash = hashText
-				manifestChanged = true
 			}
 		}
 		inventory.Objects = append(inventory.Objects, remoteSyncObject{
@@ -1624,11 +1787,6 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 			ModifiedAt:     item.ModifiedAt,
 			Summary:        cloneNoteSummary(item),
 		})
-	}
-	if manifestChanged {
-		if err := s.saveManifestLocked(); err != nil {
-			return fmt.Errorf("save local ciphertext hashes: %w", err)
-		}
 	}
 	for _, deleted := range s.manifest.DeletedNotes {
 		inventory.Objects = append(inventory.Objects, remoteSyncObject{
@@ -1779,45 +1937,72 @@ func (s *Store) readExistingRemoteInventoryLocked(
 // authenticated remote snapshot into the local vault. Revisions take
 // precedence over timestamps so clock skew cannot overwrite newer content.
 func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.requireUnlocked(); err != nil {
-		return MergeResult{}, err
-	}
 	if strings.TrimSpace(source) == "" {
 		return MergeResult{}, errors.New("remote snapshot source is required")
 	}
-	remote, err := s.readRemoteSnapshotLocked(source, false, false)
-	if err != nil {
-		return MergeResult{}, err
+	for attempt := 0; attempt < 3; attempt++ {
+		s.mu.RLock()
+		if err := s.requireUnlocked(); err != nil {
+			s.mu.RUnlock()
+			return MergeResult{}, err
+		}
+		manifestData, err := json.Marshal(s.manifest)
+		validator := &Store{root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key)}
+		s.mu.RUnlock()
+		if err != nil {
+			return MergeResult{}, err
+		}
+		remote, err := validator.readRemoteSnapshotLocked(source, false, false)
+		if err != nil {
+			return MergeResult{}, err
+		}
+		s.mu.Lock()
+		currentData, err := json.Marshal(s.manifest)
+		if err != nil {
+			s.mu.Unlock()
+			return MergeResult{}, err
+		}
+		if !bytes.Equal(manifestData, currentData) {
+			s.mu.Unlock()
+			continue
+		}
+		result, err := s.mergeRemoteSnapshotLocked(source, remote)
+		s.mu.Unlock()
+		return result, err
 	}
+	return MergeResult{}, errors.New("vault changed repeatedly while planning its remote merge")
+}
+
+func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRemoteSnapshot) (MergeResult, error) {
 	result := MergeResult{UpToDate: true}
+	if err := reconcileRemoteAttachmentDirectory(
+		filepath.Join(source, "attachments", sharedAttachmentFolder),
+		filepath.Join(s.root, "attachments", sharedAttachmentFolder),
+	); err != nil {
+		return MergeResult{}, fmt.Errorf("reconcile shared attachments: %w", err)
+	}
 	mergedNotes := make([]NoteSummary, 0, len(s.manifest.Notes)+len(remote.Manifest.Notes))
 	mergedNotes = append(mergedNotes, s.manifest.Notes...)
 	mergedDeletedNotes := slices.Clone(s.manifest.DeletedNotes)
+	localNotes := make(map[string]NoteSummary, len(mergedNotes))
+	for _, note := range mergedNotes {
+		localNotes[note.ID] = note
+	}
+	deletedNoteIDs := make(map[string]struct{})
 
 	for _, deleted := range remote.Manifest.DeletedNotes {
-		found := false
+		local, found := localNotes[deleted.ID]
 		var localModified int64
 		var localRevision uint64
-		for index, local := range mergedNotes {
-			if local.ID == deleted.ID {
-				found = true
-				localModified = local.ModifiedAt
-				localRevision = local.Revision
-				if versionIsNewer(
-					deleted.Revision,
-					deleted.ModifiedAt,
-					local.Revision,
-					local.ModifiedAt,
-				) {
-					mergedNotes = append(mergedNotes[:index], mergedNotes[index+1:]...)
-					removeFileAndBackup(s.notePathLocked(deleted.ID))
-					_ = os.RemoveAll(filepath.Join(s.root, "attachments", deleted.ID))
-					result.DeletedNotes++
-					result.UpToDate = false
-				}
-				break
+		if found {
+			localModified = local.ModifiedAt
+			localRevision = local.Revision
+			if versionIsNewer(deleted.Revision, deleted.ModifiedAt, local.Revision, local.ModifiedAt) {
+				deletedNoteIDs[deleted.ID] = struct{}{}
+				removeFileAndBackup(s.notePathLocked(deleted.ID))
+				_ = os.RemoveAll(filepath.Join(s.root, "attachments", deleted.ID))
+				result.DeletedNotes++
+				result.UpToDate = false
 			}
 		}
 		if !found || versionIsNewer(
@@ -1829,7 +2014,20 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			mergedDeletedNotes = upsertTombstone(mergedDeletedNotes, deleted)
 		}
 	}
+	if len(deletedNoteIDs) > 0 {
+		kept := mergedNotes[:0]
+		for _, note := range mergedNotes {
+			if _, deleted := deletedNoteIDs[note.ID]; !deleted {
+				kept = append(kept, note)
+			}
+		}
+		mergedNotes = kept
+	}
 
+	noteIndexes := make(map[string]int, len(mergedNotes))
+	for index, note := range mergedNotes {
+		noteIndexes[note.ID] = index
+	}
 	for _, remoteNote := range remote.Manifest.Notes {
 		if deleted, found := findTombstone(mergedDeletedNotes, remoteNote.ID); found &&
 			!versionIsNewer(
@@ -1841,12 +2039,9 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			continue
 		}
 		mergedDeletedNotes = removeTombstone(mergedDeletedNotes, remoteNote.ID)
-		localIndex := -1
-		for index, local := range mergedNotes {
-			if local.ID == remoteNote.ID {
-				localIndex = index
-				break
-			}
+		localIndex, found := noteIndexes[remoteNote.ID]
+		if !found {
+			localIndex = -1
 		}
 		if localIndex < 0 {
 			if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
@@ -1856,6 +2051,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 				return MergeResult{}, err
 			}
 			mergedNotes = append(mergedNotes, remoteNote)
+			noteIndexes[remoteNote.ID] = len(mergedNotes) - 1
 			result.PulledNotes++
 			result.UpToDate = false
 			continue
@@ -1915,6 +2111,10 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 
 	mergedFolders := slices.Clone(s.manifest.Folders)
 	mergedDeletedFolders := slices.Clone(s.manifest.DeletedFolders)
+	folderIndexes := make(map[string]int, len(mergedFolders))
+	for index, folder := range mergedFolders {
+		folderIndexes[folder.ID] = index
+	}
 	for _, remoteFolder := range remote.Manifest.Folders {
 		if deleted, found := findTombstone(mergedDeletedFolders, remoteFolder.ID); found {
 			updated, _ := time.Parse(time.RFC3339Nano, remoteFolder.UpdatedAt)
@@ -1923,42 +2123,53 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			}
 			mergedDeletedFolders = removeTombstone(mergedDeletedFolders, remoteFolder.ID)
 		}
-		found := false
-		for index, local := range mergedFolders {
-			if local.ID != remoteFolder.ID {
-				continue
-			}
-			found = true
+		index, found := folderIndexes[remoteFolder.ID]
+		if found {
+			local := mergedFolders[index]
 			if remoteFolder.UpdatedAt > local.UpdatedAt {
 				mergedFolders[index] = remoteFolder
 				result.PulledFolders++
 				result.UpToDate = false
 			}
-			break
 		}
 		if !found {
 			mergedFolders = append(mergedFolders, remoteFolder)
+			folderIndexes[remoteFolder.ID] = len(mergedFolders) - 1
 			result.PulledFolders++
 			result.UpToDate = false
 		}
 	}
+	folderByID := make(map[string]Folder, len(mergedFolders))
+	childCounts := make(map[string]int)
+	noteFolderRefs := make(map[string]struct{})
+	for _, folder := range mergedFolders {
+		folderByID[folder.ID] = folder
+		if folder.ParentID != "" {
+			childCounts[folder.ParentID]++
+		}
+	}
+	for _, note := range mergedNotes {
+		if note.FolderID != "" {
+			noteFolderRefs[note.FolderID] = struct{}{}
+		}
+	}
+	deletedFolderIDs := make(map[string]struct{})
 	for _, deleted := range remote.Manifest.DeletedFolders {
-		found := false
+		local, found := folderByID[deleted.ID]
 		acceptTombstone := true
-		for index, local := range mergedFolders {
-			if local.ID != deleted.ID {
-				continue
-			}
-			found = true
+		if found {
 			updated, _ := time.Parse(time.RFC3339Nano, local.UpdatedAt)
-			if deleted.ModifiedAt <= updated.Unix() || noteReferencesFolder(mergedNotes, deleted.ID) || folderHasChild(mergedFolders, deleted.ID) {
+			_, referenced := noteFolderRefs[deleted.ID]
+			if deleted.ModifiedAt <= updated.Unix() || referenced || childCounts[deleted.ID] > 0 {
 				acceptTombstone = false
-				break
+			} else {
+				deletedFolderIDs[deleted.ID] = struct{}{}
+				if local.ParentID != "" && childCounts[local.ParentID] > 0 {
+					childCounts[local.ParentID]--
+				}
+				result.DeletedFolders++
+				result.UpToDate = false
 			}
-			mergedFolders = append(mergedFolders[:index], mergedFolders[index+1:]...)
-			result.DeletedFolders++
-			result.UpToDate = false
-			break
 		}
 		if acceptTombstone {
 			before, existed := findTombstone(mergedDeletedFolders, deleted.ID)
@@ -1967,6 +2178,15 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 				result.UpToDate = false
 			}
 		}
+	}
+	if len(deletedFolderIDs) > 0 {
+		kept := mergedFolders[:0]
+		for _, folder := range mergedFolders {
+			if _, deleted := deletedFolderIDs[folder.ID]; !deleted {
+				kept = append(kept, folder)
+			}
+		}
+		mergedFolders = kept
 	}
 	sortFolders(mergedFolders)
 	if err := validateFolderHierarchy(mergedFolders); err != nil {
@@ -1984,6 +2204,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 		return MergeResult{}, fmt.Errorf("save merged manifest: %w", err)
 	}
 	s.searchIndex = nil
+	s.normalizedSearchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	return result, nil
 }
@@ -2001,25 +2222,39 @@ func copyRemoteNoteObject(source, localRoot, id string) error {
 }
 
 func replaceRemoteAttachments(source, localRoot, noteID string) error {
-	sharedSource := filepath.Join(source, "attachments", sharedAttachmentFolder)
-	if _, err := os.Stat(sharedSource); err == nil {
-		if err := copyAttachmentDirectory(sharedSource, filepath.Join(localRoot, "attachments", sharedAttachmentFolder)); err != nil {
-			return fmt.Errorf("copy shared attachments: %w", err)
-		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect remote shared attachments: %w", err)
-	}
 	target := filepath.Join(localRoot, "attachments", noteID)
-	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("replace local attachments: %w", err)
-	}
 	sourceDir := filepath.Join(source, "attachments", noteID)
-	if _, err := os.Stat(sourceDir); errors.Is(err, os.ErrNotExist) {
-		return nil
+	return reconcileRemoteAttachmentDirectory(sourceDir, target)
+}
+
+func reconcileRemoteAttachmentDirectory(source, target string) error {
+	if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
+		return os.RemoveAll(target)
 	} else if err != nil {
-		return fmt.Errorf("inspect remote attachments: %w", err)
+		return err
 	}
-	return copyAttachmentDirectory(sourceDir, target)
+	expected := make(map[string]struct{})
+	if err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, relative)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return err
+		}
+		if err := copyFileIfChangedFast(path, destination); err != nil {
+			return err
+		}
+		expected[filepath.Clean(destination)] = struct{}{}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return removeUnexpectedSnapshotObjects(target, expected)
 }
 
 func copyAttachmentDirectory(source, target string) error {
@@ -2478,6 +2713,7 @@ func (s *Store) RestoreRemoteSnapshot(
 	s.secret = []byte(passphrase)
 	s.manifest = remote.Manifest
 	s.searchIndex = nil
+	s.normalizedSearchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	keyOwnedByStore = true
 	validator.key = nil
@@ -2506,25 +2742,39 @@ func (s *Store) clearLocked() {
 	s.vaultID = ""
 	s.manifest = manifest{}
 	s.searchIndex = nil
+	s.normalizedSearchIndex = nil
 	s.authorizedFolders = nil
+	s.noteIndexes = nil
+	s.folderIndexes = nil
+	s.sharedAttachmentRefs = nil
+	s.pendingSharedAttachments = nil
+	s.exportBaselines = nil
+	s.hasSavedManifestHash = false
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
 	if s.searchIndex != nil {
 		s.searchIndex[id] = content
 	}
+	if s.normalizedSearchIndex != nil {
+		s.normalizedSearchIndex[id] = strings.ToLower(content)
+	}
 }
 
 func (s *Store) rebuildSearchIndexLocked() error {
 	index := make(map[string]string, len(s.manifest.Notes))
+	normalized := make(map[string]string, len(s.manifest.Notes))
 	for _, item := range s.manifest.Notes {
 		note, err := s.readNoteLocked(item.ID)
 		if err != nil {
 			return err
 		}
-		index[item.ID] = derivedMarkdownContent(note.Content)
+		content := derivedMarkdownContent(note.Content)
+		index[item.ID] = content
+		normalized[item.ID] = strings.ToLower(content)
 	}
 	s.searchIndex = index
+	s.normalizedSearchIndex = normalized
 	return nil
 }
 
@@ -2543,12 +2793,25 @@ func (s *Store) UnlockedSecret() ([]byte, bool) {
 }
 
 func (s *Store) findNoteLocked(id string) (int, bool) {
-	for index, item := range s.manifest.Notes {
-		if item.ID == id {
-			return index, true
-		}
+	if len(s.noteIndexes) != len(s.manifest.Notes) {
+		s.rebuildNoteIndexesLocked()
 	}
-	return -1, false
+	if index, found := s.noteIndexes[id]; found && index < len(s.manifest.Notes) && s.manifest.Notes[index].ID == id {
+		return index, true
+	}
+	s.rebuildNoteIndexesLocked()
+	index, found := s.noteIndexes[id]
+	if !found {
+		return -1, false
+	}
+	return index, found
+}
+
+func (s *Store) rebuildNoteIndexesLocked() {
+	s.noteIndexes = make(map[string]int, len(s.manifest.Notes))
+	for index, note := range s.manifest.Notes {
+		s.noteIndexes[note.ID] = index
+	}
 }
 
 func (s *Store) requireNoteAccessibleLocked(note NoteSummary) error {
@@ -2577,12 +2840,25 @@ func (s *Store) requireFolderAccessibleLocked(id string) error {
 }
 
 func (s *Store) findFolderLocked(id string) (int, bool) {
-	for index, item := range s.manifest.Folders {
-		if item.ID == id {
-			return index, true
-		}
+	if len(s.folderIndexes) != len(s.manifest.Folders) {
+		s.rebuildFolderIndexesLocked()
 	}
-	return -1, false
+	if index, found := s.folderIndexes[id]; found && index < len(s.manifest.Folders) && s.manifest.Folders[index].ID == id {
+		return index, true
+	}
+	s.rebuildFolderIndexesLocked()
+	index, found := s.folderIndexes[id]
+	if !found {
+		return -1, false
+	}
+	return index, found
+}
+
+func (s *Store) rebuildFolderIndexesLocked() {
+	s.folderIndexes = make(map[string]int, len(s.manifest.Folders))
+	for index, folder := range s.manifest.Folders {
+		s.folderIndexes[folder.ID] = index
+	}
 }
 
 func (s *Store) folderByIDLocked(id string) (Folder, bool) {
@@ -2747,7 +3023,16 @@ func (s *Store) saveManifestLocked() error {
 	if err != nil {
 		return fmt.Errorf("encode manifest: %w", err)
 	}
-	return s.writeEnvelopeLocked(filepath.Join(s.root, manifestFilename), "manifest", "manifest", plaintext)
+	hash := sha256.Sum256(plaintext)
+	if s.hasSavedManifestHash && hash == s.savedManifestHash {
+		return nil
+	}
+	if err := s.writeEnvelopeLocked(filepath.Join(s.root, manifestFilename), "manifest", "manifest", plaintext); err != nil {
+		return err
+	}
+	s.savedManifestHash = hash
+	s.hasSavedManifestHash = true
+	return nil
 }
 
 func (s *Store) loadManifestLocked() error {
@@ -2756,6 +3041,11 @@ func (s *Store) loadManifestLocked() error {
 		return err
 	}
 	s.manifest = result
+	plaintext, err := json.Marshal(result)
+	if err == nil {
+		s.savedManifestHash = sha256.Sum256(plaintext)
+		s.hasSavedManifestHash = true
+	}
 	return nil
 }
 

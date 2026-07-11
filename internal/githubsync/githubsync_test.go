@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,57 @@ func TestMergedEnvironmentRemovesGitOverrides(t *testing.T) {
 	}
 }
 
+func TestSecureGitEnvironmentIsolatesMultiplexSockets(t *testing.T) {
+	first := SyncSettings{VaultID: "vault-one", RepositorySSH: "git@github.com:a/one.git", PrivateKeyPath: "/key"}
+	second := first
+	second.VaultID = "vault-two"
+	firstEnv := strings.Join(secureGitEnvironment(first, "/known", "/runtime/wrapper"), "\n")
+	secondEnv := strings.Join(secureGitEnvironment(second, "/known", "/runtime/wrapper"), "\n")
+	if !strings.Contains(firstEnv, "CIPHERLEAF_SSH_CONTROL_PATH=/runtime/mux-") || firstEnv == secondEnv {
+		t.Fatalf("multiplex environments are missing or not isolated:\n%s\n%s", firstEnv, secondEnv)
+	}
+}
+
+func BenchmarkGitHubSSHConnection(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip("SSH multiplexing uses the Unix wrapper")
+	}
+	repository := os.Getenv("CIPHERLEAF_BENCH_REPOSITORY")
+	key := os.Getenv("CIPHERLEAF_BENCH_SSH_KEY")
+	if repository == "" || key == "" {
+		b.Skip("set CIPHERLEAF_BENCH_REPOSITORY and CIPHERLEAF_BENCH_SSH_KEY")
+	}
+	runtimeDir := b.TempDir()
+	knownHosts, wrapper, err := prepareSSHFiles(runtimeDir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	settings := SyncSettings{VaultID: "connection-benchmark", RepositorySSH: repository, PrivateKeyPath: key}
+	environment := secureGitEnvironment(settings, knownHosts, wrapper)
+	controlPath := ""
+	for _, value := range environment {
+		if strings.HasPrefix(value, "CIPHERLEAF_SSH_CONTROL_PATH=") {
+			controlPath = strings.TrimPrefix(value, "CIPHERLEAF_SSH_CONTROL_PATH=")
+		}
+	}
+	runner := ExecCommandRunner{}
+	b.Run("cold", func(b *testing.B) {
+		for b.Loop() {
+			_ = os.Remove(controlPath)
+			if _, err := runner.Run(context.Background(), "git", []string{"ls-remote", repository, "HEAD"}, environment); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("reused", func(b *testing.B) {
+		for b.Loop() {
+			if _, err := runner.Run(context.Background(), "git", []string{"ls-remote", repository, "HEAD"}, environment); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 func TestParseRemotePathsAcceptsEncryptedAttachments(t *testing.T) {
 	objectID := strings.Repeat("a", 32)
 	attachmentID := strings.Repeat("b", 32)
@@ -223,6 +275,52 @@ type successfulConnectionTester struct {
 
 type countingGitTransport struct {
 	showCalls int
+}
+
+type recordingGitTransport struct {
+	arguments [][]string
+	output    []byte
+}
+
+func (r *recordingGitTransport) Run(
+	_ context.Context,
+	_ string,
+	args []string,
+	_ []string,
+) ([]byte, error) {
+	r.arguments = append(r.arguments, slices.Clone(args))
+	return r.output, nil
+}
+
+func TestStageChangedSnapshotUsesChangedPathsOnly(t *testing.T) {
+	runner := &recordingGitTransport{output: []byte(" M sync/manifest.enc\x00?? objects/aa/" + strings.Repeat("a", 32) + ".enc\x00")}
+	provider := &GitHubSSHProvider{runner: runner}
+	if err := provider.stageChangedSnapshot(context.Background(), "/cache"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.arguments) != 2 {
+		t.Fatalf("commands = %d, want status and add", len(runner.arguments))
+	}
+	add := strings.Join(runner.arguments[1], " ")
+	if strings.Contains(add, " -- .") || !strings.Contains(add, "sync/manifest.enc") || !strings.Contains(add, "objects/aa/") {
+		t.Fatalf("incremental add command = %q", add)
+	}
+}
+
+func TestRecordPushedTipUsesNoNetworkOrGarbageCollection(t *testing.T) {
+	runner := &recordingGitTransport{}
+	provider := &GitHubSSHProvider{runner: runner}
+	settings := SyncSettings{Branch: "main"}
+	if err := provider.recordPushedTip(context.Background(), "/cache", settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.arguments) != 1 {
+		t.Fatalf("commands = %d, want 1", len(runner.arguments))
+	}
+	joined := strings.Join(runner.arguments[0], " ")
+	if joined != "-C /cache update-ref refs/remotes/origin/main HEAD" {
+		t.Fatalf("command = %q", joined)
+	}
 }
 
 func (c *countingGitTransport) Run(
@@ -346,6 +444,61 @@ func (successfulDownloadProvider) Pull(
 	_ SyncSettings,
 ) (PullResult, error) {
 	return PullResult{}, errors.New("not used")
+}
+
+type revisionSnapshot struct{ revision string }
+
+func (s *revisionSnapshot) SnapshotRevision() (string, error) { return s.revision, nil }
+func (s *revisionSnapshot) ExportRemoteSnapshot(string) error { return nil }
+func (s *revisionSnapshot) ValidateRemoteSnapshot(string) (bool, error) {
+	return true, nil
+}
+
+type countingPushProvider struct {
+	successfulDownloadProvider
+	pushes int
+}
+
+func (p *countingPushProvider) Push(
+	_ context.Context,
+	settings SyncSettings,
+	_ RemoteSnapshotStore,
+) (PushResult, error) {
+	p.pushes++
+	return PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("c", 40)}, nil
+}
+
+func TestManagerSkipsPushForUnchangedSnapshotRevision(t *testing.T) {
+	vaultID := strings.Repeat("a", 32)
+	settingsStore := NewFileSettingsStore(t.TempDir())
+	settings := DefaultSettings(vaultID)
+	settings.Linked = true
+	settings.RepositorySSH = "git@github.com:acme/notes.git"
+	settings.PrivateKeyPath = "/key"
+	settings.RepositoryPrivate = true
+	settings.LastSnapshotRev = "same"
+	settings.LastCommit = strings.Repeat("b", 40)
+	if err := settingsStore.Save(settings); err != nil {
+		t.Fatal(err)
+	}
+	provider := &countingPushProvider{}
+	manager := NewManager(settingsStore, &successfulConnectionTester{})
+	manager.provider = provider
+	snapshot := &revisionSnapshot{revision: "same"}
+	result, err := manager.PushVault(context.Background(), vaultID, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UpToDate || provider.pushes != 0 {
+		t.Fatalf("unchanged result = %#v, pushes = %d", result, provider.pushes)
+	}
+	snapshot.revision = "changed"
+	if _, err := manager.PushVault(context.Background(), vaultID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if provider.pushes != 1 {
+		t.Fatalf("changed snapshot pushes = %d, want 1", provider.pushes)
+	}
 }
 
 func TestManagerDownloadsThenActivatesVaultSettings(t *testing.T) {
@@ -507,14 +660,14 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	if deleted.UpToDate {
 		t.Fatal("deleting the final note unexpectedly produced an up-to-date push")
 	}
-	cacheCommitCount := strings.TrimSpace(runGitTestCommand(
+	cacheRemoteTip := strings.TrimSpace(runGitTestCommand(
 		t,
 		"",
 		"-C", provider.cacheRepositoryPath(settings),
-		"rev-list", "--count", "HEAD",
+		"rev-parse", "origin/main",
 	))
-	if cacheCommitCount != "1" {
-		t.Fatalf("encrypted Git cache retained %s reachable commits, want 1", cacheCommitCount)
+	if cacheRemoteTip != deleted.LastCommit {
+		t.Fatalf("cached remote tip = %q, want pushed commit %q", cacheRemoteTip, deleted.LastCommit)
 	}
 	tree = runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
 	if strings.Contains(tree, note.ID+".enc") {

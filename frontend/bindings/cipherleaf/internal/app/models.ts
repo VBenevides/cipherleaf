@@ -33,4 +33,14 @@ export interface SyncResult {
     "pull": githubsync$0.PullResult;
     "push": githubsync$0.PushResult;
     "merge": vault$0.MergeResult;
+    "timings": SyncTimings;
+}
+
+export interface SyncTimings {
+    "pullMilliseconds": number;
+    "mergeMilliseconds": number;
+    "pushMilliseconds": number;
+    "totalMilliseconds": number;
+    "transportMilliseconds": number;
+    "localMilliseconds": number;
 }

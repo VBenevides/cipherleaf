@@ -34,6 +34,8 @@ type SyncSettings struct {
 	RepositoryPrivate bool   `json:"repositoryPrivate"`
 	Linked            bool   `json:"linked"`
 	LastSyncedAt      int64  `json:"lastSyncedAt"`
+	LastSnapshotRev   string `json:"lastSnapshotRev"`
+	LastCommit        string `json:"lastCommit"`
 }
 
 type ConnectionResult struct {
@@ -63,25 +65,28 @@ type DownloadedVault struct {
 // PushResult reports the outcome of pushing the local vault snapshot to the
 // remote repository.
 type PushResult struct {
-	Linked     bool   `json:"linked"`
-	Message    string `json:"message"`
-	Warning    string `json:"warning"`
-	Branch     string `json:"branch"`
-	LastCommit string `json:"lastCommit"`
-	UpToDate   bool   `json:"upToDate"`
+	Linked                bool   `json:"linked"`
+	Message               string `json:"message"`
+	Warning               string `json:"warning"`
+	Branch                string `json:"branch"`
+	LastCommit            string `json:"lastCommit"`
+	UpToDate              bool   `json:"upToDate"`
+	LocalMilliseconds     int64  `json:"localMilliseconds"`
+	TransportMilliseconds int64  `json:"transportMilliseconds"`
 }
 
 // PullResult reports the outcome of fetching the remote snapshot. StagingPath
 // points at the materialized encrypted layout; Temporary indicates ownership.
 type PullResult struct {
-	Linked      bool   `json:"linked"`
-	Message     string `json:"message"`
-	Warning     string `json:"warning"`
-	Branch      string `json:"branch"`
-	LastCommit  string `json:"lastCommit"`
-	StagingPath string `json:"stagingPath"`
-	Temporary   bool   `json:"temporary"`
-	UpToDate    bool   `json:"upToDate"`
+	Linked                bool   `json:"linked"`
+	Message               string `json:"message"`
+	Warning               string `json:"warning"`
+	Branch                string `json:"branch"`
+	LastCommit            string `json:"lastCommit"`
+	StagingPath           string `json:"stagingPath"`
+	Temporary             bool   `json:"temporary"`
+	UpToDate              bool   `json:"upToDate"`
+	TransportMilliseconds int64  `json:"transportMilliseconds"`
 }
 
 type Repository struct {
