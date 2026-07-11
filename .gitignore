@@ -3,6 +3,7 @@ local/
 AGENTS.md
 .vscode
 .kilo
+.codex
 
 # Automatic / Template Entries
 .task
