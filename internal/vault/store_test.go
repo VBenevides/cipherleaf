@@ -145,6 +145,70 @@ func TestLockedFolderRequiresBackendAuthorization(t *testing.T) {
 	}
 }
 
+func TestParentFolderLocksNestedFolders(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.CreateFolder("Projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateFolder("Private", parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ParentID != parent.ID {
+		t.Fatalf("child parent = %q, want %q", child.ParentID, parent.ID)
+	}
+	if _, err := store.CreateFolder("Private"); err != nil {
+		t.Fatalf("same name in another folder should be allowed: %v", err)
+	}
+	note, err := store.CreateNoteInFolder("Plan", child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LockFolder(child.ID, "child password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LockFolder(parent.ID, "parent password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(note.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() = %v, want ErrFolderLocked", err)
+	}
+	if err := store.CheckFolderPassword(parent.ID, "parent password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(note.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() after unlocking parent = %v, want ErrFolderLocked", err)
+	}
+	if err := store.CheckFolderPassword(child.ID, "child password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(note.ID); err != nil {
+		t.Fatalf("GetNote() after unlocking hierarchy: %v", err)
+	}
+	if err := store.LockFolderSession(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(note.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() after locking parent = %v, want ErrFolderLocked", err)
+	}
+	if err := store.CheckFolderPassword(parent.ID, "parent password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetNote(note.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetNote() after reopening parent = %v, want child to remain locked", err)
+	}
+	if _, err := store.MoveFolder(parent.ID, child.ID); err == nil {
+		t.Fatal("moving a folder into a descendant succeeded")
+	}
+	if err := store.DeleteFolder(parent.ID); err == nil {
+		t.Fatal("deleting a folder with subfolders succeeded")
+	}
+}
+
 func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

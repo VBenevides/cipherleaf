@@ -275,6 +275,34 @@ function folderName(path: string): string {
   return parts[parts.length - 1] ?? "Encrypted vault";
 }
 
+function folderLineage(folderID: string, folderByID: ReadonlyMap<string, Folder>): Folder[] {
+  const result: Folder[] = [];
+  const seen = new Set<string>();
+  for (let id = folderID; id; ) {
+    if (seen.has(id)) break;
+    seen.add(id);
+    const folder = folderByID.get(id);
+    if (!folder) break;
+    result.unshift(folder);
+    id = folder.parentId ?? "";
+  }
+  return result;
+}
+
+function folderIsLocked(
+  folderID: string,
+  folderByID: ReadonlyMap<string, Folder>,
+  unlockedFolderIDs: ReadonlySet<string>,
+): boolean {
+  return folderLineage(folderID, folderByID).some(
+    (folder) => folder.locked && !unlockedFolderIDs.has(folder.id),
+  );
+}
+
+function folderIsHidden(folderID: string, folderByID: ReadonlyMap<string, Folder>): boolean {
+  return folderLineage(folderID, folderByID).some((folder) => folder.hidden);
+}
+
 function startOfMonth(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -306,6 +334,8 @@ function App() {
   const [vaultAction, setVaultAction] = useState<VaultAction | null>(null);
   const [vaultPath, setVaultPath] = useState("");
   const [lastVaultPath, setLastVaultPath] = useState("");
+  const [recentVaultPaths, setRecentVaultPaths] = useState<string[]>([]);
+  const [vaultMenuOpen, setVaultMenuOpen] = useState(false);
   const [vaultName, setVaultName] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [rememberSecret, setRememberSecret] = useState(false);
@@ -591,13 +621,13 @@ function App() {
     setGlobalSearchError("");
     try {
       const results = await VaultService.FindInNotes(trimmed);
-      const lockedFolderIDs = new Set(
-        folders
-          .filter((folder) => folder.locked && !unlockedFolderIDs.has(folder.id))
-          .map((folder) => folder.id),
-      );
+      const folderByID = new Map(folders.map((folder) => [folder.id, folder]));
       if (request !== globalSearchRequestRef.current) return;
-      setGlobalSearchMatches((results ?? []).filter((match) => !lockedFolderIDs.has(match.folderId)));
+      setGlobalSearchMatches(
+        (results ?? []).filter(
+          (match) => !folderIsLocked(match.folderId, folderByID, unlockedFolderIDs),
+        ),
+      );
     } catch (reason) {
       if (request !== globalSearchRequestRef.current) return;
       setGlobalSearchError(errorText(reason));
@@ -793,6 +823,23 @@ function App() {
         setSession({ locked: true, path: "", vaultId: "", noteCount: 0 });
       });
   }, []);
+
+  useEffect(() => {
+    VaultService.ListRecentVaultPaths()
+      .then((paths) => setRecentVaultPaths(paths ?? []))
+      .catch(() => setRecentVaultPaths([]));
+  }, [session?.path]);
+
+  useEffect(() => {
+    if (!vaultMenuOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest(".vault-selector")) {
+        setVaultMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [vaultMenuOpen]);
 
   const refreshNotes = async (preferredID?: string) => {
     const result = (await VaultService.ListNotes()) ?? [];
@@ -1037,6 +1084,7 @@ function App() {
     setQuery("");
     setRememberError("");
     setSidebarOpen(false);
+    setVaultMenuOpen(false);
     setSaveState("idle");
     setGlobalSearchTarget(null);
     setSyncLinked(false);
@@ -1104,6 +1152,20 @@ function App() {
     setError("");
     if (await openRememberedVault(lastVaultPath)) return;
     await prepareVaultPrompt("open", lastVaultPath);
+  };
+
+  const openRecentVault = async (path: string) => {
+    setVaultMenuOpen(false);
+    if (path === session?.path) return;
+    setError("");
+    try {
+      await persistCurrent();
+      resetToLocked(await VaultService.LockVault());
+      if (await openRememberedVault(path)) return;
+      await prepareVaultPrompt("open", path);
+    } catch {
+      // persistCurrent already presents the actionable error.
+    }
   };
 
   const copyVaultSecret = async () => {
@@ -1451,11 +1513,12 @@ function App() {
     }
   };
 
-  const createFolder = async () => {
+  const createFolder = async (parentID = selectedFolderID === "all" ? "" : selectedFolderID) => {
+    const parent = folderByID.get(parentID);
     const name = await requestAppPrompt({
       kind: "prompt",
       eyebrow: "Folder",
-      title: "New folder",
+      title: parent ? `New folder in “${parent.name}”` : "New folder",
       label: "Folder name",
       submitLabel: "Create folder",
       icon: "folder",
@@ -1464,7 +1527,7 @@ function App() {
     if (!trimmed) return;
     setError("");
     try {
-      const created = await VaultService.CreateFolder(trimmed);
+      const created = await VaultService.CreateFolder(trimmed, parentID);
       await refreshFolders();
       setSelectedFolderID(created.id);
     } catch (reason) {
@@ -1552,7 +1615,9 @@ function App() {
     setError("");
     try {
       await VaultService.LockFolder(folder.id, password);
-      if (selectedFolderID === folder.id) setSelectedFolderID("all");
+      if (folderLineage(selectedFolderID, folderByID).some((item) => item.id === folder.id)) {
+        setSelectedFolderID("all");
+      }
       await refreshFolders();
       await refreshNotes();
     } catch (reason) {
@@ -1563,17 +1628,21 @@ function App() {
   const lockUnlockedFolder = async (folder: Folder) => {
     setError("");
     try {
-      if (noteRef.current?.folderId === folder.id) {
+      if (noteRef.current && folderLineage(noteRef.current.folderId, folderByID).some((item) => item.id === folder.id)) {
         await persistCurrent();
         applyLoadedNote(null);
         setNoteTrail([]);
       }
-      if (selectedFolderID === folder.id) setSelectedFolderID("all");
+      if (folderLineage(selectedFolderID, folderByID).some((item) => item.id === folder.id)) {
+        setSelectedFolderID("all");
+      }
       await VaultService.LockFolderSession(folder.id);
       setUnlockedFolderIDs((current) => {
-        const next = new Set(current);
-        next.delete(folder.id);
-        return next;
+        return new Set(
+          [...current].filter(
+            (id) => !folderLineage(id, folderByID).some((item) => item.id === folder.id),
+          ),
+        );
       });
       await refreshNotes();
     } catch (reason) {
@@ -1609,19 +1678,27 @@ function App() {
     }
   };
 
-  const selectFolder = async (folder: Folder) => {
-    if (folder.locked && !unlockedFolderIDs.has(folder.id)) {
-      const password = await requestFolderPassword(`Unlock “${folder.name}”`, "Unlock folder");
-      if (password === null) return;
+  const unlockFolderLineage = async (folder: Folder) => {
+    const unlocked = new Set(unlockedFolderIDs);
+    for (const ancestor of folderLineage(folder.id, folderByID)) {
+      if (!ancestor.locked || unlocked.has(ancestor.id)) continue;
+      const password = await requestFolderPassword(`Unlock “${ancestor.name}”`, "Unlock folder");
+      if (password === null) return false;
       try {
-        await VaultService.CheckFolderPassword(folder.id, password);
-        setUnlockedFolderIDs((current) => new Set(current).add(folder.id));
-        await refreshNotes();
+        await VaultService.CheckFolderPassword(ancestor.id, password);
       } catch (reason) {
         setError(errorText(reason));
-        return;
+        return false;
       }
+      unlocked.add(ancestor.id);
+      setUnlockedFolderIDs(new Set(unlocked));
     }
+    await refreshNotes();
+    return true;
+  };
+
+  const selectFolder = async (folder: Folder) => {
+    if (!(await unlockFolderLineage(folder))) return;
     setSelectedFolderID(folder.id);
     setQuery("");
   };
@@ -1640,13 +1717,7 @@ function App() {
       await persistCurrent();
       const summary = notes.find((item) => item.id === id);
       const lockedFolder = summary && folderByID.get(summary.folderId);
-      if (lockedFolder?.locked && !unlockedFolderIDs.has(lockedFolder.id)) {
-        const password = await requestFolderPassword(`Unlock “${lockedFolder.name}”`, "Unlock folder");
-        if (password === null) return;
-        await VaultService.CheckFolderPassword(lockedFolder.id, password);
-        setUnlockedFolderIDs((current) => new Set(current).add(lockedFolder.id));
-        await refreshNotes();
-      }
+      if (lockedFolder && !(await unlockFolderLineage(lockedFolder))) return;
       const loaded = await VaultService.GetNote(id);
       applyLoadedNote(loaded);
       if (options.replaceTrail) {
@@ -1715,6 +1786,16 @@ function App() {
         applyLoadedNote(moved, "saved");
       }
       if (query) setNotes((await VaultService.SearchNotes(query)) ?? []);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const moveFolder = async (id: string, parentID: string) => {
+    setError("");
+    try {
+      await VaultService.MoveFolder(id, parentID);
+      await refreshFolders();
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -1891,11 +1972,35 @@ function App() {
     [folders],
   );
 
+  const folderRows = useMemo(() => {
+    const children = new Map<string, Folder[]>();
+    for (const folder of folders) {
+      const parentID = folder.parentId ?? "";
+      children.set(parentID, [...(children.get(parentID) ?? []), folder]);
+    }
+    for (const items of children.values()) {
+      items.sort((left, right) =>
+        left.order === right.order
+          ? left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+          : left.order - right.order,
+      );
+    }
+    const rows: { folder: Folder; depth: number }[] = [];
+    const addChildren = (parentID: string, depth: number) => {
+      for (const folder of children.get(parentID) ?? []) {
+        rows.push({ folder, depth });
+        addChildren(folder.id, depth + 1);
+      }
+    };
+    addChildren("", 0);
+    return rows;
+  }, [folders]);
+
   const publicNotes = useMemo(
     () => notes.filter((item) => {
       if (!item.folderId) return true;
-      const folder = folderByID.get(item.folderId);
-      return !folder?.hidden && (!folder?.locked || unlockedFolderIDs.has(item.folderId));
+      return !folderIsHidden(item.folderId, folderByID) &&
+        !folderIsLocked(item.folderId, folderByID, unlockedFolderIDs);
     }),
     [folderByID, notes, unlockedFolderIDs],
   );
@@ -2714,10 +2819,11 @@ function App() {
             <span>Unfiled</span>
             <small>{noteCountsByFolder.get("") ?? 0}</small>
           </button>
-          {folders.map((folder) => (
+          {folderRows.map(({ folder, depth }) => (
             <button
               key={folder.id}
               className={`folder-list-item ${selectedFolderID === folder.id ? "active" : ""} ${dropTarget === `folder:${folder.id}` ? "drag-over" : ""} ${dropTarget === `folder:${folder.id}:before` ? "drag-over-before" : ""} ${dropTarget === `folder:${folder.id}:after` ? "drag-over-after" : ""}`}
+              style={{ paddingLeft: `${10 + depth * 14}px` }}
               onClick={() => {
                 if (suppressClickRef.current) {
                   suppressClickRef.current = false;
@@ -2752,9 +2858,9 @@ function App() {
                 finishPointerDrag({ kind: "folder", id: folder.id, after: target.after });
               }}
             >
-              <Icon name={folder.locked && !unlockedFolderIDs.has(folder.id) ? "lock" : "folder"} size={15} />
+              <Icon name={folderIsLocked(folder.id, folderByID, unlockedFolderIDs) ? "lock" : "folder"} size={15} />
               <span>{folder.name}</span>
-              <small>{folder.locked && !unlockedFolderIDs.has(folder.id) ? "Locked" : (noteCountsByFolder.get(folder.id) ?? 0)}</small>
+              <small>{folderIsLocked(folder.id, folderByID, unlockedFolderIDs) ? "Locked" : (noteCountsByFolder.get(folder.id) ?? 0)}</small>
             </button>
           ))}
         </nav>
@@ -2866,6 +2972,36 @@ function App() {
           <button className="lock-button" onClick={() => void lockVault()}>
             <Icon name="lock" size={15} /> Lock vault
           </button>
+          <div className="vault-selector">
+            <button
+              type="button"
+              className="vault-selector-button"
+              aria-haspopup="menu"
+              aria-expanded={vaultMenuOpen}
+              onClick={() => setVaultMenuOpen((open) => !open)}
+            >
+              <span>{folderName(session.path)}</span><small>⌃</small>
+            </button>
+            {vaultMenuOpen && (
+              <div className="vault-selector-menu" role="menu" aria-label="Recent vaults">
+                {(recentVaultPaths.includes(session.path)
+                  ? recentVaultPaths
+                  : [...recentVaultPaths, session.path]
+                ).slice(-5).map((path) => (
+                  <button
+                    key={path}
+                    type="button"
+                    role="menuitem"
+                    className={path === session.path ? "active" : ""}
+                    title={path}
+                    onClick={() => void openRecentVault(path)}
+                  >
+                    {folderName(path)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -3548,6 +3684,16 @@ function App() {
                       role="menuitem"
                       onClick={() => {
                         setContextMenu(null);
+                        void createFolder(folder.id);
+                      }}
+                    >
+                      <Icon name="folder" size={14} />
+                      New subfolder
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setContextMenu(null);
                         void setFolderHidden(folder, !folder.hidden);
                       }}
                     >
@@ -3576,6 +3722,38 @@ function App() {
                       <Icon name="lock" size={14} />
                       {folder.locked ? "Remove lock" : "Lock folder"}
                     </button>
+                    <div className="titlebar-menu-separator" />
+                    <div className="context-menu-label">Move to</div>
+                    <button
+                      role="menuitem"
+                      disabled={!folder.parentId}
+                      onClick={() => {
+                        setContextMenu(null);
+                        void moveFolder(folder.id, "");
+                      }}
+                    >
+                      <Icon name="folder" size={14} />
+                      Top level
+                    </button>
+                    {folderRows
+                      .filter(({ folder: destination }) =>
+                        destination.id !== folder.id &&
+                        !folderLineage(destination.id, folderByID).some((item) => item.id === folder.id),
+                      )
+                      .map(({ folder: destination, depth }) => (
+                        <button
+                          key={destination.id}
+                          role="menuitem"
+                          disabled={destination.id === folder.parentId}
+                          onClick={() => {
+                            setContextMenu(null);
+                            void moveFolder(folder.id, destination.id);
+                          }}
+                        >
+                          <Icon name="folder" size={14} />
+                          {" ".repeat(depth)}{destination.name}
+                        </button>
+                      ))}
                     <div className="titlebar-menu-separator" />
                     {(["manual", "title", "updated", "created"] as const).map((mode) => (
                       <button

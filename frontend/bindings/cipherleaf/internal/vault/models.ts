@@ -17,6 +17,7 @@ export interface FindMatch {
 export interface Folder {
     "id": string;
     "name": string;
+    "parentId"?: string;
     "order": number;
     "hidden"?: boolean;
     "locked"?: boolean;

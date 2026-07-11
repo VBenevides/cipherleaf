@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,40 @@ func TestRecentVaultPersistsTheme(t *testing.T) {
 	}
 	if got := store.LastTheme(); got != "" {
 		t.Fatalf("LastTheme() after invalid input = %q, want empty", got)
+	}
+}
+
+func TestRecentVaultPathsKeepTheFiveMostRecentInAccessOrder(t *testing.T) {
+	store := NewRecentVaultStore(filepath.Join(t.TempDir(), recentFilename))
+	root := t.TempDir()
+	var paths []string
+	for index := 1; index <= 6; index++ {
+		path := filepath.Join(root, "vault", string(rune('0'+index)))
+		paths = append(paths, path)
+		if err := store.Remember(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.Paths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := paths[1:]; !slices.Equal(got, want) {
+		t.Fatalf("Paths() = %#v, want %#v", got, want)
+	}
+	if err := store.Remember(paths[2]); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.Paths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{paths[1], paths[3], paths[4], paths[5], paths[2]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Paths() after revisiting = %#v, want %#v", got, want)
+	}
+	if last, err := store.LastPath(); err != nil || last != paths[2] {
+		t.Fatalf("LastPath() = %q, %v; want %q", last, err, paths[2])
 	}
 }
 

@@ -10,10 +10,12 @@ import (
 )
 
 const recentFilename = "last-vault.json"
+const maxRecentVaults = 5
 
 type recentVault struct {
-	Path  string `json:"path"`
-	Theme string `json:"theme,omitempty"`
+	Path  string   `json:"path"`
+	Paths []string `json:"paths,omitempty"`
+	Theme string   `json:"theme,omitempty"`
 }
 
 // ErrNoLastVault is returned when an operation expects a previously opened
@@ -47,14 +49,10 @@ func NormalizeTheme(value string) string {
 
 func (s *RecentVaultStore) Remember(path string) error {
 	theme := ""
-	data, err := os.ReadFile(s.path)
-	if err == nil {
-		var existing recentVault
-		if json.Unmarshal(data, &existing) == nil {
-			theme = NormalizeTheme(existing.Theme)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read previous recent vault file: %w", err)
+	if existing, err := s.read(); err != nil {
+		return err
+	} else {
+		theme = existing.Theme
 	}
 	return s.RememberWithTheme(path, theme)
 }
@@ -68,7 +66,22 @@ func (s *RecentVaultStore) RememberWithTheme(path, theme string) error {
 	if err != nil {
 		return fmt.Errorf("resolve recent vault path: %w", err)
 	}
-	data, err := json.Marshal(recentVault{Path: filepath.Clean(absolute), Theme: NormalizeTheme(theme)})
+	current, err := s.read()
+	if err != nil {
+		return err
+	}
+	cleaned := filepath.Clean(absolute)
+	paths := make([]string, 0, maxRecentVaults)
+	for _, existing := range current.Paths {
+		if existing != cleaned {
+			paths = append(paths, existing)
+		}
+	}
+	paths = append(paths, cleaned)
+	if len(paths) > maxRecentVaults {
+		paths = paths[len(paths)-maxRecentVaults:]
+	}
+	data, err := json.Marshal(recentVault{Path: cleaned, Paths: paths, Theme: NormalizeTheme(theme)})
 	if err != nil {
 		return fmt.Errorf("encode recent vault file: %w", err)
 	}
@@ -107,31 +120,70 @@ func (s *RecentVaultStore) RememberWithTheme(path, theme string) error {
 }
 
 func (s *RecentVaultStore) LastPath() (string, error) {
-	path, _, err := s.read()
-	return path, err
+	recent, err := s.read()
+	return recent.Path, err
 }
 
 func (s *RecentVaultStore) LastTheme() string {
-	_, theme, err := s.read()
+	recent, err := s.read()
 	if err != nil {
 		return ""
 	}
-	return theme
+	return recent.Theme
 }
 
-func (s *RecentVaultStore) read() (string, string, error) {
+// Paths returns up to five vault paths in access order, from oldest to newest.
+func (s *RecentVaultStore) Paths() ([]string, error) {
+	recent, err := s.read()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), recent.Paths...), nil
+}
+
+func (s *RecentVaultStore) read() (recentVault, error) {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", "", nil
+		return recentVault{}, nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("read recent vault file: %w", err)
+		return recentVault{}, fmt.Errorf("read recent vault file: %w", err)
 	}
 	var recent recentVault
 	if err := json.Unmarshal(data, &recent); err != nil {
-		return "", "", fmt.Errorf("decode recent vault file: %w", err)
+		return recentVault{}, fmt.Errorf("decode recent vault file: %w", err)
 	}
-	return filepath.Clean(recent.Path), NormalizeTheme(recent.Theme), nil
+	paths := make([]string, 0, maxRecentVaults)
+	for _, path := range recent.Paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		cleaned := filepath.Clean(path)
+		duplicate := false
+		for _, existing := range paths {
+			if existing == cleaned {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			paths = append(paths, cleaned)
+		}
+	}
+	if len(paths) == 0 && strings.TrimSpace(recent.Path) != "" {
+		paths = append(paths, filepath.Clean(recent.Path))
+	}
+	if len(paths) > maxRecentVaults {
+		paths = paths[len(paths)-maxRecentVaults:]
+	}
+	recent.Paths = paths
+	recent.Path = ""
+	if len(paths) > 0 {
+		recent.Path = paths[len(paths)-1]
+	}
+	recent.Theme = NormalizeTheme(recent.Theme)
+	return recent, nil
 }
 
 func (s *RecentVaultStore) Forget() error {

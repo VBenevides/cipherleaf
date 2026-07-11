@@ -235,6 +235,10 @@ func (s *VaultService) GetLastVaultPath() (string, error) {
 	return s.recent.LastPath()
 }
 
+func (s *VaultService) ListRecentVaultPaths() ([]string, error) {
+	return s.recent.Paths()
+}
+
 type LastSession struct {
 	Path  string `json:"path"`
 	Theme string `json:"theme"`
@@ -371,8 +375,8 @@ func (s *VaultService) ListFolders() ([]vault.Folder, error) {
 	return s.store.ListFolders()
 }
 
-func (s *VaultService) CreateFolder(name string) (vault.Folder, error) {
-	return s.store.CreateFolder(name)
+func (s *VaultService) CreateFolder(name, parentID string) (vault.Folder, error) {
+	return s.store.CreateFolder(name, parentID)
 }
 
 func (s *VaultService) RenameFolder(id, name string) (vault.Folder, error) {
@@ -385,6 +389,10 @@ func (s *VaultService) DeleteFolder(id string) error {
 
 func (s *VaultService) ReorderFolders(orderedIDs []string) error {
 	return s.store.ReorderFolders(orderedIDs)
+}
+
+func (s *VaultService) MoveFolder(id, parentID string) (vault.Folder, error) {
+	return s.store.MoveFolder(id, parentID)
 }
 
 func (s *VaultService) SetFolderHidden(id string, hidden bool) (vault.Folder, error) {
