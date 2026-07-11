@@ -92,6 +92,7 @@ type ConflictResolution = {
 const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 const ObjectTreeView = lazy(() => import("./ObjectTreeView"));
 const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
+const GraphView = lazy(() => import("./GraphView").then(({ GraphView }) => ({ default: GraphView })));
 
 function EditorLoading() {
   return <div className="settings-loading">Loading editor...</div>;
@@ -194,7 +195,7 @@ function Icon({
   name,
   size = 18,
 }: {
-  name: "book" | "copy" | "dots" | "eye" | "file" | "folder" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
+  name: "book" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
   size?: number;
 }) {
   const paths = {
@@ -231,6 +232,14 @@ function Icon({
     ),
     folder: (
       <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    ),
+    graph: (
+      <>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="8" r="2" />
+        <circle cx="12" cy="18" r="2" />
+        <path d="m7.7 7.1 8.5.8M7.3 7.8l3.4 8.4M16.9 9.8l-3.8 6.4" />
+      </>
     ),
     lock: (
       <>
@@ -325,7 +334,6 @@ function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [query, setQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
   const [globalSortMode, setGlobalSortMode] = useState(() => window.localStorage.getItem("cipherleaf-sort-all") || "manual");
   const [unfiledSortMode, setUnfiledSortMode] = useState(() => window.localStorage.getItem("cipherleaf-sort-unfiled") || "manual");
@@ -351,6 +359,7 @@ function App() {
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [graphOpen, setGraphOpen] = useState(false);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -403,7 +412,6 @@ function App() {
   const initialThemeRef = useRef(true);
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
-  const sidebarSearchRef = useRef<HTMLInputElement | null>(null);
   const editVersion = useRef(0);
   const noteRef = useRef<Note | null>(null);
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
@@ -653,11 +661,6 @@ function App() {
       if (!isFind && !isReplace && !isQuickSearch) return;
       if (session?.locked) return;
       event.preventDefault();
-      if (isQuickSearch) {
-        setSidebarOpen(true);
-        window.setTimeout(() => sidebarSearchRef.current?.focus(), 0);
-        return;
-      }
       bringWindowToFront("globalSearch");
       setGlobalSearchReplace(isReplace);
       setGlobalSearchOpen(true);
@@ -1082,7 +1085,6 @@ function App() {
     setSelectedFolderID("all");
     setContextMenu(null);
     setDirty(false);
-    setQuery("");
     setRememberError("");
     setSidebarOpen(false);
     setVaultMenuOpen(false);
@@ -1701,7 +1703,6 @@ function App() {
   const selectFolder = async (folder: Folder) => {
     if (!(await unlockFolderLineage(folder))) return;
     setSelectedFolderID(folder.id);
-    setQuery("");
   };
 
   const selectNote = async (
@@ -1786,7 +1787,6 @@ function App() {
       if (noteRef.current?.id === id) {
         applyLoadedNote(moved, "saved");
       }
-      if (query) setNotes((await VaultService.SearchNotes(query)) ?? []);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -1950,24 +1950,6 @@ function App() {
     setView(nextView);
   };
 
-  useEffect(() => {
-    if (!session || session.locked) return;
-    let active = true;
-    const timer = window.setTimeout(() => {
-      VaultService.SearchNotes(query)
-        .then((result) => {
-          if (active && unlockedRef.current) setNotes(result ?? []);
-        })
-        .catch((reason) => {
-          if (active && unlockedRef.current) setError(errorText(reason));
-        });
-    }, 220);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [query, session?.locked, session?.vaultId]);
-
   const folderByID = useMemo(
     () => new Map(folders.map((folder) => [folder.id, folder])),
     [folders],
@@ -2005,6 +1987,16 @@ function App() {
         !folderIsLocked(item.folderId, folderByID, unlockedFolderIDs);
     }),
     [folderByID, notes, unlockedFolderIDs],
+  );
+
+  const graphFolders = useMemo(
+    () => graphOpen
+      ? folders.filter((folder) =>
+          !folderIsHidden(folder.id, folderByID) &&
+          !folderIsLocked(folder.id, folderByID, unlockedFolderIDs),
+        )
+      : [],
+    [folderByID, folders, graphOpen, unlockedFolderIDs],
   );
 
   const noteCountsByFolder = useMemo(() => {
@@ -2065,12 +2057,12 @@ function App() {
     const tagged = selectedTag
       ? publicNotes.filter((item) => (item.tags ?? []).includes(selectedTag))
       : publicNotes;
-    if (query.trim() || selectedFolderID === "all") return sortNotesForMode(tagged, globalSortMode);
+    if (selectedFolderID === "all") return sortNotesForMode(tagged, globalSortMode);
     return sortNotesForFolder(
       notes.filter((item) => item.folderId === selectedFolderID),
       selectedFolderID,
     ).filter((item) => !selectedTag || (item.tags ?? []).includes(selectedTag));
-  }, [globalSortMode, notes, publicNotes, query, selectedFolderID, selectedTag, sortNotesForFolder, sortNotesForMode]);
+  }, [globalSortMode, notes, publicNotes, selectedFolderID, selectedTag, sortNotesForFolder, sortNotesForMode]);
 
   const currentFolder = useMemo(
     () => folders.find((folder) => folder.id === note?.folderId),
@@ -2773,17 +2765,17 @@ function App() {
             <Icon name="x" />
           </button>
         </div>
-        <div className="search-box">
-          <Icon name="search" size={16} />
-          <input
-            ref={sidebarSearchRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search encrypted notes"
-            aria-label="Search notes"
-          />
-          <kbd>⌘ K</kbd>
-        </div>
+        <button
+          type="button"
+          className={`graph-view-button ${graphOpen ? "active" : ""}`}
+          onClick={() => {
+            setGraphOpen(true);
+            setSidebarOpen(false);
+          }}
+        >
+          <Icon name="graph" size={16} />
+          <span>Graph view</span>
+        </button>
         <div className="notes-heading folders-heading">
           <span>Folders</span>
           <button className="icon-button" onClick={() => void createFolder()} aria-label="Create folder" title="New folder">
@@ -2794,8 +2786,8 @@ function App() {
           <button
             className={`folder-list-item ${selectedFolderID === "all" ? "active" : ""}`}
             onClick={() => {
+              setGraphOpen(false);
               setSelectedFolderID("all");
-              setQuery("");
             }}
           >
             <Icon name="book" size={15} />
@@ -2809,8 +2801,8 @@ function App() {
                 suppressClickRef.current = false;
                 return;
               }
+              setGraphOpen(false);
               setSelectedFolderID("");
-              setQuery("");
             }}
             onMouseEnter={(event) => {
               if (event.buttons === 1 && dragCandidateRef.current?.kind === "note") activatePointerDrag("folder:");
@@ -2830,11 +2822,12 @@ function App() {
                 if (suppressClickRef.current) {
                   suppressClickRef.current = false;
                   return;
-                }
-                void selectFolder(folder);
+              }
+              setGraphOpen(false);
+              void selectFolder(folder);
               }}
               onMouseDown={(event) => {
-                if (event.button === 0 && !query) {
+                if (event.button === 0) {
                   dragCandidateRef.current = { kind: "folder", id: folder.id, active: false };
                 }
               }}
@@ -2892,13 +2885,11 @@ function App() {
         )}
         <div className="notes-heading">
           <span>
-            {query
-              ? "Search results"
-              : selectedFolderID === "all"
-                ? "Notes"
-                : selectedFolderID === ""
-                  ? "Unfiled"
-                  : folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes"}
+            {selectedFolderID === "all"
+              ? "Notes"
+              : selectedFolderID === ""
+                ? "Unfiled"
+                : folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes"}
           </span>
           <select
             className="notes-sort-select"
@@ -2924,11 +2915,12 @@ function App() {
                 if (suppressClickRef.current) {
                   suppressClickRef.current = false;
                   return;
-                }
-                void selectNote(item.id);
+              }
+              setGraphOpen(false);
+              void selectNote(item.id);
               }}
               onMouseDown={(event) => {
-                if (event.button === 0 && !query) {
+                if (event.button === 0) {
                   dragCandidateRef.current = { kind: "note", id: item.id, active: false };
                 }
               }}
@@ -2965,7 +2957,7 @@ function App() {
           ))}
           {visibleNotes.length === 0 && (
             <div className="empty-list">
-              <p>{query ? "No notes match your search." : "This folder is empty."}</p>
+              <p>This folder is empty.</p>
             </div>
           )}
         </nav>
@@ -3013,7 +3005,9 @@ function App() {
             <Icon name="menu" />
           </button>
           <div className="breadcrumbs">
-            {(noteTrail.length ? noteTrail : [
+            {graphOpen ? (
+              <span className="breadcrumb-item"><strong>Graph view</strong></span>
+            ) : (noteTrail.length ? noteTrail : [
               { id: "", title: folderName(session.path) },
               ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
               ...(note ? [{ id: note.id, title: note.title || "Untitled" }] : []),
@@ -3047,7 +3041,7 @@ function App() {
           </div>
           <button
             className="save-file-button"
-            disabled={(!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+            disabled={graphOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
             title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
             onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
           >
@@ -3059,7 +3053,7 @@ function App() {
           </div>
           <button
             className="save-and-sync-button"
-            disabled={!note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
+            disabled={graphOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
             title={
               !note
                 ? "No note open"
@@ -3076,7 +3070,7 @@ function App() {
               {lastSyncLabel}
             </span>
           )}
-          {note && (
+          {note && !graphOpen && (
             <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
               <Icon name="trash" size={16} />
             </button>
@@ -3092,7 +3086,22 @@ function App() {
           </div>
         )}
 
-        {conflictResolution ? (
+        {graphOpen ? (
+          <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
+            <GraphView
+              folders={graphFolders}
+              notes={publicNotes}
+              onSelectFolder={(folder) => {
+                setGraphOpen(false);
+                void selectFolder(folder);
+              }}
+              onSelectNote={(noteID) => {
+                setGraphOpen(false);
+                void selectNote(noteID);
+              }}
+            />
+          </Suspense>
+        ) : conflictResolution ? (
           <>
             <div className="document-heading conflict-heading">
               <div>

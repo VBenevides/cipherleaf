@@ -1317,34 +1317,33 @@ a:focus-visible {
   padding: 8px 12px;
 }
 
-.search-box {
+.graph-view-button {
   height: 35px;
   display: flex;
   align-items: center;
   gap: 7px;
   margin: 15px 14px 13px;
   padding: 0 9px;
-  color: #8a877e;
+  color: #77736a;
   border: 1px solid #d5d0c4;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.5);
-}
-
-.search-box input {
-  min-width: 0;
-  flex: 1;
-  padding: 0;
-  color: var(--ink);
-  border: 0;
-  background: transparent;
-  outline: 0;
+  cursor: pointer;
+  font: inherit;
   font-size: 11px;
+  font-weight: 700;
+  text-align: left;
 }
 
-.search-box kbd {
-  color: #aaa69c;
-  font-family: inherit;
-  font-size: 9px;
+.graph-view-button:hover,
+.graph-view-button.active {
+  color: var(--green-dark);
+  border-color: var(--green);
+  background: var(--green-pale);
+}
+
+.graph-view-button span {
+  flex: 1;
 }
 
 .notes-heading {
@@ -2040,6 +2039,109 @@ a:focus-visible {
   flex: 1;
   display: grid;
   overflow: hidden;
+}
+
+.graph-view {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 10% 5%, rgba(255, 255, 255, 0.64), transparent 31%),
+    var(--canvas);
+}
+
+.graph-view-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 28px clamp(30px, 5.4vw, 76px) 21px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.graph-view-header .eyebrow {
+  margin-bottom: 7px;
+}
+
+.graph-view-header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.graph-view-header > p {
+  max-width: 300px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.graph-canvas {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 28px clamp(30px, 5.4vw, 76px);
+}
+
+.graph-canvas svg {
+  min-width: 100%;
+  display: block;
+  color: var(--ink);
+}
+
+.graph-edges path {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.34;
+}
+
+.graph-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.graph-node:hover rect,
+.graph-node:hover circle,
+.graph-node:focus rect,
+.graph-node:focus circle {
+  filter: brightness(1.08);
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.graph-node text {
+  dominant-baseline: middle;
+  font-family: Inter, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-node--folder text {
+  font-size: 11px;
+}
+
+.empty-graph-view {
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+}
+
+.empty-graph-view h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
+}
+
+.empty-graph-view p {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .conflict-heading {
@@ -3584,7 +3686,7 @@ a:focus-visible {
   background: rgba(46, 52, 64, 0.96);
 }
 
-:root[data-theme="dark"] .search-box,
+:root[data-theme="dark"] .graph-view-button,
 :root[data-theme="dark"] .lock-button,
 :root[data-theme="dark"] .vault-selector-button,
 :root[data-theme="dark"] .vault-selector-menu,
@@ -3602,7 +3704,6 @@ a:focus-visible {
   border-color: var(--line);
 }
 
-:root[data-theme="dark"] .search-box input,
 :root[data-theme="dark"] .title-input,
 :root[data-theme="dark"] .markdown-editor,
 :root[data-theme="dark"] .markdown-preview,
