@@ -1492,6 +1492,9 @@ a:focus-visible {
 }
 
 .note-list-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
+  contain: layout paint style;
   width: 100%;
   min-height: 47px;
   display: flex;

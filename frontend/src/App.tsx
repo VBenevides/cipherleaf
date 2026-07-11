@@ -847,12 +847,14 @@ function App() {
     return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [vaultMenuOpen]);
 
-  const refreshNotes = async (preferredID?: string) => {
+  const refreshNotes = async (preferredID?: string, preferredNote?: Note) => {
     const result = (await VaultService.ListNotes()) ?? [];
     setNotes(result);
     const targetID = preferredID ?? noteRef.current?.id ?? result[0]?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
-      const loaded = await VaultService.GetNote(targetID);
+      const loaded = preferredNote?.id === targetID
+        ? preferredNote
+        : await VaultService.GetNote(targetID);
       applyLoadedNote(loaded);
     } else {
       applyLoadedNote(null);
@@ -1281,7 +1283,7 @@ function App() {
           first.title,
           welcomeContent,
         );
-        await refreshNotes(saved.id);
+        await refreshNotes(saved.id, saved);
       } else {
         await refreshNotes();
       }
@@ -1381,7 +1383,7 @@ function App() {
       setSyncConflicts((current) =>
         current.filter((item) => item.localNoteId !== conflictResolution.conflict.localNoteId),
       );
-      await refreshNotes(saved.id);
+      await refreshNotes(saved.id, saved);
       applyLoadedNote(saved, "saved");
       if (syncLinked) {
         await syncNow();
