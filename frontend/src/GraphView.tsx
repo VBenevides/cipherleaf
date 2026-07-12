@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Folder, NoteSummary } from "../bindings/cipherleaf/internal/vault/models";
 
 type GraphNode = {
@@ -18,6 +19,10 @@ type GraphEdge = {
 const BRANCH_HUES = [250, 155, 305, 65, 15, 200];
 const ROW_HEIGHT = 74;
 const LEVEL_WIDTH = 210;
+const DEFAULT_ZOOM = 1;
+const ZOOM_STEP = 0.1;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 2;
 
 function ordered<T extends { name?: string; title?: string; order: number }>(items: T[]): T[] {
   return [...items].sort((left, right) => {
@@ -53,6 +58,7 @@ export function GraphView({
   onSelectFolder: (folder: Folder) => void;
   onSelectNote: (noteID: string) => void;
 }) {
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const foldersByParent = new Map<string, Folder[]>();
   const foldersByID = new Map(folders.map((folder) => [folder.id, folder]));
   for (const folder of folders) {
@@ -138,10 +144,17 @@ export function GraphView({
           <p className="eyebrow">Vault structure</p>
           <h2>Graph view</h2>
         </div>
-        <p>Folder hue stays constant; each tier becomes lighter. Circular nodes are notes.</p>
+        <div className="graph-view-actions">
+          <p>Folder hue stays constant; each tier becomes lighter. Circular nodes are notes.</p>
+          <div className="graph-zoom-controls" aria-label="Graph zoom controls">
+            <button type="button" onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - ZOOM_STEP))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out">−</button>
+            <button type="button" onClick={() => setZoom(DEFAULT_ZOOM)} aria-label="Reset zoom">{Math.round(zoom * 100)}%</button>
+            <button type="button" onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value + ZOOM_STEP))} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in">+</button>
+          </div>
+        </div>
       </header>
       <div className="graph-canvas">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Folder and note hierarchy">
+        <svg viewBox={`0 0 ${width} ${height}`} width={width * zoom} height={height * zoom} role="img" aria-label="Folder and note hierarchy">
           <g className="graph-edges">
             {edges.map(({ from, to }) => (
               <path

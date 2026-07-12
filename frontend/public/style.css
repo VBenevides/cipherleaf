@@ -2089,12 +2089,46 @@ a:focus-visible {
   font-weight: 500;
 }
 
-.graph-view-header > p {
+.graph-view-actions {
   max-width: 300px;
+}
+
+.graph-view-actions > p {
   margin: 0;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
+}
+
+.graph-zoom-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.graph-zoom-controls button {
+  min-width: 30px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.graph-zoom-controls button:nth-child(2) {
+  min-width: 54px;
+  font-size: 10px;
+}
+
+.graph-zoom-controls button:hover:not(:disabled) {
+  background: var(--green-pale);
+}
+
+.graph-zoom-controls button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .graph-canvas {
@@ -2105,7 +2139,6 @@ a:focus-visible {
 }
 
 .graph-canvas svg {
-  min-width: 100%;
   display: block;
   color: var(--ink);
 }
