@@ -76,6 +76,12 @@ func TestRecentVaultPersistsTheme(t *testing.T) {
 	}
 }
 
+func TestNormalizeThemeAcceptsArchivist(t *testing.T) {
+	if got := NormalizeTheme(" Archivist "); got != "archivist" {
+		t.Fatalf("NormalizeTheme() = %q, want archivist", got)
+	}
+}
+
 func TestRecentVaultPathsKeepTheFiveMostRecentInAccessOrder(t *testing.T) {
 	store := NewRecentVaultStore(filepath.Join(t.TempDir(), recentFilename))
 	root := t.TempDir()

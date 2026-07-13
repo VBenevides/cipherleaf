@@ -149,6 +149,103 @@ const setQuoteCollapsed = StateEffect.define<{ position: number; collapsed: bool
 });
 const setAllQuotesCollapsed = StateEffect.define<boolean>();
 
+function installJournalRules(editor: EditorView) {
+  const scroller = editor.scrollDOM;
+  const layer = document.createElement("div");
+  layer.className = "cm-journal-rules";
+  scroller.appendChild(layer);
+  let frame = 0;
+  const enabled = () => {
+    const mode = document.documentElement.dataset.journalLines;
+    return mode === "full" || mode === "dotted";
+  };
+
+  const render = () => {
+    frame = 0;
+    if (!enabled()) return;
+
+    const scrollerRect = scroller.getBoundingClientRect();
+    const positions: { top: number; left: number }[] = [];
+    for (const line of editor.dom.querySelectorAll<HTMLElement>(".cm-line:not(.cm-live-attachment-line)")) {
+      const lineRect = line.getBoundingClientRect();
+      if (lineRect.bottom < scrollerRect.top || lineRect.top > scrollerRect.bottom) continue;
+
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      const rects: DOMRect[] = [];
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        if (!node.textContent?.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        rects.push(...range.getClientRects());
+      }
+      rects.sort((left, right) => left.top - right.top);
+      const rows: { top: number; bottom: number }[] = [];
+      for (const rect of rects) {
+        const row = rows[rows.length - 1];
+        if (row) {
+          if (rect.top < row.bottom && rect.bottom > row.top) {
+            row.top = Math.min(row.top, rect.top);
+            row.bottom = Math.max(row.bottom, rect.bottom);
+            continue;
+          }
+        }
+        rows.push({ top: rect.top, bottom: rect.bottom });
+      }
+      if (rows.length === 0) rows.push({ top: lineRect.top, bottom: lineRect.bottom });
+
+      const handleRect = line.querySelector<HTMLElement>(".cm-live-object-handle")?.getBoundingClientRect();
+      const left = (handleRect?.right ?? lineRect.left) - scrollerRect.left + scroller.scrollLeft + 6;
+      for (const row of rows) {
+        positions.push({
+          top: row.bottom - scrollerRect.top + scroller.scrollTop,
+          left,
+        });
+      }
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const position of positions) {
+      const rule = document.createElement("span");
+      rule.className = "cm-journal-rule";
+      rule.style.top = `${position.top}px`;
+      rule.style.left = `${position.left}px`;
+      fragment.appendChild(rule);
+    }
+    layer.replaceChildren(fragment);
+  };
+
+  const schedule = () => {
+    if (!enabled()) {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      if (layer.childElementCount) layer.replaceChildren();
+      return;
+    }
+    if (!frame) frame = requestAnimationFrame(render);
+  };
+  const resizeObserver = new ResizeObserver(schedule);
+  resizeObserver.observe(scroller);
+  const themeObserver = new MutationObserver(schedule);
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-journal-lines", "data-editor-font", "data-theme", "style"],
+  });
+  scroller.addEventListener("scroll", schedule, { passive: true });
+  schedule();
+
+  return {
+    schedule,
+    destroy() {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      themeObserver.disconnect();
+      scroller.removeEventListener("scroll", schedule);
+      layer.remove();
+    },
+  };
+}
+
 const liveMarkdownTheme = EditorView.theme(
   {
     "&": {
@@ -2227,6 +2324,7 @@ export default function LiveMarkdownEditor({
     if (!host.current) return;
 
     const normalizedValue = normalizeArrowText(value);
+    let scheduleJournalRules = () => {};
     const editor = new EditorView({
       parent: host.current,
       state: EditorState.create({
@@ -2490,10 +2588,15 @@ export default function LiveMarkdownEditor({
             if (update.selectionSet || update.docChanged) {
               onCaretChangeRef.current?.(update.state.selection.main.head);
             }
+            if (update.docChanged || update.viewportChanged || update.geometryChanged) {
+              scheduleJournalRules();
+            }
           }),
         ],
       }),
     });
+    const journalRules = installJournalRules(editor);
+    scheduleJournalRules = journalRules.schedule;
 
     view.current = editor;
     if (typeof caretOffset === "number" && Number.isFinite(caretOffset)) {
@@ -2510,6 +2613,7 @@ export default function LiveMarkdownEditor({
 
     return () => {
       onCaretChangeRef.current?.(editor.state.selection.main.head);
+      journalRules.destroy();
       editor.destroy();
       view.current = null;
     };

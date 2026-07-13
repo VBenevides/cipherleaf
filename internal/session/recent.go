@@ -41,7 +41,7 @@ func NewDefaultRecentVaultStore() *RecentVaultStore {
 // NormalizeTheme clamps a user-supplied theme identifier to a known value.
 func NormalizeTheme(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "light", "dark":
+	case "light", "dark", "archivist":
 		return strings.ToLower(strings.TrimSpace(value))
 	}
 	return ""

@@ -36,12 +36,14 @@ import { targetForMatch, type SearchTarget } from "./searchTarget";
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
-type Theme = "light" | "dark";
+type Theme = "light" | "dark" | "archivist";
+type JournalLines = "none" | "full" | "dotted";
 type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "calendar" | "globalSearch" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
   { value: "dark", label: "Dark (Nord)", swatch: "dark" },
+  { value: "archivist", label: "Archivist", swatch: "archivist" },
 ];
 type TitlebarMenu = "file";
 type ContextMenuState =
@@ -411,6 +413,10 @@ function App() {
     const saved = Number(window.localStorage.getItem("cipherleaf-editor-font-size"));
     return Number.isFinite(saved) && saved >= 10 && saved <= 32 ? saved : 14;
   });
+  const [journalLines, setJournalLines] = useState<JournalLines>(() => {
+    const saved = window.localStorage.getItem("cipherleaf-journal-lines");
+    return saved === "full" || saved === "dotted" ? saved : "none";
+  });
   const initialThemeRef = useRef(true);
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
@@ -567,6 +573,11 @@ function App() {
       String(editorFontSize),
     );
   }, [editorFontSize]);
+
+  useEffect(() => {
+    document.documentElement.dataset.journalLines = journalLines;
+    window.localStorage.setItem("cipherleaf-journal-lines", journalLines);
+  }, [journalLines]);
 
   const decreaseEditorFontSize = useCallback(() => {
     setEditorFontSize((current) => Math.max(10, current - 1));
@@ -3433,11 +3444,28 @@ function App() {
               </div>
             </fieldset>
 
+            <fieldset className="appearance-fieldset">
+              <legend>Journal lines</legend>
+              <div className="appearance-theme-options">
+                {(["none", "full", "dotted"] as JournalLines[]).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={journalLines === value ? "active" : ""}
+                    aria-pressed={journalLines === value}
+                    onClick={() => setJournalLines(value)}
+                  >
+                    {value === "none" ? "No lines" : value === "full" ? "Full lines" : "Dotted lines"}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
             <label>
               Font
               <div className="appearance-font-row">
                 <span title={editorFontName}>
-                  {editorFontName || "Default (Georgia)"}
+                  {editorFontName || "Default (Charter)"}
                 </span>
                 {editorFontName && (
                   <button

@@ -7,7 +7,10 @@
 }
 
 :root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ui-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --title-font: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --editor-font: Charter, "Bitstream Charter", Georgia, "Times New Roman", serif;
+  font-family: var(--ui-font);
   color: #2e3440;
   background: #eceff4;
   font-synthesis: none;
@@ -39,6 +42,123 @@
   --green-dark: #88c0d0;
   --green-pale: #3b4655;
   --red: #bf616a;
+}
+
+:root[data-theme="archivist"] {
+  color: #37332e;
+  background: #f5f0e6;
+  --ink: #37332e;
+  --muted: #786f64;
+  --paper: #f5f0e6;
+  --canvas: #f7f3ea;
+  --line: #d8ccb8;
+  --line-soft: #ded3c1;
+  --green: #7d4336;
+  --green-dark: #67362c;
+  --green-pale: #dfcfaa;
+  --red: #91493c;
+  --editor-bg: #f7f3ea;
+  --sidebar-bg: #eee4d2;
+  --toolbar-bg: #f0e7d7;
+  --surface: #f1e9da;
+  --surface-hover: #e8dcc6;
+  --surface-active: #dcc8a4;
+  --text-faint: #9b9185;
+}
+
+:root[data-theme="archivist"] ::selection {
+  background: #dfcfaa;
+}
+
+:root[data-theme="archivist"] .markdown-preview a {
+  color: #4f6873;
+}
+
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-code,
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-code-block,
+:root[data-theme="archivist"] .markdown-preview code,
+:root[data-theme="archivist"] .markdown-preview pre {
+  color: #38332c;
+  background: #ddd1b5;
+}
+
+:root[data-theme="archivist"] .app-menubar,
+:root[data-theme="archivist"] .editor-topbar,
+:root[data-theme="archivist"] .markdown-toolbar {
+  border-color: var(--line);
+  background: var(--toolbar-bg);
+}
+
+:root[data-theme="archivist"] .sidebar {
+  border-color: var(--line);
+  background: var(--sidebar-bg);
+}
+
+:root[data-theme="archivist"] .document-body {
+  background-color: var(--editor-bg);
+}
+
+:root[data-theme="archivist"] .folder-list-item:hover,
+:root[data-theme="archivist"] .note-list-item:hover,
+:root[data-theme="archivist"] .graph-view-button:hover {
+  background: var(--surface-hover);
+}
+
+:root[data-theme="archivist"] .folder-list-item.active,
+:root[data-theme="archivist"] .note-list-item.active,
+:root[data-theme="archivist"] .graph-view-button.active {
+  background: var(--surface-active);
+}
+
+:root[data-theme="archivist"] .notes-sort-select,
+:root[data-theme="archivist"] .lock-button,
+:root[data-theme="archivist"] .vault-selector-button,
+:root[data-theme="archivist"] .vault-selector-menu button,
+:root[data-theme="archivist"] .vault-modal,
+:root[data-theme="archivist"] .vault-modal input,
+:root[data-theme="archivist"] .log-panel,
+:root[data-theme="archivist"] .conflict-editor-pane {
+  background: var(--surface);
+}
+
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-task-line:has(.cm-live-task input:checked),
+:root[data-theme="archivist"] .notion-outline-node.is-complete > .notion-outline-row > .notion-outline-text {
+  color: #8a8176;
+  text-decoration-color: #a89d8f;
+}
+
+.cm-journal-rules {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+}
+
+.live-markdown-editor .cm-content {
+  position: relative;
+  z-index: 1;
+}
+
+.cm-journal-rule {
+  position: absolute;
+  right: 0;
+}
+
+:root[data-journal-lines="full"] .cm-journal-rule {
+  border-top: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  transform: translateY(0.1em);
+}
+
+:root[data-journal-lines="dotted"] .cm-journal-rule {
+  height: 2px;
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--line) 90%, var(--ink)) 1px,
+    transparent 1.2px
+  );
+  background-repeat: repeat-x;
+  background-size: 5px 2px;
+  transform: translateY(0.2em);
 }
 
 * {
@@ -1835,6 +1955,11 @@ a:focus-visible {
   background: #2e3440;
 }
 
+.theme-swatch.archivist {
+  background: #f3ecd8;
+  border-color: #8a4b32;
+}
+
 .menu-check {
   margin-left: auto;
 }
@@ -2009,7 +2134,7 @@ a:focus-visible {
   border: 0;
   background: transparent;
   outline: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--title-font);
   font-size: clamp(31px, 3.5vw, 45px);
   font-weight: 400;
   letter-spacing: -0.035em;
@@ -2612,13 +2737,14 @@ a:focus-visible {
   height: 100%;
   color: var(--ink);
   background: transparent;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--editor-font);
   font-size: var(--editor-font-size, 14px);
 }
 
-:root[data-editor-font="custom"] .title-input,
 :root[data-editor-font="custom"] .live-markdown-editor .cm-editor,
-:root[data-editor-font="custom"] .live-markdown-editor .cm-editor * {
+:root[data-editor-font="custom"] .live-markdown-editor .cm-editor *,
+:root[data-editor-font="custom"] .markdown-editor,
+:root[data-editor-font="custom"] .markdown-preview {
   font-family: "CipherleafEditorFont", monospace !important;
   font-synthesis: weight;
 }
@@ -2674,7 +2800,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-heading {
   color: #37362f;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-weight: 500;
   letter-spacing: -0.025em;
 }
@@ -3109,7 +3235,7 @@ a:focus-visible {
 }
 
 .markdown-preview {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--editor-font);
   font-size: 14px;
   line-height: 1.75;
 }
