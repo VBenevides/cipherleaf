@@ -12,6 +12,7 @@ export {
   parseCanonicalObjectDocument,
   parseObjectDocument,
   prepareNoteContent,
+  remapObjectKeysByLine,
   stringifyCanonicalObjectDocument,
   type CanonicalObjectDocument,
   type CanonicalObjectNode,

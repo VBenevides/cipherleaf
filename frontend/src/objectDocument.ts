@@ -586,6 +586,25 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
   return { objects, roots, byId, byLine };
 }
 
+export function remapObjectKeysByLine(
+  keys: ReadonlySet<string>,
+  previous: ObjectDocument,
+  next: ObjectDocument,
+  mapLine: (lineNumber: number) => number,
+): Set<string> {
+  const remapped = new Set<string>();
+  for (const key of keys) {
+    if (!key.startsWith("object:")) {
+      remapped.add(key);
+      continue;
+    }
+    const object = previous.byId.get(key.slice(7));
+    const mapped = object && next.byLine.get(mapLine(object.lineNumber));
+    if (mapped) remapped.add(`object:${mapped.id}`);
+  }
+  return remapped;
+}
+
 export function markdownObjectTree(markdown: string): ObjectLine[] {
   return parseObjectDocument(markdown).roots;
 }

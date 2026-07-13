@@ -49,6 +49,7 @@ import {
   objectHierarchyIndent,
   objectOwnerLineNumber as ownerLineNumberInLines,
   parseObjectDocument,
+  remapObjectKeysByLine,
   repeatedObjectPrefix,
   visualIndent,
   type ObjectDropMode,
@@ -1685,7 +1686,7 @@ function livePreviewExtension(
       );
     },
     update(value, transaction) {
-      const collapsed = new Set(value.collapsedQuotes);
+      let collapsed = new Set(value.collapsedQuotes);
       let cachedContext: ObjectDocumentContext | null = null;
       const collapseContext = () => {
         if (!cachedContext) {
@@ -1705,6 +1706,19 @@ function livePreviewExtension(
         return cachedContext;
       };
       let collapseChanged = false;
+      if (transaction.docChanged) {
+        const { objectDocument } = collapseContext();
+        collapsed = remapObjectKeysByLine(
+          collapsed,
+          value.objectDocument,
+          objectDocument,
+          (lineNumber) => {
+            const from = transaction.startState.doc.line(lineNumber).from;
+            return transaction.state.doc.lineAt(transaction.changes.mapPos(from, 1)).number;
+          },
+        );
+        collapseChanged = true;
+      }
       for (const effect of transaction.effects) {
         if (effect.is(setAllQuotesCollapsed)) {
           const { lines, objectDocument } = collapseContext();

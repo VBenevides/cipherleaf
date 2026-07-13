@@ -1333,7 +1333,29 @@ function App() {
       if (completedAction === "create") {
         const first = await VaultService.CreateNote("Welcome");
         const welcomeContent = canonicalObjectDocumentTextFromMarkdown(
-          "# Welcome to your encrypted vault\n\nYour notes are encrypted before they touch the disk.\n\n* Write naturally in **Live Preview**\n* Add _emphasis_, **strong ideas**, and `[[double brackets]]`\n* [ ] Try the interactive checklist\n* Create a note with **Ctrl + N**\n\n> Collapsible project\n> [ ] First task\n>> [ ] Nested task—use Tab and Shift+Tab to change its level\n> [ ] Another task\n\nThis vault locks automatically after 15 minutes of inactivity.",
+          [
+            "# Welcome to Cipherleaf",
+            "",
+            "Your notes, titles, properties, and attachments are encrypted before they touch the disk.",
+            "",
+            "> Start here",
+            "  > [ ] Write naturally in **Live Preview** or switch to Markdown",
+            "  > [ ] Create a note with **Ctrl + N**",
+            "  > [ ] Connect notes with `[[wikilinks]]` and explore the link graph",
+            "  > [ ] Open the quick switcher with **Ctrl/Cmd + K**",
+            "",
+            "## Explore",
+            "",
+            "* Open the calendar to create daily notes from a template",
+            "* Use File to import or export Markdown and attach encrypted files",
+            "* Use Recovery to restore deleted notes or earlier versions",
+            "* Choose Nord Light, Nord Dark, or Archivist in Appearance",
+            "* Link a private GitHub repository for encrypted multi-device sync",
+            "",
+            "## Keep your vault safe",
+            "",
+            "Save your vault secret somewhere secure—there is no password reset. Cipherleaf locks automatically after 15 minutes of inactivity.",
+          ].join("\n"),
         );
         const saved = await VaultService.SaveNote(
           first.id,
@@ -3824,8 +3846,8 @@ function App() {
               <small>Template variables: {"{{title}}"}, {"{{date}}"}, and {"{{time}}"}.</small>
             </fieldset>
 
-            <label>
-              Font
+            <div className="appearance-font-field">
+              <span>Font</span>
               <div className="appearance-font-row">
                 <span title={editorFontName}>
                   {editorFontName || "Default (Charter)"}
@@ -3854,7 +3876,7 @@ function App() {
                   onChange={(event) => void chooseEditorFont(event)}
                 />
               </div>
-            </label>
+            </div>
 
             <label>
               Font size

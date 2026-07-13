@@ -11,6 +11,7 @@ import {
   parseCanonicalObjectDocument,
   parseObjectDocument,
   prepareNoteContent,
+  remapObjectKeysByLine,
 } from "../src/objectTree.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -179,6 +180,15 @@ test("assigns sibling sections to the nested section parent", () => {
     nested.uuid,
     nested.uuid,
   ]);
+});
+
+test("preserves collapsed sections shifted by an inserted nested item", () => {
+  const previous = parseObjectDocument(["> Sec 1", "  > Item 1", "> Sec 2", "> Sec 3"].join("\n"));
+  const next = parseObjectDocument(["> Sec 1", "  > Item 1", "  > Item 2", "> Sec 2", "> Sec 3"].join("\n"));
+  const collapsed = new Set(previous.roots.map((section) => `object:${section.id}`));
+  const remapped = remapObjectKeysByLine(collapsed, previous, next, (line) => line >= 3 ? line + 1 : line);
+
+  assert.deepEqual(remapped, new Set(next.roots.map((section) => `object:${section.id}`)));
 });
 
 test("moves objects after multiline object text", () => {
