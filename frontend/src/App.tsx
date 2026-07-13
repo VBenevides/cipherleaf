@@ -337,7 +337,6 @@ function App() {
   const [note, setNote] = useState<Note | null>(null);
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
-  const [unlinkedMentions, setUnlinkedMentions] = useState<FindMatch[]>([]);
   const [fileAttachments, setFileAttachments] = useState<AttachmentInfo[]>([]);
   const [unlockedFolderIDs, setUnlockedFolderIDs] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedFolderID, setSelectedFolderID] = useState("all");
@@ -530,23 +529,20 @@ function App() {
   useEffect(() => {
     if (!note || session?.locked) {
       setBacklinks([]);
-      setUnlinkedMentions([]);
       setFileAttachments([]);
       return;
     }
     let active = true;
-    Promise.all([VaultService.ListBacklinks(note.id), VaultService.ListUnlinkedMentions(note.id), VaultService.ListFileAttachments(note.id)])
-      .then(([linked, unlinked, attachments]) => {
+    Promise.all([VaultService.ListBacklinks(note.id), VaultService.ListFileAttachments(note.id)])
+      .then(([linked, attachments]) => {
         if (active) {
           setBacklinks(linked ?? []);
-          setUnlinkedMentions(unlinked ?? []);
           setFileAttachments(attachments ?? []);
         }
       })
       .catch(() => {
         if (active) {
           setBacklinks([]);
-          setUnlinkedMentions([]);
           setFileAttachments([]);
         }
       });
@@ -3611,17 +3607,6 @@ function App() {
                     type="button"
                     onClick={() => void selectNote(item.noteId)}
                   >
-                    <span>{item.title}</span>
-                    <small>{item.snippet}</small>
-                  </button>
-                ))}
-              </aside>
-            )}
-            {unlinkedMentions.length > 0 && (
-              <aside className="backlinks-panel" aria-label="Unlinked mentions">
-                <strong>Unlinked mentions</strong>
-                {unlinkedMentions.map((item) => (
-                  <button key={`${item.noteId}-${item.offset}`} type="button" onClick={() => void selectNote(item.noteId)}>
                     <span>{item.title}</span>
                     <small>{item.snippet}</small>
                   </button>
