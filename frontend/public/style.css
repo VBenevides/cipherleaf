@@ -3024,8 +3024,11 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-list-line {
-  padding-left: var(--live-list-indent, 0px);
-  text-indent: 0;
+  padding-left: calc(
+    var(--live-list-indent, 0px) +
+    var(--live-list-marker-width, 2em)
+  );
+  text-indent: calc(0px - var(--live-list-marker-width, 2em));
 }
 
 .live-markdown-editor .cm-line.cm-live-toggle-line {
@@ -3045,17 +3048,23 @@ a:focus-visible {
   padding-left: calc(
     var(--toggle-padding-left, 0px) +
     var(--toggle-button-width) +
-    var(--toggle-button-gap)
+    var(--toggle-button-gap) +
+    var(--live-list-marker-width, 2em)
   ) !important;
   text-indent: calc(
     0px -
     var(--toggle-button-width) -
-    var(--toggle-button-gap)
+    var(--toggle-button-gap) -
+    var(--live-list-marker-width, 2em)
   );
 }
 
-.live-markdown-editor .cm-live-toggle-line .cm-live-list-marker {
-  margin-left: 1.35em;
+.live-markdown-editor .cm-live-object-continuation-line {
+  padding-left: calc(
+    var(--live-object-depth, 0) * 22px +
+    var(--live-continuation-marker-width, 0px)
+  );
+  text-indent: calc(0px - var(--live-continuation-marker-width, 0px));
 }
 
 .live-markdown-editor .cm-live-horizontal-rule-line {

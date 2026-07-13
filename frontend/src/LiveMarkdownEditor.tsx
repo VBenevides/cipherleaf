@@ -1546,7 +1546,7 @@ function buildLivePreviewState(
           attributes: objectLineAttributes(
             lineNumber,
             "cm-live-object-continuation-line",
-            "",
+            markerWidth ? `--live-continuation-marker-width: ${markerWidth};` : "",
             depthByLine.get(continuationOwner.lineNumber) ?? 0,
           ),
         }).range(line.from),
