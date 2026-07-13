@@ -29,11 +29,6 @@ tasks:
           EXTRA_TAGS: '{{.EXTRA_TAGS}}'
           OBFUSCATED: '{{.OBFUSCATED}}'
           GARBLE_ARGS: '{{.GARBLE_ARGS}}'
-      # Compress the resulting binary with UPX when available. Skips silently
-      # when UPX is not installed so the build is still reproducible.
-      - task: compress:upx
-        vars:
-          OUTPUT: '{{.OUTPUT}}'
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
@@ -186,32 +181,6 @@ tasks:
   run:
     cmds:
       - '{{.BIN_DIR}}/{{.APP_NAME}}'
-
-  compress:upx:
-    summary: Compresses the built binary with UPX if available
-    desc: |
-      Uses UPX (https://upx.github.io) to compress the production binary
-      when it is on the PATH. The step is a no-op when UPX is not
-      installed, so builds remain reproducible. Uses the best `--best
-      --lzma` preset for the smallest artifact; pass `UPX_FLAGS` to
-      override. The original binary is backed up next to the compressed
-      one (`.upx-backup`) so you can recover it.
-    cmds:
-      - cmd: |
-          if ! command -v upx >/dev/null 2>&1; then
-            echo "upx not on PATH, skipping"
-            exit 0
-          fi
-
-          if [ ! -f "{{.OUTPUT}}" ]; then
-            echo "no binary at {{.OUTPUT}}, skipping"
-            exit 0
-          fi
-
-          cp -f "{{.OUTPUT}}" "{{.OUTPUT}}.upx-backup"
-          upx {{.UPX_FLAGS | default "--best --lzma"}} "{{.OUTPUT}}"
-    vars:
-      UPX_FLAGS: '{{.UPX_FLAGS}}'
 
   sign:deb:
     summary: Signs the DEB package

@@ -378,7 +378,7 @@ tasks:
         xcrun devicectl device process launch --device "{{.UDID}}" --stderr console --stdout console "{{.BUNDLE_ID}}"
 
   build:all:
-    summary: Builds Linux amd64, Windows amd64, and macOS amd64/arm64 binaries with UPX
+    summary: Builds Linux amd64, Windows amd64, and macOS amd64/arm64 binaries
     desc: |
       Builds release binaries for:
         - linux/amd64
@@ -392,63 +392,58 @@ tasks:
       Usage if this file is your root Taskfile:
         wails3 task build:all
 
-      Optional:
-        wails3 task common:build:all UPX_FLAGS="--best --lzma"
-
       Notes:
         - macOS cross-builds from Linux require the wails-cross Docker image.
           Run once first: wails3 task setup:docker
-        - UPX is required.
-        - Sign/notarize macOS apps after UPX compression.
     cmds:
-      - task: build:linux:amd64:upx
-      - task: build:windows:amd64:upx
-      - task: build:darwin:amd64:upx
-      - task: build:darwin:arm64:upx
+      - task: build:linux:amd64
+      - task: build:windows:amd64
+      - task: build:darwin:amd64
+      - task: build:darwin:arm64
 
   build:release:
     summary: Alias for build:all
     cmds:
       - task: build:all
 
-  build:linux:amd64:upx:
-    summary: Builds Linux amd64 and compresses it with UPX
+  build:linux:amd64:
+    summary: Builds Linux amd64
     cmds:
-      - task: build:target:upx
+      - task: build:target
         vars:
           TARGET_GOOS: linux
           TARGET_GOARCH: amd64
           TARGET_EXT: ""
 
-  build:windows:amd64:upx:
-    summary: Builds Windows amd64 and compresses it with UPX
+  build:windows:amd64:
+    summary: Builds Windows amd64
     cmds:
-      - task: build:target:upx
+      - task: build:target
         vars:
           TARGET_GOOS: windows
           TARGET_GOARCH: amd64
           TARGET_EXT: ".exe"
 
-  build:darwin:amd64:upx:
-    summary: Builds macOS Intel amd64 and compresses it with UPX
+  build:darwin:amd64:
+    summary: Builds macOS Intel amd64
     cmds:
-      - task: build:target:upx
+      - task: build:target
         vars:
           TARGET_GOOS: darwin
           TARGET_GOARCH: amd64
           TARGET_EXT: ""
 
-  build:darwin:arm64:upx:
-    summary: Builds macOS Apple Silicon arm64 and compresses it with UPX
+  build:darwin:arm64:
+    summary: Builds macOS Apple Silicon arm64
     cmds:
-      - task: build:target:upx
+      - task: build:target
         vars:
           TARGET_GOOS: darwin
           TARGET_GOARCH: arm64
           TARGET_EXT: ""
 
-  build:target:upx:
-    summary: Builds one GOOS/GOARCH target, normalizes the output filename, and compresses it with UPX
+  build:target:
+    summary: Builds one GOOS/GOARCH target and normalizes the output filename
     internal: true
     vars:
       TARGET_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}-{{.TARGET_GOOS}}-{{.TARGET_GOARCH}}{{.TARGET_EXT}}'
@@ -459,8 +454,6 @@ tasks:
         msg: "TARGET_GOARCH is required"
       - sh: command -v wails3 >/dev/null 2>&1
         msg: "wails3 is required on PATH"
-      - sh: command -v upx >/dev/null 2>&1
-        msg: "UPX is required to compress release binaries. Install UPX and rerun the task."
     cmds:
       - cmd: |
           set -eu
@@ -474,18 +467,18 @@ tasks:
 
           mkdir -p "$bin_dir"
 
-          rm -f "$target" "$target.upx-backup"
+          rm -f "$target"
 
           case "$target_goos" in
             windows)
-              rm -f "$bin_dir/$app_name.exe" "$bin_dir/$app_name.exe.upx-backup"
+              rm -f "$bin_dir/$app_name.exe"
               ;;
             linux)
-              rm -f "$bin_dir/$app_name" "$bin_dir/$app_name.upx-backup"
+              rm -f "$bin_dir/$app_name"
               ;;
             darwin)
-              rm -f "$bin_dir/$app_name" "$bin_dir/$app_name.upx-backup"
-              rm -f "$bin_dir/$app_name-darwin-$target_goarch" "$bin_dir/$app_name-darwin-$target_goarch.upx-backup"
+              rm -f "$bin_dir/$app_name"
+              rm -f "$bin_dir/$app_name-darwin-$target_goarch"
               ;;
           esac
 
@@ -522,9 +515,6 @@ tasks:
 
             mv -f "$source" "$target"
 
-            if [ -f "$source.upx-backup" ]; then
-              mv -f "$source.upx-backup" "$target.upx-backup"
-            fi
           else
             echo "Output already normalized: $target"
           fi
@@ -533,66 +523,3 @@ tasks:
             echo "Expected output was not created: $target"
             exit 1
           fi
-
-      - task: compress:upx:file
-        vars:
-          FILE: '{{.TARGET_OUTPUT}}'
-          UPX_FLAGS: '{{.UPX_FLAGS}}'
-
-  compress:upx:file:
-    summary: Compresses one exact binary with UPX if it is not already compressed
-    internal: true
-    vars:
-      UPX_FLAGS: '{{.UPX_FLAGS | default "--best --lzma"}}'
-    preconditions:
-      - sh: test -n "{{.FILE}}"
-        msg: "FILE is required"
-      - sh: command -v upx >/dev/null 2>&1
-        msg: "UPX is required to compress release binaries. Install UPX and rerun the task."
-    cmds:
-      - cmd: |
-          set -eu
-
-          file="{{.FILE}}"
-          backup="$file.upx-backup"
-          upx_flags='{{.UPX_FLAGS}}'
-
-          if [ ! -f "$file" ]; then
-            echo "No binary at $file"
-            exit 1
-          fi
-
-          if [ -f "$backup" ]; then
-            echo "UPX backup already exists, assuming already compressed: $file"
-            exit 0
-          fi
-
-          echo "Compressing with UPX: $file"
-
-          restore="$(mktemp)"
-          log="$(mktemp)"
-          trap 'rm -f "$restore" "$log"' EXIT
-
-          cp -f "$file" "$restore"
-
-          set +e
-          upx $upx_flags "$file" >"$log" 2>&1
-          status=$?
-          set -e
-
-          cat "$log"
-
-          if [ "$status" -eq 0 ]; then
-            cp -f "$restore" "$backup"
-            echo "UPX-compressed: $file"
-            exit 0
-          fi
-
-          if grep -q 'AlreadyPackedException' "$log"; then
-            echo "Already UPX-packed, keeping existing binary: $file"
-            exit 0
-          fi
-
-          echo "UPX failed; restoring original binary: $file"
-          cp -f "$restore" "$file"
-          exit "$status"
