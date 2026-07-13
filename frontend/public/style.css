@@ -2247,6 +2247,17 @@ a:focus-visible {
   font-size: 10px;
 }
 
+.graph-mode-controls button,
+.graph-mode-controls button:nth-child(2) {
+  min-width: 54px;
+  font-size: 11px;
+}
+
+.graph-mode-controls button.active {
+  background: var(--green-pale);
+  border-color: var(--green);
+}
+
 .graph-zoom-controls button:hover:not(:disabled) {
   background: var(--green-pale);
 }
@@ -2268,10 +2279,24 @@ a:focus-visible {
   color: var(--ink);
 }
 
-.graph-edges path {
+.graph-edges path,
+.graph-edges line {
   fill: none;
   stroke-width: 2;
   opacity: 0.34;
+}
+
+.graph-edges line {
+  stroke: var(--green);
+}
+
+.graph-empty-state {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .graph-node {
@@ -4259,4 +4284,44 @@ a:focus-visible {
 .cm-editor .cm-panels .cm-search {
   padding: 6px 10px !important;
   gap: 4px !important;
+}
+.recovery-modal {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
+}
+
+.recovery-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.recovery-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.recovery-row > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.recovery-row small {
+  color: var(--muted);
+}
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attachment-row > span {
+  display: grid;
+  flex: 1;
 }

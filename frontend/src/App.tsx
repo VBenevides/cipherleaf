@@ -12,13 +12,16 @@ import {
 import { Events } from "@wailsio/runtime";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type {
+  AttachmentInfo,
   FindMatch,
   Folder,
   MergeConflict,
   Note,
+  NoteVersion,
   NoteSummary,
   ReplaceResult,
   Session,
+  TrashItem,
 } from "../bindings/cipherleaf/internal/vault/models";
 import type {
   ConnectionResult,
@@ -32,13 +35,15 @@ import {
   prepareNoteContent,
 } from "./objectDocument";
 import { targetForMatch, type SearchTarget } from "./searchTarget";
+import { rankQuickSwitcher } from "./quickSwitcher";
+import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark" | "archivist";
 type JournalLines = "none" | "full" | "dotted";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "syncConflicts" | "calendar" | "globalSearch" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -332,6 +337,8 @@ function App() {
   const [note, setNote] = useState<Note | null>(null);
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
+  const [unlinkedMentions, setUnlinkedMentions] = useState<FindMatch[]>([]);
+  const [fileAttachments, setFileAttachments] = useState<AttachmentInfo[]>([]);
   const [unlockedFolderIDs, setUnlockedFolderIDs] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedFolderID, setSelectedFolderID] = useState("all");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -370,6 +377,10 @@ function App() {
   const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [noteVersions, setNoteVersions] = useState<NoteVersion[]>([]);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [folderPasswordPrompt, setFolderPasswordPrompt] = useState<FolderPasswordPrompt | null>(null);
   const [folderPassword, setFolderPassword] = useState("");
   const [folderPasswordVisible, setFolderPasswordVisible] = useState(false);
@@ -385,6 +396,8 @@ function App() {
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [quickSwitcherQuery, setQuickSwitcherQuery] = useState("");
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
@@ -395,6 +408,9 @@ function App() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [calendarSelected, setCalendarSelected] = useState(() => new Date());
+  const [dailyNoteFormat, setDailyNoteFormat] = useState(() => window.localStorage.getItem("cipherleaf-daily-format") || "YYYY-MM-DD");
+  const [dailyNoteFolderID, setDailyNoteFolderID] = useState(() => window.localStorage.getItem("cipherleaf-daily-folder") || "");
+  const [dailyTemplateNoteID, setDailyTemplateNoteID] = useState(() => window.localStorage.getItem("cipherleaf-daily-template") || "");
   const [today, setToday] = useState(() => new Date());
   const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
@@ -506,17 +522,33 @@ function App() {
   }, [unfiledSortMode]);
 
   useEffect(() => {
+    window.localStorage.setItem("cipherleaf-daily-format", dailyNoteFormat);
+    window.localStorage.setItem("cipherleaf-daily-folder", dailyNoteFolderID);
+    window.localStorage.setItem("cipherleaf-daily-template", dailyTemplateNoteID);
+  }, [dailyNoteFolderID, dailyNoteFormat, dailyTemplateNoteID]);
+
+  useEffect(() => {
     if (!note || session?.locked) {
       setBacklinks([]);
+      setUnlinkedMentions([]);
+      setFileAttachments([]);
       return;
     }
     let active = true;
-    VaultService.ListBacklinks(note.id)
-      .then((result) => {
-        if (active) setBacklinks(result ?? []);
+    Promise.all([VaultService.ListBacklinks(note.id), VaultService.ListUnlinkedMentions(note.id), VaultService.ListFileAttachments(note.id)])
+      .then(([linked, unlinked, attachments]) => {
+        if (active) {
+          setBacklinks(linked ?? []);
+          setUnlinkedMentions(unlinked ?? []);
+          setFileAttachments(attachments ?? []);
+        }
       })
       .catch(() => {
-        if (active) setBacklinks([]);
+        if (active) {
+          setBacklinks([]);
+          setUnlinkedMentions([]);
+          setFileAttachments([]);
+        }
       });
     return () => {
       active = false;
@@ -674,6 +706,12 @@ function App() {
       if (!isFind && !isReplace && !isQuickSearch) return;
       if (session?.locked) return;
       event.preventDefault();
+      if (isQuickSearch) {
+        bringWindowToFront("quickSwitcher");
+        setQuickSwitcherQuery("");
+        setQuickSwitcherOpen(true);
+        return;
+      }
       bringWindowToFront("globalSearch");
       setGlobalSearchReplace(isReplace);
       setGlobalSearchOpen(true);
@@ -966,6 +1004,7 @@ function App() {
         stored.content,
       );
       updateSummary(saved);
+      setNotes((await VaultService.ListNotes()) ?? []);
       if (version === editVersion.current) {
         const prepared = noteForEditing(saved);
         noteRef.current = prepared.note;
@@ -1549,16 +1588,41 @@ function App() {
     await quitApplication();
   };
 
-  const createNote = async () => {
+  const createNote = async (title = "Untitled") => {
     setError("");
     try {
       await persistCurrent();
       const targetFolder = selectedFolderID === "all" ? "" : selectedFolderID;
-      const created = await VaultService.CreateNoteInFolder("Untitled", targetFolder);
+      const created = await VaultService.CreateNoteInFolder(title, targetFolder);
       const result = (await VaultService.ListNotes()) ?? [];
       setNotes(result);
       applyLoadedNote(created);
       setSidebarOpen(false);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const openDailyNote = async (date: Date) => {
+    const title = formatDailyTitle(date, dailyNoteFormat);
+    const existing = notes.find((item) => item.title === title && item.folderId === dailyNoteFolderID);
+    setCalendarOpen(false);
+    if (existing) {
+      await selectNote(existing.id, { appendTrail: true });
+      return;
+    }
+    setError("");
+    try {
+      await persistCurrent();
+      const created = await VaultService.CreateNoteInFolder(title, dailyNoteFolderID);
+      let content = `# ${title}\n`;
+      if (dailyTemplateNoteID) {
+        const template = await VaultService.GetNote(dailyTemplateNoteID);
+        content = renderNoteTemplate(markdownForEditing(template.content), title, date);
+      }
+      const saved = await VaultService.SaveNote(created.id, created.title, canonicalContentFromMarkdown(content));
+      setNotes((await VaultService.ListNotes()) ?? []);
+      applyLoadedNote(saved);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -1795,7 +1859,7 @@ function App() {
         kind: "confirm",
         eyebrow: "Delete note",
         title: "Delete note",
-        message: `Delete “${title || "Untitled"}”? This cannot be undone.`,
+        message: `Move “${title || "Untitled"}” to Trash?`,
         confirmLabel: "Delete note",
         danger: true,
         icon: "trash",
@@ -1988,6 +2052,49 @@ function App() {
     }
   };
 
+  const attachFile = async () => {
+    const current = noteRef.current;
+    if (!current) return;
+    const path = await VaultService.SelectAttachmentFile();
+    if (!path) return;
+    setBusy(true);
+    try {
+      const attachment = await VaultService.ImportFileAttachment(current.id, path);
+      const markdown = markdownForEditing(current.content);
+      const separator = markdown.endsWith("\n") || markdown === "" ? "" : "\n";
+      editNote({ content: canonicalContentFromMarkdown(`${markdown}${separator}[${attachment.filename}](attachment:${attachment.id})\n`) });
+      await persistCurrent();
+      setFileAttachments((items) => [...items, attachment]);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportFileAttachment = async (attachment: AttachmentInfo) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const destination = await VaultService.SelectMarkdownFolder(`Select where to export ${attachment.filename}`);
+    if (!destination) return;
+    try {
+      const path = await VaultService.ExportFileAttachment(current.id, attachment.id, destination);
+      setSyncNotification(`Exported attachment to ${path}.`);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const removeFileAttachment = async (attachment: AttachmentInfo) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const markdown = markdownForEditing(current.content);
+    const escapedID = attachment.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    editNote({ content: canonicalContentFromMarkdown(markdown.replace(new RegExp(`!?\\[[^\\]]*\\]\\(attachment:${escapedID}[^)]*\\)\\n?`, "g"), "")) });
+    await persistCurrent();
+    setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
+  };
+
   const syncDraftNote = () => {
     const draft = noteRef.current;
     if (draft) setNote(draft);
@@ -2112,6 +2219,11 @@ function App() {
     ).filter((item) => !selectedTag || (item.tags ?? []).includes(selectedTag));
   }, [globalSortMode, notes, publicNotes, selectedFolderID, selectedTag, sortNotesForFolder, sortNotesForMode]);
 
+  const quickSwitcherNotes = useMemo(
+    () => rankQuickSwitcher(publicNotes, quickSwitcherQuery),
+    [publicNotes, quickSwitcherQuery],
+  );
+
   const currentFolder = useMemo(
     () => folders.find((folder) => folder.id === note?.folderId),
     [folders, note?.folderId],
@@ -2169,6 +2281,123 @@ function App() {
       setError(errorText(reason));
     } finally {
       setSettingsBusy(false);
+    }
+  };
+
+  const refreshRecovery = async () => {
+    const [trash, versions] = await Promise.all([
+      VaultService.ListTrash(),
+      noteRef.current ? VaultService.ListNoteVersions(noteRef.current.id) : Promise.resolve([]),
+    ]);
+    setTrashItems(trash ?? []);
+    setNoteVersions(versions ?? []);
+  };
+
+  const openRecovery = async () => {
+    setTitlebarMenu(null);
+    setRecoveryBusy(true);
+    setError("");
+    bringWindowToFront("recovery");
+    setRecoveryOpen(true);
+    try {
+      await persistCurrent();
+      await refreshRecovery();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const restoreTrashItem = async (item: TrashItem) => {
+    setRecoveryBusy(true);
+    try {
+      await VaultService.RestoreTrashItem(item.kind, item.id);
+      await Promise.all([refreshFolders(), refreshNotes()]);
+      await refreshRecovery();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const permanentlyDeleteTrashItem = async (item: TrashItem) => {
+    if (!(await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Permanent deletion",
+      title: `Delete ${item.kind} permanently?`,
+      message: `“${item.title}” cannot be recovered after this action.`,
+      confirmLabel: "Delete permanently",
+      danger: true,
+      icon: "trash",
+    }))) return;
+    setRecoveryBusy(true);
+    try {
+      await VaultService.PermanentlyDeleteTrashItem(item.kind, item.id);
+      await refreshRecovery();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const restoreNoteVersion = async (version: NoteVersion) => {
+    const current = noteRef.current;
+    if (!current) return;
+    setRecoveryBusy(true);
+    try {
+      const restored = await VaultService.RestoreNoteVersion(current.id, version.revision);
+      applyLoadedNote(restored);
+      await refreshNotes();
+      await refreshRecovery();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const importMarkdown = async () => {
+    const path = await VaultService.SelectMarkdownFolder("Select a folder containing Markdown files");
+    if (!path) return;
+    setBusy(true);
+    setError("");
+    try {
+      await persistCurrent();
+      const result = await VaultService.ImportMarkdown(path);
+      await Promise.all([refreshFolders(), refreshNotes()]);
+      setSyncNotification(`Imported ${result.notes} note${result.notes === 1 ? "" : "s"} from Markdown.`);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportMarkdown = async () => {
+    if (!(await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Plaintext export",
+      title: "Export decrypted Markdown?",
+      message: "The exported notes and attachments will not be encrypted. Anyone with filesystem access can read them.",
+      confirmLabel: "Export plaintext",
+      danger: true,
+      icon: "lock",
+    }))) return;
+    const path = await VaultService.SelectMarkdownFolder("Select where to create the Markdown export");
+    if (!path) return;
+    setBusy(true);
+    setError("");
+    try {
+      await persistCurrent();
+      const result = await VaultService.ExportMarkdown(path);
+      setSyncNotification(`Exported ${result.notes} note${result.notes === 1 ? "" : "s"} to ${result.path}.`);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -2743,11 +2972,30 @@ function App() {
                 }}>
                   Save file <kbd>Ctrl + S</kbd>
                 </button>
+                <button role="menuitem" disabled={!note || busy} onClick={() => {
+                  setTitlebarMenu(null);
+                  void attachFile();
+                }}>
+                  Attach encrypted file…
+                </button>
                 <button role="menuitem" disabled={!note || saveState === "saving" || syncing || !syncLinked} onClick={() => {
                   setTitlebarMenu(null);
                   void saveAndSync();
                 }}>
                   Save file and sync <kbd>Ctrl + Shift + S</kbd>
+                </button>
+                <div className="titlebar-menu-separator" />
+                <button role="menuitem" disabled={busy} onClick={() => {
+                  setTitlebarMenu(null);
+                  void importMarkdown();
+                }}>
+                  Import Markdown folder…
+                </button>
+                <button role="menuitem" disabled={busy} onClick={() => {
+                  setTitlebarMenu(null);
+                  void exportMarkdown();
+                }}>
+                  Export plaintext Markdown…
                 </button>
                 <div className="titlebar-menu-separator" />
                 <button role="menuitem" disabled={!syncLinked || syncing} title={!syncLinked ? "Link this vault in Vault Settings first" : syncing ? "Syncing…" : "Pull then push the vault to GitHub"} onClick={() => {
@@ -2765,6 +3013,9 @@ function App() {
                 </button>
                 <button role="menuitem" onClick={() => void openVaultSettings()}>
                   Vault Settings…
+                </button>
+                <button role="menuitem" onClick={() => void openRecovery()}>
+                  Trash and version history…
                 </button>
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
@@ -3344,6 +3595,29 @@ function App() {
                 ))}
               </aside>
             )}
+            {unlinkedMentions.length > 0 && (
+              <aside className="backlinks-panel" aria-label="Unlinked mentions">
+                <strong>Unlinked mentions</strong>
+                {unlinkedMentions.map((item) => (
+                  <button key={`${item.noteId}-${item.offset}`} type="button" onClick={() => void selectNote(item.noteId)}>
+                    <span>{item.title}</span>
+                    <small>{item.snippet}</small>
+                  </button>
+                ))}
+              </aside>
+            )}
+            {fileAttachments.length > 0 && (
+              <aside className="backlinks-panel" aria-label="File attachments">
+                <strong>Encrypted files</strong>
+                {fileAttachments.map((attachment) => (
+                  <div className="attachment-row" key={attachment.id}>
+                    <span>{attachment.filename}<small>{attachment.mimeType} · {(attachment.size / 1024).toFixed(1)} KiB</small></span>
+                    <button type="button" onClick={() => void exportFileAttachment(attachment)}>Export / open</button>
+                    <button type="button" className="danger" onClick={() => void removeFileAttachment(attachment)}>Remove</button>
+                  </div>
+                ))}
+              </aside>
+            )}
           </>
         ) : (
           <div className="empty-editor">
@@ -3441,6 +3715,39 @@ function App() {
           </form>
         </div>
       )}
+      {recoveryOpen && (
+        <div className="modal-backdrop" role="presentation" style={{ zIndex: windowLayers.recovery }}>
+          <section className="vault-modal settings-modal recovery-modal" role="dialog" aria-labelledby="recovery-title">
+            <button type="button" className="icon-button modal-close" aria-label="Close recovery" onClick={() => setRecoveryOpen(false)}>
+              <Icon name="x" />
+            </button>
+            <p className="eyebrow">Recovery</p>
+            <h2 id="recovery-title">Trash and version history</h2>
+            <h3>Trash</h3>
+            <div className="recovery-list">
+              {trashItems.length === 0 && <p className="settings-loading">Trash is empty.</p>}
+              {trashItems.map((item) => (
+                <div className="recovery-row" key={`${item.kind}:${item.id}`}>
+                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString()}</small></span>
+                  <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreTrashItem(item)}>Restore</button>
+                  <button type="button" className="danger-button" disabled={recoveryBusy} onClick={() => void permanentlyDeleteTrashItem(item)}>Delete</button>
+                </div>
+              ))}
+            </div>
+            <h3>{note ? `History for “${note.title}”` : "Note history"}</h3>
+            <div className="recovery-list">
+              {!note && <p className="settings-loading">Open a note to view its history.</p>}
+              {note && noteVersions.length === 0 && <p className="settings-loading">No earlier versions.</p>}
+              {noteVersions.map((version) => (
+                <div className="recovery-row" key={version.revision}>
+                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString()}</small></span>
+                  <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreNoteVersion(version)}>Restore</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
       {appearanceSettingsOpen && (
         <div className="modal-backdrop appearance-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.appearanceSettings }}>
           <section
@@ -3492,6 +3799,29 @@ function App() {
                   </button>
                 ))}
               </div>
+            </fieldset>
+
+            <fieldset className="appearance-fieldset">
+              <legend>Daily notes</legend>
+              <label>
+                Title format
+                <input value={dailyNoteFormat} onChange={(event) => setDailyNoteFormat(event.target.value)} placeholder="YYYY-MM-DD" />
+              </label>
+              <label>
+                Folder
+                <select value={dailyNoteFolderID} onChange={(event) => setDailyNoteFolderID(event.target.value)}>
+                  <option value="">Unfiled</option>
+                  {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select>
+              </label>
+              <label>
+                Template note
+                <select value={dailyTemplateNoteID} onChange={(event) => setDailyTemplateNoteID(event.target.value)}>
+                  <option value="">Default heading</option>
+                  {notes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                </select>
+              </label>
+              <small>Template variables: {"{{title}}"}, {"{{date}}"}, and {"{{time}}"}.</small>
             </fieldset>
 
             <label>
@@ -4027,6 +4357,9 @@ function App() {
             </div>
             <div className="calendar-footer">
               <span>{calendarSelected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
+              <button type="button" className="primary-button" onClick={() => void openDailyNote(calendarSelected)}>
+                Open daily note
+              </button>
               <button
                 type="button"
                 className="secondary-button"
@@ -4039,6 +4372,53 @@ function App() {
               </button>
             </div>
           </section>
+        </div>
+      )}
+      {quickSwitcherOpen && (
+        <div className="global-search-scrim" style={{ zIndex: windowLayers.quickSwitcher }} onClick={(event) => {
+          if (event.target === event.currentTarget) setQuickSwitcherOpen(false);
+        }}>
+          <div className="global-search-panel" role="dialog" aria-label="Quick note switcher">
+            <div className="global-search-header">
+              <span>Quick note switcher</span>
+              <button type="button" className="icon-button" onClick={() => setQuickSwitcherOpen(false)} aria-label="Close"><Icon name="x" size={14} /></button>
+            </div>
+            <div className="global-search-row">
+              <input
+                className="global-search-input"
+                autoFocus
+                value={quickSwitcherQuery}
+                placeholder="Type a note title"
+                onChange={(event) => setQuickSwitcherQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setQuickSwitcherOpen(false);
+                  if (event.key === "Enter" && quickSwitcherNotes[0]) {
+                    setQuickSwitcherOpen(false);
+                    void selectNote(quickSwitcherNotes[0].id, { appendTrail: true });
+                  }
+                }}
+              />
+            </div>
+            <div className="global-search-results">
+              {quickSwitcherNotes.map((item) => (
+                <button type="button" className="global-search-result" key={item.id} onClick={() => {
+                  setQuickSwitcherOpen(false);
+                  void selectNote(item.id, { appendTrail: true });
+                }}>
+                  <div className="global-search-result-title">{item.title}</div>
+                </button>
+              ))}
+              {quickSwitcherQuery.trim() && !notes.some((item) => item.title.toLocaleLowerCase() === quickSwitcherQuery.trim().toLocaleLowerCase()) && (
+                <button type="button" className="global-search-result" onClick={() => {
+                  const title = quickSwitcherQuery.trim();
+                  setQuickSwitcherOpen(false);
+                  void createNote(title);
+                }}>
+                  <div className="global-search-result-title">Create “{quickSwitcherQuery.trim()}”</div>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
       {globalSearchOpen && (
@@ -4072,7 +4452,7 @@ function App() {
               <input
                 className="global-search-input"
                 type="text"
-                placeholder="Find in all notes"
+                placeholder="Search text, tag:name, folder:name, property:key=value, or re:pattern"
                 value={globalSearchQuery}
                 onChange={(event) => setGlobalSearchQuery(event.target.value)}
                 onKeyDown={(event) => {

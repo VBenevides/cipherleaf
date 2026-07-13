@@ -468,6 +468,23 @@ func (p *countingPushProvider) Push(
 	return PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("c", 40)}, nil
 }
 
+func TestRetryableSyncErrors(t *testing.T) {
+	for _, err := range []error{
+		context.DeadlineExceeded,
+		errors.New("GitHub could not be reached over SSH"),
+		errors.New("connection reset by peer"),
+	} {
+		if !IsRetryableError(err) {
+			t.Fatalf("error is not retryable: %v", err)
+		}
+	}
+	for _, err := range []error{context.Canceled, errors.New("permission denied"), errors.New("invalid branch")} {
+		if IsRetryableError(err) {
+			t.Fatalf("error is unexpectedly retryable: %v", err)
+		}
+	}
+}
+
 func TestManagerSkipsPushForUnchangedSnapshotRevision(t *testing.T) {
 	vaultID := strings.Repeat("a", 32)
 	settingsStore := NewFileSettingsStore(t.TempDir())

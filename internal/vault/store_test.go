@@ -235,7 +235,7 @@ func TestParentFolderLocksNestedFolders(t *testing.T) {
 	}
 }
 
-func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
+func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024
 	defaultKDF.Time = 1
@@ -331,8 +331,12 @@ func TestWebPAttachmentsAreEncryptedAndDeletedWithTheirNote(t *testing.T) {
 	if err := store.DeleteNote(note.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("attachment remains after deleting note: %v", err)
+	if err := store.RestoreTrashItem("note", note.ID); err != nil {
+		t.Fatal(err)
+	}
+	restoredAfterDelete, err := store.GetAttachment(note.ID, id)
+	if err != nil || !bytes.Equal(restoredAfterDelete, webp) {
+		t.Fatalf("restored attachment = %q, %v", restoredAfterDelete, err)
 	}
 }
 
@@ -1401,6 +1405,28 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 }
 
+func TestListUnlinkedMentionsExcludesWikilinks(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "mention-test-secret"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.CreateNote("Project Atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := store.CreateNote("Meeting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(source.ID, source.Title, "Project Atlas is discussed. [[Project Atlas]] is linked."); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.ListUnlinkedMentions(target.ID)
+	if err != nil || len(matches) != 1 || matches[0].NoteID != source.ID || matches[0].Offset != 0 {
+		t.Fatalf("unlinked mentions = %#v, %v", matches, err)
+	}
+}
+
 func TestFindInNotesUsesSessionSearchIndex(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024
@@ -1904,5 +1930,13 @@ func TestDerivedMarkdownContentPreservesCodeObjects(t *testing.T) {
 	want := "> arsars\n  ```python\ndef main():\n    pass\n  ```"
 	if got := derivedMarkdownContent(string(content)); got != want {
 		t.Fatalf("derived markdown = %q, want %q", got, want)
+	}
+}
+
+func TestExtractOutgoingLinksIgnoresInlineCode(t *testing.T) {
+	got := extractOutgoingLinks("Use `[[double brackets]]`, then link [[2026-07-14]].")
+	want := []string{"2026-07-14"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("outgoing links = %v, want %v", got, want)
 	}
 }

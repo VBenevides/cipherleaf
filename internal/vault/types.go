@@ -13,18 +13,19 @@ type Session struct {
 }
 
 type NoteSummary struct {
-	ID             string   `json:"id"`
-	Title          string   `json:"title"`
-	FolderID       string   `json:"folderId"`
-	Order          int      `json:"order"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
-	ModifiedAt     int64    `json:"modifiedAt"`
-	Revision       uint64   `json:"revision"`
-	CiphertextHash string   `json:"ciphertextHash,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
-	AttachmentIDs  []string `json:"attachmentIds"`
-	OutgoingLinks  []string `json:"outgoingLinks"`
+	ID             string         `json:"id"`
+	Title          string         `json:"title"`
+	FolderID       string         `json:"folderId"`
+	Order          int            `json:"order"`
+	CreatedAt      string         `json:"createdAt"`
+	UpdatedAt      string         `json:"updatedAt"`
+	ModifiedAt     int64          `json:"modifiedAt"`
+	Revision       uint64         `json:"revision"`
+	CiphertextHash string         `json:"ciphertextHash,omitempty"`
+	Tags           []string       `json:"tags,omitempty"`
+	AttachmentIDs  []string       `json:"attachmentIds"`
+	OutgoingLinks  []string       `json:"outgoingLinks"`
+	Properties     map[string]any `json:"properties,omitempty"`
 }
 
 type Note struct {
@@ -37,6 +38,43 @@ type Note struct {
 	UpdatedAt  string `json:"updatedAt"`
 	ModifiedAt int64  `json:"modifiedAt"`
 	Revision   uint64 `json:"revision"`
+}
+
+type TrashItem struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	DeletedAt string `json:"deletedAt"`
+}
+
+type NoteVersion struct {
+	Revision  uint64 `json:"revision"`
+	Title     string `json:"title"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type PortabilityResult struct {
+	Notes       int    `json:"notes"`
+	Folders     int    `json:"folders"`
+	Attachments int    `json:"attachments"`
+	Path        string `json:"path"`
+}
+
+type AttachmentInfo struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	MIMEType string `json:"mimeType"`
+	Size     int64  `json:"size"`
+}
+
+type trashedNote struct {
+	Note      Note   `json:"note"`
+	DeletedAt string `json:"deleted_at"`
+}
+
+type trashedFolder struct {
+	Folder    Folder `json:"folder"`
+	DeletedAt string `json:"deleted_at"`
 }
 
 type Folder struct {

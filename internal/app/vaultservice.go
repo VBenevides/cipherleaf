@@ -137,6 +137,20 @@ func (s *VaultService) SelectVaultDestinationFolder() (string, error) {
 		PromptForSingleSelection()
 }
 
+func (s *VaultService) SelectMarkdownFolder(title string) (string, error) {
+	s.mu.RLock()
+	app := s.app
+	s.mu.RUnlock()
+	if app == nil {
+		return "", nil
+	}
+	return app.Dialog.OpenFile().
+		SetTitle(title).
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		PromptForSingleSelection()
+}
+
 func (s *VaultService) SelectGitHubSSHKey() (string, error) {
 	s.mu.RLock()
 	app := s.app
@@ -150,6 +164,16 @@ func (s *VaultService) SelectGitHubSSHKey() (string, error) {
 		CanChooseFiles(true).
 		ShowHiddenFiles(true).
 		PromptForSingleSelection()
+}
+
+func (s *VaultService) SelectAttachmentFile() (string, error) {
+	s.mu.RLock()
+	app := s.app
+	s.mu.RUnlock()
+	if app == nil {
+		return "", nil
+	}
+	return app.Dialog.OpenFile().SetTitle("Select a file to encrypt and attach").CanChooseDirectories(false).CanChooseFiles(true).PromptForSingleSelection()
 }
 
 func (s *VaultService) GenerateVaultSecret() (string, error) {
@@ -510,6 +534,18 @@ func (s *VaultService) DeleteAttachment(noteID, id string) error {
 	return s.store.DeleteAttachment(noteID, id)
 }
 
+func (s *VaultService) ImportFileAttachment(noteID, path string) (vault.AttachmentInfo, error) {
+	return s.store.ImportFileAttachment(noteID, path)
+}
+
+func (s *VaultService) ExportFileAttachment(noteID, id, destination string) (string, error) {
+	return s.store.ExportFileAttachment(noteID, id, destination)
+}
+
+func (s *VaultService) ListFileAttachments(noteID string) ([]vault.AttachmentInfo, error) {
+	return s.store.ListFileAttachments(noteID)
+}
+
 func (s *VaultService) ReadClipboardImage() (string, error) {
 	if runtime.GOOS != "linux" {
 		return "", errors.New("native clipboard image fallback is unavailable")
@@ -606,6 +642,34 @@ func (s *VaultService) DeleteNote(id string) error {
 	return s.store.DeleteNote(id)
 }
 
+func (s *VaultService) ListTrash() ([]vault.TrashItem, error) {
+	return s.store.ListTrash()
+}
+
+func (s *VaultService) RestoreTrashItem(kind, id string) error {
+	return s.store.RestoreTrashItem(kind, id)
+}
+
+func (s *VaultService) PermanentlyDeleteTrashItem(kind, id string) error {
+	return s.store.PermanentlyDeleteTrashItem(kind, id)
+}
+
+func (s *VaultService) ListNoteVersions(id string) ([]vault.NoteVersion, error) {
+	return s.store.ListNoteVersions(id)
+}
+
+func (s *VaultService) RestoreNoteVersion(id string, revision uint64) (vault.Note, error) {
+	return s.store.RestoreNoteVersion(id, revision)
+}
+
+func (s *VaultService) ImportMarkdown(path string) (vault.PortabilityResult, error) {
+	return s.store.ImportMarkdown(path)
+}
+
+func (s *VaultService) ExportMarkdown(path string) (vault.PortabilityResult, error) {
+	return s.store.ExportMarkdown(path)
+}
+
 func (s *VaultService) SearchNotes(query string) ([]vault.NoteSummary, error) {
 	return s.store.Search(query)
 }
@@ -616,6 +680,10 @@ func (s *VaultService) ResolveNoteReference(reference string) (vault.NoteSummary
 
 func (s *VaultService) ListBacklinks(noteID string) ([]vault.FindMatch, error) {
 	return s.store.ListBacklinks(noteID)
+}
+
+func (s *VaultService) ListUnlinkedMentions(noteID string) ([]vault.FindMatch, error) {
+	return s.store.ListUnlinkedMentions(noteID)
 }
 
 func (s *VaultService) FindInNotes(query string) ([]vault.FindMatch, error) {
@@ -796,6 +864,10 @@ func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 		phaseStartedAt := time.Now()
 		pull, pullErr := s.sync.PullVault(context.Background(), vaultID)
 		if pullErr != nil {
+			if githubsync.IsRetryableError(pullErr) && attempt+1 < maxAttempts {
+				time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+				continue
+			}
 			return SyncResult{}, pullErr
 		}
 		result.Pull = pull
@@ -827,6 +899,10 @@ func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 		beforePushRevision, _ := s.store.SnapshotRevision()
 		push, pushErr := s.sync.PushVault(context.Background(), vaultID, s.store)
 		if errors.Is(pushErr, githubsync.ErrRemoteAdvanced) && attempt+1 < maxAttempts {
+			continue
+		}
+		if githubsync.IsRetryableError(pushErr) && attempt+1 < maxAttempts {
+			time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
 			continue
 		}
 		if pushErr != nil {

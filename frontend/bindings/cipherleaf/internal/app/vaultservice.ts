@@ -63,6 +63,14 @@ export function DeleteNote(id: string): $CancellablePromise<void> {
     return $Call.ByID(2625750688, id);
 }
 
+export function ExportFileAttachment(noteID: string, id: string, destination: string): $CancellablePromise<string> {
+    return $Call.ByID(40245150, noteID, id, destination);
+}
+
+export function ExportMarkdown(path: string): $CancellablePromise<vault$0.PortabilityResult> {
+    return $Call.ByID(1927621820, path);
+}
+
 export function FindInNotes(query: string): $CancellablePromise<vault$0.FindMatch[] | null> {
     return $Call.ByID(991868496, query);
 }
@@ -111,6 +119,14 @@ export function GetSyncSettings(): $CancellablePromise<githubsync$0.SyncSettings
     return $Call.ByID(2923257755);
 }
 
+export function ImportFileAttachment(noteID: string, path: string): $CancellablePromise<vault$0.AttachmentInfo> {
+    return $Call.ByID(2182536893, noteID, path);
+}
+
+export function ImportMarkdown(path: string): $CancellablePromise<vault$0.PortabilityResult> {
+    return $Call.ByID(1577812963, path);
+}
+
 export function LinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<githubsync$0.LinkResult> {
     return $Call.ByID(974300788, settings);
 }
@@ -119,8 +135,16 @@ export function ListBacklinks(noteID: string): $CancellablePromise<vault$0.FindM
     return $Call.ByID(1268925393, noteID);
 }
 
+export function ListFileAttachments(noteID: string): $CancellablePromise<vault$0.AttachmentInfo[] | null> {
+    return $Call.ByID(4116603909, noteID);
+}
+
 export function ListFolders(): $CancellablePromise<vault$0.Folder[] | null> {
     return $Call.ByID(220507736);
+}
+
+export function ListNoteVersions(id: string): $CancellablePromise<vault$0.NoteVersion[] | null> {
+    return $Call.ByID(2533964502, id);
 }
 
 export function ListNotes(): $CancellablePromise<vault$0.NoteSummary[] | null> {
@@ -129,6 +153,14 @@ export function ListNotes(): $CancellablePromise<vault$0.NoteSummary[] | null> {
 
 export function ListRecentVaultPaths(): $CancellablePromise<string[] | null> {
     return $Call.ByID(1694639620);
+}
+
+export function ListTrash(): $CancellablePromise<vault$0.TrashItem[] | null> {
+    return $Call.ByID(3351323131);
+}
+
+export function ListUnlinkedMentions(noteID: string): $CancellablePromise<vault$0.FindMatch[] | null> {
+    return $Call.ByID(3691123198, noteID);
 }
 
 export function LockFolder(id: string, password: string): $CancellablePromise<vault$0.Folder> {
@@ -168,6 +200,10 @@ export function OpenVault(path: string, secret: string): $CancellablePromise<vau
  */
 export function OpenVaultRemembered(path: string): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(910528891, path);
+}
+
+export function PermanentlyDeleteTrashItem(kind: string, id: string): $CancellablePromise<void> {
+    return $Call.ByID(1655843432, kind, id);
 }
 
 export function PullAndLinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<$models.SyncResult> {
@@ -226,6 +262,14 @@ export function ResolveNoteReference(reference: string): $CancellablePromise<vau
     return $Call.ByID(4068969958, reference);
 }
 
+export function RestoreNoteVersion(id: string, revision: number): $CancellablePromise<vault$0.Note> {
+    return $Call.ByID(3216968481, id, revision);
+}
+
+export function RestoreTrashItem(kind: string, id: string): $CancellablePromise<void> {
+    return $Call.ByID(3441570684, kind, id);
+}
+
 export function SaveAttachment(noteID: string, webpBase64: string): $CancellablePromise<string> {
     return $Call.ByID(2496789391, noteID, webpBase64);
 }
@@ -242,8 +286,16 @@ export function SearchNotes(query: string): $CancellablePromise<vault$0.NoteSumm
     return $Call.ByID(1370302028, query);
 }
 
+export function SelectAttachmentFile(): $CancellablePromise<string> {
+    return $Call.ByID(3438204788);
+}
+
 export function SelectGitHubSSHKey(): $CancellablePromise<string> {
     return $Call.ByID(233117765);
+}
+
+export function SelectMarkdownFolder(title: string): $CancellablePromise<string> {
+    return $Call.ByID(1224618098, title);
 }
 
 export function SelectVaultDestinationFolder(): $CancellablePromise<string> {

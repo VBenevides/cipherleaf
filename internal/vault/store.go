@@ -32,11 +32,13 @@ const (
 	syncFoldersFile              = "folders.enc"
 	maxNoteBytes                 = 10 * 1024 * 1024
 	maxAttachmentBytes           = 10 * 1024 * 1024
-	maxEnvelopeBytes             = 16 * 1024 * 1024
+	maxFileAttachmentBytes       = 64 * 1024 * 1024
+	maxEnvelopeBytes             = 96 * 1024 * 1024
 	maxTitleRunes                = 200
 	maxFolderRunes               = 120
 	folderPasswordSaltBytes      = 16
 	folderPasswordVerifierPrefix = "sha256-salt-v1:"
+	maxNoteHistory               = 20
 )
 
 var (
@@ -48,11 +50,16 @@ var (
 	ErrVaultNotFound       = errors.New("no encrypted vault exists in this folder")
 	ErrEncryptedFileAbsent = errors.New("an encrypted note file is missing")
 	attachmentReference    = regexp.MustCompile(`attachment:([a-f0-9]{32})`)
+	inlineCodePattern      = regexp.MustCompile("`+[^`\n]*`+")
 	wikilinkPattern        = regexp.MustCompile(`\[\[([^\]\n]+)\]\]`)
 	tagPattern             = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9][A-Za-z0-9_-]{0,63})`)
 )
 
-const sharedAttachmentFolder = "shared"
+const (
+	sharedAttachmentFolder = "shared"
+	trashDirectory         = "trash"
+	historyDirectory       = "history"
+)
 
 type Store struct {
 	mu                       sync.RWMutex
@@ -274,6 +281,9 @@ func (s *Store) ListNotes() ([]NoteSummary, error) {
 	result := make([]NoteSummary, 0, len(s.manifest.Notes))
 	for _, note := range s.manifest.Notes {
 		if s.requireNoteAccessibleLocked(note) == nil {
+			if content, ok := s.searchIndex[note.ID]; ok {
+				note.OutgoingLinks = extractOutgoingLinks(content)
+			}
 			result = append(result, note)
 		}
 	}
@@ -633,6 +643,9 @@ func (s *Store) DeleteFolder(id string) error {
 	}
 	original := s.manifest.Folders
 	originalDeleted := slices.Clone(s.manifest.DeletedFolders)
+	if err := s.writeTrashedFolderLocked(original[index]); err != nil {
+		return err
+	}
 	deletedAt := time.Now().UTC().Unix()
 	if updated, err := time.Parse(time.RFC3339Nano, original[index].UpdatedAt); err == nil &&
 		deletedAt <= updated.Unix() {
@@ -817,6 +830,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		return noteForClient(current), nil
 	}
 	original := current
+	if err := s.writeNoteHistoryLocked(current); err != nil {
+		return Note{}, err
+	}
 	s.ensureSharedAttachmentRefsLocked()
 	current.Title = title
 	current.Content = storedContent
@@ -1230,6 +1246,16 @@ func (s *Store) DeleteNote(id string) error {
 	original := s.manifest.Notes
 	originalDeleted := slices.Clone(s.manifest.DeletedNotes)
 	item := original[index]
+	note, err := s.readNoteLocked(id)
+	if err != nil {
+		return err
+	}
+	if err := s.writeNoteHistoryLocked(note); err != nil {
+		return err
+	}
+	if err := s.writeTrashedNoteLocked(note); err != nil {
+		return err
+	}
 	s.manifest.Notes = append(slices.Clone(original[:index]), original[index+1:]...)
 	s.manifest.DeletedNotes = upsertTombstone(
 		s.manifest.DeletedNotes,
@@ -1255,9 +1281,6 @@ func (s *Store) DeleteNote(id string) error {
 	}
 	if err := os.RemoveAll(filepath.Join(s.root, "attachments", id)); err != nil {
 		return fmt.Errorf("remove encrypted note attachments: %w", err)
-	}
-	if err := s.pruneSharedAttachmentsLocked(); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1409,6 +1432,58 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 	return matches, nil
 }
 
+func (s *Store) ListUnlinkedMentions(noteID string) ([]FindMatch, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	targetIndex, found := s.findNoteLocked(noteID)
+	if !found {
+		return nil, errors.New("note not found")
+	}
+	target := s.manifest.Notes[targetIndex]
+	needle := strings.ToLower(strings.TrimSpace(target.Title))
+	if needle == "" {
+		return []FindMatch{}, nil
+	}
+	result := make([]FindMatch, 0)
+	for _, summary := range s.manifest.Notes {
+		if summary.ID == noteID || s.requireNoteAccessibleLocked(summary) != nil {
+			continue
+		}
+		content := s.searchIndex[summary.ID]
+		if content == "" {
+			note, err := s.readNoteLocked(summary.ID)
+			if err != nil {
+				return nil, err
+			}
+			content = derivedMarkdownContent(note.Content)
+		}
+		lower := strings.ToLower(content)
+		linkedRanges := wikilinkPattern.FindAllStringIndex(content, -1)
+		for offset := 0; offset < len(lower); {
+			at := strings.Index(lower[offset:], needle)
+			if at < 0 {
+				break
+			}
+			at += offset
+			linked := false
+			for _, span := range linkedRanges {
+				if at >= span[0] && at < span[1] {
+					linked = true
+					break
+				}
+			}
+			if !linked {
+				result = append(result, FindMatch{NoteID: summary.ID, Title: summary.Title, FolderID: summary.FolderID, Field: "content", Snippet: makeSnippet(content, at, len(needle)), Offset: at, MatchLength: len(needle)})
+			}
+			offset = at + len(needle)
+		}
+	}
+	return result, nil
+}
+
 // FindInNotes decrypts every note, locates all case-insensitive matches of
 // query, and returns up to maxPerNote snippets per note. Matches report the
 // exact offset and length inside the note's plain-text content so the
@@ -1419,7 +1494,13 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return nil, err
 	}
-	query = strings.ToLower(strings.TrimSpace(query))
+	rawQuery := strings.TrimSpace(query)
+	if _, advanced, err := parseAdvancedQuery(rawQuery); err != nil {
+		return nil, err
+	} else if advanced {
+		return s.findAdvancedLocked(rawQuery, maxPerNote)
+	}
+	query = strings.ToLower(rawQuery)
 	if query == "" {
 		return []FindMatch{}, nil
 	}
@@ -2364,7 +2445,14 @@ func (s *Store) validateRemoteAttachmentsLocked(
 		}
 		data, err := s.readEnvelopeFileLocked(path, "attachment", objectID)
 		if err != nil {
-			return fmt.Errorf("authenticate remote attachment: %w", err)
+			payload, fileErr := s.readEnvelopeFileLocked(path, "file-attachment", objectID)
+			if fileErr != nil {
+				return fmt.Errorf("authenticate remote attachment: %w", err)
+			}
+			if _, _, fileErr = decodeFileAttachment(payload); fileErr != nil {
+				return fileErr
+			}
+			return nil
 		}
 		if len(data) == 0 || len(data) > maxAttachmentBytes ||
 			len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
@@ -3780,6 +3868,7 @@ func summaryFromNote(note Note) NoteSummary {
 		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(derivedContent),
 		AttachmentIDs: extractAttachmentIDs(derivedContent), OutgoingLinks: extractOutgoingLinks(derivedContent),
+		Properties: extractProperties(derivedContent),
 	}
 }
 
@@ -3807,6 +3896,7 @@ func cloneNoteSummary(summary NoteSummary) *NoteSummary {
 	clone.Tags = slices.Clone(summary.Tags)
 	clone.AttachmentIDs = slices.Clone(summary.AttachmentIDs)
 	clone.OutgoingLinks = slices.Clone(summary.OutgoingLinks)
+	clone.Properties = cloneProperties(summary.Properties)
 	return &clone
 }
 
@@ -4342,6 +4432,7 @@ func extractAttachmentIDs(content string) []string {
 
 func extractOutgoingLinks(content string) []string {
 	seen := make(map[string]struct{})
+	content = inlineCodePattern.ReplaceAllString(content, "")
 	for _, match := range wikilinkPattern.FindAllStringSubmatch(content, -1) {
 		link := normalizeOutgoingLink(match[1])
 		if link != "" {

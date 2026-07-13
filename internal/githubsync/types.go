@@ -1,6 +1,7 @@
 package githubsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -285,4 +286,18 @@ func RedactCommandError(output string) error {
 	default:
 		return errors.New("the GitHub SSH connection could not be completed")
 	}
+}
+
+func IsRetryableError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "could not be reached") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "temporarily unavailable") ||
+		strings.Contains(message, "remote end hung up")
 }
