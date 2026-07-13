@@ -25,7 +25,7 @@ import type {
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
-import { syncFinishedMessage } from "./syncTiming";
+import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import {
   canonicalObjectDocumentTextFromMarkdown,
@@ -755,6 +755,7 @@ function App() {
     }
     setGlobalSearchBusy(true);
     setGlobalSearchError("");
+    console.info(`Global replace triggered for ${noteIDs.length || "all"} note(s)`);
     try {
       const result: ReplaceResult = await VaultService.ReplaceAcrossNotes(
         globalSearchQuery,
@@ -775,8 +776,10 @@ function App() {
       setError(
         `Replaced ${result.replacements} occurrence${result.replacements === 1 ? "" : "s"} in ${result.replacedNotes} note${result.replacedNotes === 1 ? "" : "s"}.`,
       );
+      console.info(`Global replace completed: ${result.replacements} replacement(s) in ${result.replacedNotes} note(s)`);
     } catch (reason) {
       setGlobalSearchError(errorText(reason));
+      console.error(`Global replace failed: ${errorText(reason)}`);
     } finally {
       setGlobalSearchBusy(false);
     }
@@ -892,10 +895,11 @@ function App() {
     setSyncing(true);
     setSyncNotification("");
     try {
+      console.info(">>>>> Cloud Sync Triggered");
       const syncStartedAt = performance.now();
       const result = await VaultService.SyncNow();
       const syncElapsed = performance.now() - syncStartedAt;
-      if (import.meta.env.DEV) console.debug("Cipherleaf sync timings", result.timings);
+      syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
       if (result.warning) {
         setError(result.warning);
       } else {
@@ -1088,6 +1092,7 @@ function App() {
   }, [calendarOpen]);
 
   const autoLock = async () => {
+    console.info("Vault auto-lock triggered");
     try {
       await persistCurrent();
     } catch {
@@ -1095,6 +1100,7 @@ function App() {
     }
     const locked = await VaultService.LockVault();
     resetToLocked(locked);
+    console.info("Vault auto-lock completed");
   };
 
   const resetToLocked = (locked: Session) => {
@@ -1237,6 +1243,7 @@ function App() {
     }
     setBusy(true);
     setError("");
+    console.info(`Vault ${vaultAction} triggered`);
     try {
       const completedAction = vaultAction;
       let opened: Session;
@@ -1299,8 +1306,10 @@ function App() {
         await refreshNotes();
       }
       if (restoreWarning) setError(restoreWarning);
+      console.info(`Vault ${completedAction} completed`);
     } catch (reason) {
       setError(errorText(reason));
+      console.error(`Vault ${vaultAction} failed: ${errorText(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1312,10 +1321,11 @@ function App() {
     setSyncNotification("");
     try {
       await persistCurrent();
+      console.info(">>>>> Cloud Sync Triggered");
       const syncStartedAt = performance.now();
       const result: SyncResult = await VaultService.SyncNow();
       const syncElapsed = performance.now() - syncStartedAt;
-      if (import.meta.env.DEV) console.debug("Cipherleaf sync timings", result.timings);
+      syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
       await refreshNotes();
       await refreshFolders();
       const note = noteRef.current;
@@ -1353,6 +1363,7 @@ function App() {
 
   async function startConflictResolution(conflict: MergeConflict) {
     setError("");
+    console.info("Sync conflict resolution opened");
     try {
       await persistCurrent();
       const localNote = await VaultService.GetNote(conflict.localNoteId);
@@ -1369,6 +1380,7 @@ function App() {
       setSidebarOpen(false);
     } catch (reason) {
       setError(errorText(reason));
+      console.error(`Sync conflict resolution failed to open: ${errorText(reason)}`);
     }
   }
 
@@ -1384,6 +1396,7 @@ function App() {
     });
     if (!confirmed) return;
     setSaveState("saving");
+    console.info("Sync conflict resolution save triggered");
     try {
       const saved = await VaultService.SaveNote(
         conflictResolution.localNote.id,
@@ -1399,9 +1412,11 @@ function App() {
       if (syncLinked) {
         await syncNow();
       }
+      console.info("Sync conflict resolution saved");
     } catch (reason) {
       setSaveState("error");
       setError(errorText(reason));
+      console.error(`Sync conflict resolution save failed: ${errorText(reason)}`);
     }
   };
 
@@ -1419,6 +1434,7 @@ function App() {
     if (!confirmed) return;
     setSyncing(true);
     setError("");
+    console.warn("Git force-push triggered");
     try {
       await persistCurrent();
       const result = await VaultService.ForcePushNow();
@@ -1427,8 +1443,10 @@ function App() {
       setLastSyncedAt(settings.lastSyncedAt);
       setSaveState("saved");
       setError(result.warning || result.message || "Local vault force-pushed to cloud.");
+      console.info("Git force-push completed");
     } catch (reason) {
       setError(errorText(reason));
+      console.error(`Git force-push failed: ${errorText(reason)}`);
     } finally {
       setSyncing(false);
     }
@@ -1452,9 +1470,11 @@ function App() {
 
   const lockVault = async () => {
     setError("");
+    console.info("Vault lock triggered");
     try {
       await persistCurrent();
       resetToLocked(await VaultService.LockVault());
+      console.info("Vault lock completed");
     } catch {
       // persistCurrent already presents the actionable error.
     }
@@ -2202,8 +2222,11 @@ function App() {
     if (!syncSettings) return;
     setSettingsBusy(true);
     setConnectionResult(null);
+    console.info("GitHub connection test triggered");
     try {
-      setConnectionResult(await VaultService.TestGitHubConnection(syncSettings));
+      const result = await VaultService.TestGitHubConnection(syncSettings);
+      setConnectionResult(result);
+      console.info(`GitHub connection test completed: ${result.success ? "success" : "failed"}`);
     } catch (reason) {
       setConnectionResult({
         success: false,
@@ -2211,6 +2234,7 @@ function App() {
         warning: "",
         branch: syncSettings.branch,
       });
+      console.error(`GitHub connection test failed: ${errorText(reason)}`);
     } finally {
       setSettingsBusy(false);
     }
@@ -2220,6 +2244,7 @@ function App() {
     if (!syncSettings) return;
     setSettingsBusy(true);
     setConnectionResult(null);
+    console.info("GitHub link triggered");
     try {
       await persistCurrent();
       const linked = await VaultService.LinkGitHubVault(syncSettings);
@@ -2233,6 +2258,7 @@ function App() {
         warning: linked.warning,
         branch: linked.branch,
       });
+      console.info("GitHub link completed");
     } catch (reason) {
       setConnectionResult({
         success: false,
@@ -2240,6 +2266,7 @@ function App() {
         warning: "",
         branch: syncSettings.branch,
       });
+      console.error(`GitHub link failed: ${errorText(reason)}`);
     } finally {
       setSettingsBusy(false);
     }
@@ -2258,6 +2285,7 @@ function App() {
     if (!confirmed) return;
     setSettingsBusy(true);
     setConnectionResult(null);
+    console.info("GitHub pull-and-link triggered");
     try {
       await persistCurrent();
       const result: SyncResult = await VaultService.PullAndLinkGitHubVault(syncSettings);
@@ -2286,6 +2314,7 @@ function App() {
         setSyncConflicts(result.merge.conflicts);
         void startConflictResolution(result.merge.conflicts[0]);
       }
+      console.info(`GitHub pull-and-link completed with ${result.merge.conflicts?.length ?? 0} conflict(s)`);
     } catch (reason) {
       setConnectionResult({
         success: false,
@@ -2293,6 +2322,7 @@ function App() {
         warning: "",
         branch: syncSettings.branch,
       });
+      console.error(`GitHub pull-and-link failed: ${errorText(reason)}`);
     } finally {
       setSettingsBusy(false);
     }
@@ -2313,6 +2343,7 @@ function App() {
       return;
     }
     setSettingsBusy(true);
+    console.info("GitHub unlink triggered");
     try {
       await VaultService.UnlinkGitHubSync();
       const settings = await VaultService.GetSyncSettings();
@@ -2325,6 +2356,7 @@ function App() {
         warning: "",
         branch: "main",
       });
+      console.info("GitHub unlink completed");
     } catch (reason) {
       setConnectionResult({
         success: false,
@@ -2332,6 +2364,7 @@ function App() {
         warning: "",
         branch: syncSettings?.branch ?? "main",
       });
+      console.error(`GitHub unlink failed: ${errorText(reason)}`);
     } finally {
       setSettingsBusy(false);
     }

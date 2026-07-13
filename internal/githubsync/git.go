@@ -36,6 +36,22 @@ type GitTransport interface {
 
 type ExecCommandRunner struct{}
 
+// ToolVersions returns the installed Git and OpenSSH versions without opening
+// a console window on Windows.
+func ToolVersions() (string, string) {
+	return toolVersion("git", "--version"), toolVersion("ssh", "-V")
+}
+
+func toolVersion(name string, arguments ...string) string {
+	command := exec.Command(name, arguments...)
+	configureBackgroundCommand(command)
+	output, err := command.CombinedOutput()
+	if err != nil && len(output) == 0 {
+		return "unavailable"
+	}
+	return strings.Join(strings.Fields(string(output)), " ")
+}
+
 func (ExecCommandRunner) Run(
 	ctx context.Context,
 	name string,
@@ -566,6 +582,7 @@ func (p *GitHubSSHProvider) push(
 		UpToDate:              false,
 		LocalMilliseconds:     localMilliseconds,
 		TransportMilliseconds: transportMilliseconds,
+		TransportPerformed:    true,
 	}, nil
 }
 
@@ -642,9 +659,10 @@ func (p *GitHubSSHProvider) Pull(
 	prefetchedAt, prefetched := p.prefetched[cachePath]
 	delete(p.prefetched, cachePath)
 	p.prefetchMu.Unlock()
+	usedPrefetch := prefetched && time.Since(prefetchedAt) <= 30*time.Second
 	transportStartedAt := time.Now()
 	var output []byte
-	if !prefetched || time.Since(prefetchedAt) > 30*time.Second {
+	if !usedPrefetch {
 		output, err = p.runner.Run(contextWithTimeout, "git", fetchArguments, environment)
 	}
 	transportMilliseconds := time.Since(transportStartedAt).Milliseconds()
@@ -665,6 +683,7 @@ func (p *GitHubSSHProvider) Pull(
 			Temporary:             false,
 			UpToDate:              true,
 			TransportMilliseconds: transportMilliseconds,
+			UsedPrefetch:          usedPrefetch,
 		}, nil
 	}
 	changed, err := p.changedRemotePaths(
@@ -700,6 +719,7 @@ func (p *GitHubSSHProvider) Pull(
 		Temporary:             false,
 		UpToDate:              false,
 		TransportMilliseconds: transportMilliseconds,
+		UsedPrefetch:          usedPrefetch,
 	}, nil
 }
 

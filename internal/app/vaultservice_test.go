@@ -1,6 +1,28 @@
 package app
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestRepositorySizesSeparatesGitMetadata(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git", "objects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "objects", "pack"), []byte("git"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "vault.enc"), []byte("vault"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitBytes, repositoryBytes := repositorySizes(root)
+	if gitBytes != 3 || repositoryBytes != 5 {
+		t.Fatalf("sizes = (%d, %d), want (3, 5)", gitBytes, repositoryBytes)
+	}
+}
 
 func TestClearClipboardIfUnchanged(t *testing.T) {
 	value := "vault-secret"

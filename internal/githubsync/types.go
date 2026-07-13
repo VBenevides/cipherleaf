@@ -73,6 +73,7 @@ type PushResult struct {
 	UpToDate              bool   `json:"upToDate"`
 	LocalMilliseconds     int64  `json:"localMilliseconds"`
 	TransportMilliseconds int64  `json:"transportMilliseconds"`
+	TransportPerformed    bool   `json:"transportPerformed"`
 }
 
 // PullResult reports the outcome of fetching the remote snapshot. StagingPath
@@ -87,6 +88,7 @@ type PullResult struct {
 	Temporary             bool   `json:"temporary"`
 	UpToDate              bool   `json:"upToDate"`
 	TransportMilliseconds int64  `json:"transportMilliseconds"`
+	UsedPrefetch          bool   `json:"usedPrefetch"`
 }
 
 type Repository struct {

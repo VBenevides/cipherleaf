@@ -62,7 +62,28 @@ type SyncResult struct {
 	Push       githubsync.PushResult `json:"push"`
 	Merge      vault.MergeResult     `json:"merge"`
 	Timings    SyncTimings           `json:"timings"`
+	Git        GitDiagnostics        `json:"git"`
 }
+
+type GitDiagnostics struct {
+	SSHConnectionReuse       bool   `json:"sshConnectionReuse"`
+	SSHConnectionPersistSecs int    `json:"sshConnectionPersistSeconds"`
+	TransportOperations      int    `json:"transportOperations"`
+	GitBytes                 int64  `json:"gitBytes"`
+	RepositoryFilesBytes     int64  `json:"repositoryFilesBytes"`
+	Platform                 string `json:"platform"`
+	Architecture             string `json:"architecture"`
+	GitVersion               string `json:"gitVersion"`
+	OpenSSHVersion           string `json:"openSshVersion"`
+	UsedPrefetch             bool   `json:"usedPrefetch"`
+	RepositoryPath           string `json:"repositoryPath"`
+}
+
+var (
+	toolVersionsOnce sync.Once
+	gitVersion       string
+	openSSHVersion   string
+)
 
 type SyncTimings struct {
 	PullMilliseconds      int64 `json:"pullMilliseconds"`
@@ -754,12 +775,21 @@ func (s *VaultService) SyncNow() (SyncResult, error) {
 	return completed.result, completed.err
 }
 
-func (s *VaultService) syncNow() (SyncResult, error) {
+func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 	startedAt := time.Now()
 	vaultID, err := s.unlockedVaultID()
 	if err != nil {
 		return SyncResult{}, err
 	}
+	defer func() {
+		if resultErr != nil {
+			return
+		}
+		path, err := s.sync.GitWorkingDirectory(vaultID)
+		if err == nil {
+			result.Git = gitDiagnostics(path, result.Pull, result.Push)
+		}
+	}()
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result := SyncResult{Linked: true}
@@ -822,6 +852,61 @@ func (s *VaultService) syncNow() (SyncResult, error) {
 		return result, nil
 	}
 	return SyncResult{}, errors.New("sync could not converge after the remote branch changed repeatedly")
+}
+
+func gitDiagnostics(path string, pull githubsync.PullResult, push githubsync.PushResult) GitDiagnostics {
+	toolVersionsOnce.Do(func() {
+		gitVersion, openSSHVersion = githubsync.ToolVersions()
+	})
+	gitBytes, repositoryFilesBytes := repositorySizes(path)
+	operations := 0
+	if !pull.UsedPrefetch {
+		operations++
+	}
+	if push.TransportPerformed {
+		operations++
+	}
+	reuseConnections := runtime.GOOS != "windows"
+	persistSeconds := 0
+	if reuseConnections {
+		persistSeconds = 30
+	}
+	return GitDiagnostics{
+		SSHConnectionReuse:       reuseConnections,
+		SSHConnectionPersistSecs: persistSeconds,
+		TransportOperations:      operations,
+		GitBytes:                 gitBytes,
+		RepositoryFilesBytes:     repositoryFilesBytes,
+		Platform:                 runtime.GOOS,
+		Architecture:             runtime.GOARCH,
+		GitVersion:               gitVersion,
+		OpenSSHVersion:           openSSHVersion,
+		UsedPrefetch:             pull.UsedPrefetch,
+		RepositoryPath:           path,
+	}
+}
+
+func repositorySizes(root string) (gitBytes, repositoryFilesBytes int64) {
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		if relative == ".git" || strings.HasPrefix(relative, ".git"+string(filepath.Separator)) {
+			gitBytes += info.Size()
+		} else {
+			repositoryFilesBytes += info.Size()
+		}
+		return nil
+	})
+	return gitBytes, repositoryFilesBytes
 }
 
 // ForcePushNow overwrites the linked remote branch with the current local

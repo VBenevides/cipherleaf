@@ -16,6 +16,20 @@ export interface CloneVaultResult {
     "linked": boolean;
 }
 
+export interface GitDiagnostics {
+    "sshConnectionReuse": boolean;
+    "sshConnectionPersistSeconds": number;
+    "transportOperations": number;
+    "gitBytes": number;
+    "repositoryFilesBytes": number;
+    "platform": string;
+    "architecture": string;
+    "gitVersion": string;
+    "openSshVersion": string;
+    "usedPrefetch": boolean;
+    "repositoryPath": string;
+}
+
 export interface LastSession {
     "path": string;
     "theme": string;
@@ -34,6 +48,7 @@ export interface SyncResult {
     "push": githubsync$0.PushResult;
     "merge": vault$0.MergeResult;
     "timings": SyncTimings;
+    "git": GitDiagnostics;
 }
 
 export interface SyncTimings {

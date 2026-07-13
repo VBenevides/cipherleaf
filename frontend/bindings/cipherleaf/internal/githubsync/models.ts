@@ -30,6 +30,7 @@ export interface PullResult {
     "temporary": boolean;
     "upToDate": boolean;
     "transportMilliseconds": number;
+    "usedPrefetch": boolean;
 }
 
 /**
@@ -45,6 +46,7 @@ export interface PushResult {
     "upToDate": boolean;
     "localMilliseconds": number;
     "transportMilliseconds": number;
+    "transportPerformed": boolean;
 }
 
 /**

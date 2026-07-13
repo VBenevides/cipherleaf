@@ -8,6 +8,7 @@ export {
 
 export type {
     CloneVaultResult,
+    GitDiagnostics,
     LastSession,
     SyncResult,
     SyncTimings
