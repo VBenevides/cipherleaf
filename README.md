@@ -13,35 +13,48 @@ encrypted vault through a private GitHub repository over SSH.
 
 ## Main features
 
-- Encrypted vault creation, reopening, renaming, recent-vault switching, and
-  manual or 15-minute automatic locking
-- Encrypted notes and titles organized in multiple levels of nested folders,
-  with folder passwords, hiding, sorting, custom ordering, and drag-and-drop
-  movement of both notes and folders
-- Live Preview and source Markdown modes with GFM tables, task lists, fenced
-  code, links, headings, dividers, and custom collapsible outline sections
-- `[[wikilinks]]`, backlinks, inline tags and tag filtering, title/content
-  search, note search/replace, and vault-wide search/replace
-- Encrypted pasted-image attachments, converted to WebP and rendered locally
+- Local-first encrypted vaults with manual locking, 15-minute automatic
+  locking, recent-vault switching, and optional OS credential-store support
+- Encrypted notes and titles in nested folders, with folder passwords, hiding,
+  sorting, custom ordering, and drag-and-drop organization
+- Live Preview, Object Tree, and source Markdown views with GFM tables, task
+  lists, fenced code, headings, links, dividers, and collapsible nested sections
+- `[[wikilinks]]`, backlinks, outgoing links, unresolved links, unlinked title
+  mentions, inline tags, and navigable note-relationship and folder graphs
+- Quick note switching, note-level search/replace, vault-wide search/replace,
+  and advanced searches by title, content, tag, folder, property, date, case,
+  or regular expression
+- Typed frontmatter properties for structured, Markdown-compatible metadata
+- Daily notes opened from a calendar, with configurable title formats, folders,
+  template notes, and `{{title}}`, `{{date}}`, and `{{time}}` variables
+- Encrypted pasted images and general file attachments, including export/open
+  controls and authenticated attachment ownership
+- Encrypted trash and note history with restore, permanent deletion,
+  content-based deduplication, and a maximum of 20 retained versions
+- Plaintext Markdown folder import and export for portability and independent
+  backups, with explicit security warnings before export
 - Autosave 60 seconds after editing stops, explicit save, word count, and an
   editing trail for recently opened notes
-- An interactive graph view of the complete folder/note hierarchy, with nodes
-  that open the selected folder or note
 - Cipherleaf object notation: Markdown is represented internally as a versioned
   object document with stable IDs and parent/child relationships for text,
   sections, lists, checkboxes, images, and code blocks. This powers nested
   editing, indentation, collapsing, and drag-and-drop reordering while retaining
   Markdown source editing.
-- Nord-inspired light and dark themes plus adjustable/custom editor fonts
-- Manual GitHub SSH sync, encrypted clone/restore, conflict resolution, and
-  force-push recovery controls
-- Optional temporary vault-secret storage in the operating system credential
-  store
+- Manual GitHub SSH sync, encrypted clone/restore, incremental synchronization,
+  retry handling, conflict resolution, diagnostics, and force-push recovery
 
-The current graph visualizes the folder hierarchy rather than relationships
-between notes. The calendar is a date picker, not a daily-notes system. See
-[`local/note-taking-feature-gaps.md`](local/note-taking-feature-gaps.md) for the
-current product-gap audit.
+## Appearance and themes
+
+Cipherleaf includes three built-in themes:
+
+- **Light (Nord):** a cool, low-contrast light workspace
+- **Dark (Nord):** a matching dark workspace for low-light environments
+- **Archivist:** a warm paper-and-ink theme designed for long-form writing
+
+Appearance settings also provide optional full or dotted journal lines, an
+editor font-size range from 10–32 px, and custom TrueType (`.ttf`) editor fonts.
+Theme preferences persist between sessions; imported font data remains local
+to the application.
 
 ## Security model
 

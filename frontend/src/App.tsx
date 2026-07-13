@@ -3824,8 +3824,8 @@ function App() {
               <small>Template variables: {"{{title}}"}, {"{{date}}"}, and {"{{time}}"}.</small>
             </fieldset>
 
-            <label>
-              Font
+            <div className="appearance-font-field">
+              <span>Font</span>
               <div className="appearance-font-row">
                 <span title={editorFontName}>
                   {editorFontName || "Default (Charter)"}
@@ -3854,7 +3854,7 @@ function App() {
                   onChange={(event) => void chooseEditorFont(event)}
                 />
               </div>
-            </label>
+            </div>
 
             <label>
               Font size

@@ -652,7 +652,8 @@ a:focus-visible {
   box-shadow: none;
 }
 
-.vault-modal label {
+.vault-modal label,
+.vault-modal .appearance-font-field {
   display: grid;
   gap: 7px;
   margin-bottom: 15px;
