@@ -28,7 +28,7 @@ import type {
   ConnectionResult,
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
-import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
+import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import {
@@ -46,7 +46,7 @@ type Theme = "light" | "dark" | "archivist";
 type JournalLines = "none" | "full" | "dotted";
 type SettingsTab = "general" | "appearance";
 type SectionDefault = "expanded" | "collapsed";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "statistics" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -376,6 +376,9 @@ function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
+  const [statisticsOpen, setStatisticsOpen] = useState(false);
+  const [statistics, setStatistics] = useState<ApplicationStatistics | null>(null);
+  const [statisticsError, setStatisticsError] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
@@ -550,6 +553,21 @@ function App() {
     const timeout = window.setTimeout(() => setSyncNotification(""), 5_000);
     return () => window.clearTimeout(timeout);
   }, [syncNotification]);
+
+  useEffect(() => {
+    if (!statisticsOpen) return;
+    const refresh = () => {
+      void VaultService.GetApplicationStatistics()
+        .then((value) => {
+          setStatistics(value);
+          setStatisticsError("");
+        })
+        .catch((reason) => setStatisticsError(errorText(reason)));
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1_000);
+    return () => window.clearInterval(interval);
+  }, [statisticsOpen]);
 
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -1883,6 +1901,7 @@ function App() {
         layer: "appearanceSettings",
         close: () => setAppearanceSettingsOpen(false),
       },
+      { open: statisticsOpen, layer: "statistics", close: () => setStatisticsOpen(false) },
     ];
     const current = dialogs
       .filter((dialog) => dialog.open)
@@ -1903,6 +1922,7 @@ function App() {
     globalSearchOpen,
     quickSwitcherOpen,
     recoveryOpen,
+    statisticsOpen,
     syncConflicts.length,
     vaultSettingsOpen,
     windowLayers,
@@ -3263,6 +3283,13 @@ function App() {
                 }}>
                   Log
                 </button>
+                <button role="menuitem" onClick={() => {
+                  setTitlebarMenu(null);
+                  bringWindowToFront("statistics");
+                  setStatisticsOpen(true);
+                }}>
+                  Application statistics…
+                </button>
               </div>
             )}
           </div>
@@ -4123,6 +4150,38 @@ function App() {
                 )}
               </div>
             </div>
+          </section>
+        </div>
+      )}
+
+      {statisticsOpen && (
+        <div className="modal-backdrop" role="presentation" style={{ zIndex: windowLayers.statistics }}>
+          <section className="vault-modal statistics-modal" role="dialog" aria-modal="true" aria-labelledby="statistics-title">
+            <button type="button" className="icon-button modal-close" aria-label="Close statistics" onClick={() => setStatisticsOpen(false)}>
+              <Icon name="x" />
+            </button>
+            <div className="modal-icon"><Icon name="dots" size={21} /></div>
+            <p className="eyebrow">Live usage</p>
+            <h2 id="statistics-title">Application statistics</h2>
+            {statisticsError ? <p className="error-message">{statisticsError}</p> : (
+              <>
+                <div className="statistics-grid">
+                  <div><span>CPU usage</span><strong>{statistics ? `${statistics.cpuPercent.toFixed(1)}%` : "—"}</strong></div>
+                  <div><span>Memory usage</span><strong>{statistics ? `${(statistics.memoryBytes / 1024 / 1024).toFixed(1)} MB` : "—"}</strong></div>
+                </div>
+                {statistics && (
+                  <div className="statistics-processes">
+                    <h3>Memory by process</h3>
+                    {(statistics.memoryUsage ?? []).map((item) => (
+                      <div className="statistics-process" key={item.pid}>
+                        <span><strong>{item.name}</strong><small>PID {item.pid}</small></span>
+                        <strong>{(item.memoryBytes / 1024 / 1024).toFixed(1)} MB</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </section>
         </div>
       )}

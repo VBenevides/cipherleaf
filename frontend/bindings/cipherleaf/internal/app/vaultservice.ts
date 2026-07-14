@@ -95,6 +95,10 @@ export function GenerateVaultSecret(): $CancellablePromise<string> {
     return $Call.ByID(3315011432);
 }
 
+export function GetApplicationStatistics(): $CancellablePromise<$models.ApplicationStatistics> {
+    return $Call.ByID(1301789830);
+}
+
 export function GetAttachment(noteID: string, id: string): $CancellablePromise<string> {
     return $Call.ByID(115494468, noteID, id);
 }

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"cipherleaf/internal/secure"
 	appsession "cipherleaf/internal/session"
 	"cipherleaf/internal/vault"
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -31,6 +33,8 @@ type VaultService struct {
 	sync           *githubsync.Manager
 	syncWorkerOnce sync.Once
 	syncJobs       chan syncJob
+	statisticsMu   sync.Mutex
+	process        *process.Process
 }
 
 type syncJob struct{ done chan syncJobResult }
@@ -49,6 +53,18 @@ type CloneVaultResult struct {
 	Warning    string        `json:"warning"`
 	LastCommit string        `json:"lastCommit"`
 	Linked     bool          `json:"linked"`
+}
+
+type ApplicationStatistics struct {
+	CPUPercent  float64              `json:"cpuPercent"`
+	MemoryBytes uint64               `json:"memoryBytes"`
+	MemoryUsage []ProcessMemoryUsage `json:"memoryUsage"`
+}
+
+type ProcessMemoryUsage struct {
+	Name        string `json:"name"`
+	PID         int32  `json:"pid"`
+	MemoryBytes uint64 `json:"memoryBytes"`
 }
 
 // SyncResult summarizes a manual sync (pull then push) for the frontend.
@@ -95,12 +111,61 @@ type SyncTimings struct {
 }
 
 func NewVaultService() *VaultService {
+	currentProcess, _ := process.NewProcess(int32(os.Getpid()))
 	return &VaultService{
 		store:   vault.NewStore(),
 		recent:  appsession.NewDefaultRecentVaultStore(),
 		secrets: secretstore.New(),
 		sync:    githubsync.NewDefaultManager(),
+		process: currentProcess,
 	}
+}
+
+func (s *VaultService) GetApplicationStatistics() (ApplicationStatistics, error) {
+	s.statisticsMu.Lock()
+	defer s.statisticsMu.Unlock()
+	if s.process == nil {
+		return ApplicationStatistics{}, errors.New("application statistics are unavailable")
+	}
+	cpuPercent, err := s.process.Percent(0)
+	if err != nil {
+		return ApplicationStatistics{}, err
+	}
+	memoryUsage, err := processMemoryUsage(s.process)
+	if err != nil {
+		return ApplicationStatistics{}, err
+	}
+	var memoryBytes uint64
+	for _, item := range memoryUsage {
+		memoryBytes += item.MemoryBytes
+	}
+	return ApplicationStatistics{CPUPercent: cpuPercent, MemoryBytes: memoryBytes, MemoryUsage: memoryUsage}, nil
+}
+
+func processMemoryUsage(root *process.Process) ([]ProcessMemoryUsage, error) {
+	processes := []*process.Process{root}
+	for index := 0; index < len(processes); index++ {
+		if children, err := processes[index].Children(); err == nil {
+			processes = append(processes, children...)
+		}
+	}
+	usage := make([]ProcessMemoryUsage, 0, len(processes))
+	for index, item := range processes {
+		memory, err := item.MemoryInfo()
+		if err != nil {
+			if index == 0 {
+				return nil, err
+			}
+			continue
+		}
+		name, err := item.Name()
+		if err != nil || name == "" {
+			name = "Application process"
+		}
+		usage = append(usage, ProcessMemoryUsage{Name: name, PID: item.Pid, MemoryBytes: memory.RSS})
+	}
+	sort.Slice(usage, func(left, right int) bool { return usage[left].MemoryBytes > usage[right].MemoryBytes })
+	return usage, nil
 }
 
 func (s *VaultService) SetApp(app *application.App) {

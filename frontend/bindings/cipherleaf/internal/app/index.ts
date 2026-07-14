@@ -7,9 +7,11 @@ export {
 };
 
 export type {
+    ApplicationStatistics,
     CloneVaultResult,
     GitDiagnostics,
     LastSession,
+    ProcessMemoryUsage,
     SyncResult,
     SyncTimings
 } from "./models.js";
