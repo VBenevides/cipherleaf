@@ -546,6 +546,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!syncNotification) return;
+    const timeout = window.setTimeout(() => setSyncNotification(""), 5_000);
+    return () => window.clearTimeout(timeout);
+  }, [syncNotification]);
+
+  useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
 

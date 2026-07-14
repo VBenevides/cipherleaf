@@ -51,7 +51,9 @@ import {
   objectDepthByLine,
   objectHierarchyIndent,
   objectOwnerLineNumber as ownerLineNumberInLines,
+  normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
+  replaceExclusiveObjectPrefix,
   remapObjectKeysByLine,
   repeatedObjectPrefix,
   visualIndent,
@@ -1927,19 +1929,11 @@ function prefixSelectedLines(view: EditorView, prefix: string) {
     .sort((left, right) => left - right)
     .map((lineNumber) => {
       const line = view.state.doc.line(lineNumber);
-      const toggle = toggleLine(line.text);
-      const indentation = line.text.match(/^[ \t]*/)?.[0].length ?? 0;
-
-      const insertionPoint =
-        prefix === "> "
-          ? line.from + indentation
-          : toggle
-            ? line.from + toggle.prefixSize
-            : line.from + indentation;
-
+      const previousLine = lineNumber > 1 ? view.state.doc.line(lineNumber - 1).text : undefined;
       return {
-        from: insertionPoint,
-        insert: prefix,
+        from: line.from,
+        to: line.to,
+        insert: replaceExclusiveObjectPrefix(line.text, prefix, previousLine),
       };
     });
 
@@ -2138,7 +2132,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const object = classifyObjectLine(line.text);
   const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
   const section = line.text.match(/^([ \t]*>+[ \t]?)/);
-  const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
+  const list = line.text.match(/^([ \t]*)(?:(\d+)([.)])|([-+*]))[ \t]+/);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
   const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
@@ -2153,7 +2147,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
     : object.tag === "section"
     ? `\n${section?.[1] ?? `${indentation}> `}`
     : object.tag === "bulletpoint" && list
-    ? `\n${indentation}${list[2]} `
+    ? `\n${indentation}${list[2] ? `${Number(list[2]) + 1}${list[3]}` : list[4]} `
     : `\n${indentation}`;
 
   view.dispatch({
@@ -2546,6 +2540,26 @@ export default function LiveMarkdownEditor({
             let changeFrom = from;
             let changeTo = to;
             let inserted = text;
+
+            if (!inserted.includes("\n")) {
+              const line = inputView.state.doc.lineAt(changeFrom);
+              if (changeTo <= line.to) {
+                const relativeFrom = changeFrom - line.from;
+                const prospective = `${line.text.slice(0, relativeFrom)}${inserted}${line.text.slice(changeTo - line.from)}`;
+                const previousLine = line.number > 1
+                  ? inputView.state.doc.line(line.number - 1).text
+                  : undefined;
+                const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
+                if (normalizedPrefix !== prospective) {
+                  const prefixLength = normalizedPrefix.match(/^[ \t]*(?:>+|[-*]|\d+[.)])[ \t]+/)?.[0].length ?? 0;
+                  inputView.dispatch({
+                    changes: { from: line.from, to: line.to, insert: normalizedPrefix },
+                    selection: EditorSelection.cursor(line.from + prefixLength),
+                  });
+                  return true;
+                }
+              }
+            }
 
             if (
               changeFrom > 0 &&

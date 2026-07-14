@@ -92,6 +92,70 @@ export function objectHierarchyIndent(text: string): number {
   return quote ? visualIndent(quote[1]) + (quote[2].length - 1) * 2 : lineIndent(text);
 }
 
+type ExclusiveObjectPrefix = {
+  indent: number;
+  kind: "bulletpoint" | "section" | "numbering";
+  marker: string;
+  rest: string;
+};
+
+function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
+  const section = text.match(/^([ \t]*)(>+)[ \t]?(.*)$/);
+  if (section) {
+    return {
+      indent: visualIndent(section[1]) + (section[2].length - 1) * 2,
+      kind: "section",
+      marker: `${section[2]} `,
+      rest: section[3],
+    };
+  }
+
+  const list = text.match(/^([ \t]*)(?:(\d+)([.)])|([-*]))[ \t]+(.*)$/);
+  if (!list) return null;
+  return {
+    indent: visualIndent(list[1]),
+    kind: list[2] ? "numbering" : "bulletpoint",
+    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[4]} `,
+    rest: list[5],
+  };
+}
+
+function numberedMarker(previousLine: string | undefined, indent: number, fallback: string) {
+  if (!previousLine) return fallback;
+  const previous = exclusiveObjectPrefix(previousLine);
+  if (!previous || previous.kind !== "numbering" || previous.indent !== indent) return fallback;
+  const number = Number.parseInt(previous.marker, 10);
+  const punctuation = fallback.match(/[.)]/)?.[0] ?? ".";
+  return `${number + 1}${punctuation} `;
+}
+
+export function replaceExclusiveObjectPrefix(
+  line: string,
+  marker: string,
+  previousLine?: string,
+): string {
+  const current = exclusiveObjectPrefix(line);
+  if (!current) {
+    const indentation = line.match(/^[ \t]*/)?.[0] ?? "";
+    return `${indentation}${marker}${line.slice(indentation.length)}`;
+  }
+  const nextMarker = /^\d+[.)] $/.test(marker)
+    ? numberedMarker(previousLine, current.indent, marker)
+    : marker;
+  return `${" ".repeat(current.indent)}${nextMarker}${current.rest}`;
+}
+
+export function normalizeStackedExclusiveObjectPrefix(line: string, previousLine?: string): string {
+  const current = exclusiveObjectPrefix(line);
+  if (!current) return line;
+  const next = exclusiveObjectPrefix(current.rest);
+  if (!next || /^\s/.test(current.rest)) return line;
+  const marker = next.kind === "numbering"
+    ? numberedMarker(previousLine, current.indent, next.marker)
+    : next.marker;
+  return `${" ".repeat(current.indent)}${marker}${next.rest}`;
+}
+
 function stableUuid(input: string): string {
   let first = 0x811c9dc5;
   let second = 0x01000193;
