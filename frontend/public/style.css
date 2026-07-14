@@ -2713,11 +2713,6 @@ a:focus-visible {
   cursor: text;
 }
 
-.live-markdown-editor .cm-live-object-line.cm-live-list-line,
-.live-markdown-editor .cm-live-object-line.cm-live-toggle-line {
-  padding-left: initial;
-}
-
 .live-markdown-editor .cm-live-indent-spacer {
   display: inline-block;
   height: 1px;
@@ -2773,7 +2768,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-object-handle {
   position: absolute;
-  left: -40px;
+  left: -24px;
   top: 50%;
   width: 20px;
   height: 20px;
@@ -2919,7 +2914,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-content {
   min-height: 100%;
-  padding: 30px clamp(30px, 5vw, 72px) 70px;
+  padding: 30px 24px 70px;
   caret-color: var(--green-dark);
 }
 
@@ -3155,6 +3150,23 @@ a:focus-visible {
   border-radius: 6px 6px 0 0;
 }
 
+.live-markdown-editor .cm-live-code-language {
+  color: #0550ae;
+}
+
+.live-markdown-editor .cm-live-deep-code {
+  font-style: normal;
+  font-weight: normal;
+}
+
+:root[data-theme="dark"] .live-markdown-editor .cm-live-code-language {
+  color: #88c0d0;
+}
+
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-code-language {
+  color: #4f6873;
+}
+
 .live-markdown-editor .cm-live-code-fence-close {
   padding-bottom: 8px;
   border-radius: 0 0 6px 6px;
@@ -3166,7 +3178,8 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-list-symbol {
-  display: inline;
+  display: inline-block;
+  margin-right: 0.4em;
   color: var(--green) !important;
   font-weight: 800;
   vertical-align: baseline;
@@ -3182,45 +3195,25 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-list-line {
-  padding-left: calc(
-    var(--live-list-indent, 0px) +
-    var(--live-list-marker-width, 2em)
-  );
-  text-indent: calc(0px - var(--live-list-marker-width, 2em));
+  padding-left: calc(var(--live-list-indent, 0px) + 0.8em);
+  text-indent: 0;
 }
 
 .live-markdown-editor .cm-line.cm-live-toggle-line {
-  padding-left: calc(
-    var(--toggle-padding-left, 0px) +
-    var(--toggle-button-width) +
-    var(--toggle-button-gap)
-  ) !important;
-  text-indent: calc(
-    0px -
-    var(--toggle-button-width) -
-    var(--toggle-button-gap)
-  );
+  padding-left: calc(var(--toggle-padding-left, 0px) + 0.5em) !important;
+  text-indent: 0;
 }
 
 .live-markdown-editor .cm-live-toggle-line.cm-live-list-line {
-  padding-left: calc(
-    var(--toggle-padding-left, 0px) +
-    var(--toggle-button-width) +
-    var(--toggle-button-gap) +
-    var(--live-list-marker-width, 2em)
-  ) !important;
-  text-indent: calc(
-    0px -
-    var(--toggle-button-width) -
-    var(--toggle-button-gap) -
-    var(--live-list-marker-width, 2em)
-  );
+  padding-left: calc(var(--toggle-padding-left, 0px) + 0.5em) !important;
+  text-indent: 0;
 }
 
 .live-markdown-editor .cm-live-object-continuation-line {
   padding-left: calc(
     var(--live-object-depth, 0) * 22px +
-    var(--live-continuation-marker-width, 0px)
+    var(--live-continuation-marker-width, 0px) +
+    0.5em
   );
   text-indent: calc(0px - var(--live-continuation-marker-width, 0px));
 }
@@ -3277,104 +3270,6 @@ a:focus-visible {
   background: #d8e4d6;
 }
 
-.live-markdown-editor .cm-live-quote {
-  padding-right: 14px;
-  padding-left: 15px;
-  color: #59645b;
-  border-left: 3px solid #8ca08e;
-  background: #f0f3ed;
-}
-
-.live-markdown-editor .cm-live-quote-first {
-  margin-top: 0.8em;
-  padding-top: 8px;
-  border-radius: 0 7px 0 0;
-}
-
-.live-markdown-editor .cm-live-quote-last,
-.live-markdown-editor .cm-live-quote-collapsed {
-  margin-bottom: 0.8em;
-  padding-bottom: 8px;
-  border-radius: 0 0 7px 0;
-}
-
-.live-markdown-editor .cm-live-quote-toggle {
-  width: 21px;
-  height: 21px;
-  display: inline-grid;
-  place-items: center;
-  margin: 0 5px 0 -9px;
-  padding: 0;
-  color: #637967;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  transform: rotate(0deg);
-  transition: transform 140ms ease, background 140ms ease;
-}
-
-.live-markdown-editor .cm-live-quote-toggle:hover {
-  background: rgba(82, 109, 87, 0.1);
-}
-
-.live-markdown-editor .cm-live-quote-toggle.is-collapsed {
-  transform: rotate(-90deg);
-}
-
-.live-markdown-editor .cm-live-heading-parent .cm-live-quote-toggle {
-  width: 0.95em;
-  height: 0.95em;
-  margin: 0 0.16em 0 0;
-  vertical-align: 0.02em;
-  font-family: Inter, sans-serif;
-  font-size: 0.72em;
-}
-
-.live-markdown-editor .cm-live-outline-line {
-  position: relative;
-  padding-left: calc(1rem + var(--outline-depth, 0) * 2ch);
-  color: #4f4d46;
-}
-
-.live-markdown-editor .cm-live-outline-line.cm-live-outline-parent {
-  color: #3f403a;
-  font-weight: 500;
-}
-
-.live-markdown-editor .cm-live-outline-line .cm-live-quote-toggle {
-  position: absolute;
-  left: 1px;
-  top: 2px;
-  width: 15px;
-  height: 18px;
-  margin: 0;
-  opacity: 0;
-}
-
-.live-markdown-editor .cm-live-outline-line:hover .cm-live-quote-toggle,
-.live-markdown-editor .cm-live-outline-line .cm-live-quote-toggle:focus-visible,
-.live-markdown-editor .cm-live-outline-collapsed .cm-live-quote-toggle {
-  opacity: 1;
-}
-
-.live-markdown-editor .cm-live-outline-spacer {
-  display: none;
-}
-
-.live-markdown-editor .cm-live-outline-collapsed {
-  color: #5a685d;
-}
-
-.live-markdown-editor .cm-live-folded-quote {
-  color: #8b978c;
-  font-family: Inter, sans-serif;
-  font-size: 9px;
-  font-style: normal;
-  letter-spacing: 0.02em;
-}
 
 .markdown-editor,
 .markdown-preview {
@@ -3435,72 +3330,6 @@ a:focus-visible {
   color: #657066;
   border-left: 3px solid #8ca08e;
   background: #f0f3ed;
-}
-
-.collapsible-quote {
-  overflow: hidden;
-  margin: 1.6em 0;
-  border: 1px solid #dbe3d9;
-  border-radius: 8px;
-  background: #f0f3ed;
-}
-
-.collapsible-quote-summary {
-  width: 100%;
-  min-height: 37px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 11px;
-  color: #526556;
-  border: 0;
-  background: #e8eee6;
-  cursor: pointer;
-  text-align: left;
-}
-
-.collapsible-quote-summary > span {
-  font-family: Inter, sans-serif;
-  font-size: 16px;
-  line-height: 1;
-  transition: transform 140ms ease;
-}
-
-.collapsible-quote:not(.is-expanded) .collapsible-quote-summary > span {
-  transform: rotate(-90deg);
-}
-
-.collapsible-quote-summary strong {
-  overflow: hidden;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.collapsible-quote-summary small {
-  color: #869087;
-  font-family: Inter, sans-serif;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.collapsible-quote blockquote {
-  border: 0;
-  border-top: 1px solid #dbe3d9;
-  border-radius: 0;
-}
-
-.collapsible-quote blockquote > :first-child {
-  margin-top: 0;
-}
-
-.collapsible-quote blockquote > :last-child {
-  margin-bottom: 0;
 }
 
 .notion-outline {
@@ -3947,10 +3776,14 @@ a:focus-visible {
   }
 
   .markdown-editor,
-  .markdown-preview,
-  .live-markdown-editor .cm-content {
+  .markdown-preview {
     padding-left: 26px;
     padding-right: 26px;
+  }
+
+  .live-markdown-editor .cm-content {
+    padding-left: 20px;
+    padding-right: 20px;
   }
 
   .markdown-toolbar {
@@ -4133,8 +3966,7 @@ a:focus-visible {
 :root[data-theme="dark"] .title-input,
 :root[data-theme="dark"] .markdown-editor,
 :root[data-theme="dark"] .markdown-preview,
-:root[data-theme="dark"] .live-markdown-editor .cm-editor,
-:root[data-theme="dark"] .live-markdown-editor .cm-live-outline-line {
+:root[data-theme="dark"] .live-markdown-editor .cm-editor {
   color: #e5e9f0;
 }
 
@@ -4142,8 +3974,7 @@ a:focus-visible {
   background: rgba(136, 192, 208, 0.06);
 }
 
-:root[data-theme="dark"] .live-markdown-editor .cm-live-list-marker,
-:root[data-theme="dark"] .live-markdown-editor .cm-live-bullet {
+:root[data-theme="dark"] .live-markdown-editor .cm-live-list-marker {
   color: #b7d5d4;
 }
 
@@ -4155,8 +3986,7 @@ a:focus-visible {
 :root[data-theme="dark"] .live-markdown-editor .cm-live-code-block,
 :root[data-theme="dark"] .markdown-preview code,
 :root[data-theme="dark"] .markdown-preview pre,
-:root[data-theme="dark"] .markdown-preview blockquote,
-:root[data-theme="dark"] .collapsible-quote {
+:root[data-theme="dark"] .markdown-preview blockquote {
   color: #d8dee9;
   border-color: var(--line);
   background: #353d4b;

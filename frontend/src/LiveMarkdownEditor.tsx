@@ -12,13 +12,16 @@ import {
 import {
   Decoration,
   EditorView,
+  ViewPlugin,
   WidgetType,
   keymap,
   placeholder,
   type DecorationSet,
 } from "@codemirror/view";
+import { LanguageDescription, highlightingFor } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
+import { highlightTree } from "@lezer/highlight";
 import { minimalSetup } from "codemirror";
 import { redo, undo } from "@codemirror/commands";
 import {
@@ -96,6 +99,65 @@ type ObjectDocumentContext = {
   objectDocument: ObjectDocument;
 };
 
+const setDeepCodeHighlights = StateEffect.define<DecorationSet>();
+
+const deepCodeHighlightField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    value = value.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(setDeepCodeHighlights)) value = effect.value;
+    }
+    return value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+const deepCodeHighlightLoader = ViewPlugin.fromClass(class {
+  private generation = 0;
+
+  constructor(view: EditorView) {
+    void this.refresh(view);
+  }
+
+  update(update: { docChanged: boolean; view: EditorView }) {
+    if (update.docChanged) void this.refresh(update.view);
+  }
+
+  destroy() {
+    this.generation++;
+  }
+
+  private async refresh(view: EditorView) {
+    const generation = ++this.generation;
+    const source = view.state.doc.toString();
+    const codeObjects = parseObjectDocument(source).objects.filter(
+      (object) => object.tag === "code" && object.indent >= 4 && object.text && object.language,
+    );
+    const supports = await Promise.all(codeObjects.map(async (object) => {
+      const description = LanguageDescription.matchLanguageName(languages, object.language ?? "");
+      return description ? description.load().catch(() => null) : null;
+    }));
+    if (generation !== this.generation || source !== view.state.doc.toString()) return;
+
+    const decorations: Range<Decoration>[] = [];
+    codeObjects.forEach((object, index) => {
+      const support = supports[index];
+      if (!support || object.lineNumber >= view.state.doc.lines) return;
+      const from = view.state.doc.line(object.lineNumber + 1).from;
+      if (from >= object.textTo) return;
+      decorations.push(Decoration.mark({ class: "cm-live-deep-code" }).range(from, object.textTo));
+      const tree = support.language.parser.parse(object.text);
+      highlightTree(tree, {
+        style: (tags) => highlightingFor(view.state, tags, tree.topNode.type),
+      }, (start, end, classes) => {
+        if (start < end) decorations.push(Decoration.mark({ class: classes }).range(from + start, from + end));
+      });
+    });
+    view.dispatch({ effects: setDeepCodeHighlights.of(Decoration.set(decorations, true)) });
+  }
+});
+
 function collapsedStorageKey(noteID: string): string {
   return `cipherleaf-collapsed-sections:${noteID}`;
 }
@@ -168,7 +230,9 @@ function installJournalRules(editor: EditorView) {
 
     const scrollerRect = scroller.getBoundingClientRect();
     const positions: { top: number; left: number }[] = [];
-    for (const line of editor.dom.querySelectorAll<HTMLElement>(".cm-line:not(.cm-live-attachment-line)")) {
+    for (const line of editor.dom.querySelectorAll<HTMLElement>(
+      ".cm-line:not(.cm-live-attachment-line):not(.cm-live-code-block)",
+    )) {
       const lineRect = line.getBoundingClientRect();
       if (lineRect.bottom < scrollerRect.top || lineRect.top > scrollerRect.bottom) continue;
 
@@ -268,7 +332,7 @@ const liveMarkdownTheme = EditorView.theme(
       display: "inline-flex",
       width: "var(--toggle-button-width)",
       marginRight: "var(--toggle-button-gap)",
-      justifyContent: "center",
+      justifyContent: "flex-start",
       alignItems: "center",
       verticalAlign: "baseline",
       background: "transparent",
@@ -931,10 +995,11 @@ function decorateUnorderedListMarker(
   marker: "-" | "*",
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
+  to = from + 1,
 ) {
   addHiddenRange(
     from,
-    from + 1,
+    to,
     decorations,
     atomicRanges,
     new TextWidget(marker === "*" ? "•" : "-", "cm-live-list-symbol"),
@@ -1062,6 +1127,7 @@ function objectLineAttributes(
 function toggleSectionEnd(
   state: EditorState,
   lines: readonly string[],
+  objectDocument: ObjectDocument,
   startLineNumber: number,
   startIndent: number,
 ): number {
@@ -1074,6 +1140,14 @@ function toggleSectionEnd(
   ) {
     const line = state.doc.line(lineNumber);
     const text = line.text;
+    const owner = objectDocument.byLine.get(lineNumber);
+
+    if (owner?.tag === "code") {
+      if (lineNumber === owner.lineNumber && owner.indent <= startIndent) break;
+      endLineNumber = owner.lineEnd;
+      lineNumber = owner.lineEnd;
+      continue;
+    }
 
     if (isSectionSeparatorLine(lines, lineNumber)) break;
 
@@ -1196,7 +1270,7 @@ function expandToggleTree(
   }
 
   const endLineNumber = toggle
-    ? toggleSectionEnd(state, lines, line.number, toggle.indent)
+    ? toggleSectionEnd(state, lines, objectDocument, line.number, toggle.indent)
     : level !== null
       ? headingSectionEnd(state, line.number, level)
       : line.number;
@@ -1263,6 +1337,13 @@ function buildLivePreviewState(
         attributes: lineAttributes(lineNumber, `cm-live-code-block ${edge}`),
       }).range(line.from));
       if (lineNumber === codeObject.lineNumber) {
+        const languageFrom = line.text.indexOf(codeObject.language ?? "");
+        if (languageFrom >= 0 && codeObject.language) {
+          decorations.push(Decoration.mark({ class: "cm-live-code-language" }).range(
+            line.from + languageFrom,
+            line.from + languageFrom + codeObject.language.length,
+          ));
+        }
         decorations.push(Decoration.widget({
           widget: new CopyCodeWidget(codeObject.text),
           side: 1,
@@ -1337,6 +1418,7 @@ function buildLivePreviewState(
       const sectionEndLineNumber = toggleSectionEnd(
         state,
         lines,
+        objectDocument,
         lineNumber,
         toggle.indent,
       );
@@ -1361,6 +1443,7 @@ function buildLivePreviewState(
           toggleList[1] as "-" | "*",
           decorations,
           atomicRanges,
+          contentOffset + toggleList[0].length,
         );
       }
       const toggleOrderedList = !toggleAttachment && !isTask && !toggleList &&
@@ -1582,6 +1665,7 @@ function buildLivePreviewState(
     );
 
     if (task) {
+      if (indentation > 0) addHiddenRange(line.from, line.from + indentation, decorations, atomicRanges);
       decorations.push(Decoration.line({
         attributes: objectLineAttributes(
           lineNumber,
@@ -1594,12 +1678,12 @@ function buildLivePreviewState(
 
     const unorderedList = !task && line.text.match(/^(\s*)([-*])\s+/);
     if (unorderedList) {
-      const markerStart = line.from + unorderedList[1].length;
       decorateUnorderedListMarker(
-        markerStart,
+        line.from,
         unorderedList[2] as "-" | "*",
         decorations,
         atomicRanges,
+        line.from + unorderedList[0].length,
       );
       decorations.push(Decoration.line({
         attributes: objectLineAttributes(
@@ -1613,10 +1697,9 @@ function buildLivePreviewState(
 
     const orderedList = !task && !unorderedList && line.text.match(/^(\s*)(\d+[.)])\s+/);
     if (orderedList) {
-      const markerStart = line.from + orderedList[1].length;
       addHiddenRange(
-        markerStart,
-        markerStart + orderedList[2].length + 1,
+        line.from,
+        line.from + orderedList[0].length,
         decorations,
         atomicRanges,
         new TextWidget(orderedList[2], "cm-live-list-marker"),
@@ -2010,7 +2093,11 @@ function changeCodeIndent(view: EditorView, direction: 1 | -1) {
   }
 
   if (changes.length === 0) return true;
-  view.dispatch({ changes });
+  const changeSet = view.state.changes(changes);
+  view.dispatch({
+    changes: changeSet,
+    selection: view.state.selection.map(changeSet, 1),
+  });
   return true;
 }
 
@@ -2058,9 +2145,13 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const section = line.text.match(/^([ \t]*>+[ \t]?)/);
   const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
-  if (!lineStartsObject(line.text) && continuationObjectPrefix === null) return false;
+  const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
+  const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
+  if (!isCodeContent && !lineStartsObject(line.text) && continuationObjectPrefix === null) return false;
 
-  const inserted = continuationObjectPrefix
+  const inserted = isCodeContent
+    ? `\n${indentation}`
+    : continuationObjectPrefix
     ? `\n${continuationObjectPrefix}`
     : object.tag === "code"
     ? "\n"
@@ -2139,6 +2230,7 @@ function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
 
 function currentToggleSectionPosition(state: EditorState): number | null {
   const lines = state.doc.toString().split("\n");
+  const objectDocument = parseObjectDocument(state.doc.toString());
   const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
   const currentLine = state.doc.line(currentLineNumber);
   const currentToggle = toggleLine(currentLine.text);
@@ -2166,7 +2258,7 @@ function currentToggleSectionPosition(state: EditorState): number | null {
     if (!toggle && level === null) continue;
 
     const endLineNumber = toggle
-      ? toggleSectionEnd(state, lines, lineNumber, toggle.indent)
+      ? toggleSectionEnd(state, lines, objectDocument, lineNumber, toggle.indent)
       : headingSectionEnd(state, lineNumber, level!);
 
     if (endLineNumber >= currentLineNumber && endLineNumber > lineNumber) {
@@ -2450,6 +2542,8 @@ export default function LiveMarkdownEditor({
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
           markdown({ codeLanguages: languages }),
+          deepCodeHighlightField,
+          deepCodeHighlightLoader,
           liveMarkdownTheme,
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
