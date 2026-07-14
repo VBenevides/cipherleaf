@@ -80,6 +80,7 @@ type LiveMarkdownEditorProps = {
   readOnly?: boolean;
   showToolbar?: boolean;
   highlightLineNumbers?: ReadonlySet<number>;
+  defaultSectionsCollapsed?: boolean;
 };
 
 type LivePreviewState = {
@@ -1665,6 +1666,7 @@ function livePreviewExtension(
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
+  defaultSectionsCollapsed: boolean,
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
@@ -1673,8 +1675,9 @@ function livePreviewExtension(
         lines: docText.split("\n"),
         objectDocument: parseObjectDocument(docText),
       };
-      const collapsed = savedCollapsedPositions(state, noteID) ??
-        new Set(collapsibleQuotePositions(state, context.lines).map((position) => collapseKeyForPosition(state, position, context.objectDocument)));
+      const collapsed = savedCollapsedPositions(state, noteID) ?? (defaultSectionsCollapsed
+        ? new Set(collapsibleQuotePositions(state, context.lines).map((position) => collapseKeyForPosition(state, position, context.objectDocument)))
+        : new Set<string>());
       return buildLivePreviewState(
         state,
         collapsed,
@@ -2286,6 +2289,7 @@ export default function LiveMarkdownEditor({
   readOnly = false,
   showToolbar = true,
   highlightLineNumbers = new Set<number>(),
+  defaultSectionsCollapsed = true,
 }: LiveMarkdownEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -2588,6 +2592,7 @@ export default function LiveMarkdownEditor({
             noteID,
             (reason) => onErrorRef.current(reason),
             highlightLineNumbers,
+            defaultSectionsCollapsed,
           ),
           searchHighlightField,
           EditorView.updateListener.of((update) => {

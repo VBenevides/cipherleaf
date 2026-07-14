@@ -119,6 +119,10 @@ export function GetSyncSettings(): $CancellablePromise<githubsync$0.SyncSettings
     return $Call.ByID(2923257755);
 }
 
+export function GetVaultSettings(): $CancellablePromise<vault$0.VaultSettings> {
+    return $Call.ByID(4079532670);
+}
+
 export function ImportFileAttachment(noteID: string, path: string): $CancellablePromise<vault$0.AttachmentInfo> {
     return $Call.ByID(2182536893, noteID, path);
 }
@@ -280,6 +284,10 @@ export function SaveImageAttachment(noteID: string, imageDataURL: string): $Canc
 
 export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.Note> {
     return $Call.ByID(2770680190, id, title, content);
+}
+
+export function SaveVaultSettings(settings: vault$0.VaultSettings): $CancellablePromise<vault$0.VaultSettings> {
+    return $Call.ByID(3499492715, settings);
 }
 
 export function SearchNotes(query: string): $CancellablePromise<vault$0.NoteSummary[] | null> {

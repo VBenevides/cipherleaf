@@ -103,6 +103,21 @@ type manifest struct {
 	Notes          []NoteSummary `json:"notes"`
 	DeletedNotes   []Tombstone   `json:"deleted_notes,omitempty"`
 	DeletedFolders []Tombstone   `json:"deleted_folders,omitempty"`
+	Settings       VaultSettings `json:"settings,omitempty"`
+}
+
+// VaultSettings contains portable preferences encrypted and synced with a vault.
+type VaultSettings struct {
+	Theme                   string `json:"theme"`
+	JournalLines            string `json:"journalLines"`
+	EditorFontSize          int    `json:"editorFontSize"`
+	DailyNoteFormat         string `json:"dailyNoteFormat"`
+	DailyNoteFolderID       string `json:"dailyNoteFolderId"`
+	DailyTemplateNoteID     string `json:"dailyTemplateNoteId"`
+	AutosaveIntervalSeconds int    `json:"autosaveIntervalSeconds"`
+	AutoLockMinutes         int    `json:"autoLockMinutes"`
+	SectionDefault          string `json:"sectionDefault"`
+	ModifiedAt              int64  `json:"modifiedAt"`
 }
 
 type vaultConfig struct {
@@ -156,10 +171,11 @@ type remoteSyncObject struct {
 }
 
 type remoteFolderManifest struct {
-	FormatVersion int         `json:"format_version"`
-	VaultID       string      `json:"vault_id"`
-	Folders       []Folder    `json:"folders"`
-	Deleted       []Tombstone `json:"deleted,omitempty"`
+	FormatVersion int           `json:"format_version"`
+	VaultID       string        `json:"vault_id"`
+	Folders       []Folder      `json:"folders"`
+	Deleted       []Tombstone   `json:"deleted,omitempty"`
+	Settings      VaultSettings `json:"settings,omitempty"`
 }
 
 type authenticatedRemoteSnapshot struct {
@@ -170,13 +186,14 @@ type authenticatedRemoteSnapshot struct {
 
 // MergeResult summarizes a pull merge between the remote and local vault.
 type MergeResult struct {
-	PulledNotes    int             `json:"pulledNotes"`
-	UpdatedNotes   int             `json:"updatedNotes"`
-	DeletedNotes   int             `json:"deletedNotes"`
-	PulledFolders  int             `json:"pulledFolders"`
-	DeletedFolders int             `json:"deletedFolders"`
-	UpToDate       bool            `json:"upToDate"`
-	Conflicts      []MergeConflict `json:"conflicts,omitempty"`
+	PulledNotes     int             `json:"pulledNotes"`
+	UpdatedNotes    int             `json:"updatedNotes"`
+	DeletedNotes    int             `json:"deletedNotes"`
+	PulledFolders   int             `json:"pulledFolders"`
+	DeletedFolders  int             `json:"deletedFolders"`
+	UpdatedSettings bool            `json:"updatedSettings"`
+	UpToDate        bool            `json:"upToDate"`
+	Conflicts       []MergeConflict `json:"conflicts,omitempty"`
 }
 
 type MergeConflict struct {

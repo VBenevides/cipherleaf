@@ -206,6 +206,7 @@ func (s *Store) Create(root, passphrase string) (Session, error) {
 		VaultID:       vaultID,
 		Folders:       []Folder{},
 		Notes:         []NoteSummary{},
+		Settings:      defaultVaultSettings(),
 	}
 	s.searchIndex = make(map[string]string)
 	s.normalizedSearchIndex = make(map[string]string)
@@ -270,6 +271,64 @@ func (s *Store) Session() Session {
 		return Session{Locked: true}
 	}
 	return s.sessionLocked()
+}
+
+func defaultVaultSettings() VaultSettings {
+	return VaultSettings{
+		Theme: "light", JournalLines: "none", EditorFontSize: 14,
+		DailyNoteFormat: "YYYY-MM-DD", AutosaveIntervalSeconds: 60,
+		AutoLockMinutes: 15, SectionDefault: "collapsed",
+	}
+}
+
+func normalizeVaultSettings(settings VaultSettings) VaultSettings {
+	defaults := defaultVaultSettings()
+	if settings.Theme != "light" && settings.Theme != "dark" && settings.Theme != "archivist" {
+		settings.Theme = defaults.Theme
+	}
+	if settings.JournalLines != "none" && settings.JournalLines != "full" && settings.JournalLines != "dotted" {
+		settings.JournalLines = defaults.JournalLines
+	}
+	if settings.EditorFontSize < 10 || settings.EditorFontSize > 32 {
+		settings.EditorFontSize = defaults.EditorFontSize
+	}
+	if strings.TrimSpace(settings.DailyNoteFormat) == "" {
+		settings.DailyNoteFormat = defaults.DailyNoteFormat
+	}
+	if settings.AutosaveIntervalSeconds < 60 {
+		settings.AutosaveIntervalSeconds = defaults.AutosaveIntervalSeconds
+	}
+	if settings.AutoLockMinutes < 1 {
+		settings.AutoLockMinutes = defaults.AutoLockMinutes
+	}
+	if settings.SectionDefault != "expanded" && settings.SectionDefault != "collapsed" {
+		settings.SectionDefault = defaults.SectionDefault
+	}
+	return settings
+}
+
+func (s *Store) GetVaultSettings() (VaultSettings, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return VaultSettings{}, err
+	}
+	return normalizeVaultSettings(s.manifest.Settings), nil
+}
+
+func (s *Store) SaveVaultSettings(settings VaultSettings) (VaultSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return VaultSettings{}, err
+	}
+	settings = normalizeVaultSettings(settings)
+	settings.ModifiedAt = time.Now().UnixMilli()
+	s.manifest.Settings = settings
+	if err := s.saveManifestLocked(); err != nil {
+		return VaultSettings{}, err
+	}
+	return settings, nil
 }
 
 func (s *Store) ListNotes() ([]NoteSummary, error) {
@@ -1911,6 +1970,7 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 		VaultID:       s.vaultID,
 		Folders:       slices.Clone(s.manifest.Folders),
 		Deleted:       slices.Clone(s.manifest.DeletedFolders),
+		Settings:      s.manifest.Settings,
 	}
 	sortFolders(folderManifest.Folders)
 	sortTombstones(folderManifest.Deleted)
@@ -1957,6 +2017,7 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 	matches := slices.Equal(remote.Manifest.Folders, localFolders) &&
 		slices.Equal(remote.Manifest.DeletedFolders, localDeletedFolders) &&
 		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
+		remote.Manifest.Settings == s.manifest.Settings &&
 		len(remote.Objects) == len(s.manifest.Notes)+len(localDeletedNotes)
 	if matches {
 		for _, local := range s.manifest.Notes {
@@ -2273,6 +2334,12 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 	if err := validateFolderHierarchy(mergedFolders); err != nil {
 		return MergeResult{}, fmt.Errorf("merged folder hierarchy %w", err)
 	}
+	mergedSettings := s.manifest.Settings
+	if remote.Manifest.Settings.ModifiedAt > mergedSettings.ModifiedAt {
+		mergedSettings = remote.Manifest.Settings
+		result.UpdatedSettings = true
+		result.UpToDate = false
+	}
 
 	if result.UpToDate {
 		return result, nil
@@ -2281,6 +2348,7 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 	s.manifest.Notes = mergedNotes
 	s.manifest.DeletedNotes = mergedDeletedNotes
 	s.manifest.DeletedFolders = mergedDeletedFolders
+	s.manifest.Settings = mergedSettings
 	if err := s.saveManifestLocked(); err != nil {
 		return MergeResult{}, fmt.Errorf("save merged manifest: %w", err)
 	}
@@ -2513,6 +2581,11 @@ func (s *Store) readRemoteSnapshotLocked(
 	if folderManifest.FormatVersion != FormatVersion || folderManifest.VaultID != s.vaultID {
 		return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata belongs to another vault or format")
 	}
+	remoteSettings := normalizeVaultSettings(folderManifest.Settings)
+	if remoteSettings.ModifiedAt < 0 ||
+		(folderManifest.Settings.ModifiedAt != 0 && remoteSettings != folderManifest.Settings) {
+		return authenticatedRemoteSnapshot{}, errors.New("remote settings contain invalid data")
+	}
 	remoteFolders := slices.Clone(folderManifest.Folders)
 	sortFolders(remoteFolders)
 	seenFolders := make(map[string]struct{}, len(remoteFolders))
@@ -2680,6 +2753,7 @@ func (s *Store) readRemoteSnapshotLocked(
 			Notes:          noteSummaries,
 			DeletedFolders: remoteDeletedFolders,
 			DeletedNotes:   tombstonesFromRemoteObjects(remoteNotes),
+			Settings:       remoteSettings,
 		},
 		Objects: remoteNotes,
 	}, nil
@@ -3156,6 +3230,7 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 	if result.FormatVersion != FormatVersion || result.VaultID != s.vaultID {
 		return manifest{}, errors.New("manifest belongs to another vault or format version")
 	}
+	result.Settings = normalizeVaultSettings(result.Settings)
 	for index, folder := range result.Folders {
 		if !validID(folder.ID) {
 			return manifest{}, errors.New("manifest contains an invalid folder ID")

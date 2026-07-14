@@ -392,6 +392,66 @@ func TestMergeRestoresMissingAttachmentForEqualNoteVersion(t *testing.T) {
 	}
 }
 
+func TestVaultSettingsSyncAndRestore(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "correct horse battery staple"
+	first := NewStore()
+	if _, err := first.Create(t.TempDir(), secret); err != nil {
+		t.Fatal(err)
+	}
+	want, err := first.SaveVaultSettings(VaultSettings{
+		Theme: "dark", JournalLines: "dotted", EditorFontSize: 18,
+		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90,
+		AutoLockMinutes: 30, SectionDefault: "expanded",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := first.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := NewStore()
+	if _, err := restored.RestoreRemoteSnapshot(remote, t.TempDir(), "restored", secret); err != nil {
+		t.Fatal(err)
+	}
+	got, err := restored.GetVaultSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("restored settings = %#v, want %#v", got, want)
+	}
+
+	newer, err := first.SaveVaultSettings(VaultSettings{
+		Theme: "archivist", JournalLines: "full", EditorFontSize: 20,
+		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120,
+		AutoLockMinutes: 45, SectionDefault: "collapsed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	merge, err := restored.MergeRemoteSnapshot(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merge.UpdatedSettings {
+		t.Fatal("settings update was not reported")
+	}
+	got, err = restored.GetVaultSettings()
+	if err != nil || got != newer {
+		t.Fatalf("merged settings = %#v, %v; want %#v", got, err, newer)
+	}
+}
+
 func TestMergeConflictReturnsBothVersionsWithoutDuplicatingRemote(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

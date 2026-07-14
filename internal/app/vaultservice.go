@@ -694,6 +694,14 @@ func (s *VaultService) ReplaceAcrossNotes(find, replace string, noteIDs []string
 	return s.store.ReplaceAcrossNotes(find, replace, noteIDs)
 }
 
+func (s *VaultService) GetVaultSettings() (vault.VaultSettings, error) {
+	return s.store.GetVaultSettings()
+}
+
+func (s *VaultService) SaveVaultSettings(settings vault.VaultSettings) (vault.VaultSettings, error) {
+	return s.store.SaveVaultSettings(settings)
+}
+
 func (s *VaultService) GetSyncSettings() (githubsync.SyncSettings, error) {
 	vaultID, err := s.unlockedVaultID()
 	if err != nil {

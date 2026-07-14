@@ -52,6 +52,7 @@ export interface MergeResult {
     "deletedNotes": number;
     "pulledFolders": number;
     "deletedFolders": number;
+    "updatedSettings": boolean;
     "upToDate": boolean;
     "conflicts"?: MergeConflict[] | null;
 }
@@ -117,4 +118,20 @@ export interface TrashItem {
     "kind": string;
     "title": string;
     "deletedAt": string;
+}
+
+/**
+ * VaultSettings contains portable preferences encrypted and synced with a vault.
+ */
+export interface VaultSettings {
+    "theme": string;
+    "journalLines": string;
+    "editorFontSize": number;
+    "dailyNoteFormat": string;
+    "dailyNoteFolderId": string;
+    "dailyTemplateNoteId": string;
+    "autosaveIntervalSeconds": number;
+    "autoLockMinutes": number;
+    "sectionDefault": string;
+    "modifiedAt": number;
 }

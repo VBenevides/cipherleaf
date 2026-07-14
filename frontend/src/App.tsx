@@ -22,6 +22,7 @@ import type {
   ReplaceResult,
   Session,
   TrashItem,
+  VaultSettings,
 } from "../bindings/cipherleaf/internal/vault/models";
 import type {
   ConnectionResult,
@@ -43,6 +44,8 @@ type EditorView = "live" | "object" | "markdown";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type Theme = "light" | "dark" | "archivist";
 type JournalLines = "none" | "full" | "dotted";
+type SettingsTab = "general" | "appearance";
+type SectionDefault = "expanded" | "collapsed";
 type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
@@ -50,7 +53,7 @@ const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "dark", label: "Dark (Nord)", swatch: "dark" },
   { value: "archivist", label: "Archivist", swatch: "archivist" },
 ];
-type TitlebarMenu = "file";
+type TitlebarMenu = "file" | "vault" | "settings";
 type ContextMenuState =
   | { kind: "note"; id: string; label: string; x: number; y: number }
   | { kind: "folder"; id: string; label: string; x: number; y: number };
@@ -106,8 +109,6 @@ function EditorLoading() {
   return <div className="settings-loading">Loading editor...</div>;
 }
 
-const AUTO_LOCK_MS = 15 * 60 * 1000;
-const AUTOSAVE_DELAY_MS = 60 * 1000;
 const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
 const EDITOR_FONT_STORE = "appearance";
 const EDITOR_FONT_KEY = "editor-font";
@@ -375,6 +376,7 @@ function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
@@ -410,6 +412,17 @@ function App() {
   const [dailyNoteFormat, setDailyNoteFormat] = useState(() => window.localStorage.getItem("cipherleaf-daily-format") || "YYYY-MM-DD");
   const [dailyNoteFolderID, setDailyNoteFolderID] = useState(() => window.localStorage.getItem("cipherleaf-daily-folder") || "");
   const [dailyTemplateNoteID, setDailyTemplateNoteID] = useState(() => window.localStorage.getItem("cipherleaf-daily-template") || "");
+  const [autosaveIntervalSeconds, setAutosaveIntervalSeconds] = useState(() => {
+    const saved = Number(window.localStorage.getItem("cipherleaf-autosave-seconds"));
+    return Number.isFinite(saved) && saved >= 60 ? saved : 60;
+  });
+  const [autoLockMinutes, setAutoLockMinutes] = useState(() => {
+    const saved = Number(window.localStorage.getItem("cipherleaf-auto-lock-minutes"));
+    return Number.isFinite(saved) && saved >= 1 ? saved : 15;
+  });
+  const [sectionDefault, setSectionDefault] = useState<SectionDefault>(() =>
+    window.localStorage.getItem("cipherleaf-section-default") === "expanded" ? "expanded" : "collapsed"
+  );
   const [today, setToday] = useState(() => new Date());
   const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
@@ -446,11 +459,82 @@ function App() {
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
   const appDialogResolverRef = useRef<((value: string | boolean | null) => void) | null>(null);
   const nextWindowLayerRef = useRef(160);
+  const vaultSettingsLoadedForRef = useRef("");
+  const vaultSettingsSnapshotRef = useRef("");
+
+  const portableVaultSettings = useMemo<VaultSettings>(() => ({
+    theme,
+    journalLines,
+    editorFontSize,
+    dailyNoteFormat,
+    dailyNoteFolderId: dailyNoteFolderID,
+    dailyTemplateNoteId: dailyTemplateNoteID,
+    autosaveIntervalSeconds,
+    autoLockMinutes,
+    sectionDefault,
+    modifiedAt: 0,
+  }), [
+    autoLockMinutes,
+    autosaveIntervalSeconds,
+    dailyNoteFolderID,
+    dailyNoteFormat,
+    dailyTemplateNoteID,
+    editorFontSize,
+    journalLines,
+    sectionDefault,
+    theme,
+  ]);
+
+  const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, modifiedAt: 0 });
+
+  const applyVaultSettings = (settings: VaultSettings) => {
+    vaultSettingsSnapshotRef.current = settingsSnapshot(settings);
+    setTheme(settings.theme as Theme);
+    setJournalLines(settings.journalLines as JournalLines);
+    setEditorFontSize(settings.editorFontSize);
+    setDailyNoteFormat(settings.dailyNoteFormat);
+    setDailyNoteFolderID(settings.dailyNoteFolderId);
+    setDailyTemplateNoteID(settings.dailyTemplateNoteId);
+    setAutosaveIntervalSeconds(settings.autosaveIntervalSeconds);
+    setAutoLockMinutes(settings.autoLockMinutes);
+    setSectionDefault(settings.sectionDefault as SectionDefault);
+  };
+
+  const loadVaultSettings = async (vaultID: string, seedIfMissing = true) => {
+    const settings = await VaultService.GetVaultSettings();
+    vaultSettingsLoadedForRef.current = vaultID;
+    if (settings.modifiedAt === 0) {
+      vaultSettingsSnapshotRef.current = settingsSnapshot(portableVaultSettings);
+      if (!seedIfMissing) return false;
+      const saved = await VaultService.SaveVaultSettings(portableVaultSettings);
+      vaultSettingsSnapshotRef.current = settingsSnapshot(saved);
+      return true;
+    }
+    applyVaultSettings(settings);
+    return false;
+  };
+
+  const saveVaultSettings = async (force = false) => {
+    if (!session || session.locked || vaultSettingsLoadedForRef.current !== session.vaultId) return;
+    const snapshot = settingsSnapshot(portableVaultSettings);
+    if (!force && snapshot === vaultSettingsSnapshotRef.current) return;
+    const saved = await VaultService.SaveVaultSettings(portableVaultSettings);
+    vaultSettingsSnapshotRef.current = settingsSnapshot(saved);
+  };
 
   const bringWindowToFront = useCallback((layer: WindowLayer) => {
     nextWindowLayerRef.current += 1;
     setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
   }, []);
+
+  const openSettingsSection = (tab: SettingsTab, sectionID?: string) => {
+    setSettingsTab(tab);
+    if (sectionID) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(sectionID)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
 
   useEffect(() => {
     noteRef.current = note;
@@ -525,6 +609,12 @@ function App() {
     window.localStorage.setItem("cipherleaf-daily-folder", dailyNoteFolderID);
     window.localStorage.setItem("cipherleaf-daily-template", dailyTemplateNoteID);
   }, [dailyNoteFolderID, dailyNoteFormat, dailyTemplateNoteID]);
+
+  useEffect(() => {
+    window.localStorage.setItem("cipherleaf-autosave-seconds", String(autosaveIntervalSeconds));
+    window.localStorage.setItem("cipherleaf-auto-lock-minutes", String(autoLockMinutes));
+    window.localStorage.setItem("cipherleaf-section-default", sectionDefault);
+  }, [autoLockMinutes, autosaveIntervalSeconds, sectionDefault]);
 
   useEffect(() => {
     if (!note || session?.locked) {
@@ -634,6 +724,8 @@ function App() {
 
   useEffect(() => {
     if (!session || session.locked) {
+      vaultSettingsLoadedForRef.current = "";
+      vaultSettingsSnapshotRef.current = "";
       setSyncLinked(false);
       setLastSyncedAt(0);
       return;
@@ -644,6 +736,9 @@ function App() {
         if (active) {
           setSyncLinked(settings.linked);
           setLastSyncedAt(settings.lastSyncedAt);
+          void loadVaultSettings(session.vaultId, !settings.linked).catch((reason) => {
+            console.error(`Could not load synced settings: ${errorText(reason)}`);
+          });
         }
       })
       .catch(() => {
@@ -656,6 +751,16 @@ function App() {
       active = false;
     };
   }, [session?.locked, session?.vaultId]);
+
+  useEffect(() => {
+    if (!session || session.locked || vaultSettingsLoadedForRef.current !== session.vaultId) return;
+    const timer = window.setTimeout(() => {
+      void saveVaultSettings().catch((reason) => {
+        console.error(`Could not save synced settings: ${errorText(reason)}`);
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [portableVaultSettings, session?.locked, session?.vaultId]);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -932,6 +1037,9 @@ function App() {
       console.info(">>>>> Cloud Sync Triggered");
       const syncStartedAt = performance.now();
       const result = await VaultService.SyncNow();
+      if (session?.vaultId && await loadVaultSettings(session.vaultId)) {
+        await VaultService.SyncNow();
+      }
       const syncElapsed = performance.now() - syncStartedAt;
       syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
       if (result.warning) {
@@ -1037,16 +1145,17 @@ function App() {
     if (!dirty || !note) return;
     const timer = window.setTimeout(() => {
       void persistCurrent();
-    }, AUTOSAVE_DELAY_MS);
+    }, autosaveIntervalSeconds * 1000);
     return () => window.clearTimeout(timer);
-  }, [autosaveVersion, dirty, note?.id]);
+  }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
 
   useEffect(() => {
     if (!session || session.locked) return;
-    let timer = window.setTimeout(() => void autoLock(), AUTO_LOCK_MS);
+    const delay = autoLockMinutes * 60 * 1000;
+    let timer = window.setTimeout(() => void autoLock(), delay);
     const reset = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => void autoLock(), AUTO_LOCK_MS);
+      timer = window.setTimeout(() => void autoLock(), delay);
     };
     const events: (keyof WindowEventMap)[] = [
       "pointerdown",
@@ -1059,7 +1168,7 @@ function App() {
       window.clearTimeout(timer);
       events.forEach((event) => window.removeEventListener(event, reset));
     };
-  }, [session?.vaultId, session?.locked]);
+  }, [autoLockMinutes, session?.vaultId, session?.locked]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -1378,9 +1487,13 @@ function App() {
     setSyncNotification("");
     try {
       await persistCurrent();
+      await saveVaultSettings();
       console.info(">>>>> Cloud Sync Triggered");
       const syncStartedAt = performance.now();
       const result: SyncResult = await VaultService.SyncNow();
+      if (session?.vaultId && await loadVaultSettings(session.vaultId)) {
+        await VaultService.SyncNow();
+      }
       const syncElapsed = performance.now() - syncStartedAt;
       syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
       await refreshNotes();
@@ -1494,6 +1607,7 @@ function App() {
     console.warn("Git force-push triggered");
     try {
       await persistCurrent();
+      await saveVaultSettings(true);
       const result = await VaultService.ForcePushNow();
       setSyncConflicts([]);
       const settings = await VaultService.GetSyncSettings();
@@ -2494,6 +2608,7 @@ function App() {
     console.info("GitHub link triggered");
     try {
       await persistCurrent();
+      await saveVaultSettings(true);
       const linked = await VaultService.LinkGitHubVault(syncSettings);
       const saved = await VaultService.GetSyncSettings();
       setSyncSettings(saved);
@@ -2536,6 +2651,9 @@ function App() {
     try {
       await persistCurrent();
       const result: SyncResult = await VaultService.PullAndLinkGitHubVault(syncSettings);
+      if (session?.vaultId && await loadVaultSettings(session.vaultId)) {
+        await VaultService.SyncNow();
+      }
       const saved = await VaultService.GetSyncSettings();
       setSyncSettings(saved);
       setSyncLinked(saved.linked);
@@ -3016,30 +3134,36 @@ function App() {
                   Export plaintext Markdown…
                 </button>
                 <div className="titlebar-menu-separator" />
+                <button role="menuitem" onClick={() => void closeApplication()}>
+                  Close application
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="titlebar-menu">
+            <button
+              className={titlebarMenu === "vault" ? "active" : ""}
+              aria-haspopup="menu"
+              aria-expanded={titlebarMenu === "vault"}
+              onClick={() => {
+                setTitlebarMenu((current) => current === "vault" ? null : "vault")
+              }}
+            >
+              Vault
+            </button>
+            {titlebarMenu === "vault" && (
+              <div className="titlebar-menu-popover" role="menu">
                 <button role="menuitem" disabled={!syncLinked || syncing} title={!syncLinked ? "Link this vault in Vault Settings first" : syncing ? "Syncing…" : "Pull then push the vault to GitHub"} onClick={() => {
                   setTitlebarMenu(null);
                   void syncNow();
                 }}>
                   Sync vault <kbd>Ctrl + Shift + R</kbd>
                 </button>
-                <button role="menuitem" onClick={() => {
-                  setTitlebarMenu(null);
-                  bringWindowToFront("appearanceSettings");
-                  setAppearanceSettingsOpen(true);
-                }}>
-                  Settings…
-                </button>
                 <button role="menuitem" onClick={() => void openVaultSettings()}>
                   Vault Settings…
                 </button>
                 <button role="menuitem" onClick={() => void openRecovery()}>
                   Trash and version history…
-                </button>
-                <button role="menuitem" onClick={() => {
-                  setTitlebarMenu(null);
-                  setLogOpen(true);
-                }}>
-                  Log
                 </button>
                 <div className="titlebar-menu-separator" />
                 <button role="menuitem" onClick={() => void switchVault("create")}>
@@ -3058,9 +3182,34 @@ function App() {
                 <button role="menuitem" onClick={() => void closeCurrentVault()}>
                   Close vault
                 </button>
-                <div className="titlebar-menu-separator" />
-                <button role="menuitem" onClick={() => void closeApplication()}>
-                  Close application
+              </div>
+            )}
+          </div>
+          <div className="titlebar-menu">
+            <button
+              className={titlebarMenu === "settings" ? "active" : ""}
+              aria-haspopup="menu"
+              aria-expanded={titlebarMenu === "settings"}
+              onClick={() => {
+                setTitlebarMenu((current) => current === "settings" ? null : "settings")
+              }}
+            >
+              Settings
+            </button>
+            {titlebarMenu === "settings" && (
+              <div className="titlebar-menu-popover" role="menu">
+                <button role="menuitem" onClick={() => {
+                  setTitlebarMenu(null);
+                  bringWindowToFront("appearanceSettings");
+                  setAppearanceSettingsOpen(true);
+                }}>
+                  Settings…
+                </button>
+                <button role="menuitem" onClick={() => {
+                  setTitlebarMenu(null);
+                  setLogOpen(true);
+                }}>
+                  Log
                 </button>
               </div>
             )}
@@ -3559,7 +3708,7 @@ function App() {
                 {view === "live" && (
                   <div className="editor-view-pane active">
                     <LiveMarkdownEditor
-                      key={note.id}
+                      key={`${note.id}:${sectionDefault}`}
                       noteID={note.id}
                       value={noteMarkdown}
                       onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
@@ -3572,6 +3721,7 @@ function App() {
                       onSearchTargetApplied={() => setGlobalSearchTarget(null)}
                       caretOffset={noteCaretOffsetsRef.current.get(note.id) ?? 0}
                       onCaretChange={(offset) => noteCaretOffsetsRef.current.set(note.id, offset)}
+                      defaultSectionsCollapsed={sectionDefault === "collapsed"}
                     />
                   </div>
                 )}
@@ -3771,115 +3921,156 @@ function App() {
               <Icon name="x" />
             </button>
             <p className="eyebrow">Settings</p>
-            <h2 id="appearance-settings-title">Appearance</h2>
-
-            <fieldset className="appearance-fieldset">
-              <legend>Theme</legend>
-              <div className="appearance-theme-options">
-                {THEME_OPTIONS.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    className={theme === item.value ? "active" : ""}
-                    aria-pressed={theme === item.value}
-                    onClick={() => setTheme(item.value)}
-                  >
-                    <span className={`theme-swatch ${item.swatch}`} />
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-
-            <fieldset className="appearance-fieldset">
-              <legend>Journal lines</legend>
-              <div className="appearance-theme-options">
-                {(["none", "full", "dotted"] as JournalLines[]).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={journalLines === value ? "active" : ""}
-                    aria-pressed={journalLines === value}
-                    onClick={() => setJournalLines(value)}
-                  >
-                    {value === "none" ? "No lines" : value === "full" ? "Full lines" : "Dotted lines"}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-
-            <fieldset className="appearance-fieldset">
-              <legend>Daily notes</legend>
-              <label>
-                Title format
-                <input value={dailyNoteFormat} onChange={(event) => setDailyNoteFormat(event.target.value)} placeholder="YYYY-MM-DD" />
-              </label>
-              <label>
-                Folder
-                <select value={dailyNoteFolderID} onChange={(event) => setDailyNoteFolderID(event.target.value)}>
-                  <option value="">Unfiled</option>
-                  {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-                </select>
-              </label>
-              <label>
-                Template note
-                <select value={dailyTemplateNoteID} onChange={(event) => setDailyTemplateNoteID(event.target.value)}>
-                  <option value="">Default heading</option>
-                  {notes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-                </select>
-              </label>
-              <small>Template variables: {"{{title}}"}, {"{{date}}"}, and {"{{time}}"}.</small>
-            </fieldset>
-
-            <div className="appearance-font-field">
-              <span>Font</span>
-              <div className="appearance-font-row">
-                <span title={editorFontName}>
-                  {editorFontName || "Default (Charter)"}
-                </span>
-                {editorFontName && (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => void resetEditorFont()}
-                  >
-                    Reset
-                  </button>
+            <h2 id="appearance-settings-title">Settings</h2>
+            <div className="settings-layout">
+              <nav className="settings-sidebar" aria-label="Settings sections">
+                <button
+                  type="button"
+                  aria-expanded={settingsTab === "general"}
+                  className={`settings-parent ${settingsTab === "general" ? "active" : ""}`}
+                  onClick={() => openSettingsSection("general")}
+                >
+                  General
+                </button>
+                {settingsTab === "general" && (
+                  <div className="settings-submenu">
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-daily-notes")}>Daily notes</button>
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-autosave")}>Auto-save</button>
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-auto-lock")}>Vault lock</button>
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-section-default")}>Section state</button>
+                  </div>
                 )}
                 <button
                   type="button"
-                  className="secondary-button"
-                  onClick={() => editorFontInputRef.current?.click()}
+                  aria-expanded={settingsTab === "appearance"}
+                  className={`settings-parent ${settingsTab === "appearance" ? "active" : ""}`}
+                  onClick={() => openSettingsSection("appearance")}
                 >
-                  Select .ttf…
+                  Appearance
                 </button>
-                <input
-                  ref={editorFontInputRef}
-                  className="appearance-font-input"
-                  type="file"
-                  accept=".ttf,font/ttf"
-                  onChange={(event) => void chooseEditorFont(event)}
-                />
+                {settingsTab === "appearance" && (
+                  <div className="settings-submenu">
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-theme")}>Theme</button>
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-guide-lines")}>Guide lines</button>
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-font-size")}>Text size</button>
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-editor-font")}>Editor font</button>
+                  </div>
+                )}
+              </nav>
+              <div className="settings-content" role="tabpanel">
+                {settingsTab === "general" ? (
+                  <>
+                    <h3>General</h3>
+                    <fieldset id="settings-daily-notes" className="appearance-fieldset settings-section settings-section-card">
+                      <legend>Daily notes</legend>
+                      <label>
+                        Title format
+                        <input value={dailyNoteFormat} onChange={(event) => setDailyNoteFormat(event.target.value)} placeholder="YYYY-MM-DD" />
+                      </label>
+                      <label>
+                        Folder
+                        <select value={dailyNoteFolderID} onChange={(event) => setDailyNoteFolderID(event.target.value)}>
+                          <option value="">Unfiled</option>
+                          {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        Template note
+                        <select value={dailyTemplateNoteID} onChange={(event) => setDailyTemplateNoteID(event.target.value)}>
+                          <option value="">Default heading</option>
+                          {notes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                        </select>
+                      </label>
+                      <small>Template variables: {"{{title}}"}, {"{{date}}"}, and {"{{time}}"}.</small>
+                    </fieldset>
+                    <div id="settings-autosave" className="settings-section settings-section-card">
+                      <label>
+                        Auto-save interval (seconds)
+                        <input
+                          type="number"
+                          min="60"
+                          step="1"
+                          value={autosaveIntervalSeconds}
+                          onChange={(event) => setAutosaveIntervalSeconds(Math.max(60, Number(event.target.value) || 60))}
+                        />
+                      </label>
+                    </div>
+                    <div id="settings-auto-lock" className="settings-section settings-section-card">
+                      <label>
+                        Lock vault after inactivity (minutes)
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={autoLockMinutes}
+                          onChange={(event) => setAutoLockMinutes(Math.max(1, Number(event.target.value) || 1))}
+                        />
+                      </label>
+                    </div>
+                    <fieldset id="settings-section-default" className="appearance-fieldset settings-section settings-section-card">
+                      <legend>Default section state</legend>
+                      <div className="appearance-theme-options">
+                        {(["expanded", "collapsed"] as SectionDefault[]).map((value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={sectionDefault === value ? "active" : ""}
+                            aria-pressed={sectionDefault === value}
+                            onClick={() => setSectionDefault(value)}
+                          >
+                            {value === "expanded" ? "Expanded" : "Collapsed"}
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+                  </>
+                ) : (
+                  <>
+                    <h3>Appearance</h3>
+                    <fieldset id="settings-theme" className="appearance-fieldset settings-section settings-section-card">
+                      <legend>Theme</legend>
+                      <div className="appearance-theme-options">
+                        {THEME_OPTIONS.map((item) => (
+                          <button key={item.value} type="button" className={theme === item.value ? "active" : ""} aria-pressed={theme === item.value} onClick={() => setTheme(item.value)}>
+                            <span className={`theme-swatch ${item.swatch}`} />
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <fieldset id="settings-guide-lines" className="appearance-fieldset settings-section settings-section-card">
+                      <legend>Writing guide lines</legend>
+                      <div className="appearance-theme-options">
+                        {(["none", "full", "dotted"] as JournalLines[]).map((value) => (
+                          <button key={value} type="button" className={journalLines === value ? "active" : ""} aria-pressed={journalLines === value} onClick={() => setJournalLines(value)}>
+                            {value === "none" ? "None" : value === "full" ? "Solid" : "Dotted"}
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <div id="settings-font-size" className="settings-section settings-section-card">
+                      <label>
+                        Editor font size
+                        <div className="appearance-size-row">
+                          <input type="range" min="10" max="32" step="1" value={editorFontSize} onChange={(event) => setEditorFontSize(Number(event.target.value))} />
+                          <output>{editorFontSize}px</output>
+                        </div>
+                      </label>
+                    </div>
+                    <div id="settings-editor-font" className="appearance-font-field settings-section settings-section-card">
+                      <span>Editor font</span>
+                      <div className="appearance-font-row">
+                        <span title={editorFontName}>{editorFontName || "Default (Charter)"}</span>
+                        {editorFontName && <button type="button" className="secondary-button" onClick={() => void resetEditorFont()}>Reset</button>}
+                        <button type="button" className="secondary-button" onClick={() => editorFontInputRef.current?.click()}>Select .ttf…</button>
+                        <input ref={editorFontInputRef} className="appearance-font-input" type="file" accept=".ttf,font/ttf" onChange={(event) => void chooseEditorFont(event)} />
+                      </div>
+                    </div>
+                    <p className="appearance-help">Select a TrueType font file to customize the editor.</p>
+                  </>
+                )}
               </div>
             </div>
-
-            <label>
-              Font size
-              <div className="appearance-size-row">
-                <input
-                  type="range"
-                  min="10"
-                  max="32"
-                  step="1"
-                  value={editorFontSize}
-                  onChange={(event) => setEditorFontSize(Number(event.target.value))}
-                />
-                <output>{editorFontSize}px</output>
-              </div>
-            </label>
-            <p className="appearance-help">
-              Download and extract a Nerd Font, then select one of its .ttf files.
-            </p>
           </section>
         </div>
       )}

@@ -13,5 +13,6 @@ export type {
     PortabilityResult,
     ReplaceResult,
     Session,
-    TrashItem
+    TrashItem,
+    VaultSettings
 } from "./models.js";
