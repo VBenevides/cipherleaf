@@ -316,7 +316,7 @@ const liveMarkdownTheme = EditorView.theme(
   {
     "&": {
       "--toggle-indent-step": "2ch",
-      "--toggle-button-width": "1.25em",
+      "--toggle-button-width": "0.8em",
       "--toggle-button-gap": "0em",
     },
 
@@ -353,8 +353,6 @@ const liveMarkdownTheme = EditorView.theme(
     ".cm-live-toggle-button.is-empty": {
       cursor: "default",
       color: "var(--green)",
-      fontSize: "1.2em",
-      fontWeight: "800",
       opacity: "1",
     },
 
@@ -1103,11 +1101,11 @@ function toggleLine(text: string): ToggleLine | null {
 }
 
 function toggleLineStyle(_indent: number): string {
-  return "--toggle-padding-left: calc(var(--live-object-depth, 0) * 22px);";
+  return "--toggle-padding-left: calc(var(--live-object-depth, 0) * 24px);";
 }
 
 function listLineStyle(_indent: number, markerWidth = "1.25em"): string {
-  return `--live-list-indent: calc(var(--live-object-depth, 0) * 22px); --live-list-marker-width: ${markerWidth}; --live-list-marker-offset: 0px;`;
+  return `--live-list-indent: calc(var(--live-object-depth, 0) * 24px); --live-list-marker-width: ${markerWidth}; --live-list-marker-offset: 0px;`;
 }
 
 function objectLineAttributes(

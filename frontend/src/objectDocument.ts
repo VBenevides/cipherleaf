@@ -350,7 +350,13 @@ export function objectBlockEnd(lines: readonly string[], startLineNumber: number
   for (let lineNumber = startLineNumber + 1; lineNumber <= lines.length; lineNumber++) {
     const raw = lines[lineNumber - 1] ?? "";
     if (isSeparatorLine(lines, lineNumber)) break;
-    if (raw.trim() !== "" && lineStartsObject(raw) && classifyObjectLine(raw).indent <= startIndent) break;
+    const object = classifyObjectLine(raw);
+    if (raw.trim() !== "" && lineStartsObject(raw) && object.indent <= startIndent) break;
+    if (object.tag === "code") {
+      endLineNumber = objectBlockEnd(lines, lineNumber);
+      lineNumber = endLineNumber;
+      continue;
+    }
     endLineNumber = lineNumber;
   }
 

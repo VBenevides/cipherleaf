@@ -2707,9 +2707,9 @@ a:focus-visible {
   background: var(--paper);
 }
 
-.live-markdown-editor .cm-live-object-line {
+.live-markdown-editor .cm-line.cm-live-object-line {
   position: relative;
-  padding-left: calc(var(--live-object-depth, 0) * 22px);
+  padding-left: calc(var(--live-object-depth, 0) * 24px + 0.4em);
   cursor: text;
 }
 
@@ -3120,7 +3120,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-code-block {
   box-sizing: border-box;
-  margin-left: calc(var(--live-object-depth, 0) * 22px);
+  margin-left: calc(var(--live-object-depth, 0) * 24px + 0.4em);
   padding-left: 12px;
   padding-right: 12px;
   position: relative;
@@ -3195,25 +3195,25 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-list-line {
-  padding-left: calc(var(--live-list-indent, 0px) + 0.8em);
+  padding-left: calc(var(--live-list-indent, 0px) + 0.4em);
   text-indent: 0;
 }
 
 .live-markdown-editor .cm-line.cm-live-toggle-line {
-  padding-left: calc(var(--toggle-padding-left, 0px) + 0.5em) !important;
+  padding-left: calc(var(--toggle-padding-left, 0px) + 0.4em) !important;
   text-indent: 0;
 }
 
 .live-markdown-editor .cm-live-toggle-line.cm-live-list-line {
-  padding-left: calc(var(--toggle-padding-left, 0px) + 0.5em) !important;
+  padding-left: calc(var(--toggle-padding-left, 0px) + 0.4em) !important;
   text-indent: 0;
 }
 
 .live-markdown-editor .cm-live-object-continuation-line {
   padding-left: calc(
-    var(--live-object-depth, 0) * 22px +
+    var(--live-object-depth, 0) * 24px +
     var(--live-continuation-marker-width, 0px) +
-    0.5em
+    0.4em
   );
   text-indent: calc(0px - var(--live-continuation-marker-width, 0px));
 }
@@ -3237,7 +3237,7 @@ a:focus-visible {
   display: inline-flex;
   width: 1.45em;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   vertical-align: -0.12em;
 }
 

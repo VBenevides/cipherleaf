@@ -217,6 +217,18 @@ test("moves objects after multiline object text", () => {
   ].join("\n"));
 });
 
+test("moves an object after a section containing fenced code", () => {
+  const markdown = [
+    "> Section",
+    "  ```python",
+    "print('inside')",
+    "  ```",
+    "> Moving",
+  ].join("\n");
+
+  assert.equal(moveObjectInMarkdown(markdown, 5, 1, "after"), markdown);
+});
+
 test("moves objects by id", () => {
   const markdown = [
     "> A",
