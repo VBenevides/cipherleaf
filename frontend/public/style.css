@@ -2825,6 +2825,11 @@ a:focus-visible {
   background: rgba(97, 120, 101, 0.035);
 }
 
+.live-markdown-editor .cm-caret-locator {
+  background: rgba(245, 194, 66, 0.3);
+  box-shadow: inset 3px 0 #d6a820;
+}
+
 .live-markdown-editor .cm-selectionBackground,
 .live-markdown-editor .cm-content ::selection {
   background: rgba(106, 132, 111, 0.2) !important;
@@ -3648,6 +3653,11 @@ a:focus-visible {
 
 :root[data-theme="dark"] .live-markdown-editor .cm-activeLine {
   background: rgba(136, 192, 208, 0.06);
+}
+
+:root[data-theme="dark"] .live-markdown-editor .cm-caret-locator {
+  background: rgba(235, 203, 92, 0.22);
+  box-shadow: inset 3px 0 #ebcb5c;
 }
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-list-marker {

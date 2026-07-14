@@ -7,6 +7,7 @@ import {
   Prec,
   StateEffect,
   StateField,
+  Transaction,
   type Range,
 } from "@codemirror/state";
 import {
@@ -23,7 +24,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { highlightTree } from "@lezer/highlight";
 import { minimalSetup } from "codemirror";
-import { redo, undo } from "@codemirror/commands";
+import { history, redo, undo } from "@codemirror/commands";
 import {
   acceptCompletion,
   autocompletion,
@@ -214,6 +215,28 @@ const setQuoteCollapsed = StateEffect.define<{ position: number; collapsed: bool
   }),
 });
 const setAllQuotesCollapsed = StateEffect.define<boolean>();
+const locateCaret = StateEffect.define<number>({
+  map: (position, changes) => changes.mapPos(position),
+});
+const caretLocatorField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    if (transaction.startState.selection.main.head !== transaction.state.selection.main.head) {
+      next = Decoration.none;
+    }
+    for (const effect of transaction.effects) {
+      if (effect.is(locateCaret)) {
+        const line = transaction.state.doc.lineAt(effect.value);
+        next = Decoration.set([
+          Decoration.line({ class: "cm-caret-locator" }).range(line.from),
+        ]);
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 function installJournalRules(editor: EditorView) {
   const scroller = editor.scrollDOM;
@@ -2271,6 +2294,21 @@ function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
   return true;
 }
 
+function showCaretLocation(view: EditorView) {
+  const position = view.state.selection.main.head;
+  const sectionPosition = currentToggleSectionPosition(view.state);
+  const effects = [
+    locateCaret.of(position),
+    EditorView.scrollIntoView(position, { y: "center" }),
+  ];
+  if (sectionPosition !== null) {
+    effects.push(setQuoteCollapsed.of({ position: sectionPosition, collapsed: false }));
+  }
+  view.dispatch({ effects });
+  view.focus();
+  return true;
+}
+
 function objectHandleElement(target: EventTarget | null): HTMLElement | null {
   return target instanceof HTMLElement
     ? target.closest<HTMLElement>(".cm-live-object-handle[data-object-line]")
@@ -2441,6 +2479,16 @@ export default function LiveMarkdownEditor({
               run: (editor) => redo(editor),
             },
             {
+              key: "Ctrl-Shift-z",
+              preventDefault: true,
+              run: (editor) => redo(editor),
+            },
+            {
+              key: "Ctrl-Alt-l",
+              preventDefault: true,
+              run: (editor) => showCaretLocation(editor),
+            },
+            {
               key: "Ctrl-]",
               preventDefault: true,
               run: (editor) => setCurrentSectionCollapsed(editor, false),
@@ -2528,12 +2576,14 @@ export default function LiveMarkdownEditor({
             override: [snippetCompletion],
           }),
           minimalSetup,
+          history({ newGroupDelay: 250 }),
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
           markdown({ codeLanguages: languages }),
           deepCodeHighlightField,
           deepCodeHighlightLoader,
           liveMarkdownTheme,
+          caretLocatorField,
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
             if (readOnly) return false;
@@ -2750,7 +2800,10 @@ export default function LiveMarkdownEditor({
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: normalizedValue },
       selection: preservedSelection(editor, normalizedValue.length),
-      annotations: externalDocumentUpdate.of(true),
+      annotations: [
+        externalDocumentUpdate.of(true),
+        Transaction.addToHistory.of(false),
+      ],
     });
     if (normalizedValue !== value) {
       queueMicrotask(() => onChangeRef.current(normalizedValue));

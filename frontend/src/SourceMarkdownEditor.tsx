@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import { Annotation, EditorSelection, EditorState } from "@codemirror/state";
+import { Annotation, EditorSelection, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { redo, undo } from "@codemirror/commands";
+import { history, redo, undo } from "@codemirror/commands";
 import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { minimalSetup } from "codemirror";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
@@ -59,6 +59,7 @@ export default function SourceMarkdownEditor({
         doc: value,
         extensions: [
           minimalSetup,
+          history({ newGroupDelay: 250 }),
           markdown({ codeLanguages: languages }),
           search({ top: false }),
           keymap.of([
@@ -70,6 +71,11 @@ export default function SourceMarkdownEditor({
             },
             {
               key: "Ctrl-r",
+              preventDefault: true,
+              run: (current) => redo(current),
+            },
+            {
+              key: "Ctrl-Shift-z",
               preventDefault: true,
               run: (current) => redo(current),
             },
@@ -137,7 +143,10 @@ export default function SourceMarkdownEditor({
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: value },
       selection: preservedSelection(editor, value.length),
-      annotations: externalDocumentUpdate.of(true),
+      annotations: [
+        externalDocumentUpdate.of(true),
+        Transaction.addToHistory.of(false),
+      ],
     });
   }, [value]);
 
