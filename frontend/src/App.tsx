@@ -1226,15 +1226,6 @@ function App() {
     };
   }, [titlebarMenu]);
 
-  useEffect(() => {
-    if (!calendarOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCalendarOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [calendarOpen]);
-
   const autoLock = async () => {
     console.info("Vault auto-lock triggered");
     try {
@@ -1855,6 +1846,61 @@ function App() {
     setFolderPassword("");
     setFolderPasswordVisible(false);
   };
+
+  useEffect(() => {
+    const dialogs: { open: boolean; layer: WindowLayer; close: () => void }[] = [
+      {
+        open: Boolean(appDialog),
+        layer: "appDialog",
+        close: () => closeAppDialog(appDialog?.kind === "prompt" ? null : false),
+      },
+      {
+        open: Boolean(folderPasswordPrompt),
+        layer: "folderPassword",
+        close: () => closeFolderPasswordPrompt(null),
+      },
+      { open: quickSwitcherOpen, layer: "quickSwitcher", close: () => setQuickSwitcherOpen(false) },
+      { open: globalSearchOpen, layer: "globalSearch", close: () => setGlobalSearchOpen(false) },
+      { open: calendarOpen, layer: "calendar", close: () => setCalendarOpen(false) },
+      { open: syncConflicts.length > 0, layer: "syncConflicts", close: () => setSyncConflicts([]) },
+      { open: recoveryOpen, layer: "recovery", close: () => setRecoveryOpen(false) },
+      {
+        open: vaultSettingsOpen,
+        layer: "vaultSettings",
+        close: () => {
+          setVaultSettingsOpen(false);
+          setConnectionResult(null);
+        },
+      },
+      {
+        open: appearanceSettingsOpen,
+        layer: "appearanceSettings",
+        close: () => setAppearanceSettingsOpen(false),
+      },
+    ];
+    const current = dialogs
+      .filter((dialog) => dialog.open)
+      .sort((left, right) => (windowLayers[right.layer] ?? 0) - (windowLayers[left.layer] ?? 0))[0];
+    if (!current) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      current.close();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [
+    appDialog,
+    appearanceSettingsOpen,
+    calendarOpen,
+    folderPasswordPrompt,
+    globalSearchOpen,
+    quickSwitcherOpen,
+    recoveryOpen,
+    syncConflicts.length,
+    vaultSettingsOpen,
+    windowLayers,
+  ]);
 
   const lockFolder = async (folder: Folder) => {
     const password = await requestFolderPassword(`Password for “${folder.name}”`, "Lock folder");
