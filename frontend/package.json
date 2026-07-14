@@ -17,9 +17,7 @@
     "@wailsio/runtime": "3.0.0-alpha.95",
     "codemirror": "^6.0.2",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",

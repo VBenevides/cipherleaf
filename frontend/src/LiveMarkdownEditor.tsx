@@ -315,9 +315,7 @@ function installJournalRules(editor: EditorView) {
 const liveMarkdownTheme = EditorView.theme(
   {
     "&": {
-      "--toggle-indent-step": "2ch",
       "--toggle-button-width": "0.8em",
-      "--toggle-button-gap": "0em",
     },
 
     ".cm-line.cm-live-toggle-line": {
@@ -331,7 +329,6 @@ const liveMarkdownTheme = EditorView.theme(
     ".cm-live-toggle-button": {
       display: "inline-flex",
       width: "var(--toggle-button-width)",
-      marginRight: "var(--toggle-button-gap)",
       justifyContent: "flex-start",
       alignItems: "center",
       verticalAlign: "baseline",
@@ -1100,12 +1097,12 @@ function toggleLine(text: string): ToggleLine | null {
   };
 }
 
-function toggleLineStyle(_indent: number): string {
+function toggleLineStyle(): string {
   return "--toggle-padding-left: calc(var(--live-object-depth, 0) * 24px);";
 }
 
-function listLineStyle(_indent: number, markerWidth = "1.25em"): string {
-  return `--live-list-indent: calc(var(--live-object-depth, 0) * 24px); --live-list-marker-width: ${markerWidth}; --live-list-marker-offset: 0px;`;
+function listLineStyle(markerWidth = "1.25em"): string {
+  return `--live-list-indent: calc(var(--live-object-depth, 0) * 24px); --live-list-marker-width: ${markerWidth};`;
 }
 
 function objectLineAttributes(
@@ -1472,8 +1469,8 @@ function buildLivePreviewState(
             lineNumber,
             classes,
             isTask || toggleList || toggleOrderedList
-              ? `${toggleLineStyle(toggle.indent)} ${listLineStyle(0, toggleMarkerWidth)}`
-              : toggleLineStyle(toggle.indent),
+              ? `${toggleLineStyle()} ${listLineStyle(toggleMarkerWidth)}`
+              : toggleLineStyle(),
             depthByLine.get(lineNumber) ?? 0,
           ),
         }).range(line.from),
@@ -1668,7 +1665,7 @@ function buildLivePreviewState(
         attributes: objectLineAttributes(
           lineNumber,
           "cm-live-task-line cm-live-list-line",
-          listLineStyle(visualIndent(line.text.match(/^\s*/)?.[0] ?? ""), "1.45em"),
+          listLineStyle("1.45em"),
           depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
@@ -1687,7 +1684,7 @@ function buildLivePreviewState(
         attributes: objectLineAttributes(
           lineNumber,
           "cm-live-list-line",
-          listLineStyle(visualIndent(unorderedList[1])),
+          listLineStyle(),
           depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
@@ -1706,7 +1703,7 @@ function buildLivePreviewState(
         attributes: objectLineAttributes(
           lineNumber,
           "cm-live-list-line",
-          listLineStyle(visualIndent(orderedList[1]), "2em"),
+          listLineStyle("2em"),
           depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));

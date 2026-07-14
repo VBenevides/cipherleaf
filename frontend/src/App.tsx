@@ -3750,7 +3750,7 @@ function App() {
               ))}
             </div>
             <Suspense fallback={<EditorLoading />}>
-              <div className={`document-body view-${view}`}>
+              <div className="document-body">
                 {view === "live" && (
                   <div className="editor-view-pane active">
                     <LiveMarkdownEditor
