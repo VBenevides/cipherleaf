@@ -1,4 +1,5 @@
 export type AttachmentAlignment = "left" | "center" | "right";
+export type AttachmentKind = "image" | "file";
 
 export function isHorizontalRule(line: string): boolean {
   return line.trim() === "---";
@@ -28,6 +29,13 @@ export function parseAttachmentMarkdown(line: string) {
     width: Math.max(120, Math.min(2400, Number(match[3] ?? 640))),
     align: (match[4] ?? "left") as AttachmentAlignment,
   };
+}
+
+export function parseAttachmentReferenceMarkdown(line: string): { id: string; kind: AttachmentKind } | null {
+  const match = line.match(
+    /^\s*(!?)\[[^\]]*\]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$/,
+  );
+  return match ? { id: match[2], kind: match[1] ? "image" : "file" } : null;
 }
 
 export function attachmentMarkdown(

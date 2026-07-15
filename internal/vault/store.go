@@ -58,6 +58,7 @@ var (
 	canonicalOutline       = regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`)
 	canonicalBare          = regexp.MustCompile(`^([ \t]*)<([ \t]?)(.*)$`)
 	canonicalImage         = regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`)
+	canonicalAttachment    = regexp.MustCompile(`^(!?)\[[^\]]*]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$`)
 	canonicalBullet        = regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`)
 	canonicalOrdered       = regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`)
 	canonicalCheckbox      = regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`)
@@ -4024,18 +4025,22 @@ type canonicalObjectNode struct {
 	SourcePrefix    string   `json:"sourcePrefix,omitempty"`
 	Language        string   `json:"language,omitempty"`
 	Closed          *bool    `json:"closed,omitempty"`
+	AttachmentID    string   `json:"attachmentId,omitempty"`
+	AttachmentKind  string   `json:"attachmentKind,omitempty"`
 }
 
 type parsedCanonicalLine struct {
-	tag           string
-	tags          []string
-	indent        int
-	contentIndent int
-	text          string
-	checked       *bool
-	startsObject  bool
-	sourcePrefix  string
-	language      string
+	tag            string
+	tags           []string
+	indent         int
+	contentIndent  int
+	text           string
+	checked        *bool
+	startsObject   bool
+	sourcePrefix   string
+	language       string
+	attachmentID   string
+	attachmentKind string
 }
 
 func canonicalizeNoteContent(content string) string {
@@ -4131,7 +4136,8 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 		object := canonicalObjectNode{
 			ID: id, Tag: parsed.tag, Tags: slices.Clone(parsed.tags), Text: parsed.text, Checked: parsed.checked,
 			Indent: parsed.indent, ContentIndent: parsed.contentIndent, ChildrenIDs: []string{}, SourcePrefix: parsed.sourcePrefix,
-			Language: parsed.language,
+			Language:     parsed.language,
+			AttachmentID: parsed.attachmentID, AttachmentKind: parsed.attachmentKind,
 		}
 		if object.Tag == "code" {
 			closed := false
@@ -4172,7 +4178,7 @@ func stableCanonicalObjectID(input string) string {
 }
 
 func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
-	if fence := canonicalCodeFence.FindStringSubmatch(raw); fence != nil && fence[2] != "" {
+	if fence := canonicalCodeFence.FindStringSubmatch(raw); fence != nil {
 		indent := visualIndent(fence[1])
 		return parsedCanonicalLine{
 			tag: "code", tags: []string{"code"}, indent: indent, contentIndent: indent,
@@ -4209,9 +4215,20 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		}
 		return raw[:contentIndent]
 	}
-	if canonicalImage.MatchString(strings.TrimSpace(source)) || attachmentReference.MatchString(source) {
+	attachment := canonicalAttachment.FindStringSubmatch(source)
+	if canonicalImage.MatchString(strings.TrimSpace(source)) && (attachment == nil || attachment[1] == "!") {
 		text := strings.TrimSpace(source)
-		return parsedCanonicalLine{tag: "image", tags: append(tags, "image"), indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
+		attachmentID, attachmentKind := "", ""
+		tags = append(tags, "image")
+		if attachment != nil {
+			tags = append(tags, "attachment")
+			attachmentID, attachmentKind = attachment[2], "image"
+		}
+		return parsedCanonicalLine{tag: "image", tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text), attachmentID: attachmentID, attachmentKind: attachmentKind}
+	}
+	if attachment != nil {
+		text := strings.TrimSpace(source)
+		return parsedCanonicalLine{tag: "text", tags: append(tags, "attachment", "text"), indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text), attachmentID: attachment[2], attachmentKind: "file"}
 	}
 	if match := canonicalBullet.FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
@@ -4280,7 +4297,7 @@ func lineStartsExplicitCanonicalObject(raw string) bool {
 	return outline != nil ||
 		bare != nil ||
 		canonicalImage.MatchString(strings.TrimSpace(source)) ||
-		attachmentReference.MatchString(source) ||
+		canonicalAttachment.MatchString(source) ||
 		canonicalTask.MatchString(source) ||
 		canonicalBullet.MatchString(source) ||
 		canonicalOrdered.MatchString(source) ||

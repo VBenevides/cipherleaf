@@ -44,22 +44,20 @@ import {
 import {
   classifyObjectLine,
   continuationPrefix,
-  isSeparatorLine,
   lineIndent,
   lineStartsObject,
   moveObjectInMarkdown,
   objectContentIndent,
   objectDepthByLine,
-  objectHierarchyIndent,
   objectOwnerLineNumber as ownerLineNumberInLines,
   normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
   replaceExclusiveObjectPrefix,
   remapObjectKeysByLine,
   repeatedObjectPrefix,
-  visualIndent,
   type ObjectDropMode,
   type ObjectDocument,
+  type ObjectLine,
 } from "./objectDocument";
 import {
   rangeForActiveDocument,
@@ -1041,32 +1039,54 @@ function decorateUnorderedListMarker(
   );
 }
 
-function decorateTaskMarker(
-  text: string,
-  offset: number,
+function decorateObjectTask(
+  object: ObjectLine,
+  syntaxFrom: number,
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
 ): boolean {
-  const task = text.match(/^(?:[-+*]\s+)?\[([ xX])\]\s+/);
-  if (!task) return false;
-  const bracketOffset = text.indexOf("[");
+  if (object.checked === undefined) return false;
+  const bracketOffset = object.sourcePrefix.lastIndexOf("[");
+  if (bracketOffset < 0) return false;
   addHiddenRange(
-    offset,
-    offset + task[0].length,
+    syntaxFrom,
+    object.textFrom,
     decorations,
     atomicRanges,
     new TaskWidget(
-      task[1].toLowerCase() === "x",
-      offset + bracketOffset + 1,
+      object.checked,
+      object.from + bracketOffset + 1,
     ),
   );
   return true;
 }
 
+function decorateObjectListMarker(
+  object: ObjectLine,
+  syntaxFrom: number,
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+): "unordered" | "ordered" | null {
+  const marker = object.listMarker;
+  if (!marker) return null;
+  if (marker === "-" || marker === "*") {
+    decorateUnorderedListMarker(syntaxFrom, marker, decorations, atomicRanges, object.textFrom);
+    return "unordered";
+  }
+  addHiddenRange(
+    syntaxFrom,
+    object.textFrom,
+    decorations,
+    atomicRanges,
+    new TextWidget(marker, "cm-live-list-marker"),
+  );
+  return "ordered";
+}
+
 type ToggleLine = {
-  indent: number;
   prefixSize: number;
   content: string;
+  object: ObjectLine;
 };
 
 function parentObjectPrefixForContinuation(state: EditorState, lineNumber: number): string | null {
@@ -1118,22 +1138,17 @@ function continuationMarkerWidth(document: ObjectDocument, ownerLineNumber: numb
   return widths.length > 0 ? `calc(${widths.join(" + ")})` : null;
 }
 
-function isSectionSeparatorLine(lines: readonly string[], lineNumber: number): boolean {
-  return isSeparatorLine(lines, lineNumber);
-}
-
 function objectOwnerLineNumber(lines: readonly string[], lineNumber: number): number {
   return ownerLineNumberInLines(lines, lineNumber);
 }
 
-function toggleLine(text: string): ToggleLine | null {
-  const match = text.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  if (!match) return null;
-
+function toggleLine(document: ObjectDocument, lineNumber: number, text: string): ToggleLine | null {
+  const object = document.byLine.get(lineNumber);
+  if (!object || object.lineNumber !== lineNumber || !object.tags.includes("section")) return null;
   return {
-    indent: visualIndent(match[1]) + (match[2].length - 1) * 2,
-    prefixSize: match[1].length + match[2].length + match[3].length,
-    content: match[4],
+    prefixSize: object.sectionPrefixSize,
+    content: text.slice(object.sectionPrefixSize),
+    object,
   };
 }
 
@@ -1159,75 +1174,22 @@ function objectLineAttributes(
   };
 }
 
-function toggleSectionEnd(
-  state: EditorState,
-  lines: readonly string[],
-  objectDocument: ObjectDocument,
-  startLineNumber: number,
-  startIndent: number,
-): number {
-  let endLineNumber = startLineNumber;
-
-  for (
-    let lineNumber = startLineNumber + 1;
-    lineNumber <= state.doc.lines;
-    lineNumber++
-  ) {
-    const line = state.doc.line(lineNumber);
-    const text = line.text;
-    const owner = objectDocument.byLine.get(lineNumber);
-
-    if (owner?.tag === "code") {
-      if (lineNumber === owner.lineNumber && owner.indent <= startIndent) break;
-      endLineNumber = owner.lineEnd;
-      lineNumber = owner.lineEnd;
-      continue;
-    }
-
-    if (isSectionSeparatorLine(lines, lineNumber)) break;
-
-    if (
-      text.trim() !== "" &&
-      lineStartsObject(text) &&
-      objectHierarchyIndent(text) <= startIndent
-    ) break;
-
-    endLineNumber = lineNumber;
-  }
-
-  return endLineNumber;
+function objectTreeEnd(object: ObjectLine): number {
+  return object.children.reduce(
+    (end, child) => Math.max(end, objectTreeEnd(child)),
+    object.lineEnd,
+  );
 }
 
-function toggleChildObjectLineNumbers(
-  state: EditorState,
-  lines: readonly string[],
-  startLineNumber: number,
-  startIndent: number,
-): number[] {
-  const children: number[] = [];
-
-  for (
-    let lineNumber = startLineNumber + 1;
-    lineNumber <= state.doc.lines;
-    lineNumber++
-  ) {
-    const line = state.doc.line(lineNumber);
-    if (isSectionSeparatorLine(lines, lineNumber)) break;
-    if (!lineStartsObject(line.text)) continue;
-    if (objectHierarchyIndent(line.text) <= startIndent) break;
-    children.push(lineNumber);
-  }
-
-  return children;
+function toggleSectionEnd(document: ObjectDocument, lineNumber: number): number {
+  const object = document.byLine.get(lineNumber);
+  return object?.lineNumber === lineNumber && object.tags.includes("section")
+    ? objectTreeEnd(object)
+    : lineNumber;
 }
 
-function toggleHasChildren(
-  state: EditorState,
-  lines: readonly string[],
-  lineNumber: number,
-  toggle: ToggleLine,
-): boolean {
-  return toggleChildObjectLineNumbers(state, lines, lineNumber, toggle.indent).length > 0;
+function toggleHasChildren(toggle: ToggleLine): boolean {
+  return toggle.object.children.length > 0;
 }
 
 function headingLevel(text: string): number | null {
@@ -1266,16 +1228,16 @@ function headingHasChildren(
 
 function collapsibleQuotePositions(
   state: EditorState,
-  lines: readonly string[] = state.doc.toString().split("\n"),
+  objectDocument = parseObjectDocument(state.doc.toString()),
 ): number[] {
   const positions: number[] = [];
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
     const line = state.doc.line(lineNumber);
-    const toggle = toggleLine(line.text);
+    const toggle = toggleLine(objectDocument, lineNumber, line.text);
     const level = headingLevel(line.text);
 
-    if (toggle && toggleHasChildren(state, lines, lineNumber, toggle)) {
+    if (toggle && toggleHasChildren(toggle)) {
       positions.push(line.from);
       continue;
     }
@@ -1290,13 +1252,12 @@ function collapsibleQuotePositions(
 
 function expandToggleTree(
   state: EditorState,
-  lines: readonly string[],
   objectDocument: ObjectDocument,
   position: number,
   collapsed: Set<string>,
 ) {
   const line = state.doc.lineAt(position);
-  const toggle = toggleLine(line.text);
+  const toggle = toggleLine(objectDocument, line.number, line.text);
   const level = headingLevel(line.text);
 
   if (line.from !== position) {
@@ -1305,7 +1266,7 @@ function expandToggleTree(
   }
 
   const endLineNumber = toggle
-    ? toggleSectionEnd(state, lines, objectDocument, line.number, toggle.indent)
+    ? toggleSectionEnd(objectDocument, line.number)
     : level !== null
       ? headingSectionEnd(state, line.number, level)
       : line.number;
@@ -1349,7 +1310,8 @@ function buildLivePreviewState(
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     const line = state.doc.line(lineNumber);
-    const toggle = toggleLine(line.text);
+    const lineObject = objectDocument.byLine.get(lineNumber);
+    const toggle = toggleLine(objectDocument, lineNumber, line.text);
     const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
 
     if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationOwner) {
@@ -1450,48 +1412,22 @@ function buildLivePreviewState(
 
     if (toggle) {
       const toggleAttachment = parseAttachmentMarkdown(toggle.content);
-      const sectionEndLineNumber = toggleSectionEnd(
-        state,
-        lines,
-        objectDocument,
-        lineNumber,
-        toggle.indent,
-      );
+      const sectionEndLineNumber = toggleSectionEnd(objectDocument, lineNumber);
 
       const hasChildren = sectionEndLineNumber > lineNumber;
       const collapseKey = collapseKeyForPosition(state, line.from, objectDocument);
       const collapsed = hasChildren && nextCollapsed.has(collapseKey);
       const contentOffset = line.from + toggle.prefixSize;
 
-      const isTask = !toggleAttachment && decorateTaskMarker(
-        toggle.content,
+      const isTask = !toggleAttachment && decorateObjectTask(
+        toggle.object,
         contentOffset,
         decorations,
         atomicRanges,
       );
-
-      const toggleList = !toggleAttachment && !isTask &&
-        toggle.content.match(/^([-*])\s+/);
-      if (toggleList) {
-        decorateUnorderedListMarker(
-          contentOffset,
-          toggleList[1] as "-" | "*",
-          decorations,
-          atomicRanges,
-          contentOffset + toggleList[0].length,
-        );
-      }
-      const toggleOrderedList = !toggleAttachment && !isTask && !toggleList &&
-        toggle.content.match(/^(\d+[.)])\s+/);
-      if (toggleOrderedList) {
-        addHiddenRange(
-          contentOffset,
-          contentOffset + toggleOrderedList[0].length,
-          decorations,
-          atomicRanges,
-          new TextWidget(toggleOrderedList[1], "cm-live-list-marker"),
-        );
-      }
+      const listKind = !toggleAttachment && !isTask
+        ? decorateObjectListMarker(toggle.object, contentOffset, decorations, atomicRanges)
+        : null;
 
       const classes = [
         "cm-live-toggle-line",
@@ -1499,16 +1435,16 @@ function buildLivePreviewState(
         collapsed ? "cm-live-toggle-collapsed" : "",
         toggleAttachment ? "cm-live-attachment-line" : "",
         isTask ? "cm-live-task-line" : "",
-        isTask || toggleList || toggleOrderedList ? "cm-live-list-line" : "",
+        isTask || listKind ? "cm-live-list-line" : "",
       ].filter(Boolean).join(" ");
 
-      const toggleMarkerWidth = isTask ? "1.45em" : toggleOrderedList ? "2em" : "1.25em";
+      const toggleMarkerWidth = isTask ? "1.45em" : listKind === "ordered" ? "2em" : "1.25em";
       decorations.push(
         Decoration.line({
           attributes: objectLineAttributes(
             lineNumber,
             classes,
-            isTask || toggleList || toggleOrderedList
+            isTask || listKind
               ? `${toggleLineStyle()} ${listLineStyle(toggleMarkerWidth)}`
               : toggleLineStyle(),
             depthByLine.get(lineNumber) ?? 0,
@@ -1691,22 +1627,17 @@ function buildLivePreviewState(
       continue;
     }
 
-    const bare = line.text.match(/^(\s*)<([ \t]?)/);
-    const barePrefixSize = bare?.[0].length ?? 0;
-    if (bare) {
+    const object = lineObject?.lineNumber === lineNumber ? lineObject : null;
+    const barePrefixSize = object?.barePrefixSize ?? 0;
+    if (barePrefixSize > 0 && object?.checked === undefined && !object?.listMarker) {
       addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
     }
 
-    const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
-    const task = decorateTaskMarker(
-      line.text.slice(indentation),
-      line.from + indentation,
-      decorations,
-      atomicRanges,
-    );
+    const task = object
+      ? decorateObjectTask(object, line.from, decorations, atomicRanges)
+      : false;
 
     if (task) {
-      if (indentation > 0) addHiddenRange(line.from, line.from + indentation, decorations, atomicRanges);
       decorations.push(Decoration.line({
         attributes: objectLineAttributes(
           lineNumber,
@@ -1717,15 +1648,10 @@ function buildLivePreviewState(
       }).range(line.from));
     }
 
-    const unorderedList = !task && line.text.match(/^(\s*)([-*])\s+/);
-    if (unorderedList) {
-      decorateUnorderedListMarker(
-        line.from,
-        unorderedList[2] as "-" | "*",
-        decorations,
-        atomicRanges,
-        line.from + unorderedList[0].length,
-      );
+    const listKind = object && !task
+      ? decorateObjectListMarker(object, line.from, decorations, atomicRanges)
+      : null;
+    if (listKind === "unordered") {
       decorations.push(Decoration.line({
         attributes: objectLineAttributes(
           lineNumber,
@@ -1736,15 +1662,7 @@ function buildLivePreviewState(
       }).range(line.from));
     }
 
-    const orderedList = !task && !unorderedList && line.text.match(/^(\s*)(\d+[.)])\s+/);
-    if (orderedList) {
-      addHiddenRange(
-        line.from,
-        line.from + orderedList[0].length,
-        decorations,
-        atomicRanges,
-        new TextWidget(orderedList[2], "cm-live-list-marker"),
-      );
+    if (listKind === "ordered") {
       decorations.push(Decoration.line({
         attributes: objectLineAttributes(
           lineNumber,
@@ -1755,7 +1673,7 @@ function buildLivePreviewState(
       }).range(line.from));
     }
 
-    if (!task && !unorderedList && !orderedList) {
+    if (!task && !listKind) {
       decorations.push(
         Decoration.line({
           attributes: lineAttributes(lineNumber),
@@ -1800,7 +1718,7 @@ function livePreviewExtension(
         objectDocument: parseObjectDocument(docText),
       };
       const collapsed = savedCollapsedPositions(state, noteID) ?? (defaultSectionsCollapsed
-        ? new Set(collapsibleQuotePositions(state, context.lines).map((position) => collapseKeyForPosition(state, position, context.objectDocument)))
+        ? new Set(collapsibleQuotePositions(state, context.objectDocument).map((position) => collapseKeyForPosition(state, position, context.objectDocument)))
         : new Set<string>());
       return buildLivePreviewState(
         state,
@@ -1848,24 +1766,23 @@ function livePreviewExtension(
       }
       for (const effect of transaction.effects) {
         if (effect.is(setAllQuotesCollapsed)) {
-          const { lines, objectDocument } = collapseContext();
+          const { objectDocument } = collapseContext();
           collapseChanged = true;
           collapsed.clear();
           if (effect.value) {
-            for (const position of collapsibleQuotePositions(transaction.state, lines)) {
+            for (const position of collapsibleQuotePositions(transaction.state, objectDocument)) {
               collapsed.add(collapseKeyForPosition(transaction.state, position, objectDocument));
             }
           }
           continue;
         }
         if (effect.is(setQuoteCollapsed)) {
-          const { lines, objectDocument } = collapseContext();
+          const { objectDocument } = collapseContext();
           collapseChanged = true;
           const key = collapseKeyForPosition(transaction.state, effect.value.position, objectDocument);
           if (effect.value.collapsed) collapsed.add(key);
           else expandToggleTree(
             transaction.state,
-            lines,
             objectDocument,
             effect.value.position,
             collapsed,
@@ -1873,11 +1790,11 @@ function livePreviewExtension(
           continue;
         }
         if (!effect.is(toggleQuote)) continue;
-        const { lines, objectDocument } = collapseContext();
+        const { objectDocument } = collapseContext();
         collapseChanged = true;
         const key = collapseKeyForPosition(transaction.state, effect.value, objectDocument);
         if (collapsed.has(key)) {
-          expandToggleTree(transaction.state, lines, objectDocument, effect.value, collapsed);
+          expandToggleTree(transaction.state, objectDocument, effect.value, collapsed);
         }
         else collapsed.add(key);
       }
@@ -2173,29 +2090,21 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   if (!range.empty) return false;
 
   const line = view.state.doc.lineAt(range.head);
-  const object = classifyObjectLine(line.text);
-  const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
-  const section = line.text.match(/^([ \t]*>+[ \t]?)/);
-  const bare = line.text.match(/^([ \t]*)<([ \t]?)/);
-  const list = line.text.match(/^([ \t]*)(?:(\d+)([.)])|([-+*]))[ \t]+/);
+  const indentation = line.text.slice(0, line.text.length - line.text.trimStart().length);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
-  const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
+  const document = parseObjectDocument(view.state.doc.toString());
+  const owner = document.byLine.get(line.number);
+  const object = owner?.lineNumber === line.number ? owner : null;
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
-  if (!isCodeContent && !lineStartsObject(line.text) && continuationObjectPrefix === null) return false;
+  if (!isCodeContent && !object && continuationObjectPrefix === null) return false;
 
   const inserted = isCodeContent
     ? `\n${indentation}`
     : continuationObjectPrefix
     ? `\n${continuationObjectPrefix}`
-    : object.tag === "code"
+    : object?.tag === "code"
     ? "\n"
-    : object.tag === "section"
-    ? `\n${section?.[1] ?? `${indentation}> `}`
-    : bare
-    ? `\n${bare[1]}< `
-    : object.tag === "bulletpoint" && list
-    ? `\n${indentation}${list[2] ? `${Number(list[2]) + 1}${list[3]}` : list[4]} `
-    : `\n${indentation}`;
+    : `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
 
   view.dispatch({
     changes: {
@@ -2265,44 +2174,39 @@ function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
 }
 
 function currentToggleSectionPosition(state: EditorState): number | null {
-  const lines = state.doc.toString().split("\n");
   const objectDocument = parseObjectDocument(state.doc.toString());
   const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
   const currentLine = state.doc.line(currentLineNumber);
-  const currentToggle = toggleLine(currentLine.text);
   const currentHeadingLevel = headingLevel(currentLine.text);
 
-  if (
-    currentToggle &&
-    toggleHasChildren(state, lines, currentLineNumber, currentToggle)
-  ) {
-    return currentLine.from;
+  let object = objectDocument.byLine.get(currentLineNumber);
+  let sectionLineNumber = 0;
+  while (object) {
+    if (object.tags.includes("section") && object.children.length > 0) {
+      sectionLineNumber = object.lineNumber;
+      break;
+    }
+    object = object.parentId ? objectDocument.byId.get(object.parentId) : undefined;
   }
 
-  if (
-    currentHeadingLevel !== null &&
-    headingHasChildren(state, currentLineNumber, currentHeadingLevel)
-  ) {
-    return currentLine.from;
+  let headingLineNumber = 0;
+  if (currentHeadingLevel !== null && headingHasChildren(state, currentLineNumber, currentHeadingLevel)) {
+    headingLineNumber = currentLineNumber;
   }
 
-  for (let lineNumber = currentLineNumber - 1; lineNumber >= 1; lineNumber--) {
+  for (let lineNumber = currentLineNumber - 1; headingLineNumber === 0 && lineNumber >= 1; lineNumber--) {
     const line = state.doc.line(lineNumber);
-    const toggle = toggleLine(line.text);
     const level = headingLevel(line.text);
-
-    if (!toggle && level === null) continue;
-
-    const endLineNumber = toggle
-      ? toggleSectionEnd(state, lines, objectDocument, lineNumber, toggle.indent)
-      : headingSectionEnd(state, lineNumber, level!);
+    if (level === null) continue;
+    const endLineNumber = headingSectionEnd(state, lineNumber, level);
 
     if (endLineNumber >= currentLineNumber && endLineNumber > lineNumber) {
-      return line.from;
+      headingLineNumber = lineNumber;
     }
   }
 
-  return null;
+  const lineNumber = Math.max(sectionLineNumber, headingLineNumber);
+  return lineNumber > 0 ? state.doc.line(lineNumber).from : null;
 }
 
 function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {

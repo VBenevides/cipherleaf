@@ -14,6 +14,7 @@ import {
   parseObjectDocument,
   prepareNoteContent,
   remapObjectKeysByLine,
+  removeAttachmentReferences,
 } from "../src/objectDocument.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -63,6 +64,30 @@ test("recognizes image objects", () => {
   const tree = markdownObjectTree(`![Diagram](attachment:${"a".repeat(32)}#width=640)`);
 
   assert.equal(tree[0].tag, "image");
+});
+
+test("represents and removes image and file attachment objects", () => {
+  const imageID = "a".repeat(32);
+  const fileID = "b".repeat(32);
+  const markdown = [
+    `![Diagram](attachment:${imageID}#width=640)`,
+    "keep",
+    `[report.pdf](attachment:${fileID})`,
+  ].join("\n");
+  const document = parseObjectDocument(markdown);
+
+  assert.deepEqual(
+    document.objects.map(({ attachmentId, attachmentKind }) => ({ attachmentId, attachmentKind })),
+    [
+      { attachmentId: imageID, attachmentKind: "image" },
+      { attachmentId: undefined, attachmentKind: undefined },
+      { attachmentId: fileID, attachmentKind: "file" },
+    ],
+  );
+  assert.equal(removeAttachmentReferences(markdown, fileID), [
+    `![Diagram](attachment:${imageID}#width=640)`,
+    "keep",
+  ].join("\n"));
 });
 
 test("keeps fenced code as one typed object", () => {

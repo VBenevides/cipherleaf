@@ -1,6 +1,6 @@
-import { parseAttachmentMarkdown } from "./markdown.ts";
+import { parseAttachmentMarkdown, parseAttachmentReferenceMarkdown, type AttachmentKind } from "./markdown.ts";
 
-export type ObjectTag = "section" | "bulletpoint" | "checkbox" | "text" | "image" | "code";
+export type ObjectTag = "section" | "bulletpoint" | "checkbox" | "text" | "image" | "code" | "attachment";
 export type ObjectDropMode = "before" | "child" | "after";
 
 export type ParsedObjectLine = {
@@ -13,6 +13,11 @@ export type ParsedObjectLine = {
   language?: string;
   startsObject: boolean;
   sourcePrefix: string;
+  sectionPrefixSize: number;
+  barePrefixSize: number;
+  listMarker?: string;
+  attachmentId?: string;
+  attachmentKind?: AttachmentKind;
 };
 
 export type ObjectLine = {
@@ -34,6 +39,11 @@ export type ObjectLine = {
   parentSectionId: string | null;
   childrenIds: string[];
   sourcePrefix: string;
+  sectionPrefixSize: number;
+  barePrefixSize: number;
+  listMarker?: string;
+  attachmentId?: string;
+  attachmentKind?: AttachmentKind;
   text: string;
   checked?: boolean;
   language?: string;
@@ -62,6 +72,8 @@ export type CanonicalObjectNode = {
   parentSectionId: string | null;
   childrenIds: string[];
   sourcePrefix?: string;
+  attachmentId?: string;
+  attachmentKind?: AttachmentKind;
 };
 
 export type CanonicalObjectDocument = {
@@ -197,6 +209,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       language: fence[2] || undefined,
       startsObject: true,
       sourcePrefix: `${fence[1]}` + "```" + fence[2],
+      sectionPrefixSize: 0,
+      barePrefixSize: 0,
     };
   }
 
@@ -215,11 +229,32 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     const index = raw.indexOf(text);
     return index >= 0 ? raw.slice(0, index) : raw.slice(0, Math.min(raw.length, contentIndent));
   };
+  const sectionPrefixSize = outline
+    ? outline[1].length + outline[2].length + outline[3].length
+    : 0;
+  const barePrefixSize = bare ? bare[1].length + 1 + bare[2].length : 0;
+  const objectPrefix = { sectionPrefixSize, barePrefixSize };
 
-  if (parseAttachmentMarkdown(source) || /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim())) {
+  const attachment = parseAttachmentReferenceMarkdown(source);
+  if (parseAttachmentMarkdown(source) || attachment?.kind === "image" || /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim())) {
     tags.push("image");
+    if (attachment) tags.push("attachment");
     const text = source.trim();
-    return { tag: "image", tags, indent, contentIndent, text, startsObject: true, sourcePrefix: sourcePrefix(text) };
+    return {
+      tag: "image", tags, indent, contentIndent, text, startsObject: true,
+      sourcePrefix: sourcePrefix(text), attachmentId: attachment?.id,
+      attachmentKind: attachment?.kind, ...objectPrefix,
+    };
+  }
+
+  if (attachment) {
+    tags.push("attachment", "text");
+    const text = source.trim();
+    return {
+      tag: "text", tags, indent, contentIndent, text, startsObject: true,
+      sourcePrefix: sourcePrefix(text), attachmentId: attachment.id,
+      attachmentKind: attachment.kind, ...objectPrefix,
+    };
   }
 
   const bullet = source.match(/^([-*])(?:\s+(.*)|\s*)$/);
@@ -236,6 +271,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       checked: checked ? checked[1].toLowerCase() === "x" : undefined,
       startsObject: true,
       sourcePrefix: sourcePrefix(text),
+      listMarker: bullet[1],
+      ...objectPrefix,
     };
   }
 
@@ -253,6 +290,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       checked: checked ? checked[1].toLowerCase() === "x" : undefined,
       startsObject: true,
       sourcePrefix: sourcePrefix(text),
+      listMarker: ordered[1],
+      ...objectPrefix,
     };
   }
 
@@ -266,6 +305,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       text: source.trim(),
       startsObject: true,
       sourcePrefix: sourcePrefix(source.trim()),
+      ...objectPrefix,
     };
   }
 
@@ -283,6 +323,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     checked: checkbox ? checkbox[1].toLowerCase() === "x" : undefined,
     startsObject: true,
     sourcePrefix: sourcePrefix(text),
+    ...objectPrefix,
   };
 }
 
@@ -296,9 +337,10 @@ function lineStartsExplicitObject(raw: string): boolean {
   const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
 
   return Boolean(
-    outline ||
+      outline ||
       bare ||
       parseAttachmentMarkdown(source) ||
+      parseAttachmentReferenceMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
       /^\[([ xX])\]\s*(.*)$/.test(source) ||
       /^[-*](?:\s+.*|\s*)$/.test(source) ||
@@ -643,6 +685,11 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
       parentSectionId: parentSection?.uuid ?? null,
       childrenIds: [],
       sourcePrefix: classified.sourcePrefix,
+      sectionPrefixSize: classified.sectionPrefixSize,
+      barePrefixSize: classified.barePrefixSize,
+      listMarker: classified.listMarker,
+      attachmentId: classified.attachmentId,
+      attachmentKind: classified.attachmentKind,
       text: classified.text,
       checked: classified.checked,
       language: classified.language,
@@ -693,6 +740,21 @@ export function remapObjectKeysByLine(
 
 export function markdownObjectTree(markdown: string): ObjectLine[] {
   return parseObjectDocument(markdown).roots;
+}
+
+export function removeAttachmentReferences(markdown: string, attachmentId: string): string {
+  const references = parseObjectDocument(markdown).objects
+    .filter((object) => object.attachmentId === attachmentId)
+    .map((object) => ({
+      from: markdown[object.to] !== "\n" && markdown[object.from - 1] === "\n" ? object.from - 1 : object.from,
+      to: markdown[object.to] === "\n" ? object.to + 1 : object.to,
+    }))
+    .sort((left, right) => right.from - left.from);
+
+  return references.reduce(
+    (content, range) => content.slice(0, range.from) + content.slice(range.to),
+    markdown,
+  );
 }
 
 export function portableMarkdown(markdown: string): string {
@@ -786,6 +848,8 @@ export function canonicalObjectDocumentFromMarkdown(markdown: string): Canonical
       parentSectionId: object.parentSectionId,
       childrenIds: [...object.childrenIds],
       sourcePrefix: object.sourcePrefix,
+      attachmentId: object.attachmentId,
+      attachmentKind: object.attachmentKind,
     })),
   };
 }
@@ -799,7 +863,7 @@ export function canonicalObjectDocumentTextFromMarkdown(markdown: string): strin
 }
 
 function isObjectTag(value: unknown): value is ObjectTag {
-  return value === "section" || value === "bulletpoint" || value === "checkbox" || value === "text" || value === "image" || value === "code";
+  return value === "section" || value === "bulletpoint" || value === "checkbox" || value === "text" || value === "image" || value === "code" || value === "attachment";
 }
 
 function validCanonicalObjectDocument(value: unknown): value is CanonicalObjectDocument {
@@ -821,6 +885,8 @@ function validCanonicalObjectDocument(value: unknown): value is CanonicalObjectD
     Array.isArray(object.childrenIds) &&
     object.childrenIds.every((id) => typeof id === "string") &&
     (object.sourcePrefix === undefined || typeof object.sourcePrefix === "string") &&
+    (object.attachmentId === undefined || typeof object.attachmentId === "string") &&
+    (object.attachmentKind === undefined || object.attachmentKind === "image" || object.attachmentKind === "file") &&
     (object.checked === undefined || typeof object.checked === "boolean")
     && (object.language === undefined || typeof object.language === "string")
     && (object.closed === undefined || typeof object.closed === "boolean")
@@ -866,6 +932,10 @@ export function objectDocumentFromCanonicalObjectDocument(document: CanonicalObj
       parentSectionId: node.parentSectionId,
       childrenIds: [...node.childrenIds],
       sourcePrefix: node.sourcePrefix ?? "",
+      sectionPrefixSize: 0,
+      barePrefixSize: 0,
+      attachmentId: node.attachmentId,
+      attachmentKind: node.attachmentKind,
       text: node.text,
       checked: node.checked,
       language: node.language,

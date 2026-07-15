@@ -36,6 +36,7 @@ import {
   parseCanonicalObjectDocumentText,
   portableMarkdown,
   prepareNoteContent,
+  removeAttachmentReferences,
 } from "./objectDocument";
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
@@ -2292,8 +2293,7 @@ function App() {
     const current = noteRef.current;
     if (!current) return;
     const markdown = markdownForEditing(current.content);
-    const escapedID = attachment.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    editNote({ content: markdown.replace(new RegExp(`!?\\[[^\\]]*\\]\\(attachment:${escapedID}[^)]*\\)\\n?`, "g"), "") });
+    editNote({ content: removeAttachmentReferences(markdown, attachment.id) });
     await persistCurrent();
     setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
   };

@@ -10,5 +10,22 @@
       { "tag": "bulletpoint", "text": "Ordered", "indent": 2, "contentIndent": 5, "sourcePrefix": "  1. " },
       { "tag": "code", "text": "fmt.Println(\"ok\")", "indent": 2, "contentIndent": 2, "sourcePrefix": "  ```go", "language": "go", "closed": true }
     ]
+  },
+  {
+    "name": "language-less fenced code keeps following children",
+    "markdown": "> Section\n  ```\nunindented code\n  ```\n  > After",
+    "objects": [
+      { "tag": "section", "text": "Section", "indent": 0, "contentIndent": 2, "sourcePrefix": "> " },
+      { "tag": "code", "text": "unindented code", "indent": 2, "contentIndent": 2, "sourcePrefix": "  ```", "closed": true },
+      { "tag": "section", "text": "After", "indent": 2, "contentIndent": 4, "sourcePrefix": "  > " }
+    ]
+  },
+  {
+    "name": "image and file attachment references",
+    "markdown": "![Image](attachment:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#width=640)\n[report.pdf](attachment:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",
+    "objects": [
+      { "tag": "image", "tags": ["image", "attachment"], "text": "![Image](attachment:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#width=640)", "attachmentId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "attachmentKind": "image" },
+      { "tag": "text", "tags": ["attachment", "text"], "text": "[report.pdf](attachment:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)", "attachmentId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "attachmentKind": "file" }
+    ]
   }
 ]
