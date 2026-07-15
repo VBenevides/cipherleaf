@@ -20,6 +20,7 @@ type Props = {
   value: string;
   onChange: (value: string) => void;
   onError: (reason: unknown) => void;
+  readOnly?: boolean;
 };
 
 const externalDocumentUpdate = Annotation.define<boolean>();
@@ -40,6 +41,7 @@ export default function SourceMarkdownEditor({
   value,
   onChange,
   onError,
+  readOnly = false,
 }: Props) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -59,6 +61,7 @@ export default function SourceMarkdownEditor({
         doc: value,
         extensions: [
           minimalSetup,
+          EditorState.readOnly.of(readOnly),
           history({ newGroupDelay: 250 }),
           markdown({ codeLanguages: languages }),
           search({ top: false }),
@@ -87,11 +90,13 @@ export default function SourceMarkdownEditor({
           ]),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({
-            "aria-label": "Source Markdown editor",
+            "aria-label": readOnly ? "Portable Markdown" : "Raw Markdown editor",
+            "aria-readonly": readOnly ? "true" : "false",
             spellcheck: "true",
           }),
           EditorView.domEventHandlers({
             paste(event, pastedView) {
+              if (readOnly) return false;
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) return false;
               event.preventDefault();

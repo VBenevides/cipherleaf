@@ -2515,6 +2515,37 @@ a:focus-visible {
   display: flex;
 }
 
+.editor-view-pane.active.markdown-split-view {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.markdown-split-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+
+.markdown-split-pane > header {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.markdown-split-pane.portable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .object-tree-view {
   min-width: 0;
   min-height: 0;
@@ -3450,6 +3481,12 @@ a:focus-visible {
 }
 
 @media (max-width: 780px) {
+  .markdown-split-view {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(300px, 1fr));
+    overflow: auto;
+  }
+
   .welcome-screen {
     display: block;
     min-height: 100%;

@@ -11,6 +11,7 @@ export {
   objectDocumentFromCanonicalObjectDocument,
   parseCanonicalObjectDocument,
   parseObjectDocument,
+  portableMarkdown,
   prepareNoteContent,
   remapObjectKeysByLine,
   stringifyCanonicalObjectDocument,

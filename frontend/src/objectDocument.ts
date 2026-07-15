@@ -695,6 +695,35 @@ export function markdownObjectTree(markdown: string): ObjectLine[] {
   return parseObjectDocument(markdown).roots;
 }
 
+export function portableMarkdown(markdown: string): string {
+  const document = parseObjectDocument(markdown);
+
+  return document.objects.map((object) => {
+    const indent = " ".repeat(Math.max(0, object.indent));
+    if (object.tag === "code") {
+      return ["```" + (object.language ?? "text"), object.text, object.closed === false ? "" : "```"]
+        .filter((line, index) => line !== "" || index === 1)
+        .map((line) => line ? `${indent}${line}` : "")
+        .join("\n");
+    }
+    if (object.tag === "section") {
+      const level = Math.min(6, Math.floor(object.indent / 2) + 1);
+      return `${"#".repeat(level)} ${object.text}`.trimEnd();
+    }
+    if (object.tag === "bulletpoint") {
+      const ordered = object.sourcePrefix.trimStart().match(/^\d+[.)]/)?.[0];
+      const marker = ordered ?? "-";
+      const checked = object.checked === undefined ? "" : `[${object.checked ? "x" : " "}] `;
+      const lines = object.text.split("\n");
+      return [
+        `${indent}${marker} ${checked}${lines[0] ?? ""}`.trimEnd(),
+        ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
+      ].join("\n");
+    }
+    return object.text.split("\n").map((line) => line ? `${indent}${line}` : "").join("\n");
+  }).join("\n");
+}
+
 export function objectDepth(object: Pick<ObjectLine, "parentId">, byId: ReadonlyMap<string, Pick<ObjectLine, "parentId">>): number {
   let depth = 0;
   let parentId = object.parentId;

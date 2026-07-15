@@ -8,6 +8,7 @@ import {
   moveObject,
   moveObjectInMarkdown,
   objectDepthByLine,
+  portableMarkdown,
   parseCanonicalObjectDocument,
   parseObjectDocument,
   prepareNoteContent,
@@ -172,6 +173,38 @@ test("keeps marked bare text as an independent object", () => {
   assert.equal(tree[0].children[0].tag, "text");
   assert.equal(tree[0].children[0].text, "Bare child");
   assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), markdown);
+});
+
+test("exports Cipherleaf objects as portable markdown", () => {
+  assert.equal(portableMarkdown([
+    "> Section",
+    "  < Bare text",
+    "  * Item",
+    "    - Nested item",
+    "  > Child section",
+  ].join("\n")), [
+    "# Section",
+    "  Bare text",
+    "  - Item",
+    "    - Nested item",
+    "## Child section",
+  ].join("\n"));
+});
+
+test("preserves bare text depth in portable markdown", () => {
+  assert.equal(portableMarkdown([
+    "> Section",
+    "  < First level",
+    "    < Second level",
+    "      < Third level",
+    "  < First level again",
+  ].join("\n")), [
+    "# Section",
+    "  First level",
+    "    Second level",
+    "      Third level",
+    "  First level again",
+  ].join("\n"));
 });
 
 test("assigns sibling sections to the nested section parent", () => {

@@ -33,6 +33,7 @@ import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import {
   canonicalObjectDocumentTextFromMarkdown,
+  portableMarkdown,
   prepareNoteContent,
 } from "./objectDocument";
 import { targetForMatch, type SearchTarget } from "./searchTarget";
@@ -3810,14 +3811,28 @@ function App() {
                   </div>
                 )}
                 {view === "markdown" && (
-                  <div className="editor-view-pane active">
-                    <SourceMarkdownEditor
-                      key={note.id}
-                      noteID={note.id}
-                      value={noteMarkdown}
-                      onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
-                      onError={(reason) => setError(errorText(reason))}
-                    />
+                  <div className="editor-view-pane active markdown-split-view">
+                    <section className="markdown-split-pane">
+                      <header>Raw Markdown</header>
+                      <SourceMarkdownEditor
+                        key={`${note.id}:raw`}
+                        noteID={note.id}
+                        value={noteMarkdown}
+                        onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
+                        onError={(reason) => setError(errorText(reason))}
+                      />
+                    </section>
+                    <section className="markdown-split-pane portable">
+                      <header>Portable Markdown · Read only</header>
+                      <SourceMarkdownEditor
+                        key={`${note.id}:portable`}
+                        noteID={note.id}
+                        value={portableMarkdown(noteMarkdown)}
+                        readOnly
+                        onChange={() => {}}
+                        onError={(reason) => setError(errorText(reason))}
+                      />
+                    </section>
                   </div>
                 )}
               </div>
