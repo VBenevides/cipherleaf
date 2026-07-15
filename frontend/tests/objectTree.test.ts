@@ -129,6 +129,15 @@ test("round trips code language and content through canonical objects", () => {
   assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
 });
 
+test("round trips fenced code without a language through canonical objects", () => {
+  const markdown = ["  ```", "plain code", "  ```"].join("\n");
+  const canonical = canonicalObjectDocumentFromMarkdown(markdown);
+
+  assert.equal(canonical.objects[0].tag, "code");
+  assert.equal(canonical.objects[0].language, undefined);
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+});
+
 test("does not add a closing fence while an indented code block is being typed", () => {
   const markdown = [
     "> arsars",

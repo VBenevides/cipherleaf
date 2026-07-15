@@ -167,3 +167,55 @@ test("rollf uses the next dated root section", () => {
     ].join("\n"),
   );
 });
+
+test("roll preserves a fenced code child and every child after it", () => {
+  assert.equal(
+    rollLastDatedSection(
+      [
+        "> 2026-07-07",
+        "  > before",
+        "  ```typescript",
+        "const nested = {",
+        "  kept: true,",
+        "};",
+        "  ```",
+        "  > after",
+        "    > [ ] nested after",
+      ].join("\n"),
+      new Date(2026, 6, 8),
+    ),
+    [
+      "> 2026-07-08",
+      "  > before",
+      "  ```typescript",
+      "const nested = {",
+      "  kept: true,",
+      "};",
+      "  ```",
+      "  > after",
+      "    > [ ] nested after",
+    ].join("\n"),
+  );
+});
+
+test("roll preserves fenced code without a language", () => {
+  assert.equal(
+    rollLastDatedSection(
+      [
+        "> 2026-07-07",
+        "  ```",
+        "unindented code",
+        "  ```",
+        "  > after",
+      ].join("\n"),
+      new Date(2026, 6, 8),
+    ),
+    [
+      "> 2026-07-08",
+      "  ```",
+      "unindented code",
+      "  ```",
+      "  > after",
+    ].join("\n"),
+  );
+});

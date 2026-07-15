@@ -186,7 +186,7 @@ function stableUuid(input: string): string {
 
 export function classifyObjectLine(raw: string): ParsedObjectLine {
   const fence = raw.match(/^([ \t]*)```([^\s`]*)[ \t]*$/);
-  if (fence && fence[2]) {
+  if (fence) {
     const indent = visualIndent(fence[1]);
     return {
       tag: "code",
@@ -194,7 +194,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       indent,
       contentIndent: indent,
       text: "",
-      language: fence[2],
+      language: fence[2] || undefined,
       startsObject: true,
       sourcePrefix: `${fence[1]}` + "```" + fence[2],
     };
@@ -304,7 +304,7 @@ function lineStartsExplicitObject(raw: string): boolean {
       /^[-*](?:\s+.*|\s*)$/.test(source) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
       /^#{1,6}\s+/.test(source) ||
-      /^```[^\s`]+[ \t]*$/.test(source),
+      /^```[^\s`]*[ \t]*$/.test(source),
   );
 }
 
@@ -896,7 +896,7 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
   if (object.tag === "code") {
     const indent = object.sourcePrefix?.match(/^[ \t]*/)?.[0] ?? " ".repeat(Math.max(0, object.indent));
     const lines = [
-      `${indent}` + "```" + (object.language ?? "text"),
+      `${indent}` + "```" + (object.language ?? ""),
       ...(object.text ? object.text.split("\n") : []),
     ];
     if (object.closed !== false) lines.push(`${indent}` + "```");
