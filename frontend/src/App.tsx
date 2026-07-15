@@ -127,10 +127,6 @@ function noteForEditing(note: Note): { note: Note; migrated: boolean } {
   };
 }
 
-function noteForStorage(note: Note): Note {
-  return note;
-}
-
 function markdownForEditing(content: string): string {
   return prepareNoteContent(content).markdown;
 }
@@ -1126,23 +1122,22 @@ function App() {
     setSaveState("saving");
     try {
       const version = editVersion.current;
-      const stored = noteForStorage(snapshot);
       const saved = await VaultService.SaveNote(
-        stored.id,
-        stored.title,
-        stored.content,
+        snapshot.id,
+        snapshot.title,
+        markdownForEditing(snapshot.content),
       );
       updateSummary(saved);
       setNotes((await VaultService.ListNotes()) ?? []);
+      const prepared = noteForEditing(saved);
       if (version === editVersion.current) {
-        const prepared = noteForEditing(saved);
         noteRef.current = prepared.note;
         dirtyRef.current = false;
         setNote(prepared.note);
         setDirty(false);
         setSaveState("saved");
       }
-      return noteForEditing(saved).note;
+      return prepared.note;
     } catch (reason) {
       setSaveState("error");
       setError(errorText(reason));
@@ -1587,7 +1582,7 @@ function App() {
       const saved = await VaultService.SaveNote(
         conflictResolution.localNote.id,
         conflictResolution.localNote.title,
-        canonicalContentFromMarkdown(conflictResolution.mergedContent),
+        conflictResolution.mergedContent,
       );
       setConflictResolution(null);
       setSyncConflicts((current) =>
@@ -1768,7 +1763,7 @@ function App() {
         const template = await VaultService.GetNote(dailyTemplateNoteID);
         content = renderNoteTemplate(markdownForEditing(template.content), title, date);
       }
-      const saved = await VaultService.SaveNote(created.id, created.title, canonicalContentFromMarkdown(content));
+      const saved = await VaultService.SaveNote(created.id, created.title, content);
       setNotes((await VaultService.ListNotes()) ?? []);
       applyLoadedNote(saved);
     } catch (reason) {
@@ -2437,6 +2432,11 @@ function App() {
   const noteMarkdown = useMemo(
     () => note ? markdownForEditing(note.content) : "",
     [note?.content],
+  );
+
+  const portableNoteMarkdown = useMemo(
+    () => view === "markdown" ? portableMarkdown(noteMarkdown) : "",
+    [noteMarkdown, view],
   );
 
   const contentWordCount = useMemo(() => {
@@ -3827,7 +3827,7 @@ function App() {
                       <SourceMarkdownEditor
                         key={`${note.id}:portable`}
                         noteID={note.id}
-                        value={portableMarkdown(noteMarkdown)}
+                        value={portableNoteMarkdown}
                         readOnly
                         onChange={() => {}}
                         onError={(reason) => setError(errorText(reason))}

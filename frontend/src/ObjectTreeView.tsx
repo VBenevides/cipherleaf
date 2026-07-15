@@ -5,7 +5,7 @@ import {
   prepareNoteContent,
   type ObjectDropMode,
   type ObjectLine,
-} from "./objectTree";
+} from "./objectDocument";
 
 type Props = {
   value: string;

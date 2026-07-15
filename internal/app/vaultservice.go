@@ -571,14 +571,6 @@ func (s *VaultService) SaveNote(id, title, content string) (vault.Note, error) {
 	return s.store.SaveNote(id, title, content)
 }
 
-func (s *VaultService) SaveAttachment(noteID, webpBase64 string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(webpBase64)
-	if err != nil {
-		return "", errors.New("image data is not valid base64")
-	}
-	return s.store.SaveAttachment(noteID, data)
-}
-
 func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string, error) {
 	data, err := convertImageDataURLToWebP(imageDataURL)
 	if err != nil {
@@ -735,20 +727,12 @@ func (s *VaultService) ExportMarkdown(path string) (vault.PortabilityResult, err
 	return s.store.ExportMarkdown(path)
 }
 
-func (s *VaultService) SearchNotes(query string) ([]vault.NoteSummary, error) {
-	return s.store.Search(query)
-}
-
 func (s *VaultService) ResolveNoteReference(reference string) (vault.NoteSummary, error) {
 	return s.store.ResolveNoteReference(reference)
 }
 
 func (s *VaultService) ListBacklinks(noteID string) ([]vault.FindMatch, error) {
 	return s.store.ListBacklinks(noteID)
-}
-
-func (s *VaultService) ListUnlinkedMentions(noteID string) ([]vault.FindMatch, error) {
-	return s.store.ListUnlinkedMentions(noteID)
 }
 
 func (s *VaultService) FindInNotes(query string) ([]vault.FindMatch, error) {
@@ -1066,33 +1050,6 @@ func (s *VaultService) ForcePushNow() (githubsync.PushResult, error) {
 		return githubsync.PushResult{}, err
 	}
 	return s.sync.ForcePushVault(context.Background(), vaultID, s.store)
-}
-
-// PullNow pulls and merges the remote vault snapshot without pushing back.
-func (s *VaultService) PullNow() (vault.MergeResult, error) {
-	vaultID, err := s.unlockedVaultID()
-	if err != nil {
-		return vault.MergeResult{}, err
-	}
-	pull, err := s.sync.PullVault(context.Background(), vaultID)
-	if err != nil {
-		return vault.MergeResult{}, err
-	}
-	if pull.Temporary {
-		defer os.RemoveAll(pull.StagingPath)
-	}
-	if pull.StagingPath == "" {
-		return vault.MergeResult{}, errors.New("pull returned no encrypted vault snapshot")
-	}
-	merged, err := s.store.MergeRemoteSnapshot(pull.StagingPath)
-	if err != nil {
-		return vault.MergeResult{}, err
-	}
-	if err := s.store.PruneStaleAttachments(); err != nil {
-		return vault.MergeResult{}, err
-	}
-	s.sync.MarkSynced(vaultID)
-	return merged, nil
 }
 
 func (s *VaultService) unlockedVaultID() (string, error) {

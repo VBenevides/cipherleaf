@@ -53,6 +53,18 @@ var (
 	inlineCodePattern      = regexp.MustCompile("`+[^`\n]*`+")
 	wikilinkPattern        = regexp.MustCompile(`\[\[([^\]\n]+)\]\]`)
 	tagPattern             = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9][A-Za-z0-9_-]{0,63})`)
+	canonicalCodeFence     = regexp.MustCompile("^([ \\t]*)```([^\\s`]*)[ \\t]*$")
+	canonicalCodeFenceEnd  = regexp.MustCompile("^[ \\t]*```[ \\t]*$")
+	canonicalOutline       = regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`)
+	canonicalBare          = regexp.MustCompile(`^([ \t]*)<([ \t]?)(.*)$`)
+	canonicalImage         = regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`)
+	canonicalBullet        = regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`)
+	canonicalOrdered       = regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`)
+	canonicalCheckbox      = regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`)
+	canonicalTask          = regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`)
+	canonicalHeading       = regexp.MustCompile(`^#{1,6}\s+`)
+	canonicalLeadingSpace  = regexp.MustCompile(`^[ \t]*`)
+	canonicalCheckboxEnd   = regexp.MustCompile(`\[[ xX]\]\s*$`)
 )
 
 const (
@@ -4038,6 +4050,7 @@ type parsedCanonicalLine struct {
 	checked       *bool
 	startsObject  bool
 	sourcePrefix  string
+	language      string
 }
 
 func canonicalizeNoteContent(content string) string {
@@ -4064,9 +4077,23 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 	var stack []*canonicalObjectNode
 	var sectionStack []*canonicalObjectNode
 	parsedByID := map[string]parsedCanonicalLine{}
+	var activeCode *canonicalObjectNode
+	var activeCodeLines []string
 
 	for index, raw := range lines {
 		lineNumber := index + 1
+		if activeCode != nil {
+			if canonicalCodeFenceEnd.MatchString(raw) {
+				closed := true
+				activeCode.Closed = &closed
+				activeCode = nil
+				activeCodeLines = nil
+			} else {
+				activeCodeLines = append(activeCodeLines, raw)
+				activeCode.Text = strings.Join(activeCodeLines, "\n")
+			}
+			continue
+		}
 		if raw != "" && strings.TrimSpace(raw) == "" {
 			usedAsContinuation := false
 			if len(stack) > 0 {
@@ -4093,7 +4120,7 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 		if previous != nil {
 			previousParsed := parsedByID[previous.ID]
 			if previous.Text != "" && startsWithWhitespace(raw) && !lineStartsExplicitCanonicalObject(raw) && parsed.indent >= previousParsed.contentIndent {
-				previous.Text += "\n" + strings.TrimSpace(raw)
+				previous.Text += "\n" + canonicalContinuationText(raw, previousParsed.contentIndent)
 				continue
 			}
 		}
@@ -4119,6 +4146,11 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 		object := canonicalObjectNode{
 			ID: id, Tag: parsed.tag, Tags: slices.Clone(parsed.tags), Text: parsed.text, Checked: parsed.checked,
 			Indent: parsed.indent, ContentIndent: parsed.contentIndent, ChildrenIDs: []string{}, SourcePrefix: parsed.sourcePrefix,
+			Language: parsed.language,
+		}
+		if object.Tag == "code" {
+			closed := false
+			object.Closed = &closed
 		}
 		if parent != nil {
 			parentID := parent.ID
@@ -4136,6 +4168,10 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 		if object.Tag == "section" {
 			sectionStack = append(sectionStack, objectPointer)
 		}
+		if object.Tag == "code" {
+			activeCode = objectPointer
+			activeCodeLines = nil
+		}
 	}
 	objects := make([]canonicalObjectNode, 0, len(objectPointers))
 	for _, object := range objectPointers {
@@ -4151,7 +4187,18 @@ func stableCanonicalObjectID(input string) string {
 }
 
 func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
-	outline := regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`).FindStringSubmatch(raw)
+	if fence := canonicalCodeFence.FindStringSubmatch(raw); fence != nil && fence[2] != "" {
+		indent := visualIndent(fence[1])
+		return parsedCanonicalLine{
+			tag: "code", tags: []string{"code"}, indent: indent, contentIndent: indent,
+			startsObject: true, sourcePrefix: fence[1] + "```" + fence[2], language: fence[2],
+		}
+	}
+	outline := canonicalOutline.FindStringSubmatch(raw)
+	bare := canonicalBare.FindStringSubmatch(raw)
+	if outline != nil {
+		bare = nil
+	}
 	source := strings.TrimLeft(raw, " \t")
 	tags := []string{}
 	indent := lineVisualIndent(raw)
@@ -4161,6 +4208,8 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		tags = append(tags, "section")
 		indent = visualIndent(outline[1]) + (len(outline[2])-1)*2
 		contentIndent = visualIndent(outline[1]) + len(outline[2]) + visualIndent(outline[3])
+	} else if bare != nil {
+		source = bare[3]
 	}
 	sourcePrefix := func(text string) string {
 		if text == "" {
@@ -4175,24 +4224,24 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		}
 		return raw[:contentIndent]
 	}
-	if regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`).MatchString(strings.TrimSpace(source)) || attachmentReference.MatchString(source) {
+	if canonicalImage.MatchString(strings.TrimSpace(source)) || attachmentReference.MatchString(source) {
 		text := strings.TrimSpace(source)
 		return parsedCanonicalLine{tag: "image", tags: append(tags, "image"), indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
-	if match := regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`).FindStringSubmatch(source); match != nil {
+	if match := canonicalBullet.FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
 		var checked *bool
-		if checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(match[2]); checkbox != nil {
+		if checkbox := canonicalCheckbox.FindStringSubmatch(match[2]); checkbox != nil {
 			text = strings.TrimSpace(checkbox[2])
 			value := strings.EqualFold(checkbox[1], "x")
 			checked = &value
 		}
 		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
-	if match := regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`).FindStringSubmatch(source); match != nil {
+	if match := canonicalOrdered.FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
 		var checked *bool
-		if checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(match[2]); checkbox != nil {
+		if checkbox := canonicalCheckbox.FindStringSubmatch(match[2]); checkbox != nil {
 			text = strings.TrimSpace(checkbox[2])
 			value := strings.EqualFold(checkbox[1], "x")
 			checked = &value
@@ -4200,7 +4249,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
 	tags = append(tags, "text")
-	if strings.HasPrefix(source, "#") && regexp.MustCompile(`^#{1,6}\s+`).MatchString(source) {
+	if strings.HasPrefix(source, "#") && canonicalHeading.MatchString(source) {
 		tag := "text"
 		if outline != nil {
 			tag = "section"
@@ -4208,7 +4257,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		text := strings.TrimSpace(source)
 		return parsedCanonicalLine{tag: tag, tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
 	}
-	checkbox := regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`).FindStringSubmatch(source)
+	checkbox := canonicalCheckbox.FindStringSubmatch(source)
 	text := strings.TrimSpace(source)
 	checkboxContentIndent := -1
 	var checked *bool
@@ -4232,18 +4281,42 @@ func startsWithWhitespace(text string) bool {
 }
 
 func lineStartsExplicitCanonicalObject(raw string) bool {
-	outline := regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`).FindStringSubmatch(raw)
+	outline := canonicalOutline.FindStringSubmatch(raw)
+	bare := canonicalBare.FindStringSubmatch(raw)
+	if outline != nil {
+		bare = nil
+	}
 	source := strings.TrimLeft(raw, " \t")
 	if outline != nil {
 		source = outline[4]
+	} else if bare != nil {
+		source = bare[3]
 	}
 	return outline != nil ||
-		regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`).MatchString(strings.TrimSpace(source)) ||
+		bare != nil ||
+		canonicalImage.MatchString(strings.TrimSpace(source)) ||
 		attachmentReference.MatchString(source) ||
-		regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`).MatchString(source) ||
-		regexp.MustCompile(`^[-*](?:\s+.*|\s*)$`).MatchString(source) ||
-		regexp.MustCompile(`^\d+[.)](?:\s+.*|\s*)$`).MatchString(source) ||
-		regexp.MustCompile(`^#{1,6}\s+`).MatchString(source)
+		canonicalTask.MatchString(source) ||
+		canonicalBullet.MatchString(source) ||
+		canonicalOrdered.MatchString(source) ||
+		canonicalHeading.MatchString(source) ||
+		canonicalCodeFence.MatchString(source)
+}
+
+func canonicalContinuationText(raw string, contentIndent int) string {
+	offset, column := 0, 0
+	for offset < len(raw) && column < contentIndent {
+		switch raw[offset] {
+		case ' ':
+			column++
+		case '\t':
+			column += 2
+		default:
+			return strings.TrimRight(raw[offset:], " \t")
+		}
+		offset++
+	}
+	return strings.TrimRight(raw[offset:], " \t")
 }
 
 func visualIndent(text string) int {
@@ -4289,7 +4362,7 @@ func derivedMarkdownContent(content string) string {
 
 func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	if object.Tag == "code" {
-		indent := regexp.MustCompile(`^[ \t]*`).FindString(object.SourcePrefix)
+		indent := canonicalLeadingSpace.FindString(object.SourcePrefix)
 		lines := []string{indent + "```" + object.Language}
 		if object.Text != "" {
 			lines = append(lines, strings.Split(object.Text, "\n")...)
@@ -4305,7 +4378,7 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	if len(textLines) > 0 {
 		firstText = textLines[0]
 	}
-	prefixHasCheckbox := regexp.MustCompile(`\[[ xX]\]\s*$`).MatchString(object.SourcePrefix)
+	prefixHasCheckbox := canonicalCheckboxEnd.MatchString(object.SourcePrefix)
 	if object.Checked != nil && !prefixHasCheckbox {
 		if *object.Checked {
 			firstText = strings.TrimRight("[x] "+firstText, " ")

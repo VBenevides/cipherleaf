@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   canonicalObjectDocumentFromMarkdown,
@@ -13,9 +14,27 @@ import {
   parseObjectDocument,
   prepareNoteContent,
   remapObjectKeysByLine,
-} from "../src/objectTree.ts";
+} from "../src/objectDocument.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("matches shared object-document conformance fixtures", () => {
+  const fixtures = JSON.parse(readFileSync(
+    new URL("../../testdata/object_document_conformance.json", import.meta.url),
+    "utf8",
+  )) as Array<{ name: string; markdown: string; objects: Array<Record<string, unknown>> }>;
+
+  for (const fixture of fixtures) {
+    const document = canonicalObjectDocumentFromMarkdown(fixture.markdown);
+    assert.equal(document.objects.length, fixture.objects.length, fixture.name);
+    fixture.objects.forEach((expected, index) => {
+      for (const [field, value] of Object.entries(expected)) {
+        assert.deepEqual(document.objects[index][field as keyof typeof document.objects[number]], value, `${fixture.name}: object ${index} ${field}`);
+      }
+    });
+    assert.equal(markdownFromCanonicalObjectDocument(document), fixture.markdown, fixture.name);
+  }
+});
 
 test("builds typed objects with indentation and parents", () => {
   const tree = markdownObjectTree([
