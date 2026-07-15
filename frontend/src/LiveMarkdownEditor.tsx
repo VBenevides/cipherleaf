@@ -42,14 +42,11 @@ import {
   tableCells,
 } from "./markdown";
 import {
-  classifyObjectLine,
   continuationPrefix,
-  lineIndent,
-  lineStartsObject,
   moveObjectInMarkdown,
   objectContentIndent,
   objectDepthByLine,
-  objectOwnerLineNumber as ownerLineNumberInLines,
+  objectOwnerLineNumber,
   normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
   replaceExclusiveObjectPrefix,
@@ -901,7 +898,7 @@ class WikilinkWidget extends WidgetType {
     return other.title === this.title && other.position === this.position;
   }
 
-  toDOM(view: EditorView) {
+  toDOM(_view: EditorView) {
     const label = this.title.split("|")[0]?.trim() || this.title;
     const link = document.createElement("span");
     link.className = "cm-live-wikilink";
@@ -967,8 +964,6 @@ function hideSyntaxRange(
 }
 
 function decorateInlineMarkdown(
-  state: EditorState,
-  lineNumber: number,
   text: string,
   offset: number,
   decorations: Range<Decoration>[],
@@ -1089,24 +1084,6 @@ type ToggleLine = {
   object: ObjectLine;
 };
 
-function parentObjectPrefixForContinuation(state: EditorState, lineNumber: number): string | null {
-  const line = state.doc.line(lineNumber);
-  if (lineStartsObject(line.text)) return null;
-
-  for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
-    const previous = state.doc.line(previousNumber);
-    if (previous.text.trim() === "") continue;
-    if (!lineStartsObject(previous.text)) continue;
-    if (line.text.trim() !== "" && lineIndent(line.text) < objectContentIndent(previous.text)) return null;
-    const previousObject = classifyObjectLine(previous.text);
-    return previousObject.tag === "section"
-      ? repeatedObjectPrefix(previous.text)
-      : previous.text.match(/^[ \t]*/)?.[0] ?? "";
-  }
-
-  return null;
-}
-
 function continuationOwnerObject(document: ObjectDocument, lineNumber: number) {
   const owner = document.byLine.get(lineNumber);
   return owner && owner.lineNumber !== lineNumber ? owner : null;
@@ -1136,10 +1113,6 @@ function continuationMarkerWidth(document: ObjectDocument, ownerLineNumber: numb
   else if (owner.tag === "bulletpoint") widths.push("1.6em");
 
   return widths.length > 0 ? `calc(${widths.join(" + ")})` : null;
-}
-
-function objectOwnerLineNumber(lines: readonly string[], lineNumber: number): number {
-  return ownerLineNumberInLines(lines, lineNumber);
 }
 
 function toggleLine(document: ObjectDocument, lineNumber: number, text: string): ToggleLine | null {
@@ -1479,8 +1452,6 @@ function buildLivePreviewState(
         );
       } else {
         decorateInlineMarkdown(
-          state,
-          lineNumber,
           toggle.content,
           contentOffset,
           decorations,
@@ -1567,8 +1538,6 @@ function buildLivePreviewState(
       }
 
       decorateInlineMarkdown(
-        state,
-        lineNumber,
         line.text.slice(heading[0].length),
         line.from + heading[0].length,
         decorations,
@@ -1615,8 +1584,6 @@ function buildLivePreviewState(
         markerWidth ? new InlineSpacerWidget(markerWidth) : undefined,
       );
       decorateInlineMarkdown(
-        state,
-        lineNumber,
         line.text.slice(prefixSize),
         line.from + prefixSize,
         decorations,
@@ -1682,8 +1649,6 @@ function buildLivePreviewState(
     }
 
     decorateInlineMarkdown(
-      state,
-      lineNumber,
       line.text.slice(barePrefixSize),
       line.from + barePrefixSize,
       decorations,
@@ -2091,17 +2056,14 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
 
   const line = view.state.doc.lineAt(range.head);
   const indentation = line.text.slice(0, line.text.length - line.text.trimStart().length);
-  const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
   const document = parseObjectDocument(view.state.doc.toString());
   const owner = document.byLine.get(line.number);
   const object = owner?.lineNumber === line.number ? owner : null;
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
-  if (!isCodeContent && !object && continuationObjectPrefix === null) return false;
+  if (!isCodeContent && !object) return false;
 
   const inserted = isCodeContent
     ? `\n${indentation}`
-    : continuationObjectPrefix
-    ? `\n${continuationObjectPrefix}`
     : object?.tag === "code"
     ? "\n"
     : `\n${repeatedObjectPrefix(line.text) ?? indentation}`;

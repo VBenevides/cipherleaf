@@ -11,7 +11,6 @@ export type ParsedObjectLine = {
   text: string;
   checked?: boolean;
   language?: string;
-  startsObject: boolean;
   sourcePrefix: string;
   sectionPrefixSize: number;
   barePrefixSize: number;
@@ -97,11 +96,6 @@ export function visualIndent(text: string): number {
 
 export function lineIndent(text: string): number {
   return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
-}
-
-export function objectHierarchyIndent(text: string): number {
-  const quote = text.match(/^([ \t]*)(>+)/);
-  return quote ? visualIndent(quote[1]) + (quote[2].length - 1) * 2 : lineIndent(text);
 }
 
 type ExclusiveObjectPrefix = {
@@ -207,7 +201,6 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       contentIndent: indent,
       text: "",
       language: fence[2] || undefined,
-      startsObject: true,
       sourcePrefix: `${fence[1]}` + "```" + fence[2],
       sectionPrefixSize: 0,
       barePrefixSize: 0,
@@ -241,7 +234,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     if (attachment) tags.push("attachment");
     const text = source.trim();
     return {
-      tag: "image", tags, indent, contentIndent, text, startsObject: true,
+      tag: "image", tags, indent, contentIndent, text,
       sourcePrefix: sourcePrefix(text), attachmentId: attachment?.id,
       attachmentKind: attachment?.kind, ...objectPrefix,
     };
@@ -251,7 +244,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     tags.push("attachment", "text");
     const text = source.trim();
     return {
-      tag: "text", tags, indent, contentIndent, text, startsObject: true,
+      tag: "text", tags, indent, contentIndent, text,
       sourcePrefix: sourcePrefix(text), attachmentId: attachment.id,
       attachmentKind: attachment.kind, ...objectPrefix,
     };
@@ -269,7 +262,6 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       contentIndent: contentIndent + source.length - text.length,
       text,
       checked: checked ? checked[1].toLowerCase() === "x" : undefined,
-      startsObject: true,
       sourcePrefix: sourcePrefix(text),
       listMarker: bullet[1],
       ...objectPrefix,
@@ -288,7 +280,6 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       contentIndent: contentIndent + source.length - text.length,
       text,
       checked: checked ? checked[1].toLowerCase() === "x" : undefined,
-      startsObject: true,
       sourcePrefix: sourcePrefix(text),
       listMarker: ordered[1],
       ...objectPrefix,
@@ -303,7 +294,6 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
       indent,
       contentIndent,
       text: source.trim(),
-      startsObject: true,
       sourcePrefix: sourcePrefix(source.trim()),
       ...objectPrefix,
     };
@@ -321,14 +311,9 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     contentIndent: checkboxContentIndent ?? contentIndent,
     text,
     checked: checkbox ? checkbox[1].toLowerCase() === "x" : undefined,
-    startsObject: true,
     sourcePrefix: sourcePrefix(text),
     ...objectPrefix,
   };
-}
-
-export function lineStartsObject(raw: string): boolean {
-  return classifyObjectLine(raw).startsObject;
 }
 
 function lineStartsExplicitObject(raw: string): boolean {
@@ -375,21 +360,7 @@ export function repeatedObjectPrefix(raw: string): string | null {
 
 export function continuationPrefix(raw: string): string | null {
   const classified = classifyObjectLine(raw);
-  if (classified.startsObject) return " ".repeat(Math.max(0, classified.contentIndent));
-
-  const toggle = raw.match(/^([ \t]*)>([ \t]?)/);
-  if (toggle) return `${toggle[1]}${" ".repeat(1 + toggle[2].length)}`;
-
-  const task = raw.match(/^([ \t]*)(?:[-+*][ \t]+)?\[([ xX])\][ \t]+/);
-  if (task) return `${task[1]}${" ".repeat(task[0].length - task[1].length)}`;
-
-  const unordered = raw.match(/^([ \t]*)([-+*])[ \t]+/);
-  if (unordered) return `${unordered[1]}${" ".repeat(unordered[0].length - unordered[1].length)}`;
-
-  const ordered = raw.match(/^([ \t]*)(\d+[.)])[ \t]+/);
-  if (ordered) return `${ordered[1]}${" ".repeat(ordered[0].length - ordered[1].length)}`;
-
-  return raw.match(/^[ \t]+/)?.[0] ?? null;
+  return " ".repeat(Math.max(0, classified.contentIndent));
 }
 
 function continuationText(raw: string, parent: ParsedObjectLine): string {
@@ -421,7 +392,6 @@ export function isContinuationLine(lines: readonly string[], lineNumber: number)
     if (previous.trim() === "") continue;
     if (isContinuationLine(lines, previousNumber)) continue;
     const parsed = classifyObjectLine(previous);
-    if (!parsed.startsObject) continue;
     if (raw.trim() === "") {
       const next = lines[lineNumber] ?? "";
       return lineIndent(next) >= parsed.contentIndent;
@@ -441,9 +411,8 @@ export function objectOwnerLineNumber(lines: readonly string[], lineNumber: numb
   if (lineNumber <= 1 || !isContinuationLine(lines, lineNumber)) return lineNumber;
 
   for (let previousNumber = lineNumber - 1; previousNumber >= 1; previousNumber--) {
-    const previous = lines[previousNumber - 1] ?? "";
     if (isContinuationLine(lines, previousNumber)) continue;
-    if (lineStartsObject(previous)) return previousNumber;
+    return previousNumber;
   }
 
   return lineNumber;
@@ -473,7 +442,7 @@ export function objectBlockEnd(lines: readonly string[], startLineNumber: number
     const raw = lines[lineNumber - 1] ?? "";
     if (isSeparatorLine(lines, lineNumber)) break;
     const object = classifyObjectLine(raw);
-    if (raw.trim() !== "" && lineStartsObject(raw) && object.indent <= startIndent) break;
+    if (raw.trim() !== "" && object.indent <= startIndent) break;
     if (object.tag === "code") {
       endLineNumber = objectBlockEnd(lines, lineNumber);
       lineNumber = endLineNumber;
@@ -485,14 +454,14 @@ export function objectBlockEnd(lines: readonly string[], startLineNumber: number
   return endLineNumber;
 }
 
-export function reindentLine(text: string, delta: number): string {
+function reindentLine(text: string, delta: number): string {
   if (text.trim() === "" || delta === 0) return text;
   if (delta > 0) return `${" ".repeat(delta)}${text}`;
   const removable = Math.min(text.match(/^ */)?.[0].length ?? 0, Math.abs(delta));
   return text.slice(removable);
 }
 
-export function reindentLines(lines: readonly string[], fromIndent: number, toIndent: number): string[] {
+function reindentLines(lines: readonly string[], fromIndent: number, toIndent: number): string[] {
   const delta = Math.max(0, toIndent) - fromIndent;
   let inCode = false;
   return lines.map((line) => {
@@ -804,7 +773,7 @@ export function portableMarkdown(markdown: string): string {
   }).join("\n");
 }
 
-export function objectDepth(object: Pick<ObjectLine, "parentId">, byId: ReadonlyMap<string, Pick<ObjectLine, "parentId">>): number {
+function objectDepth(object: Pick<ObjectLine, "parentId">, byId: ReadonlyMap<string, Pick<ObjectLine, "parentId">>): number {
   let depth = 0;
   let parentId = object.parentId;
   const seen = new Set<string>();
@@ -856,10 +825,6 @@ export function canonicalObjectDocumentFromMarkdown(markdown: string): Canonical
 
 export function stringifyCanonicalObjectDocument(document: CanonicalObjectDocument): string {
   return JSON.stringify(document, null, 2);
-}
-
-export function canonicalObjectDocumentTextFromMarkdown(markdown: string): string {
-  return stringifyCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown));
 }
 
 function isObjectTag(value: unknown): value is ObjectTag {

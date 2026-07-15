@@ -4036,7 +4036,6 @@ type parsedCanonicalLine struct {
 	contentIndent  int
 	text           string
 	checked        *bool
-	startsObject   bool
 	sourcePrefix   string
 	language       string
 	attachmentID   string
@@ -4182,7 +4181,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		indent := visualIndent(fence[1])
 		return parsedCanonicalLine{
 			tag: "code", tags: []string{"code"}, indent: indent, contentIndent: indent,
-			startsObject: true, sourcePrefix: fence[1] + "```" + fence[2], language: fence[2],
+			sourcePrefix: fence[1] + "```" + fence[2], language: fence[2],
 		}
 	}
 	outline := canonicalOutline.FindStringSubmatch(raw)
@@ -4224,11 +4223,11 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 			tags = append(tags, "attachment")
 			attachmentID, attachmentKind = attachment[2], "image"
 		}
-		return parsedCanonicalLine{tag: "image", tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text), attachmentID: attachmentID, attachmentKind: attachmentKind}
+		return parsedCanonicalLine{tag: "image", tags: tags, indent: indent, contentIndent: contentIndent, text: text, sourcePrefix: sourcePrefix(text), attachmentID: attachmentID, attachmentKind: attachmentKind}
 	}
 	if attachment != nil {
 		text := strings.TrimSpace(source)
-		return parsedCanonicalLine{tag: "text", tags: append(tags, "attachment", "text"), indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text), attachmentID: attachment[2], attachmentKind: "file"}
+		return parsedCanonicalLine{tag: "text", tags: append(tags, "attachment", "text"), indent: indent, contentIndent: contentIndent, text: text, sourcePrefix: sourcePrefix(text), attachmentID: attachment[2], attachmentKind: "file"}
 	}
 	if match := canonicalBullet.FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
@@ -4238,7 +4237,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 			value := strings.EqualFold(checkbox[1], "x")
 			checked = &value
 		}
-		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, sourcePrefix: sourcePrefix(text)}
 	}
 	if match := canonicalOrdered.FindStringSubmatch(source); match != nil {
 		text := strings.TrimSpace(match[2])
@@ -4248,7 +4247,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 			value := strings.EqualFold(checkbox[1], "x")
 			checked = &value
 		}
-		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, sourcePrefix: sourcePrefix(text)}
 	}
 	tags = append(tags, "text")
 	if strings.HasPrefix(source, "#") && canonicalHeading.MatchString(source) {
@@ -4257,7 +4256,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 			tag = "section"
 		}
 		text := strings.TrimSpace(source)
-		return parsedCanonicalLine{tag: tag, tags: tags, indent: indent, contentIndent: contentIndent, text: text, startsObject: true, sourcePrefix: sourcePrefix(text)}
+		return parsedCanonicalLine{tag: tag, tags: tags, indent: indent, contentIndent: contentIndent, text: text, sourcePrefix: sourcePrefix(text)}
 	}
 	checkbox := canonicalCheckbox.FindStringSubmatch(source)
 	text := strings.TrimSpace(source)
@@ -4275,7 +4274,7 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 	if checkboxContentIndent >= 0 {
 		contentIndent = checkboxContentIndent
 	}
-	return parsedCanonicalLine{tag: map[bool]string{true: "section", false: "text"}[outline != nil], tags: tags, indent: indent, contentIndent: contentIndent, text: text, checked: checked, startsObject: true, sourcePrefix: sourcePrefix(text)}
+	return parsedCanonicalLine{tag: map[bool]string{true: "section", false: "text"}[outline != nil], tags: tags, indent: indent, contentIndent: contentIndent, text: text, checked: checked, sourcePrefix: sourcePrefix(text)}
 }
 
 func startsWithWhitespace(text string) bool {

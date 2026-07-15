@@ -6,7 +6,6 @@ import {
   isTableDivider,
   embeddedClipboardImage,
   normalizeArrowText,
-  outlineSectionEnd,
   parseAttachmentMarkdown,
   tableCells,
 } from "../src/markdown.ts";
@@ -21,13 +20,6 @@ test("recognizes a three-dash horizontal rule line", () => {
   assert.equal(isHorizontalRule("  ---  "), true);
   assert.equal(isHorizontalRule("----"), false);
   assert.equal(isHorizontalRule("--- text"), false);
-});
-
-test("groups consecutive outline lines until a separator", () => {
-  const lines = ["> 2026-07-05", "> first", "> second", "", "> 2026-07-04", "> last"];
-  const isOutline = (line: number) => /^(\s*)>/.test(lines[line - 1]);
-  assert.equal(outlineSectionEnd(1, lines.length, isOutline), 3);
-  assert.equal(outlineSectionEnd(5, lines.length, isOutline), 6);
 });
 
 test("extracts clipboard images represented as HTML data URLs", () => {
