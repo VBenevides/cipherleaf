@@ -6,6 +6,8 @@ type FindMatchLike = {
   field: string;
   offset: number;
   matchLength: number;
+  utf16Offset?: number;
+  utf16MatchLength?: number;
 };
 
 export type SearchTarget = Readonly<{
@@ -14,6 +16,10 @@ export type SearchTarget = Readonly<{
   offset: number;
   /** UTF-8 byte length reported by the Go vault service. */
   matchLength: number;
+  /** JavaScript string offset calculated by the Go vault service. */
+  utf16Offset?: number;
+  /** JavaScript string length calculated by the Go vault service. */
+  utf16MatchLength?: number;
   /** The literal query, used to resolve offsets after editor normalization. */
   query: string;
 }>;
@@ -58,6 +64,10 @@ export function utf8ByteOffsetToUtf16Offset(document: string, utf8Offset: number
 /** Creates a target only for a content result with a non-empty, valid range. */
 export function targetForMatch(match: FindMatchLike, query = ""): SearchTarget | null {
   const rangeEnd = match.offset + match.matchLength;
+  const hasUTF16Range =
+    isNonNegativeSafeInteger(match.utf16Offset ?? -1) &&
+    isNonNegativeSafeInteger(match.utf16MatchLength ?? -1) &&
+    (match.utf16MatchLength ?? 0) > 0;
   if (
     match.field !== "content" ||
     !match.noteId ||
@@ -73,6 +83,8 @@ export function targetForMatch(match: FindMatchLike, query = ""): SearchTarget |
     noteID: match.noteId,
     offset: match.offset,
     matchLength: match.matchLength,
+    utf16Offset: hasUTF16Range ? match.utf16Offset : undefined,
+    utf16MatchLength: hasUTF16Range ? match.utf16MatchLength : undefined,
     query: query.trim(),
   };
 }
@@ -124,11 +136,14 @@ export function rangeForActiveDocument(
   const utf8End = target.offset + target.matchLength;
   if (!Number.isSafeInteger(utf8End)) return null;
 
-  const from = utf8ByteOffsetToUtf16Offset(document, target.offset);
-  const to = utf8ByteOffsetToUtf16Offset(document, utf8End);
+  const from = target.utf16Offset ?? utf8ByteOffsetToUtf16Offset(document, target.offset);
+  const to = target.utf16Offset !== undefined && target.utf16MatchLength !== undefined
+    ? target.utf16Offset + target.utf16MatchLength
+    : utf8ByteOffsetToUtf16Offset(document, utf8End);
   const renderedRanges = queryRanges(document, target.query);
   const sourceRanges = queryRanges(sourceDocument, target.query);
-  const sourceFrom = utf8ByteOffsetToUtf16Offset(sourceDocument, target.offset);
+  const sourceFrom = target.utf16Offset ??
+    utf8ByteOffsetToUtf16Offset(sourceDocument, target.offset);
   const sourceRange = nearestQueryRange(
     sourceRanges,
     sourceFrom ?? Math.min(target.offset, sourceDocument.length),

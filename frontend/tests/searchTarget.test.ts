@@ -69,6 +69,22 @@ test("converts Go UTF-8 offsets to CodeMirror UTF-16 offsets", () => {
   });
 });
 
+test("uses UTF-16 offsets calculated by Go", () => {
+  const target = targetForMatch({
+    noteId: "unicode",
+    field: "content",
+    offset: 13,
+    matchLength: 6,
+    utf16Offset: 10,
+    utf16MatchLength: 6,
+  });
+
+  assert.deepEqual(rangeForActiveDocument(target, "unicode", "préfix 😀 needle"), {
+    from: 10,
+    to: 16,
+  });
+});
+
 test("resolves the query when Live Preview normalizes the document", () => {
   const source = "first -> target\nsecond -> target";
   const document = source.replaceAll("->", "→");

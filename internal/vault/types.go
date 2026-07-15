@@ -207,13 +207,15 @@ type MergeConflict struct {
 
 // FindMatch describes a single occurrence of a query inside a note.
 type FindMatch struct {
-	NoteID      string `json:"noteId"`
-	Title       string `json:"title"`
-	FolderID    string `json:"folderId"`
-	Field       string `json:"field"`
-	Snippet     string `json:"snippet"`
-	Offset      int    `json:"offset"`
-	MatchLength int    `json:"matchLength"`
+	NoteID           string `json:"noteId"`
+	Title            string `json:"title"`
+	FolderID         string `json:"folderId"`
+	Field            string `json:"field"`
+	Snippet          string `json:"snippet"`
+	Offset           int    `json:"offset"`
+	MatchLength      int    `json:"matchLength"`
+	UTF16Offset      int    `json:"utf16Offset"`
+	UTF16MatchLength int    `json:"utf16MatchLength"`
 }
 
 // ReplaceResult summarizes a replace operation across notes.

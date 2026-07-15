@@ -32,7 +32,8 @@ import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/i
 import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import {
-  canonicalObjectDocumentTextFromMarkdown,
+  markdownFromCanonicalObjectDocument,
+  parseCanonicalObjectDocumentText,
   portableMarkdown,
   prepareNoteContent,
 } from "./objectDocument";
@@ -128,11 +129,8 @@ function noteForEditing(note: Note): { note: Note; migrated: boolean } {
 }
 
 function markdownForEditing(content: string): string {
-  return prepareNoteContent(content).markdown;
-}
-
-function canonicalContentFromMarkdown(markdown: string): string {
-  return canonicalObjectDocumentTextFromMarkdown(markdown);
+  const canonical = parseCanonicalObjectDocumentText(content);
+  return canonical ? markdownFromCanonicalObjectDocument(canonical) : content;
 }
 
 function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
@@ -1448,8 +1446,7 @@ function App() {
       await refreshFolders();
       if (completedAction === "create") {
         const first = await VaultService.CreateNote("Welcome");
-        const welcomeContent = canonicalObjectDocumentTextFromMarkdown(
-          [
+        const welcomeContent = [
             "# Welcome to Cipherleaf",
             "",
             "Your notes, titles, properties, and attachments are encrypted before they touch the disk.",
@@ -1471,8 +1468,7 @@ function App() {
             "## Keep your vault safe",
             "",
             "Save your vault secret somewhere secure—there is no password reset. Cipherleaf locks automatically after 15 minutes of inactivity.",
-          ].join("\n"),
-        );
+          ].join("\n");
         const saved = await VaultService.SaveNote(
           first.id,
           first.title,
@@ -2262,7 +2258,7 @@ function App() {
       const attachment = await VaultService.ImportFileAttachment(current.id, path);
       const markdown = markdownForEditing(current.content);
       const separator = markdown.endsWith("\n") || markdown === "" ? "" : "\n";
-      editNote({ content: canonicalContentFromMarkdown(`${markdown}${separator}[${attachment.filename}](attachment:${attachment.id})\n`) });
+      editNote({ content: `${markdown}${separator}[${attachment.filename}](attachment:${attachment.id})\n` });
       await persistCurrent();
       setFileAttachments((items) => [...items, attachment]);
     } catch (reason) {
@@ -2290,7 +2286,7 @@ function App() {
     if (!current) return;
     const markdown = markdownForEditing(current.content);
     const escapedID = attachment.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    editNote({ content: canonicalContentFromMarkdown(markdown.replace(new RegExp(`!?\\[[^\\]]*\\]\\(attachment:${escapedID}[^)]*\\)\\n?`, "g"), "")) });
+    editNote({ content: markdown.replace(new RegExp(`!?\\[[^\\]]*\\]\\(attachment:${escapedID}[^)]*\\)\\n?`, "g"), "") });
     await persistCurrent();
     setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
   };
@@ -2434,10 +2430,16 @@ function App() {
     [note?.content],
   );
 
-  const portableNoteMarkdown = useMemo(
-    () => view === "markdown" ? portableMarkdown(noteMarkdown) : "",
-    [noteMarkdown, view],
-  );
+  const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
+
+  useEffect(() => {
+    if (view !== "markdown") return;
+    const timeout = window.setTimeout(
+      () => setPortableNoteMarkdown(portableMarkdown(noteMarkdown)),
+      100,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [noteMarkdown, view]);
 
   const markdownScrollSync = useMemo(() => {
     const scrollers = new Set<HTMLElement>();
@@ -3816,7 +3818,7 @@ function App() {
                       key={`${note.id}:${sectionDefault}`}
                       noteID={note.id}
                       value={noteMarkdown}
-                      onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
+                      onChange={(content) => editNote({ content })}
                       onSave={() => void persistCurrent()}
                       onError={(reason) => setError(errorText(reason))}
                       onOpenWikilink={(title) => void openWikilinkTitle(title)}
@@ -3832,7 +3834,7 @@ function App() {
                 )}
                 {view === "object" && (
                   <div className="editor-view-pane active">
-                    <ObjectTreeView value={note.content} onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) }, true)} />
+                    <ObjectTreeView value={note.content} onChange={(content) => editNote({ content }, true)} />
                   </div>
                 )}
                 {view === "markdown" && (
@@ -3844,7 +3846,7 @@ function App() {
                         noteID={note.id}
                         value={noteMarkdown}
                         scrollSync={markdownScrollSync}
-                        onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
+                        onChange={(content) => editNote({ content }, true)}
                         onError={(reason) => setError(errorText(reason))}
                       />
                     </section>

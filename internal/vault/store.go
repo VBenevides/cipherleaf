@@ -1547,7 +1547,7 @@ func (s *Store) ListUnlinkedMentions(noteID string) ([]FindMatch, error) {
 				}
 			}
 			if !linked {
-				result = append(result, FindMatch{NoteID: summary.ID, Title: summary.Title, FolderID: summary.FolderID, Field: "content", Snippet: makeSnippet(content, at, len(needle)), Offset: at, MatchLength: len(needle)})
+				result = append(result, withUTF16Range(FindMatch{NoteID: summary.ID, Title: summary.Title, FolderID: summary.FolderID, Field: "content", Snippet: makeSnippet(content, at, len(needle)), Offset: at, MatchLength: len(needle)}, content))
 			}
 			offset = at + len(needle)
 		}
@@ -1592,7 +1592,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			if at < 0 {
 				break
 			}
-			results = append(results, FindMatch{
+			results = append(results, withUTF16Range(FindMatch{
 				NoteID:      item.ID,
 				Title:       item.Title,
 				FolderID:    item.FolderID,
@@ -1600,7 +1600,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 				Snippet:     makeSnippet(item.Title, idx+at, len(query)),
 				Offset:      idx + at,
 				MatchLength: len(query),
-			})
+			}, item.Title))
 			idx += at + len(query)
 			if idx >= len(haystack) {
 				break
@@ -1625,7 +1625,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 				break
 			}
 			abs := cidx + at
-			results = append(results, FindMatch{
+			results = append(results, withUTF16Range(FindMatch{
 				NoteID:      item.ID,
 				Title:       item.Title,
 				FolderID:    item.FolderID,
@@ -1633,7 +1633,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 				Snippet:     makeSnippet(content, abs, len(query)),
 				Offset:      abs,
 				MatchLength: len(query),
-			})
+			}, content))
 			cidx = abs + len(query)
 			if cidx >= len(lowerContent) {
 				break
@@ -4615,25 +4615,26 @@ func parseNoteReference(reference string) (label string, id string, ok bool) {
 }
 
 func backlinkMatch(summary NoteSummary, content string, from, to int, raw string) FindMatch {
-	return FindMatch{
+	return withUTF16Range(FindMatch{
 		NoteID:      summary.ID,
 		Title:       summary.Title,
 		Field:       "content",
 		Snippet:     makeSnippet(content, from, to-from),
 		Offset:      from,
 		MatchLength: len(raw) + 4,
-	}
+	}, content)
 }
 
 func backlinkMetadataMatch(summary NoteSummary, raw string) FindMatch {
-	return FindMatch{
+	content := "[[" + raw + "]]"
+	return withUTF16Range(FindMatch{
 		NoteID:      summary.ID,
 		Title:       summary.Title,
 		Field:       "content",
-		Snippet:     "[[" + raw + "]]",
+		Snippet:     content,
 		Offset:      0,
-		MatchLength: len(raw) + 4,
-	}
+		MatchLength: len(content),
+	}, content)
 }
 
 func outgoingLinkMatches(link, targetID string, aliases map[string]struct{}) bool {

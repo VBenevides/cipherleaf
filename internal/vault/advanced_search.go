@@ -127,7 +127,7 @@ func (s *Store) findAdvancedLocked(raw string, maxPerNote int) ([]FindMatch, err
 		default:
 			length = len(item.Title)
 		}
-		result = append(result, FindMatch{NoteID: item.ID, Title: item.Title, FolderID: item.FolderID, Field: "content", Snippet: makeSnippet(content, offset, length), Offset: offset, MatchLength: length})
+		result = append(result, withUTF16Range(FindMatch{NoteID: item.ID, Title: item.Title, FolderID: item.FolderID, Field: "content", Snippet: makeSnippet(content, offset, length), Offset: offset, MatchLength: length}, content))
 		if len(result) >= maxPerNote*len(s.manifest.Notes) {
 			break
 		}

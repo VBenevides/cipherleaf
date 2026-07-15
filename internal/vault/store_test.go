@@ -1465,6 +1465,14 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 }
 
+func TestFindMatchIncludesUTF16Range(t *testing.T) {
+	content := "préfix 😀 needle"
+	match := withUTF16Range(FindMatch{Offset: 13, MatchLength: 6}, content)
+	if match.UTF16Offset != 10 || match.UTF16MatchLength != 6 {
+		t.Fatalf("UTF-16 range = %d:%d; want 10:6", match.UTF16Offset, match.UTF16MatchLength)
+	}
+}
+
 func TestListUnlinkedMentionsExcludesWikilinks(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "mention-test-secret"); err != nil {
