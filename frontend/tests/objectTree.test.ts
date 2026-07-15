@@ -206,7 +206,7 @@ test("exports Cipherleaf objects as portable markdown", () => {
     "  Bare text",
     "  - Item",
     "    - Nested item",
-    "## Child section",
+    "  > Child section",
   ].join("\n"));
 });
 
@@ -223,6 +223,20 @@ test("preserves bare text depth in portable markdown", () => {
     "    Second level",
     "      Third level",
     "  First level again",
+  ].join("\n"));
+});
+
+test("keeps every section after the first as an indented quote", () => {
+  assert.equal(portableMarkdown([
+    "> Project",
+    "  > [ ] Pending",
+    "  > [x] Complete",
+    "> Another root",
+  ].join("\n")), [
+    "# Project",
+    "  > [ ] Pending",
+    "  > [x] Complete",
+    "> Another root",
   ].join("\n"));
 });
 

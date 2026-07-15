@@ -697,6 +697,7 @@ export function markdownObjectTree(markdown: string): ObjectLine[] {
 
 export function portableMarkdown(markdown: string): string {
   const document = parseObjectDocument(markdown);
+  let firstSection = true;
 
   return document.objects.map((object) => {
     const indent = " ".repeat(Math.max(0, object.indent));
@@ -707,16 +708,33 @@ export function portableMarkdown(markdown: string): string {
         .join("\n");
     }
     if (object.tag === "section") {
-      const level = Math.min(6, Math.floor(object.indent / 2) + 1);
-      return `${"#".repeat(level)} ${object.text}`.trimEnd();
+      const lines = object.text.split("\n");
+      const checked = object.checked === undefined ? "" : `[${object.checked ? "x" : " "}] `;
+      if (firstSection) {
+        firstSection = false;
+        return [
+          `# ${checked}${lines[0] ?? ""}`.trimEnd(),
+          ...lines.slice(1).map((line) => line.trimEnd()),
+        ].join("\n");
+      }
+      return [
+        `${indent}> ${checked}${lines[0] ?? ""}`.trimEnd(),
+        ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
+      ].join("\n");
+    }
+    if (object.checked !== undefined) {
+      const lines = object.text.split("\n");
+      return [
+        `${indent}- [${object.checked ? "x" : " "}] ${lines[0] ?? ""}`.trimEnd(),
+        ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
+      ].join("\n");
     }
     if (object.tag === "bulletpoint") {
       const ordered = object.sourcePrefix.trimStart().match(/^\d+[.)]/)?.[0];
       const marker = ordered ?? "-";
-      const checked = object.checked === undefined ? "" : `[${object.checked ? "x" : " "}] `;
       const lines = object.text.split("\n");
       return [
-        `${indent}${marker} ${checked}${lines[0] ?? ""}`.trimEnd(),
+        `${indent}${marker} ${lines[0] ?? ""}`.trimEnd(),
         ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
       ].join("\n");
     }

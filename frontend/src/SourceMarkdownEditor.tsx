@@ -21,6 +21,10 @@ type Props = {
   onChange: (value: string) => void;
   onError: (reason: unknown) => void;
   readOnly?: boolean;
+  scrollSync?: {
+    register: (scroller: HTMLElement) => () => void;
+    sync: (source: HTMLElement) => void;
+  };
 };
 
 const externalDocumentUpdate = Annotation.define<boolean>();
@@ -42,6 +46,7 @@ export default function SourceMarkdownEditor({
   onChange,
   onError,
   readOnly = false,
+  scrollSync,
 }: Props) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -136,7 +141,12 @@ export default function SourceMarkdownEditor({
       }),
     });
     view.current = editor;
+    const syncScroll = () => scrollSync?.sync(editor.scrollDOM);
+    const unregisterScroll = scrollSync?.register(editor.scrollDOM);
+    editor.scrollDOM.addEventListener("scroll", syncScroll, { passive: true });
     return () => {
+      editor.scrollDOM.removeEventListener("scroll", syncScroll);
+      unregisterScroll?.();
       editor.destroy();
       view.current = null;
     };

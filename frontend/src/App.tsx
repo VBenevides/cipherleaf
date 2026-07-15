@@ -2439,6 +2439,31 @@ function App() {
     [noteMarkdown, view],
   );
 
+  const markdownScrollSync = useMemo(() => {
+    const scrollers = new Set<HTMLElement>();
+    const synchronizedOffsets = new WeakMap<HTMLElement, number>();
+    return {
+      register(scroller: HTMLElement) {
+        scrollers.add(scroller);
+        return () => { scrollers.delete(scroller); };
+      },
+      sync(source: HTMLElement) {
+        const synchronizedOffset = synchronizedOffsets.get(source);
+        if (synchronizedOffset !== undefined) {
+          synchronizedOffsets.delete(source);
+          if (Math.abs(source.scrollTop - synchronizedOffset) < 1) return;
+        }
+        for (const target of scrollers) {
+          if (target !== source) {
+            const offset = Math.min(source.scrollTop, Math.max(0, target.scrollHeight - target.clientHeight));
+            synchronizedOffsets.set(target, offset);
+            target.scrollTop = offset;
+          }
+        }
+      },
+    };
+  }, [note?.id]);
+
   const contentWordCount = useMemo(() => {
     const content = noteMarkdown.trim();
     return content ? content.split(/\s+/).length : 0;
@@ -3818,6 +3843,7 @@ function App() {
                         key={`${note.id}:raw`}
                         noteID={note.id}
                         value={noteMarkdown}
+                        scrollSync={markdownScrollSync}
                         onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
                         onError={(reason) => setError(errorText(reason))}
                       />
@@ -3829,6 +3855,7 @@ function App() {
                         noteID={note.id}
                         value={portableNoteMarkdown}
                         readOnly
+                        scrollSync={markdownScrollSync}
                         onChange={() => {}}
                         onError={(reason) => setError(errorText(reason))}
                       />
