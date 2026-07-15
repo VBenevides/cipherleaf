@@ -787,6 +787,13 @@ function App() {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (globalSearchOpen) return;
+    globalSearchRequestRef.current++;
+    setGlobalSearchMatches([]);
+    setGlobalSearchBusy(false);
+  }, [globalSearchOpen]);
+
   const runGlobalSearch = useCallback(async (query: string) => {
     const request = ++globalSearchRequestRef.current;
     const trimmed = query.trim();
@@ -2433,7 +2440,10 @@ function App() {
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
   useEffect(() => {
-    if (view !== "markdown") return;
+    if (view !== "markdown") {
+      setPortableNoteMarkdown("");
+      return;
+    }
     const timeout = window.setTimeout(
       () => setPortableNoteMarkdown(portableMarkdown(noteMarkdown)),
       100,

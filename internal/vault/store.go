@@ -81,7 +81,6 @@ type Store struct {
 	secret                   []byte
 	manifest                 manifest
 	searchIndex              map[string]string
-	normalizedSearchIndex    map[string]string
 	authorizedFolders        map[string]struct{}
 	exportBaselines          map[string]manifest
 	exportDirty              map[string]struct{}
@@ -221,7 +220,6 @@ func (s *Store) Create(root, passphrase string) (Session, error) {
 		Settings:      defaultVaultSettings(),
 	}
 	s.searchIndex = make(map[string]string)
-	s.normalizedSearchIndex = make(map[string]string)
 	if err := s.saveManifestLocked(); err != nil {
 		s.clearLocked()
 		removeFileAndBackup(filepath.Join(root, manifestFilename))
@@ -1342,7 +1340,6 @@ func (s *Store) DeleteNote(id string) error {
 		return err
 	}
 	delete(s.searchIndex, id)
-	delete(s.normalizedSearchIndex, id)
 	path := s.notePathLocked(id)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove encrypted note: %w", err)
@@ -1614,10 +1611,7 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			}
 			content = derivedMarkdownContent(note.Content)
 		}
-		lowerContent, normalized := s.normalizedSearchIndex[item.ID]
-		if !normalized {
-			lowerContent = strings.ToLower(content)
-		}
+		lowerContent := strings.ToLower(content)
 		cidx := 0
 		for count := 0; count < maxPerNote; count++ {
 			at := strings.Index(lowerContent[cidx:], query)
@@ -2365,7 +2359,6 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 		return MergeResult{}, fmt.Errorf("save merged manifest: %w", err)
 	}
 	s.searchIndex = nil
-	s.normalizedSearchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	return result, nil
 }
@@ -2887,7 +2880,6 @@ func (s *Store) RestoreRemoteSnapshot(
 	s.secret = []byte(passphrase)
 	s.manifest = remote.Manifest
 	s.searchIndex = nil
-	s.normalizedSearchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	keyOwnedByStore = true
 	validator.key = nil
@@ -2916,7 +2908,6 @@ func (s *Store) clearLocked() {
 	s.vaultID = ""
 	s.manifest = manifest{}
 	s.searchIndex = nil
-	s.normalizedSearchIndex = nil
 	s.authorizedFolders = nil
 	s.noteIndexes = nil
 	s.folderIndexes = nil
@@ -2930,14 +2921,10 @@ func (s *Store) updateSearchIndexLocked(id, content string) {
 	if s.searchIndex != nil {
 		s.searchIndex[id] = content
 	}
-	if s.normalizedSearchIndex != nil {
-		s.normalizedSearchIndex[id] = strings.ToLower(content)
-	}
 }
 
 func (s *Store) rebuildSearchIndexLocked() error {
 	index := make(map[string]string, len(s.manifest.Notes))
-	normalized := make(map[string]string, len(s.manifest.Notes))
 	for _, item := range s.manifest.Notes {
 		note, err := s.readNoteLocked(item.ID)
 		if err != nil {
@@ -2945,10 +2932,8 @@ func (s *Store) rebuildSearchIndexLocked() error {
 		}
 		content := derivedMarkdownContent(note.Content)
 		index[item.ID] = content
-		normalized[item.ID] = strings.ToLower(content)
 	}
 	s.searchIndex = index
-	s.normalizedSearchIndex = normalized
 	return nil
 }
 

@@ -690,20 +690,33 @@ async function copyImageToClipboard(image: HTMLImageElement) {
 
 const attachmentDataCache = new Map<string, string>();
 const attachmentDataRequests = new Map<string, Promise<string>>();
-const maxCachedAttachments = 128;
+const maxAttachmentCacheBytes = 32 * 1024 * 1024;
+let attachmentCacheBytes = 0;
+let attachmentCacheGeneration = 0;
 
 function attachmentCacheKey(noteID: string, attachmentID: string) {
   return `${noteID}:${attachmentID}`;
 }
 
 function rememberAttachmentData(key: string, data: string) {
+  const previous = attachmentDataCache.get(key);
+  if (previous !== undefined) attachmentCacheBytes -= previous.length * 2;
   attachmentDataCache.delete(key);
   attachmentDataCache.set(key, data);
-  while (attachmentDataCache.size > maxCachedAttachments) {
+  attachmentCacheBytes += data.length * 2;
+  while (attachmentCacheBytes > maxAttachmentCacheBytes) {
     const oldest = attachmentDataCache.keys().next().value;
     if (oldest === undefined) break;
+    attachmentCacheBytes -= (attachmentDataCache.get(oldest)?.length ?? 0) * 2;
     attachmentDataCache.delete(oldest);
   }
+}
+
+function clearAttachmentDataCache() {
+  attachmentCacheGeneration++;
+  attachmentCacheBytes = 0;
+  attachmentDataCache.clear();
+  attachmentDataRequests.clear();
 }
 
 function cachedAttachmentData(noteID: string, attachmentID: string) {
@@ -716,13 +729,14 @@ function cachedAttachmentData(noteID: string, attachmentID: string) {
   }
   const pending = attachmentDataRequests.get(key);
   if (pending) return pending;
+  const generation = attachmentCacheGeneration;
   const request = VaultService.GetAttachment(noteID, attachmentID)
     .then((data) => {
-      rememberAttachmentData(key, data);
+      if (generation === attachmentCacheGeneration) rememberAttachmentData(key, data);
       return data;
     })
     .finally(() => {
-      attachmentDataRequests.delete(key);
+      if (attachmentDataRequests.get(key) === request) attachmentDataRequests.delete(key);
     });
   attachmentDataRequests.set(key, request);
   return request;
@@ -730,6 +744,7 @@ function cachedAttachmentData(noteID: string, attachmentID: string) {
 
 function forgetAttachmentData(noteID: string, attachmentID: string) {
   const key = attachmentCacheKey(noteID, attachmentID);
+  attachmentCacheBytes -= (attachmentDataCache.get(key)?.length ?? 0) * 2;
   attachmentDataCache.delete(key);
   attachmentDataRequests.delete(key);
 }
@@ -2430,6 +2445,8 @@ export default function LiveMarkdownEditor({
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
   const onCaretChangeRef = useRef(onCaretChange);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+
+  useEffect(() => () => clearAttachmentDataCache(), [noteID]);
 
   useLayoutEffect(() => {
     if (!showToolbar) return;
