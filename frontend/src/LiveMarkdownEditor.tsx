@@ -1676,6 +1676,12 @@ function buildLivePreviewState(
       continue;
     }
 
+    const bare = line.text.match(/^(\s*)<([ \t]?)/);
+    const barePrefixSize = bare?.[0].length ?? 0;
+    if (bare) {
+      addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
+    }
+
     const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
     const task = decorateTaskMarker(
       line.text.slice(indentation),
@@ -1745,8 +1751,8 @@ function buildLivePreviewState(
     decorateInlineMarkdown(
       state,
       lineNumber,
-      line.text,
-      line.from,
+      line.text.slice(barePrefixSize),
+      line.from + barePrefixSize,
       decorations,
       atomicRanges,
       openWikilink,
@@ -2155,6 +2161,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const object = classifyObjectLine(line.text);
   const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
   const section = line.text.match(/^([ \t]*>+[ \t]?)/);
+  const bare = line.text.match(/^([ \t]*)<([ \t]?)/);
   const list = line.text.match(/^([ \t]*)(?:(\d+)([.)])|([-+*]))[ \t]+/);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
   const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
@@ -2169,6 +2176,8 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
     ? "\n"
     : object.tag === "section"
     ? `\n${section?.[1] ?? `${indentation}> `}`
+    : bare
+    ? `\n${bare[1]}< `
     : object.tag === "bulletpoint" && list
     ? `\n${indentation}${list[2] ? `${Number(list[2]) + 1}${list[3]}` : list[4]} `
     : `\n${indentation}`;
@@ -2601,7 +2610,7 @@ export default function LiveMarkdownEditor({
                   : undefined;
                 const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
                 if (normalizedPrefix !== prospective) {
-                  const prefixLength = normalizedPrefix.match(/^[ \t]*(?:>+|[-*]|\d+[.)])[ \t]+/)?.[0].length ?? 0;
+                  const prefixLength = normalizedPrefix.match(/^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/)?.[0].length ?? 0;
                   inputView.dispatch({
                     changes: { from: line.from, to: line.to, insert: normalizedPrefix },
                     selection: EditorSelection.cursor(line.from + prefixLength),

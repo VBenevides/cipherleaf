@@ -94,12 +94,22 @@ export function objectHierarchyIndent(text: string): number {
 
 type ExclusiveObjectPrefix = {
   indent: number;
-  kind: "bulletpoint" | "section" | "numbering";
+  kind: "bare" | "bulletpoint" | "section" | "numbering";
   marker: string;
   rest: string;
 };
 
 function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
+  const bare = text.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  if (bare) {
+    return {
+      indent: visualIndent(bare[1]),
+      kind: "bare",
+      marker: `<${bare[2]}`,
+      rest: bare[3],
+    };
+  }
+
   const section = text.match(/^([ \t]*)(>+)[ \t]?(.*)$/);
   if (section) {
     return {
@@ -191,7 +201,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  const source = outline ? outline[4] : raw.trimStart();
+  const bare = !outline && raw.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
   const tags: ObjectTag[] = outline ? ["section"] : [];
   const indent = outline
     ? visualIndent(outline[1]) + (outline[2].length - 1) * 2
@@ -281,10 +292,12 @@ export function lineStartsObject(raw: string): boolean {
 
 function lineStartsExplicitObject(raw: string): boolean {
   const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  const source = outline ? outline[4] : raw.trimStart();
+  const bare = !outline && raw.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
 
   return Boolean(
     outline ||
+      bare ||
       parseAttachmentMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
       /^\[([ xX])\]\s*(.*)$/.test(source) ||
@@ -302,6 +315,9 @@ export function objectContentIndent(raw: string): number {
 export function repeatedObjectPrefix(raw: string): string | null {
   const quote = raw.match(/^([ \t]*)(>+)([ \t]?)/);
   if (quote) return `${quote[1]}${quote[2]} `;
+
+  const bare = raw.match(/^([ \t]*)<([ \t]?)/);
+  if (bare) return `${bare[1]}< `;
 
   const task = raw.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
   if (task) return `${task[1]}${task[2] ?? ""}[ ] `;

@@ -160,6 +160,20 @@ test("keeps unindented text lines as separate objects", () => {
   assert.equal(tree[3].text, "next bullet\nbullet continuation");
 });
 
+test("keeps marked bare text as an independent object", () => {
+  const markdown = [
+    "- Parent",
+    "  continuation",
+    "  < Bare child",
+  ].join("\n");
+  const tree = markdownObjectTree(markdown);
+
+  assert.equal(tree[0].text, "Parent\ncontinuation");
+  assert.equal(tree[0].children[0].tag, "text");
+  assert.equal(tree[0].children[0].text, "Bare child");
+  assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), markdown);
+});
+
 test("assigns sibling sections to the nested section parent", () => {
   const tree = markdownObjectTree([
     "> Parent",
