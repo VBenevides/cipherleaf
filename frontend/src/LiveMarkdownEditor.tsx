@@ -7,6 +7,7 @@ import {
   Prec,
   StateEffect,
   StateField,
+  Transaction,
   type Range,
 } from "@codemirror/state";
 import {
@@ -23,7 +24,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { highlightTree } from "@lezer/highlight";
 import { minimalSetup } from "codemirror";
-import { redo, undo } from "@codemirror/commands";
+import { history, redo, undo } from "@codemirror/commands";
 import {
   acceptCompletion,
   autocompletion,
@@ -51,7 +52,9 @@ import {
   objectDepthByLine,
   objectHierarchyIndent,
   objectOwnerLineNumber as ownerLineNumberInLines,
+  normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
+  replaceExclusiveObjectPrefix,
   remapObjectKeysByLine,
   repeatedObjectPrefix,
   visualIndent,
@@ -212,6 +215,28 @@ const setQuoteCollapsed = StateEffect.define<{ position: number; collapsed: bool
   }),
 });
 const setAllQuotesCollapsed = StateEffect.define<boolean>();
+const locateCaret = StateEffect.define<number>({
+  map: (position, changes) => changes.mapPos(position),
+});
+const caretLocatorField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    if (transaction.startState.selection.main.head !== transaction.state.selection.main.head) {
+      next = Decoration.none;
+    }
+    for (const effect of transaction.effects) {
+      if (effect.is(locateCaret)) {
+        const line = transaction.state.doc.lineAt(effect.value);
+        next = Decoration.set([
+          Decoration.line({ class: "cm-caret-locator" }).range(line.from),
+        ]);
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 function installJournalRules(editor: EditorView) {
   const scroller = editor.scrollDOM;
@@ -665,20 +690,33 @@ async function copyImageToClipboard(image: HTMLImageElement) {
 
 const attachmentDataCache = new Map<string, string>();
 const attachmentDataRequests = new Map<string, Promise<string>>();
-const maxCachedAttachments = 128;
+const maxAttachmentCacheBytes = 32 * 1024 * 1024;
+let attachmentCacheBytes = 0;
+let attachmentCacheGeneration = 0;
 
 function attachmentCacheKey(noteID: string, attachmentID: string) {
   return `${noteID}:${attachmentID}`;
 }
 
 function rememberAttachmentData(key: string, data: string) {
+  const previous = attachmentDataCache.get(key);
+  if (previous !== undefined) attachmentCacheBytes -= previous.length * 2;
   attachmentDataCache.delete(key);
   attachmentDataCache.set(key, data);
-  while (attachmentDataCache.size > maxCachedAttachments) {
+  attachmentCacheBytes += data.length * 2;
+  while (attachmentCacheBytes > maxAttachmentCacheBytes) {
     const oldest = attachmentDataCache.keys().next().value;
     if (oldest === undefined) break;
+    attachmentCacheBytes -= (attachmentDataCache.get(oldest)?.length ?? 0) * 2;
     attachmentDataCache.delete(oldest);
   }
+}
+
+function clearAttachmentDataCache() {
+  attachmentCacheGeneration++;
+  attachmentCacheBytes = 0;
+  attachmentDataCache.clear();
+  attachmentDataRequests.clear();
 }
 
 function cachedAttachmentData(noteID: string, attachmentID: string) {
@@ -691,13 +729,14 @@ function cachedAttachmentData(noteID: string, attachmentID: string) {
   }
   const pending = attachmentDataRequests.get(key);
   if (pending) return pending;
+  const generation = attachmentCacheGeneration;
   const request = VaultService.GetAttachment(noteID, attachmentID)
     .then((data) => {
-      rememberAttachmentData(key, data);
+      if (generation === attachmentCacheGeneration) rememberAttachmentData(key, data);
       return data;
     })
     .finally(() => {
-      attachmentDataRequests.delete(key);
+      if (attachmentDataRequests.get(key) === request) attachmentDataRequests.delete(key);
     });
   attachmentDataRequests.set(key, request);
   return request;
@@ -705,6 +744,7 @@ function cachedAttachmentData(noteID: string, attachmentID: string) {
 
 function forgetAttachmentData(noteID: string, attachmentID: string) {
   const key = attachmentCacheKey(noteID, attachmentID);
+  attachmentCacheBytes -= (attachmentDataCache.get(key)?.length ?? 0) * 2;
   attachmentDataCache.delete(key);
   attachmentDataRequests.delete(key);
 }
@@ -1651,6 +1691,12 @@ function buildLivePreviewState(
       continue;
     }
 
+    const bare = line.text.match(/^(\s*)<([ \t]?)/);
+    const barePrefixSize = bare?.[0].length ?? 0;
+    if (bare) {
+      addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
+    }
+
     const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
     const task = decorateTaskMarker(
       line.text.slice(indentation),
@@ -1720,8 +1766,8 @@ function buildLivePreviewState(
     decorateInlineMarkdown(
       state,
       lineNumber,
-      line.text,
-      line.from,
+      line.text.slice(barePrefixSize),
+      line.from + barePrefixSize,
       decorations,
       atomicRanges,
       openWikilink,
@@ -1927,19 +1973,11 @@ function prefixSelectedLines(view: EditorView, prefix: string) {
     .sort((left, right) => left - right)
     .map((lineNumber) => {
       const line = view.state.doc.line(lineNumber);
-      const toggle = toggleLine(line.text);
-      const indentation = line.text.match(/^[ \t]*/)?.[0].length ?? 0;
-
-      const insertionPoint =
-        prefix === "> "
-          ? line.from + indentation
-          : toggle
-            ? line.from + toggle.prefixSize
-            : line.from + indentation;
-
+      const previousLine = lineNumber > 1 ? view.state.doc.line(lineNumber - 1).text : undefined;
       return {
-        from: insertionPoint,
-        insert: prefix,
+        from: line.from,
+        to: line.to,
+        insert: replaceExclusiveObjectPrefix(line.text, prefix, previousLine),
       };
     });
 
@@ -2138,7 +2176,8 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const object = classifyObjectLine(line.text);
   const indentation = line.text.match(/^[ \t]*/)?.[0] ?? "";
   const section = line.text.match(/^([ \t]*>+[ \t]?)/);
-  const list = line.text.match(/^([ \t]*)([-+*])[ \t]+/);
+  const bare = line.text.match(/^([ \t]*)<([ \t]?)/);
+  const list = line.text.match(/^([ \t]*)(?:(\d+)([.)])|([-+*]))[ \t]+/);
   const continuationObjectPrefix = parentObjectPrefixForContinuation(view.state, line.number);
   const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
@@ -2152,8 +2191,10 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
     ? "\n"
     : object.tag === "section"
     ? `\n${section?.[1] ?? `${indentation}> `}`
+    : bare
+    ? `\n${bare[1]}< `
     : object.tag === "bulletpoint" && list
-    ? `\n${indentation}${list[2]} `
+    ? `\n${indentation}${list[2] ? `${Number(list[2]) + 1}${list[3]}` : list[4]} `
     : `\n${indentation}`;
 
   view.dispatch({
@@ -2277,6 +2318,21 @@ function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
   return true;
 }
 
+function showCaretLocation(view: EditorView) {
+  const position = view.state.selection.main.head;
+  const sectionPosition = currentToggleSectionPosition(view.state);
+  const effects = [
+    locateCaret.of(position),
+    EditorView.scrollIntoView(position, { y: "center" }),
+  ];
+  if (sectionPosition !== null) {
+    effects.push(setQuoteCollapsed.of({ position: sectionPosition, collapsed: false }));
+  }
+  view.dispatch({ effects });
+  view.focus();
+  return true;
+}
+
 function objectHandleElement(target: EventTarget | null): HTMLElement | null {
   return target instanceof HTMLElement
     ? target.closest<HTMLElement>(".cm-live-object-handle[data-object-line]")
@@ -2390,6 +2446,8 @@ export default function LiveMarkdownEditor({
   const onCaretChangeRef = useRef(onCaretChange);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
 
+  useEffect(() => () => clearAttachmentDataCache(), [noteID]);
+
   useLayoutEffect(() => {
     if (!showToolbar) return;
     const editorHost = host.current;
@@ -2445,6 +2503,16 @@ export default function LiveMarkdownEditor({
               key: "Ctrl-r",
               preventDefault: true,
               run: (editor) => redo(editor),
+            },
+            {
+              key: "Ctrl-Shift-z",
+              preventDefault: true,
+              run: (editor) => redo(editor),
+            },
+            {
+              key: "Ctrl-Alt-l",
+              preventDefault: true,
+              run: (editor) => showCaretLocation(editor),
             },
             {
               key: "Ctrl-]",
@@ -2534,18 +2602,40 @@ export default function LiveMarkdownEditor({
             override: [snippetCompletion],
           }),
           minimalSetup,
+          history({ newGroupDelay: 250 }),
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
           markdown({ codeLanguages: languages }),
           deepCodeHighlightField,
           deepCodeHighlightLoader,
           liveMarkdownTheme,
+          caretLocatorField,
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
             if (readOnly) return false;
             let changeFrom = from;
             let changeTo = to;
             let inserted = text;
+
+            if (!inserted.includes("\n")) {
+              const line = inputView.state.doc.lineAt(changeFrom);
+              if (changeTo <= line.to) {
+                const relativeFrom = changeFrom - line.from;
+                const prospective = `${line.text.slice(0, relativeFrom)}${inserted}${line.text.slice(changeTo - line.from)}`;
+                const previousLine = line.number > 1
+                  ? inputView.state.doc.line(line.number - 1).text
+                  : undefined;
+                const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
+                if (normalizedPrefix !== prospective) {
+                  const prefixLength = normalizedPrefix.match(/^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/)?.[0].length ?? 0;
+                  inputView.dispatch({
+                    changes: { from: line.from, to: line.to, insert: normalizedPrefix },
+                    selection: EditorSelection.cursor(line.from + prefixLength),
+                  });
+                  return true;
+                }
+              }
+            }
 
             if (
               changeFrom > 0 &&
@@ -2736,7 +2826,10 @@ export default function LiveMarkdownEditor({
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: normalizedValue },
       selection: preservedSelection(editor, normalizedValue.length),
-      annotations: externalDocumentUpdate.of(true),
+      annotations: [
+        externalDocumentUpdate.of(true),
+        Transaction.addToHistory.of(false),
+      ],
     });
     if (normalizedValue !== value) {
       queueMicrotask(() => onChangeRef.current(normalizedValue));

@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import { Annotation, EditorSelection, EditorState } from "@codemirror/state";
+import { Annotation, EditorSelection, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { redo, undo } from "@codemirror/commands";
+import { history, redo, undo } from "@codemirror/commands";
 import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { minimalSetup } from "codemirror";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
@@ -20,6 +20,11 @@ type Props = {
   value: string;
   onChange: (value: string) => void;
   onError: (reason: unknown) => void;
+  readOnly?: boolean;
+  scrollSync?: {
+    register: (scroller: HTMLElement) => () => void;
+    sync: (source: HTMLElement) => void;
+  };
 };
 
 const externalDocumentUpdate = Annotation.define<boolean>();
@@ -40,6 +45,8 @@ export default function SourceMarkdownEditor({
   value,
   onChange,
   onError,
+  readOnly = false,
+  scrollSync,
 }: Props) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -59,6 +66,8 @@ export default function SourceMarkdownEditor({
         doc: value,
         extensions: [
           minimalSetup,
+          EditorState.readOnly.of(readOnly),
+          history({ newGroupDelay: 250 }),
           markdown({ codeLanguages: languages }),
           search({ top: false }),
           keymap.of([
@@ -74,6 +83,11 @@ export default function SourceMarkdownEditor({
               run: (current) => redo(current),
             },
             {
+              key: "Ctrl-Shift-z",
+              preventDefault: true,
+              run: (current) => redo(current),
+            },
+            {
               key: "Mod-h",
               preventDefault: true,
               run: (current) => openSearchPanel(current),
@@ -81,11 +95,13 @@ export default function SourceMarkdownEditor({
           ]),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({
-            "aria-label": "Source Markdown editor",
+            "aria-label": readOnly ? "Portable Markdown" : "Raw Markdown editor",
+            "aria-readonly": readOnly ? "true" : "false",
             spellcheck: "true",
           }),
           EditorView.domEventHandlers({
             paste(event, pastedView) {
+              if (readOnly) return false;
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) return false;
               event.preventDefault();
@@ -125,7 +141,12 @@ export default function SourceMarkdownEditor({
       }),
     });
     view.current = editor;
+    const syncScroll = () => scrollSync?.sync(editor.scrollDOM);
+    const unregisterScroll = scrollSync?.register(editor.scrollDOM);
+    editor.scrollDOM.addEventListener("scroll", syncScroll, { passive: true });
     return () => {
+      editor.scrollDOM.removeEventListener("scroll", syncScroll);
+      unregisterScroll?.();
       editor.destroy();
       view.current = null;
     };
@@ -137,7 +158,10 @@ export default function SourceMarkdownEditor({
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: value },
       selection: preservedSelection(editor, value.length),
-      annotations: externalDocumentUpdate.of(true),
+      annotations: [
+        externalDocumentUpdate.of(true),
+        Transaction.addToHistory.of(false),
+      ],
     });
   }, [value]);
 

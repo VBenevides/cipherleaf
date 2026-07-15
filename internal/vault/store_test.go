@@ -1465,6 +1465,14 @@ func TestFindInNotesReturnsSnippetsAndOffsets(t *testing.T) {
 	}
 }
 
+func TestFindMatchIncludesUTF16Range(t *testing.T) {
+	content := "préfix 😀 needle"
+	match := withUTF16Range(FindMatch{Offset: 13, MatchLength: 6}, content)
+	if match.UTF16Offset != 10 || match.UTF16MatchLength != 6 {
+		t.Fatalf("UTF-16 range = %d:%d; want 10:6", match.UTF16Offset, match.UTF16MatchLength)
+	}
+}
+
 func TestListUnlinkedMentionsExcludesWikilinks(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "mention-test-secret"); err != nil {
@@ -1991,6 +1999,53 @@ func TestDerivedMarkdownContentPreservesCodeObjects(t *testing.T) {
 	if got := derivedMarkdownContent(string(content)); got != want {
 		t.Fatalf("derived markdown = %q, want %q", got, want)
 	}
+}
+
+func TestObjectDocumentConformance(t *testing.T) {
+	type expectedObject struct {
+		Tag, Text, SourcePrefix, Language string
+		Indent, ContentIndent             int
+		Checked, Closed                   *bool
+	}
+	type fixture struct {
+		Name, Markdown string
+		Objects        []expectedObject
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "object_document_conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []fixture
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range fixtures {
+		t.Run(item.Name, func(t *testing.T) {
+			document := canonicalObjectDocumentFromMarkdown(item.Markdown)
+			if len(document.Objects) != len(item.Objects) {
+				t.Fatalf("object count = %d, want %d", len(document.Objects), len(item.Objects))
+			}
+			for index, want := range item.Objects {
+				got := document.Objects[index]
+				if got.Tag != want.Tag || got.Text != want.Text || got.SourcePrefix != want.SourcePrefix ||
+					got.Language != want.Language || got.Indent != want.Indent || got.ContentIndent != want.ContentIndent ||
+					!pointerEqual(got.Checked, want.Checked) || !pointerEqual(got.Closed, want.Closed) {
+					t.Fatalf("object %d = %+v, want %+v", index, got, want)
+				}
+			}
+			content, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := derivedMarkdownContent(string(content)); got != item.Markdown {
+				t.Fatalf("round trip = %q, want %q", got, item.Markdown)
+			}
+		})
+	}
+}
+
+func pointerEqual[T comparable](left, right *T) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
 
 func TestExtractOutgoingLinksIgnoresInlineCode(t *testing.T) {

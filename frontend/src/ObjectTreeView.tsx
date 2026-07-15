@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import {
   moveObject,
-  parseCanonicalObjectDocument,
+  objectDocumentFromCanonicalObjectDocument,
   prepareNoteContent,
   type ObjectDropMode,
   type ObjectLine,
-} from "./objectTree";
+} from "./objectDocument";
 
 type Props = {
   value: string;
@@ -102,8 +102,13 @@ function ObjectTreeNode({
 }
 
 export default function ObjectTreeView({ value, onChange }: Props) {
-  const prepared = useMemo(() => prepareNoteContent(value), [value]);
-  const tree = useMemo(() => parseCanonicalObjectDocument(value).roots, [value]);
+  const { prepared, tree } = useMemo(() => {
+    const prepared = prepareNoteContent(value);
+    return {
+      prepared,
+      tree: objectDocumentFromCanonicalObjectDocument(prepared.canonical).roots,
+    };
+  }, [value]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; mode: ObjectDropMode } | null>(null);
   const draggedIdRef = useRef<string | null>(null);

@@ -8,6 +8,12 @@ import * as githubsync$0 from "../githubsync/models.js";
 // @ts-ignore: Unused imports
 import * as vault$0 from "../vault/models.js";
 
+export interface ApplicationStatistics {
+    "cpuPercent": number;
+    "memoryBytes": number;
+    "memoryUsage": ProcessMemoryUsage[] | null;
+}
+
 export interface CloneVaultResult {
     "session": vault$0.Session;
     "message": string;
@@ -33,6 +39,12 @@ export interface GitDiagnostics {
 export interface LastSession {
     "path": string;
     "theme": string;
+}
+
+export interface ProcessMemoryUsage {
+    "name": string;
+    "pid": number;
+    "memoryBytes": number;
 }
 
 /**

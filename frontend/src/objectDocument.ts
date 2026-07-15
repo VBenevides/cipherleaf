@@ -92,6 +92,80 @@ export function objectHierarchyIndent(text: string): number {
   return quote ? visualIndent(quote[1]) + (quote[2].length - 1) * 2 : lineIndent(text);
 }
 
+type ExclusiveObjectPrefix = {
+  indent: number;
+  kind: "bare" | "bulletpoint" | "section" | "numbering";
+  marker: string;
+  rest: string;
+};
+
+function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
+  const bare = text.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  if (bare) {
+    return {
+      indent: visualIndent(bare[1]),
+      kind: "bare",
+      marker: `<${bare[2]}`,
+      rest: bare[3],
+    };
+  }
+
+  const section = text.match(/^([ \t]*)(>+)[ \t]?(.*)$/);
+  if (section) {
+    return {
+      indent: visualIndent(section[1]) + (section[2].length - 1) * 2,
+      kind: "section",
+      marker: `${section[2]} `,
+      rest: section[3],
+    };
+  }
+
+  const list = text.match(/^([ \t]*)(?:(\d+)([.)])|([-*]))[ \t]+(.*)$/);
+  if (!list) return null;
+  return {
+    indent: visualIndent(list[1]),
+    kind: list[2] ? "numbering" : "bulletpoint",
+    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[4]} `,
+    rest: list[5],
+  };
+}
+
+function numberedMarker(previousLine: string | undefined, indent: number, fallback: string) {
+  if (!previousLine) return fallback;
+  const previous = exclusiveObjectPrefix(previousLine);
+  if (!previous || previous.kind !== "numbering" || previous.indent !== indent) return fallback;
+  const number = Number.parseInt(previous.marker, 10);
+  const punctuation = fallback.match(/[.)]/)?.[0] ?? ".";
+  return `${number + 1}${punctuation} `;
+}
+
+export function replaceExclusiveObjectPrefix(
+  line: string,
+  marker: string,
+  previousLine?: string,
+): string {
+  const current = exclusiveObjectPrefix(line);
+  if (!current) {
+    const indentation = line.match(/^[ \t]*/)?.[0] ?? "";
+    return `${indentation}${marker}${line.slice(indentation.length)}`;
+  }
+  const nextMarker = /^\d+[.)] $/.test(marker)
+    ? numberedMarker(previousLine, current.indent, marker)
+    : marker;
+  return `${" ".repeat(current.indent)}${nextMarker}${current.rest}`;
+}
+
+export function normalizeStackedExclusiveObjectPrefix(line: string, previousLine?: string): string {
+  const current = exclusiveObjectPrefix(line);
+  if (!current) return line;
+  const next = exclusiveObjectPrefix(current.rest);
+  if (!next || /^\s/.test(current.rest)) return line;
+  const marker = next.kind === "numbering"
+    ? numberedMarker(previousLine, current.indent, next.marker)
+    : next.marker;
+  return `${" ".repeat(current.indent)}${marker}${next.rest}`;
+}
+
 function stableUuid(input: string): string {
   let first = 0x811c9dc5;
   let second = 0x01000193;
@@ -127,7 +201,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  const source = outline ? outline[4] : raw.trimStart();
+  const bare = !outline && raw.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
   const tags: ObjectTag[] = outline ? ["section"] : [];
   const indent = outline
     ? visualIndent(outline[1]) + (outline[2].length - 1) * 2
@@ -217,10 +292,12 @@ export function lineStartsObject(raw: string): boolean {
 
 function lineStartsExplicitObject(raw: string): boolean {
   const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  const source = outline ? outline[4] : raw.trimStart();
+  const bare = !outline && raw.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
 
   return Boolean(
     outline ||
+      bare ||
       parseAttachmentMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
       /^\[([ xX])\]\s*(.*)$/.test(source) ||
@@ -238,6 +315,9 @@ export function objectContentIndent(raw: string): number {
 export function repeatedObjectPrefix(raw: string): string | null {
   const quote = raw.match(/^([ \t]*)(>+)([ \t]?)/);
   if (quote) return `${quote[1]}${quote[2]} `;
+
+  const bare = raw.match(/^([ \t]*)<([ \t]?)/);
+  if (bare) return `${bare[1]}< `;
 
   const task = raw.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
   if (task) return `${task[1]}${task[2] ?? ""}[ ] `;
@@ -613,6 +693,53 @@ export function remapObjectKeysByLine(
 
 export function markdownObjectTree(markdown: string): ObjectLine[] {
   return parseObjectDocument(markdown).roots;
+}
+
+export function portableMarkdown(markdown: string): string {
+  const document = parseObjectDocument(markdown);
+  let firstSection = true;
+
+  return document.objects.map((object) => {
+    const indent = " ".repeat(Math.max(0, object.indent));
+    if (object.tag === "code") {
+      return ["```" + (object.language ?? "text"), object.text, object.closed === false ? "" : "```"]
+        .filter((line, index) => line !== "" || index === 1)
+        .map((line) => line ? `${indent}${line}` : "")
+        .join("\n");
+    }
+    if (object.tag === "section") {
+      const lines = object.text.split("\n");
+      const checked = object.checked === undefined ? "" : `[${object.checked ? "x" : " "}] `;
+      if (firstSection) {
+        firstSection = false;
+        return [
+          `# ${checked}${lines[0] ?? ""}`.trimEnd(),
+          ...lines.slice(1).map((line) => line.trimEnd()),
+        ].join("\n");
+      }
+      return [
+        `${indent}> ${checked}${lines[0] ?? ""}`.trimEnd(),
+        ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
+      ].join("\n");
+    }
+    if (object.checked !== undefined) {
+      const lines = object.text.split("\n");
+      return [
+        `${indent}- [${object.checked ? "x" : " "}] ${lines[0] ?? ""}`.trimEnd(),
+        ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
+      ].join("\n");
+    }
+    if (object.tag === "bulletpoint") {
+      const ordered = object.sourcePrefix.trimStart().match(/^\d+[.)]/)?.[0];
+      const marker = ordered ?? "-";
+      const lines = object.text.split("\n");
+      return [
+        `${indent}${marker} ${lines[0] ?? ""}`.trimEnd(),
+        ...lines.slice(1).map((line) => `${indent}  ${line}`.trimEnd()),
+      ].join("\n");
+    }
+    return object.text.split("\n").map((line) => line ? `${indent}${line}` : "").join("\n");
+  }).join("\n");
 }
 
 export function objectDepth(object: Pick<ObjectLine, "parentId">, byId: ReadonlyMap<string, Pick<ObjectLine, "parentId">>): number {

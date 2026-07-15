@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   canonicalObjectDocumentFromMarkdown,
@@ -8,13 +9,32 @@ import {
   moveObject,
   moveObjectInMarkdown,
   objectDepthByLine,
+  portableMarkdown,
   parseCanonicalObjectDocument,
   parseObjectDocument,
   prepareNoteContent,
   remapObjectKeysByLine,
-} from "../src/objectTree.ts";
+} from "../src/objectDocument.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("matches shared object-document conformance fixtures", () => {
+  const fixtures = JSON.parse(readFileSync(
+    new URL("../../testdata/object_document_conformance.json", import.meta.url),
+    "utf8",
+  )) as Array<{ name: string; markdown: string; objects: Array<Record<string, unknown>> }>;
+
+  for (const fixture of fixtures) {
+    const document = canonicalObjectDocumentFromMarkdown(fixture.markdown);
+    assert.equal(document.objects.length, fixture.objects.length, fixture.name);
+    fixture.objects.forEach((expected, index) => {
+      for (const [field, value] of Object.entries(expected)) {
+        assert.deepEqual(document.objects[index][field as keyof typeof document.objects[number]], value, `${fixture.name}: object ${index} ${field}`);
+      }
+    });
+    assert.equal(markdownFromCanonicalObjectDocument(document), fixture.markdown, fixture.name);
+  }
+});
 
 test("builds typed objects with indentation and parents", () => {
   const tree = markdownObjectTree([
@@ -158,6 +178,66 @@ test("keeps unindented text lines as separate objects", () => {
   assert.equal(tree[2].text, "bullet");
   assert.equal(tree[3].tag, "bulletpoint");
   assert.equal(tree[3].text, "next bullet\nbullet continuation");
+});
+
+test("keeps marked bare text as an independent object", () => {
+  const markdown = [
+    "- Parent",
+    "  continuation",
+    "  < Bare child",
+  ].join("\n");
+  const tree = markdownObjectTree(markdown);
+
+  assert.equal(tree[0].text, "Parent\ncontinuation");
+  assert.equal(tree[0].children[0].tag, "text");
+  assert.equal(tree[0].children[0].text, "Bare child");
+  assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), markdown);
+});
+
+test("exports Cipherleaf objects as portable markdown", () => {
+  assert.equal(portableMarkdown([
+    "> Section",
+    "  < Bare text",
+    "  * Item",
+    "    - Nested item",
+    "  > Child section",
+  ].join("\n")), [
+    "# Section",
+    "  Bare text",
+    "  - Item",
+    "    - Nested item",
+    "  > Child section",
+  ].join("\n"));
+});
+
+test("preserves bare text depth in portable markdown", () => {
+  assert.equal(portableMarkdown([
+    "> Section",
+    "  < First level",
+    "    < Second level",
+    "      < Third level",
+    "  < First level again",
+  ].join("\n")), [
+    "# Section",
+    "  First level",
+    "    Second level",
+    "      Third level",
+    "  First level again",
+  ].join("\n"));
+});
+
+test("keeps every section after the first as an indented quote", () => {
+  assert.equal(portableMarkdown([
+    "> Project",
+    "  > [ ] Pending",
+    "  > [x] Complete",
+    "> Another root",
+  ].join("\n")), [
+    "# Project",
+    "  > [ ] Pending",
+    "  > [x] Complete",
+    "> Another root",
+  ].join("\n"));
 });
 
 test("assigns sibling sections to the nested section parent", () => {

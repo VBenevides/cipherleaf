@@ -24,6 +24,21 @@ func TestRepositorySizesSeparatesGitMetadata(t *testing.T) {
 	}
 }
 
+func TestApplicationStatisticsMemoryUsageIsSorted(t *testing.T) {
+	statistics, err := NewVaultService().GetApplicationStatistics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statistics.MemoryUsage) == 0 || statistics.MemoryBytes == 0 {
+		t.Fatal("expected application memory usage")
+	}
+	for index := 1; index < len(statistics.MemoryUsage); index++ {
+		if statistics.MemoryUsage[index-1].MemoryBytes < statistics.MemoryUsage[index].MemoryBytes {
+			t.Fatal("memory usage is not sorted descending")
+		}
+	}
+}
+
 func TestClearClipboardIfUnchanged(t *testing.T) {
 	value := "vault-secret"
 	clearClipboardIfUnchanged(

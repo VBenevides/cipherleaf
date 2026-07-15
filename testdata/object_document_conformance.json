@@ -1,0 +1,14 @@
+[
+  {
+    "name": "nested bare text, tasks, ordered lists, and fenced code",
+    "markdown": "> Section\n  < Bare text\n    < Nested bare\n  * [x] Done\n        continuation\n  1. Ordered\n  ```go\nfmt.Println(\"ok\")\n  ```",
+    "objects": [
+      { "tag": "section", "text": "Section", "indent": 0, "contentIndent": 2, "sourcePrefix": "> " },
+      { "tag": "text", "text": "Bare text", "indent": 2, "contentIndent": 4, "sourcePrefix": "  < " },
+      { "tag": "text", "text": "Nested bare", "indent": 4, "contentIndent": 6, "sourcePrefix": "    < " },
+      { "tag": "bulletpoint", "text": "Done\ncontinuation", "indent": 2, "contentIndent": 8, "sourcePrefix": "  * [x] ", "checked": true },
+      { "tag": "bulletpoint", "text": "Ordered", "indent": 2, "contentIndent": 5, "sourcePrefix": "  1. " },
+      { "tag": "code", "text": "fmt.Println(\"ok\")", "indent": 2, "contentIndent": 2, "sourcePrefix": "  ```go", "language": "go", "closed": true }
+    ]
+  }
+]

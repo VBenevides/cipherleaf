@@ -95,6 +95,10 @@ export function GenerateVaultSecret(): $CancellablePromise<string> {
     return $Call.ByID(3315011432);
 }
 
+export function GetApplicationStatistics(): $CancellablePromise<$models.ApplicationStatistics> {
+    return $Call.ByID(1301789830);
+}
+
 export function GetAttachment(noteID: string, id: string): $CancellablePromise<string> {
     return $Call.ByID(115494468, noteID, id);
 }
@@ -163,10 +167,6 @@ export function ListTrash(): $CancellablePromise<vault$0.TrashItem[] | null> {
     return $Call.ByID(3351323131);
 }
 
-export function ListUnlinkedMentions(noteID: string): $CancellablePromise<vault$0.FindMatch[] | null> {
-    return $Call.ByID(3691123198, noteID);
-}
-
 export function LockFolder(id: string, password: string): $CancellablePromise<vault$0.Folder> {
     return $Call.ByID(1628193172, id, password);
 }
@@ -212,13 +212,6 @@ export function PermanentlyDeleteTrashItem(kind: string, id: string): $Cancellab
 
 export function PullAndLinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<$models.SyncResult> {
     return $Call.ByID(866409854, settings);
-}
-
-/**
- * PullNow pulls and merges the remote vault snapshot without pushing back.
- */
-export function PullNow(): $CancellablePromise<vault$0.MergeResult> {
-    return $Call.ByID(2641264576);
 }
 
 export function QuitApplication(): $CancellablePromise<void> {
@@ -274,10 +267,6 @@ export function RestoreTrashItem(kind: string, id: string): $CancellablePromise<
     return $Call.ByID(3441570684, kind, id);
 }
 
-export function SaveAttachment(noteID: string, webpBase64: string): $CancellablePromise<string> {
-    return $Call.ByID(2496789391, noteID, webpBase64);
-}
-
 export function SaveImageAttachment(noteID: string, imageDataURL: string): $CancellablePromise<string> {
     return $Call.ByID(1556359170, noteID, imageDataURL);
 }
@@ -288,10 +277,6 @@ export function SaveNote(id: string, title: string, content: string): $Cancellab
 
 export function SaveVaultSettings(settings: vault$0.VaultSettings): $CancellablePromise<vault$0.VaultSettings> {
     return $Call.ByID(3499492715, settings);
-}
-
-export function SearchNotes(query: string): $CancellablePromise<vault$0.NoteSummary[] | null> {
-    return $Call.ByID(1370302028, query);
 }
 
 export function SelectAttachmentFile(): $CancellablePromise<string> {

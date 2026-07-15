@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"cipherleaf/internal/secure"
 	appsession "cipherleaf/internal/session"
 	"cipherleaf/internal/vault"
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -31,6 +33,8 @@ type VaultService struct {
 	sync           *githubsync.Manager
 	syncWorkerOnce sync.Once
 	syncJobs       chan syncJob
+	statisticsMu   sync.Mutex
+	process        *process.Process
 }
 
 type syncJob struct{ done chan syncJobResult }
@@ -49,6 +53,18 @@ type CloneVaultResult struct {
 	Warning    string        `json:"warning"`
 	LastCommit string        `json:"lastCommit"`
 	Linked     bool          `json:"linked"`
+}
+
+type ApplicationStatistics struct {
+	CPUPercent  float64              `json:"cpuPercent"`
+	MemoryBytes uint64               `json:"memoryBytes"`
+	MemoryUsage []ProcessMemoryUsage `json:"memoryUsage"`
+}
+
+type ProcessMemoryUsage struct {
+	Name        string `json:"name"`
+	PID         int32  `json:"pid"`
+	MemoryBytes uint64 `json:"memoryBytes"`
 }
 
 // SyncResult summarizes a manual sync (pull then push) for the frontend.
@@ -95,12 +111,61 @@ type SyncTimings struct {
 }
 
 func NewVaultService() *VaultService {
+	currentProcess, _ := process.NewProcess(int32(os.Getpid()))
 	return &VaultService{
 		store:   vault.NewStore(),
 		recent:  appsession.NewDefaultRecentVaultStore(),
 		secrets: secretstore.New(),
 		sync:    githubsync.NewDefaultManager(),
+		process: currentProcess,
 	}
+}
+
+func (s *VaultService) GetApplicationStatistics() (ApplicationStatistics, error) {
+	s.statisticsMu.Lock()
+	defer s.statisticsMu.Unlock()
+	if s.process == nil {
+		return ApplicationStatistics{}, errors.New("application statistics are unavailable")
+	}
+	cpuPercent, err := s.process.Percent(0)
+	if err != nil {
+		return ApplicationStatistics{}, err
+	}
+	memoryUsage, err := processMemoryUsage(s.process)
+	if err != nil {
+		return ApplicationStatistics{}, err
+	}
+	var memoryBytes uint64
+	for _, item := range memoryUsage {
+		memoryBytes += item.MemoryBytes
+	}
+	return ApplicationStatistics{CPUPercent: cpuPercent, MemoryBytes: memoryBytes, MemoryUsage: memoryUsage}, nil
+}
+
+func processMemoryUsage(root *process.Process) ([]ProcessMemoryUsage, error) {
+	processes := []*process.Process{root}
+	for index := 0; index < len(processes); index++ {
+		if children, err := processes[index].Children(); err == nil {
+			processes = append(processes, children...)
+		}
+	}
+	usage := make([]ProcessMemoryUsage, 0, len(processes))
+	for index, item := range processes {
+		memory, err := item.MemoryInfo()
+		if err != nil {
+			if index == 0 {
+				return nil, err
+			}
+			continue
+		}
+		name, err := item.Name()
+		if err != nil || name == "" {
+			name = "Application process"
+		}
+		usage = append(usage, ProcessMemoryUsage{Name: name, PID: item.Pid, MemoryBytes: memory.RSS})
+	}
+	sort.Slice(usage, func(left, right int) bool { return usage[left].MemoryBytes > usage[right].MemoryBytes })
+	return usage, nil
 }
 
 func (s *VaultService) SetApp(app *application.App) {
@@ -506,14 +571,6 @@ func (s *VaultService) SaveNote(id, title, content string) (vault.Note, error) {
 	return s.store.SaveNote(id, title, content)
 }
 
-func (s *VaultService) SaveAttachment(noteID, webpBase64 string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(webpBase64)
-	if err != nil {
-		return "", errors.New("image data is not valid base64")
-	}
-	return s.store.SaveAttachment(noteID, data)
-}
-
 func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string, error) {
 	data, err := convertImageDataURLToWebP(imageDataURL)
 	if err != nil {
@@ -670,20 +727,12 @@ func (s *VaultService) ExportMarkdown(path string) (vault.PortabilityResult, err
 	return s.store.ExportMarkdown(path)
 }
 
-func (s *VaultService) SearchNotes(query string) ([]vault.NoteSummary, error) {
-	return s.store.Search(query)
-}
-
 func (s *VaultService) ResolveNoteReference(reference string) (vault.NoteSummary, error) {
 	return s.store.ResolveNoteReference(reference)
 }
 
 func (s *VaultService) ListBacklinks(noteID string) ([]vault.FindMatch, error) {
 	return s.store.ListBacklinks(noteID)
-}
-
-func (s *VaultService) ListUnlinkedMentions(noteID string) ([]vault.FindMatch, error) {
-	return s.store.ListUnlinkedMentions(noteID)
 }
 
 func (s *VaultService) FindInNotes(query string) ([]vault.FindMatch, error) {
@@ -1001,33 +1050,6 @@ func (s *VaultService) ForcePushNow() (githubsync.PushResult, error) {
 		return githubsync.PushResult{}, err
 	}
 	return s.sync.ForcePushVault(context.Background(), vaultID, s.store)
-}
-
-// PullNow pulls and merges the remote vault snapshot without pushing back.
-func (s *VaultService) PullNow() (vault.MergeResult, error) {
-	vaultID, err := s.unlockedVaultID()
-	if err != nil {
-		return vault.MergeResult{}, err
-	}
-	pull, err := s.sync.PullVault(context.Background(), vaultID)
-	if err != nil {
-		return vault.MergeResult{}, err
-	}
-	if pull.Temporary {
-		defer os.RemoveAll(pull.StagingPath)
-	}
-	if pull.StagingPath == "" {
-		return vault.MergeResult{}, errors.New("pull returned no encrypted vault snapshot")
-	}
-	merged, err := s.store.MergeRemoteSnapshot(pull.StagingPath)
-	if err != nil {
-		return vault.MergeResult{}, err
-	}
-	if err := s.store.PruneStaleAttachments(); err != nil {
-		return vault.MergeResult{}, err
-	}
-	s.sync.MarkSynced(vaultID)
-	return merged, nil
 }
 
 func (s *VaultService) unlockedVaultID() (string, error) {

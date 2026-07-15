@@ -19,6 +19,8 @@ export interface FindMatch {
     "snippet": string;
     "offset": number;
     "matchLength": number;
+    "utf16Offset": number;
+    "utf16MatchLength": number;
 }
 
 export interface Folder {

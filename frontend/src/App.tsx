@@ -28,11 +28,13 @@ import type {
   ConnectionResult,
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
-import type { SyncResult } from "../bindings/cipherleaf/internal/app/models";
+import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import {
-  canonicalObjectDocumentTextFromMarkdown,
+  markdownFromCanonicalObjectDocument,
+  parseCanonicalObjectDocumentText,
+  portableMarkdown,
   prepareNoteContent,
 } from "./objectDocument";
 import { targetForMatch, type SearchTarget } from "./searchTarget";
@@ -46,7 +48,7 @@ type Theme = "light" | "dark" | "archivist";
 type JournalLines = "none" | "full" | "dotted";
 type SettingsTab = "general" | "appearance";
 type SectionDefault = "expanded" | "collapsed";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "statistics" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -126,16 +128,9 @@ function noteForEditing(note: Note): { note: Note; migrated: boolean } {
   };
 }
 
-function noteForStorage(note: Note): Note {
-  return note;
-}
-
 function markdownForEditing(content: string): string {
-  return prepareNoteContent(content).markdown;
-}
-
-function canonicalContentFromMarkdown(markdown: string): string {
-  return canonicalObjectDocumentTextFromMarkdown(markdown);
+  const canonical = parseCanonicalObjectDocumentText(content);
+  return canonical ? markdownFromCanonicalObjectDocument(canonical) : content;
 }
 
 function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
@@ -376,6 +371,9 @@ function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
+  const [statisticsOpen, setStatisticsOpen] = useState(false);
+  const [statistics, setStatistics] = useState<ApplicationStatistics | null>(null);
+  const [statisticsError, setStatisticsError] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
@@ -544,6 +542,27 @@ function App() {
     const interval = window.setInterval(() => setToday(new Date()), 60_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!syncNotification) return;
+    const timeout = window.setTimeout(() => setSyncNotification(""), 5_000);
+    return () => window.clearTimeout(timeout);
+  }, [syncNotification]);
+
+  useEffect(() => {
+    if (!statisticsOpen) return;
+    const refresh = () => {
+      void VaultService.GetApplicationStatistics()
+        .then((value) => {
+          setStatistics(value);
+          setStatisticsError("");
+        })
+        .catch((reason) => setStatisticsError(errorText(reason)));
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1_000);
+    return () => window.clearInterval(interval);
+  }, [statisticsOpen]);
 
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -767,6 +786,13 @@ function App() {
     const id = window.setInterval(() => setNowTick(Date.now()), 30000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (globalSearchOpen) return;
+    globalSearchRequestRef.current++;
+    setGlobalSearchMatches([]);
+    setGlobalSearchBusy(false);
+  }, [globalSearchOpen]);
 
   const runGlobalSearch = useCallback(async (query: string) => {
     const request = ++globalSearchRequestRef.current;
@@ -1101,23 +1127,22 @@ function App() {
     setSaveState("saving");
     try {
       const version = editVersion.current;
-      const stored = noteForStorage(snapshot);
       const saved = await VaultService.SaveNote(
-        stored.id,
-        stored.title,
-        stored.content,
+        snapshot.id,
+        snapshot.title,
+        markdownForEditing(snapshot.content),
       );
       updateSummary(saved);
       setNotes((await VaultService.ListNotes()) ?? []);
+      const prepared = noteForEditing(saved);
       if (version === editVersion.current) {
-        const prepared = noteForEditing(saved);
         noteRef.current = prepared.note;
         dirtyRef.current = false;
         setNote(prepared.note);
         setDirty(false);
         setSaveState("saved");
       }
-      return noteForEditing(saved).note;
+      return prepared.note;
     } catch (reason) {
       setSaveState("error");
       setError(errorText(reason));
@@ -1428,8 +1453,7 @@ function App() {
       await refreshFolders();
       if (completedAction === "create") {
         const first = await VaultService.CreateNote("Welcome");
-        const welcomeContent = canonicalObjectDocumentTextFromMarkdown(
-          [
+        const welcomeContent = [
             "# Welcome to Cipherleaf",
             "",
             "Your notes, titles, properties, and attachments are encrypted before they touch the disk.",
@@ -1451,8 +1475,7 @@ function App() {
             "## Keep your vault safe",
             "",
             "Save your vault secret somewhere secure—there is no password reset. Cipherleaf locks automatically after 15 minutes of inactivity.",
-          ].join("\n"),
-        );
+          ].join("\n");
         const saved = await VaultService.SaveNote(
           first.id,
           first.title,
@@ -1562,7 +1585,7 @@ function App() {
       const saved = await VaultService.SaveNote(
         conflictResolution.localNote.id,
         conflictResolution.localNote.title,
-        canonicalContentFromMarkdown(conflictResolution.mergedContent),
+        conflictResolution.mergedContent,
       );
       setConflictResolution(null);
       setSyncConflicts((current) =>
@@ -1743,7 +1766,7 @@ function App() {
         const template = await VaultService.GetNote(dailyTemplateNoteID);
         content = renderNoteTemplate(markdownForEditing(template.content), title, date);
       }
-      const saved = await VaultService.SaveNote(created.id, created.title, canonicalContentFromMarkdown(content));
+      const saved = await VaultService.SaveNote(created.id, created.title, content);
       setNotes((await VaultService.ListNotes()) ?? []);
       applyLoadedNote(saved);
     } catch (reason) {
@@ -1877,6 +1900,7 @@ function App() {
         layer: "appearanceSettings",
         close: () => setAppearanceSettingsOpen(false),
       },
+      { open: statisticsOpen, layer: "statistics", close: () => setStatisticsOpen(false) },
     ];
     const current = dialogs
       .filter((dialog) => dialog.open)
@@ -1897,6 +1921,7 @@ function App() {
     globalSearchOpen,
     quickSwitcherOpen,
     recoveryOpen,
+    statisticsOpen,
     syncConflicts.length,
     vaultSettingsOpen,
     windowLayers,
@@ -2240,7 +2265,7 @@ function App() {
       const attachment = await VaultService.ImportFileAttachment(current.id, path);
       const markdown = markdownForEditing(current.content);
       const separator = markdown.endsWith("\n") || markdown === "" ? "" : "\n";
-      editNote({ content: canonicalContentFromMarkdown(`${markdown}${separator}[${attachment.filename}](attachment:${attachment.id})\n`) });
+      editNote({ content: `${markdown}${separator}[${attachment.filename}](attachment:${attachment.id})\n` });
       await persistCurrent();
       setFileAttachments((items) => [...items, attachment]);
     } catch (reason) {
@@ -2268,7 +2293,7 @@ function App() {
     if (!current) return;
     const markdown = markdownForEditing(current.content);
     const escapedID = attachment.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    editNote({ content: canonicalContentFromMarkdown(markdown.replace(new RegExp(`!?\\[[^\\]]*\\]\\(attachment:${escapedID}[^)]*\\)\\n?`, "g"), "")) });
+    editNote({ content: markdown.replace(new RegExp(`!?\\[[^\\]]*\\]\\(attachment:${escapedID}[^)]*\\)\\n?`, "g"), "") });
     await persistCurrent();
     setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
   };
@@ -2411,6 +2436,45 @@ function App() {
     () => note ? markdownForEditing(note.content) : "",
     [note?.content],
   );
+
+  const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
+
+  useEffect(() => {
+    if (view !== "markdown") {
+      setPortableNoteMarkdown("");
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => setPortableNoteMarkdown(portableMarkdown(noteMarkdown)),
+      100,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [noteMarkdown, view]);
+
+  const markdownScrollSync = useMemo(() => {
+    const scrollers = new Set<HTMLElement>();
+    const synchronizedOffsets = new WeakMap<HTMLElement, number>();
+    return {
+      register(scroller: HTMLElement) {
+        scrollers.add(scroller);
+        return () => { scrollers.delete(scroller); };
+      },
+      sync(source: HTMLElement) {
+        const synchronizedOffset = synchronizedOffsets.get(source);
+        if (synchronizedOffset !== undefined) {
+          synchronizedOffsets.delete(source);
+          if (Math.abs(source.scrollTop - synchronizedOffset) < 1) return;
+        }
+        for (const target of scrollers) {
+          if (target !== source) {
+            const offset = Math.min(source.scrollTop, Math.max(0, target.scrollHeight - target.clientHeight));
+            synchronizedOffsets.set(target, offset);
+            target.scrollTop = offset;
+          }
+        }
+      },
+    };
+  }, [note?.id]);
 
   const contentWordCount = useMemo(() => {
     const content = noteMarkdown.trim();
@@ -3257,6 +3321,13 @@ function App() {
                 }}>
                   Log
                 </button>
+                <button role="menuitem" onClick={() => {
+                  setTitlebarMenu(null);
+                  bringWindowToFront("statistics");
+                  setStatisticsOpen(true);
+                }}>
+                  Application statistics…
+                </button>
               </div>
             )}
           </div>
@@ -3757,7 +3828,7 @@ function App() {
                       key={`${note.id}:${sectionDefault}`}
                       noteID={note.id}
                       value={noteMarkdown}
-                      onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
+                      onChange={(content) => editNote({ content })}
                       onSave={() => void persistCurrent()}
                       onError={(reason) => setError(errorText(reason))}
                       onOpenWikilink={(title) => void openWikilinkTitle(title)}
@@ -3773,18 +3844,34 @@ function App() {
                 )}
                 {view === "object" && (
                   <div className="editor-view-pane active">
-                    <ObjectTreeView value={note.content} onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) }, true)} />
+                    <ObjectTreeView value={note.content} onChange={(content) => editNote({ content }, true)} />
                   </div>
                 )}
                 {view === "markdown" && (
-                  <div className="editor-view-pane active">
-                    <SourceMarkdownEditor
-                      key={note.id}
-                      noteID={note.id}
-                      value={noteMarkdown}
-                      onChange={(content) => editNote({ content: canonicalContentFromMarkdown(content) })}
-                      onError={(reason) => setError(errorText(reason))}
-                    />
+                  <div className="editor-view-pane active markdown-split-view">
+                    <section className="markdown-split-pane">
+                      <header>Raw Markdown</header>
+                      <SourceMarkdownEditor
+                        key={`${note.id}:raw`}
+                        noteID={note.id}
+                        value={noteMarkdown}
+                        scrollSync={markdownScrollSync}
+                        onChange={(content) => editNote({ content }, true)}
+                        onError={(reason) => setError(errorText(reason))}
+                      />
+                    </section>
+                    <section className="markdown-split-pane portable">
+                      <header>Portable Markdown · Read only</header>
+                      <SourceMarkdownEditor
+                        key={`${note.id}:portable`}
+                        noteID={note.id}
+                        value={portableNoteMarkdown}
+                        readOnly
+                        scrollSync={markdownScrollSync}
+                        onChange={() => {}}
+                        onError={(reason) => setError(errorText(reason))}
+                      />
+                    </section>
                   </div>
                 )}
               </div>
@@ -4117,6 +4204,38 @@ function App() {
                 )}
               </div>
             </div>
+          </section>
+        </div>
+      )}
+
+      {statisticsOpen && (
+        <div className="modal-backdrop" role="presentation" style={{ zIndex: windowLayers.statistics }}>
+          <section className="vault-modal statistics-modal" role="dialog" aria-modal="true" aria-labelledby="statistics-title">
+            <button type="button" className="icon-button modal-close" aria-label="Close statistics" onClick={() => setStatisticsOpen(false)}>
+              <Icon name="x" />
+            </button>
+            <div className="modal-icon"><Icon name="dots" size={21} /></div>
+            <p className="eyebrow">Live usage</p>
+            <h2 id="statistics-title">Application statistics</h2>
+            {statisticsError ? <p className="error-message">{statisticsError}</p> : (
+              <>
+                <div className="statistics-grid">
+                  <div><span>CPU usage</span><strong>{statistics ? `${statistics.cpuPercent.toFixed(1)}%` : "—"}</strong></div>
+                  <div><span>Memory usage</span><strong>{statistics ? `${(statistics.memoryBytes / 1024 / 1024).toFixed(1)} MB` : "—"}</strong></div>
+                </div>
+                {statistics && (
+                  <div className="statistics-processes">
+                    <h3>Memory by process</h3>
+                    {(statistics.memoryUsage ?? []).map((item) => (
+                      <div className="statistics-process" key={item.pid}>
+                        <span><strong>{item.name}</strong><small>PID {item.pid}</small></span>
+                        <strong>{(item.memoryBytes / 1024 / 1024).toFixed(1)} MB</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </section>
         </div>
       )}
