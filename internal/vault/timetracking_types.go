@@ -128,6 +128,7 @@ type timeTrackingCatalog struct {
 	Buckets         []timeTrackingBucketSummary `json:"buckets"`
 	ActiveEntry     *timeTrackingEntryLocation  `json:"active_entry,omitempty"`
 	PendingMove     *timeTrackingPendingMove    `json:"pending_move,omitempty"`
+	Conflicts       []TimeTrackingConflict      `json:"conflicts,omitempty"`
 	DeletedEntries  []Tombstone                 `json:"deleted_entries"`
 	DeletedProjects []Tombstone                 `json:"deleted_projects"`
 	DeletedTags     []Tombstone                 `json:"deleted_tags"`
@@ -175,6 +176,7 @@ func newTimeTrackingCatalog(vaultID string) timeTrackingCatalog {
 		DeletedEntries:  []Tombstone{},
 		DeletedProjects: []Tombstone{},
 		DeletedTags:     []Tombstone{},
+		Conflicts:       []TimeTrackingConflict{},
 	}
 }
 

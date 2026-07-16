@@ -200,18 +200,26 @@ type authenticatedRemoteSnapshot struct {
 	Config   vaultConfig
 	Manifest manifest
 	Objects  map[string]remoteSyncObject
+	Tracking *authenticatedTrackingSnapshot
+}
+
+type authenticatedTrackingSnapshot struct {
+	Inventory remoteTrackingInventory
+	Catalog   timeTrackingCatalog
+	Buckets   map[string]timeTrackingBucket
 }
 
 // MergeResult summarizes a pull merge between the remote and local vault.
 type MergeResult struct {
-	PulledNotes     int             `json:"pulledNotes"`
-	UpdatedNotes    int             `json:"updatedNotes"`
-	DeletedNotes    int             `json:"deletedNotes"`
-	PulledFolders   int             `json:"pulledFolders"`
-	DeletedFolders  int             `json:"deletedFolders"`
-	UpdatedSettings bool            `json:"updatedSettings"`
-	UpToDate        bool            `json:"upToDate"`
-	Conflicts       []MergeConflict `json:"conflicts,omitempty"`
+	PulledNotes       int                    `json:"pulledNotes"`
+	UpdatedNotes      int                    `json:"updatedNotes"`
+	DeletedNotes      int                    `json:"deletedNotes"`
+	PulledFolders     int                    `json:"pulledFolders"`
+	DeletedFolders    int                    `json:"deletedFolders"`
+	UpdatedSettings   bool                   `json:"updatedSettings"`
+	UpToDate          bool                   `json:"upToDate"`
+	Conflicts         []MergeConflict        `json:"conflicts,omitempty"`
+	TrackingConflicts []TimeTrackingConflict `json:"trackingConflicts,omitempty"`
 }
 
 type MergeConflict struct {

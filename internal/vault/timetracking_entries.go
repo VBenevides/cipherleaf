@@ -329,6 +329,7 @@ func cloneTimeTrackingCatalog(catalog timeTrackingCatalog) timeTrackingCatalog {
 	catalog.DeletedEntries = slices.Clone(catalog.DeletedEntries)
 	catalog.DeletedProjects = slices.Clone(catalog.DeletedProjects)
 	catalog.DeletedTags = slices.Clone(catalog.DeletedTags)
+	catalog.Conflicts = slices.Clone(catalog.Conflicts)
 	return catalog
 }
 

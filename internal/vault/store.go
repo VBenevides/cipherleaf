@@ -2055,6 +2055,11 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
 		remote.Manifest.Settings == s.manifest.Settings &&
 		len(remote.Objects) == len(s.manifest.Notes)+len(localDeletedNotes)
+	trackingMatches, err := s.timeTrackingSnapshotMatchesLocked(remote.Tracking)
+	if err != nil {
+		return false, err
+	}
+	matches = matches && trackingMatches
 	if matches {
 		for _, local := range s.manifest.Notes {
 			remoteObject, exists := remote.Objects[local.ID]
@@ -2124,7 +2129,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			s.mu.RUnlock()
 			return MergeResult{}, err
 		}
-		manifestData, err := json.Marshal(s.manifest)
+		manifestData, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 		validator := &Store{root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key)}
 		s.mu.RUnlock()
 		if err != nil {
@@ -2135,7 +2140,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			return MergeResult{}, err
 		}
 		s.mu.Lock()
-		currentData, err := json.Marshal(s.manifest)
+		currentData, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 		if err != nil {
 			s.mu.Unlock()
 			return MergeResult{}, err
@@ -2374,6 +2379,14 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 	if remote.Manifest.Settings.ModifiedAt > mergedSettings.ModifiedAt {
 		mergedSettings = remote.Manifest.Settings
 		result.UpdatedSettings = true
+		result.UpToDate = false
+	}
+	trackingConflicts, trackingChanged, err := s.mergeTimeTrackingSnapshotLocked(remote.Tracking)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	result.TrackingConflicts = trackingConflicts
+	if trackingChanged || len(trackingConflicts) > 0 {
 		result.UpToDate = false
 	}
 
@@ -2778,19 +2791,31 @@ func (s *Store) readRemoteSnapshotLocked(
 	if err := s.validateRemoteAttachmentsLocked(source, remoteNotes); err != nil {
 		return authenticatedRemoteSnapshot{}, err
 	}
+	remoteTracking, err := s.readRemoteTimeTrackingLocked(source)
+	if err != nil {
+		return authenticatedRemoteSnapshot{}, err
+	}
 	sortSummaries(noteSummaries)
+	remoteFormat := FormatVersion
+	var remoteCapabilities []string
+	if remoteTracking != nil {
+		remoteFormat = TimeTrackingManifestFormatVersion
+		remoteCapabilities = []string{TimeTrackingCapability}
+	}
 	return authenticatedRemoteSnapshot{
 		Config: remoteConfig,
 		Manifest: manifest{
-			FormatVersion:  FormatVersion,
+			FormatVersion:  remoteFormat,
 			VaultID:        s.vaultID,
+			Capabilities:   remoteCapabilities,
 			Folders:        remoteFolders,
 			Notes:          noteSummaries,
 			DeletedFolders: remoteDeletedFolders,
 			DeletedNotes:   tombstonesFromRemoteObjects(remoteNotes),
 			Settings:       remoteSettings,
 		},
-		Objects: remoteNotes,
+		Objects:  remoteNotes,
+		Tracking: remoteTracking,
 	}, nil
 }
 
