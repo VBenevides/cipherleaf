@@ -109,6 +109,7 @@ type timeTrackingCatalog struct {
 	Tags            []TimeTag                   `json:"tags"`
 	Buckets         []timeTrackingBucketSummary `json:"buckets"`
 	ActiveEntry     *timeTrackingEntryLocation  `json:"active_entry,omitempty"`
+	PendingMove     *timeTrackingPendingMove    `json:"pending_move,omitempty"`
 	DeletedEntries  []Tombstone                 `json:"deleted_entries"`
 	DeletedProjects []Tombstone                 `json:"deleted_projects"`
 	DeletedTags     []Tombstone                 `json:"deleted_tags"`
@@ -131,6 +132,13 @@ type timeTrackingBucketSummary struct {
 type timeTrackingEntryLocation struct {
 	EntryID  string `json:"entry_id"`
 	BucketID string `json:"bucket_id"`
+}
+
+type timeTrackingPendingMove struct {
+	Entry               TimeEntry `json:"entry"`
+	SourceBucketID      string    `json:"source_bucket_id"`
+	DestinationBucketID string    `json:"destination_bucket_id"`
+	DestinationMonthUTC string    `json:"destination_month_utc"`
 }
 
 type timeTrackingBucket struct {

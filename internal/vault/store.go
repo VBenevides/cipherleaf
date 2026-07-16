@@ -94,6 +94,10 @@ type Store struct {
 	savedManifestHash        [sha256.Size]byte
 	hasSavedManifestHash     bool
 	timeTrackingCatalog      *timeTrackingCatalog
+	timeTrackingBucketCache  map[string]timeTrackingBucket
+	timeTrackingBucketOrder  []string
+	timeTrackingBucketRead   func(string)
+	timeTrackingWriteHook    func(string, string) error
 }
 
 func NewStore() *Store {
@@ -2926,6 +2930,10 @@ func (s *Store) clearLocked() {
 	s.exportBaselines = nil
 	s.hasSavedManifestHash = false
 	s.timeTrackingCatalog = nil
+	s.timeTrackingBucketCache = nil
+	s.timeTrackingBucketOrder = nil
+	s.timeTrackingBucketRead = nil
+	s.timeTrackingWriteHook = nil
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
