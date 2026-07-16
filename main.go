@@ -29,7 +29,7 @@ func main() {
 	vaultService := cipherleafapp.NewVaultService()
 	app := application.New(application.Options{
 		Name:        appTitle,
-		Description: "A local-first desktop Markdown notebook that encrypts your notes on disk and can sync them to a private GitHub repository",
+		Description: "Note taking app with encryption",
 		Services: []application.Service{
 			application.NewService(vaultService),
 		},

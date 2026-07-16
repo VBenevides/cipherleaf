@@ -495,6 +495,118 @@ func (s *VaultService) GetSession() vault.Session {
 	return s.store.Session()
 }
 
+func (s *VaultService) GetVaultStatistics() (vault.VaultStatistics, error) {
+	return s.store.GetVaultStatistics()
+}
+
+func (s *VaultService) GetTimeTrackingCatalog() (vault.TimeTrackingCatalog, error) {
+	return s.store.GetTimeTrackingCatalog()
+}
+
+func (s *VaultService) CreateClient(name string) (vault.TimeClient, error) {
+	return s.store.CreateClient(name)
+}
+
+func (s *VaultService) RenameClient(id, name string) (vault.TimeClient, error) {
+	return s.store.RenameClient(id, name)
+}
+
+func (s *VaultService) ArchiveClient(id string) (vault.TimeClient, error) {
+	return s.store.ArchiveClient(id)
+}
+
+func (s *VaultService) RestoreClient(id string) (vault.TimeClient, error) {
+	return s.store.RestoreClient(id)
+}
+
+func (s *VaultService) CreateProject(name string) (vault.TimeProject, error) {
+	return s.store.CreateProject(name)
+}
+
+func (s *VaultService) CreateProjectForClient(name, clientID string) (vault.TimeProject, error) {
+	return s.store.CreateProject(name, clientID)
+}
+
+func (s *VaultService) RenameProject(id, name string) (vault.TimeProject, error) {
+	return s.store.RenameProject(id, name)
+}
+
+func (s *VaultService) UpdateProject(id, name, clientID string) (vault.TimeProject, error) {
+	return s.store.RenameProject(id, name, clientID)
+}
+
+func (s *VaultService) ArchiveProject(id string) (vault.TimeProject, error) {
+	return s.store.ArchiveProject(id)
+}
+
+func (s *VaultService) RestoreProject(id string) (vault.TimeProject, error) {
+	return s.store.RestoreProject(id)
+}
+
+func (s *VaultService) CreateTag(name string) (vault.TimeTag, error) {
+	return s.store.CreateTag(name)
+}
+
+func (s *VaultService) RenameTag(id, name string) (vault.TimeTag, error) {
+	return s.store.RenameTag(id, name)
+}
+
+func (s *VaultService) ArchiveTag(id string) (vault.TimeTag, error) {
+	return s.store.ArchiveTag(id)
+}
+
+func (s *VaultService) RestoreTag(id string) (vault.TimeTag, error) {
+	return s.store.RestoreTag(id)
+}
+
+func (s *VaultService) StartTimeEntry(name, projectID string, tagIDs []string) (vault.TimeEntry, error) {
+	return s.store.StartTimeEntry(name, projectID, tagIDs)
+}
+
+func (s *VaultService) StartTimeEntryForClient(name, clientID, projectID string, tagIDs []string) (vault.TimeEntry, error) {
+	return s.store.StartTimeEntryForClient(name, clientID, projectID, tagIDs)
+}
+
+func (s *VaultService) GetActiveTimeEntry() (*vault.TimeEntry, error) {
+	return s.store.GetActiveTimeEntry()
+}
+
+func (s *VaultService) FinishActiveTimeEntry() (vault.TimeEntry, error) {
+	return s.store.FinishActiveTimeEntry()
+}
+
+func (s *VaultService) UpdateTimeEntry(id, name, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (vault.TimeEntry, error) {
+	return s.store.UpdateTimeEntry(id, name, projectID, tagIDs, startedAtUTC, endedAtUTC)
+}
+
+func (s *VaultService) UpdateTimeEntryForClient(id, name, clientID, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (vault.TimeEntry, error) {
+	return s.store.UpdateTimeEntryForClient(id, name, clientID, projectID, tagIDs, startedAtUTC, endedAtUTC)
+}
+
+func (s *VaultService) DeleteTimeEntry(id string) error {
+	return s.store.DeleteTimeEntry(id)
+}
+
+func (s *VaultService) ListTimeEntries(startUTC, endUTC string, filters vault.TimeEntryFilters) (vault.TimeEntryRangeResult, error) {
+	return s.store.ListTimeEntries(startUTC, endUTC, filters)
+}
+
+func (s *VaultService) GetTimeDashboard(startUTC, endUTC string, filters vault.TimeEntryFilters) (vault.TimeDashboard, error) {
+	return s.store.GetTimeDashboard(startUTC, endUTC, filters)
+}
+
+func (s *VaultService) ListTimeDashboardGroupEntries(name, startUTC, endUTC string, filters vault.TimeEntryFilters) ([]vault.TimeEntryRangeItem, error) {
+	return s.store.ListTimeDashboardGroupEntries(name, startUTC, endUTC, filters)
+}
+
+func (s *VaultService) ListTimeTrackingConflicts() ([]vault.TimeTrackingConflict, error) {
+	return s.store.ListTimeTrackingConflicts()
+}
+
+func (s *VaultService) ResolveTimeTrackingConflict(id string) error {
+	return s.store.ResolveTimeTrackingConflict(id)
+}
+
 func (s *VaultService) ListNotes() ([]vault.NoteSummary, error) {
 	return s.store.ListNotes()
 }
@@ -817,8 +929,8 @@ func (s *VaultService) PullAndLinkGitHubVault(
 	if err := s.sync.ActivateDownloadedVault(linkedSettings); err != nil {
 		return SyncResult{}, err
 	}
-	if len(merge.Conflicts) > 0 {
-		result.Warning = "Remote changes were pulled. Resolve note conflicts before pushing."
+	if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
+		result.Warning = "Remote changes were pulled. Resolve note or time-tracking conflicts before pushing."
 		return result, nil
 	}
 	push, err := s.sync.PushVault(context.Background(), vaultID, s.store)
@@ -944,8 +1056,8 @@ func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 				return result, nil
 			}
 			result.Merge = merge
-			if len(merge.Conflicts) > 0 {
-				result.Warning = "Pull succeeded, but note conflicts must be resolved before pushing."
+			if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
+				result.Warning = "Pull succeeded, but note or time-tracking conflicts must be resolved before pushing."
 				return result, nil
 			}
 		} else {

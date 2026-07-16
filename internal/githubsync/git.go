@@ -199,6 +199,7 @@ func prepareSSHFiles(runtimeDir string) (string, string, error) {
 
 var remoteObjectPath = regexp.MustCompile(`^objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
 var remoteAttachmentPath = regexp.MustCompile(`^attachments/([a-f0-9]{32})/([a-f0-9]{32})\.enc$`)
+var remoteTrackingObjectPath = regexp.MustCompile(`^tracking/objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
 var remoteVaultID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 type GitHubSSHProvider struct {
@@ -1134,11 +1135,15 @@ func parseRemotePaths(data []byte) ([]string, error) {
 }
 
 func validRemotePath(path string) bool {
-	if path == "vault.json" || path == "sync/manifest.enc" || path == "sync/folders.enc" {
+	if path == "vault.json" || path == "sync/manifest.enc" || path == "sync/folders.enc" ||
+		path == "sync/tracking.enc" || path == "tracking/catalog.enc" {
 		return true
 	}
 	match := remoteObjectPath.FindStringSubmatch(path)
-	return (len(match) == 3 && match[1] == match[2][:2]) || remoteAttachmentPath.MatchString(path)
+	trackingMatch := remoteTrackingObjectPath.FindStringSubmatch(path)
+	return (len(match) == 3 && match[1] == match[2][:2]) ||
+		(len(trackingMatch) == 3 && trackingMatch[1] == trackingMatch[2][:2]) ||
+		remoteAttachmentPath.MatchString(path)
 }
 
 func parseChangedRemotePaths(data []byte) ([]changedRemotePath, error) {
@@ -1234,11 +1239,17 @@ func validateWorkingTreeLayout(root string) error {
 		slashPath := filepath.ToSlash(relative)
 		if slashPath == "vault.json" ||
 			slashPath == "sync/manifest.enc" ||
-			slashPath == "sync/folders.enc" {
+			slashPath == "sync/folders.enc" ||
+			slashPath == "sync/tracking.enc" ||
+			slashPath == "tracking/catalog.enc" {
 			return nil
 		}
 		match := remoteObjectPath.FindStringSubmatch(slashPath)
 		if len(match) == 3 && match[1] == match[2][:2] {
+			return nil
+		}
+		trackingMatch := remoteTrackingObjectPath.FindStringSubmatch(slashPath)
+		if len(trackingMatch) == 3 && trackingMatch[1] == trackingMatch[2][:2] {
 			return nil
 		}
 		if remoteAttachmentPath.MatchString(slashPath) {

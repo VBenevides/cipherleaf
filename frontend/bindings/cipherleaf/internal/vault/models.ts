@@ -57,6 +57,7 @@ export interface MergeResult {
     "updatedSettings": boolean;
     "upToDate": boolean;
     "conflicts"?: MergeConflict[] | null;
+    "trackingConflicts"?: TimeTrackingConflict[] | null;
 }
 
 export interface Note {
@@ -115,6 +116,137 @@ export interface Session {
     "noteCount": number;
 }
 
+export interface TimeClient {
+    "id": string;
+    "name": string;
+    "archivedAtUtc"?: string;
+    "createdAtUtc": string;
+    "updatedAtUtc": string;
+    "modifiedAt": number;
+    "revision": number;
+}
+
+export interface TimeDashboard {
+    "projectCount": number;
+    "tagCount": number;
+    "totalSeconds": number;
+    "averageDaySeconds": number;
+    "projects": TimeDurationGroup[] | null;
+    "tags": TimeDurationGroup[] | null;
+    "tasks": TimeTaskGroup[] | null;
+    "days": TimeDashboardDay[] | null;
+}
+
+export interface TimeDashboardDay {
+    "localDate": string;
+    "totalSeconds": number;
+}
+
+export interface TimeDurationGroup {
+    "id": string;
+    "name": string;
+    "totalSeconds": number;
+}
+
+/**
+ * TimeEntry is one logical tracking record. Empty EndedAtUTC means the entry
+ * is currently running.
+ */
+export interface TimeEntry {
+    "id": string;
+    "name": string;
+    "clientId"?: string;
+    "projectId"?: string;
+    "tagIds": string[] | null;
+    "startedAtUtc": string;
+    "endedAtUtc"?: string;
+    "createdAtUtc": string;
+    "updatedAtUtc": string;
+    "modifiedAt": number;
+    "revision": number;
+}
+
+export interface TimeEntryFilters {
+    "clientIds": string[] | null;
+    "projectIds": string[] | null;
+    "tagIds": string[] | null;
+}
+
+export interface TimeEntryRangeItem {
+    "entry": TimeEntry;
+    "startedAtUtc": string;
+    "endedAtUtc": string;
+    "totalSeconds": number;
+}
+
+export interface TimeEntryRangeResult {
+    "entries": TimeEntryRangeItem[] | null;
+    "days": TimeDashboardDay[] | null;
+    "totalSeconds": number;
+}
+
+export interface TimeProject {
+    "id": string;
+    "name": string;
+    "clientId"?: string;
+    "archivedAtUtc"?: string;
+    "createdAtUtc": string;
+    "updatedAtUtc": string;
+    "modifiedAt": number;
+    "revision": number;
+}
+
+export interface TimeTag {
+    "id": string;
+    "name": string;
+    "archivedAtUtc"?: string;
+    "createdAtUtc": string;
+    "updatedAtUtc": string;
+    "modifiedAt": number;
+    "revision": number;
+}
+
+export interface TimeTaskGroup {
+    "name": string;
+    "totalSeconds": number;
+    "entryCount": number;
+}
+
+export interface TimeTrackingCatalog {
+    "clients": TimeClient[] | null;
+    "projects": TimeProject[] | null;
+    "tags": TimeTag[] | null;
+}
+
+export interface TimeTrackingConflict {
+    "id": string;
+    "kind": TimeTrackingConflictKind;
+    "objectId": string;
+    "message": string;
+    "localEntry"?: TimeEntry | null;
+    "remoteEntry"?: TimeEntry | null;
+    "localClient"?: TimeClient | null;
+    "remoteClient"?: TimeClient | null;
+    "localProject"?: TimeProject | null;
+    "remoteProject"?: TimeProject | null;
+    "localTag"?: TimeTag | null;
+    "remoteTag"?: TimeTag | null;
+}
+
+export enum TimeTrackingConflictKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    TimeEntryEditConflict = "entry-edit",
+    TimeClientRenameConflict = "client-rename",
+    TimeProjectRenameConflict = "project-rename",
+    TimeTagRenameConflict = "tag-rename",
+    TimeEntryOverlapConflict = "entry-overlap",
+    TimeActiveEntriesConflict = "active-entries",
+};
+
 export interface TrashItem {
     "id": string;
     "kind": string;
@@ -136,4 +268,10 @@ export interface VaultSettings {
     "autoLockMinutes": number;
     "sectionDefault": string;
     "modifiedAt": number;
+}
+
+export interface VaultStatistics {
+    "notesBytes": number;
+    "attachmentsBytes": number;
+    "timeTrackingBytes": number;
 }

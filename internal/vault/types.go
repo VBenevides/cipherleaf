@@ -1,8 +1,11 @@
 package vault
 
 const (
-	FormatVersion = 1
-	Algorithm     = "XChaCha20-Poly1305"
+	FormatVersion                     = 1
+	TimeTrackingManifestFormatVersion = 2
+	TimeTrackingCatalogFormatVersion  = 1
+	TimeTrackingCapability            = "time-tracking-v1"
+	Algorithm                         = "XChaCha20-Poly1305"
 )
 
 type Session struct {
@@ -10,6 +13,12 @@ type Session struct {
 	Path      string `json:"path"`
 	VaultID   string `json:"vaultId"`
 	NoteCount int    `json:"noteCount"`
+}
+
+type VaultStatistics struct {
+	NotesBytes        int64 `json:"notesBytes"`
+	AttachmentsBytes  int64 `json:"attachmentsBytes"`
+	TimeTrackingBytes int64 `json:"timeTrackingBytes"`
 }
 
 type NoteSummary struct {
@@ -99,6 +108,7 @@ type Tombstone struct {
 type manifest struct {
 	FormatVersion  int           `json:"format_version"`
 	VaultID        string        `json:"vault_id"`
+	Capabilities   []string      `json:"capabilities,omitempty"`
 	Folders        []Folder      `json:"folders"`
 	Notes          []NoteSummary `json:"notes"`
 	DeletedNotes   []Tombstone   `json:"deleted_notes,omitempty"`
@@ -178,22 +188,44 @@ type remoteFolderManifest struct {
 	Settings      VaultSettings `json:"settings,omitempty"`
 }
 
+type remoteTrackingInventory struct {
+	FormatVersion int                    `json:"format_version"`
+	VaultID       string                 `json:"vault_id"`
+	Catalog       remoteTrackingObject   `json:"catalog"`
+	Buckets       []remoteTrackingObject `json:"buckets"`
+}
+
+type remoteTrackingObject struct {
+	ID             string `json:"id"`
+	CiphertextHash string `json:"ciphertext_hash"`
+	Revision       uint64 `json:"revision"`
+	ModifiedAt     int64  `json:"modified_at"`
+}
+
 type authenticatedRemoteSnapshot struct {
 	Config   vaultConfig
 	Manifest manifest
 	Objects  map[string]remoteSyncObject
+	Tracking *authenticatedTrackingSnapshot
+}
+
+type authenticatedTrackingSnapshot struct {
+	Inventory remoteTrackingInventory
+	Catalog   timeTrackingCatalog
+	Buckets   map[string]timeTrackingBucket
 }
 
 // MergeResult summarizes a pull merge between the remote and local vault.
 type MergeResult struct {
-	PulledNotes     int             `json:"pulledNotes"`
-	UpdatedNotes    int             `json:"updatedNotes"`
-	DeletedNotes    int             `json:"deletedNotes"`
-	PulledFolders   int             `json:"pulledFolders"`
-	DeletedFolders  int             `json:"deletedFolders"`
-	UpdatedSettings bool            `json:"updatedSettings"`
-	UpToDate        bool            `json:"upToDate"`
-	Conflicts       []MergeConflict `json:"conflicts,omitempty"`
+	PulledNotes       int                    `json:"pulledNotes"`
+	UpdatedNotes      int                    `json:"updatedNotes"`
+	DeletedNotes      int                    `json:"deletedNotes"`
+	PulledFolders     int                    `json:"pulledFolders"`
+	DeletedFolders    int                    `json:"deletedFolders"`
+	UpdatedSettings   bool                   `json:"updatedSettings"`
+	UpToDate          bool                   `json:"upToDate"`
+	Conflicts         []MergeConflict        `json:"conflicts,omitempty"`
+	TrackingConflicts []TimeTrackingConflict `json:"trackingConflicts,omitempty"`
 }
 
 type MergeConflict struct {

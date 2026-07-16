@@ -42,6 +42,9 @@ encrypted vault through a private GitHub repository over SSH.
   Markdown source editing.
 - Manual GitHub SSH sync, encrypted clone/restore, incremental synchronization,
   retry handling, conflict resolution, diagnostics, and force-push recovery
+- Encrypted local-first time tracking with running timers, corrections, weekly
+  and monthly calendars, project/tag organization, dashboard reporting, and
+  explicit sync-conflict resolution
 
 ## Appearance and themes
 
@@ -76,6 +79,9 @@ to the application.
   in macOS Keychain, Windows Credential Manager, or freedesktop Secret Service.
 - GitHub receives the encrypted repository layout, not plaintext note content
   or the vault master key. The SSH private key remains a device-local file.
+- Time entries, project/tag names, dates, bucket metadata, revisions, and
+  tombstones use authenticated tracking-specific envelopes. Opaque monthly
+  bucket paths reveal neither calendar months nor tracked activity.
 
 Plaintext exists in application memory while a vault is unlocked. Cipherleaf
 does not protect against malware, keyloggers, process-memory access, a
@@ -163,6 +169,8 @@ npm --prefix frontend run build
 | `Ctrl/Cmd+K` | Quick title/content search |
 | `Ctrl/Cmd+Shift+F` | Search across notes |
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
+| `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
+| `Ctrl/Cmd+Shift+E` | Confirm finishing the active timer |
 | `Ctrl+]` / `Ctrl+[` | Expand/collapse the current outline section |
 | `Ctrl+Shift+]` / `Ctrl+Shift+[` | Expand/collapse all outline sections |
 
@@ -193,6 +201,24 @@ Sync exchanges encrypted snapshots, merges revisions, propagates deletions as
 encrypted tombstones, and presents conflicting local and remote note content
 for manual resolution. Reusing a deleted title creates a new object identity;
 it does not revive the tombstone.
+
+Time-tracking catalogs, monthly buckets, revisions, and tombstones travel in
+the same encrypted snapshot lifecycle. Merging happens by logical entry,
+project, and tag identity rather than bucket filename. Entry edits, overlaps,
+label renames, and multiple active timers are preserved for explicit resolution;
+push remains blocked while a tracking conflict is unresolved.
+
+## Time tracking
+
+Open **Time tracking** below **Graph view**. The Week and Month tabs use the
+operating system's local calendar while persisted timestamps remain UTC. The
+Dashboard supports preset or custom periods and project/tag filters. Projects
+and tags can be archived without breaking historical entries.
+
+Starting, finishing, correcting, or deleting an entry writes immediately.
+The displayed running duration is calculated in memory and does not write a
+new encrypted object every second. Locking or closing the vault clears the
+decrypted tracking cache and removes the global running indicator.
 
 ## Project layout
 

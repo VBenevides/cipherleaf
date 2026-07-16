@@ -30,9 +30,11 @@ const (
 	syncDirectory                = "sync"
 	syncManifestFile             = "manifest.enc"
 	syncFoldersFile              = "folders.enc"
+	syncTrackingFile             = "tracking.enc"
 	maxNoteBytes                 = 10 * 1024 * 1024
 	maxAttachmentBytes           = 10 * 1024 * 1024
 	maxFileAttachmentBytes       = 64 * 1024 * 1024
+	maxTimeTrackingBytes         = 32 * 1024 * 1024
 	maxEnvelopeBytes             = 96 * 1024 * 1024
 	maxTitleRunes                = 200
 	maxFolderRunes               = 120
@@ -92,6 +94,12 @@ type Store struct {
 	pendingSharedAttachments map[string]struct{}
 	savedManifestHash        [sha256.Size]byte
 	hasSavedManifestHash     bool
+	timeTrackingCatalog      *timeTrackingCatalog
+	timeTrackingBucketCache  map[string]timeTrackingBucket
+	timeTrackingBucketOrder  []string
+	timeTrackingBucketRead   func(string)
+	timeTrackingWriteHook    func(string, string) error
+	timeTrackingNow          func() time.Time
 }
 
 func NewStore() *Store {
@@ -106,12 +114,19 @@ func (s *Store) SnapshotRevision() (string, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(s.manifest)
+	data, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 	if err != nil {
 		return "", fmt.Errorf("encode snapshot revision: %w", err)
 	}
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+func snapshotRevisionData(value manifest, tracking *timeTrackingCatalog) ([]byte, error) {
+	return json.Marshal(struct {
+		Manifest manifest             `json:"manifest"`
+		Tracking *timeTrackingCatalog `json:"tracking,omitempty"`
+	}{Manifest: value, Tracking: tracking})
 }
 
 // ReadVaultID returns the vault identifier stored in the configuration file
@@ -263,6 +278,12 @@ func (s *Store) Open(root, passphrase string) (Session, error) {
 	if err := s.loadManifestLocked(); err != nil {
 		s.clearLocked()
 		return Session{}, fmt.Errorf("open encrypted manifest: %w", err)
+	}
+	if hasTimeTrackingCapability(s.manifest) {
+		if err := s.loadTimeTrackingCatalogLocked(); err != nil {
+			s.clearLocked()
+			return Session{}, fmt.Errorf("open encrypted tracking catalog: %w", err)
+		}
 	}
 	_ = s.rebuildSearchIndexLocked()
 	return s.sessionLocked(), nil
@@ -1786,6 +1807,10 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 		s.mu.Unlock()
 		return err
 	}
+	if s.timeTrackingCatalog != nil && len(s.timeTrackingCatalog.Conflicts) > 0 {
+		s.mu.Unlock()
+		return errors.New("resolve time-tracking conflicts before exporting or pushing the vault")
+	}
 	s.mu.Unlock()
 	for attempt := 0; attempt < 3; attempt++ {
 		s.mu.RLock()
@@ -1793,7 +1818,7 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 			s.mu.RUnlock()
 			return err
 		}
-		manifestData, err := json.Marshal(s.manifest)
+		manifestData, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 		if err != nil {
 			s.mu.RUnlock()
 			return err
@@ -1806,6 +1831,10 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 		snapshot := &Store{
 			root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key), manifest: captured,
 			exportDirty: dirty, exportIncremental: incremental,
+		}
+		if s.timeTrackingCatalog != nil {
+			tracking := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+			snapshot.timeTrackingCatalog = &tracking
 		}
 		s.mu.RUnlock()
 		if err := snapshot.exportRemoteSnapshot(destination); err != nil {
@@ -1850,6 +1879,7 @@ func changedSnapshotNoteIDs(before, after manifest) map[string]struct{} {
 
 func cloneManifest(source manifest) manifest {
 	result := source
+	result.Capabilities = slices.Clone(source.Capabilities)
 	result.Folders = slices.Clone(source.Folders)
 	result.DeletedNotes = slices.Clone(source.DeletedNotes)
 	result.DeletedFolders = slices.Clone(source.DeletedFolders)
@@ -1955,6 +1985,9 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	if err := s.exportAttachmentsLocked(destination); err != nil {
 		return err
 	}
+	if err := s.exportTimeTrackingLocked(destination); err != nil {
+		return err
+	}
 	inventoryPlaintext, err := json.Marshal(inventory)
 	if err != nil {
 		return fmt.Errorf("encode remote sync inventory: %w", err)
@@ -2026,6 +2059,11 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
 		remote.Manifest.Settings == s.manifest.Settings &&
 		len(remote.Objects) == len(s.manifest.Notes)+len(localDeletedNotes)
+	trackingMatches, err := s.timeTrackingSnapshotMatchesLocked(remote.Tracking)
+	if err != nil {
+		return false, err
+	}
+	matches = matches && trackingMatches
 	if matches {
 		for _, local := range s.manifest.Notes {
 			remoteObject, exists := remote.Objects[local.ID]
@@ -2095,7 +2133,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			s.mu.RUnlock()
 			return MergeResult{}, err
 		}
-		manifestData, err := json.Marshal(s.manifest)
+		manifestData, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 		validator := &Store{root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key)}
 		s.mu.RUnlock()
 		if err != nil {
@@ -2106,7 +2144,7 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 			return MergeResult{}, err
 		}
 		s.mu.Lock()
-		currentData, err := json.Marshal(s.manifest)
+		currentData, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 		if err != nil {
 			s.mu.Unlock()
 			return MergeResult{}, err
@@ -2345,6 +2383,14 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 	if remote.Manifest.Settings.ModifiedAt > mergedSettings.ModifiedAt {
 		mergedSettings = remote.Manifest.Settings
 		result.UpdatedSettings = true
+		result.UpToDate = false
+	}
+	trackingConflicts, trackingChanged, err := s.mergeTimeTrackingSnapshotLocked(remote.Tracking)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	result.TrackingConflicts = trackingConflicts
+	if trackingChanged || len(trackingConflicts) > 0 {
 		result.UpToDate = false
 	}
 
@@ -2749,19 +2795,31 @@ func (s *Store) readRemoteSnapshotLocked(
 	if err := s.validateRemoteAttachmentsLocked(source, remoteNotes); err != nil {
 		return authenticatedRemoteSnapshot{}, err
 	}
+	remoteTracking, err := s.readRemoteTimeTrackingLocked(source)
+	if err != nil {
+		return authenticatedRemoteSnapshot{}, err
+	}
 	sortSummaries(noteSummaries)
+	remoteFormat := FormatVersion
+	var remoteCapabilities []string
+	if remoteTracking != nil {
+		remoteFormat = TimeTrackingManifestFormatVersion
+		remoteCapabilities = []string{TimeTrackingCapability}
+	}
 	return authenticatedRemoteSnapshot{
 		Config: remoteConfig,
 		Manifest: manifest{
-			FormatVersion:  FormatVersion,
+			FormatVersion:  remoteFormat,
 			VaultID:        s.vaultID,
+			Capabilities:   remoteCapabilities,
 			Folders:        remoteFolders,
 			Notes:          noteSummaries,
 			DeletedFolders: remoteDeletedFolders,
 			DeletedNotes:   tombstonesFromRemoteObjects(remoteNotes),
 			Settings:       remoteSettings,
 		},
-		Objects: remoteNotes,
+		Objects:  remoteNotes,
+		Tracking: remoteTracking,
 	}, nil
 }
 
@@ -2863,6 +2921,13 @@ func (s *Store) RestoreRemoteSnapshot(
 			return Session{}, fmt.Errorf("restore encrypted attachments: %w", err)
 		}
 	}
+	if remote.Tracking != nil {
+		if err := restoreTrackingCiphertext(source, stagingRoot, remote.Tracking); err != nil {
+			return Session{}, err
+		}
+		tracking := cloneTimeTrackingCatalog(remote.Tracking.Catalog)
+		validator.timeTrackingCatalog = &tracking
+	}
 	validator.root = stagingRoot
 	validator.manifest = remote.Manifest
 	if err := validator.saveManifestLocked(); err != nil {
@@ -2880,6 +2945,10 @@ func (s *Store) RestoreRemoteSnapshot(
 	s.key = key
 	s.secret = []byte(passphrase)
 	s.manifest = remote.Manifest
+	if remote.Tracking != nil {
+		tracking := cloneTimeTrackingCatalog(remote.Tracking.Catalog)
+		s.timeTrackingCatalog = &tracking
+	}
 	s.searchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	keyOwnedByStore = true
@@ -2916,6 +2985,12 @@ func (s *Store) clearLocked() {
 	s.pendingSharedAttachments = nil
 	s.exportBaselines = nil
 	s.hasSavedManifestHash = false
+	s.timeTrackingCatalog = nil
+	s.timeTrackingBucketCache = nil
+	s.timeTrackingBucketOrder = nil
+	s.timeTrackingBucketRead = nil
+	s.timeTrackingWriteHook = nil
+	s.timeTrackingNow = nil
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
@@ -3179,6 +3254,13 @@ func (s *Store) readNoteContentAtLocked(root, id string) (string, *Note, error) 
 }
 
 func (s *Store) saveManifestLocked() error {
+	if hasTimeTrackingCapability(s.manifest) && s.timeTrackingCatalog == nil {
+		catalog := newTimeTrackingCatalog(s.vaultID)
+		if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+			return fmt.Errorf("initialize tracking catalog: %w", err)
+		}
+		s.timeTrackingCatalog = &catalog
+	}
 	plaintext, err := json.Marshal(s.manifest)
 	if err != nil {
 		return fmt.Errorf("encode manifest: %w", err)
@@ -3225,8 +3307,11 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 	if err := json.Unmarshal(plaintext, &result); err != nil {
 		return manifest{}, fmt.Errorf("decode manifest: %w", err)
 	}
-	if result.FormatVersion != FormatVersion || result.VaultID != s.vaultID {
+	if result.VaultID != s.vaultID {
 		return manifest{}, errors.New("manifest belongs to another vault or format version")
+	}
+	if err := validateManifestCapabilities(result.FormatVersion, result.Capabilities); err != nil {
+		return manifest{}, err
 	}
 	result.Settings = normalizeVaultSettings(result.Settings)
 	for index, folder := range result.Folders {
@@ -3369,7 +3454,8 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 		return nil, errors.New("encrypted object header is invalid")
 	}
 	if value.Compression != "" &&
-		(value.Compression != "gzip" || (objectType != "note" && objectType != "note-content")) {
+		(value.Compression != "gzip" ||
+			(objectType != "note" && objectType != "note-content" && objectType != trackingBucketObjectType)) {
 		return nil, errors.New("encrypted object compression is invalid")
 	}
 	nonce, err := base64.RawURLEncoding.DecodeString(value.Nonce)
@@ -3390,6 +3476,9 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 		return nil, err
 	}
 	if value.Compression == "gzip" {
+		if objectType == trackingBucketObjectType {
+			return decompressPayload(plaintext, maxTimeTrackingBytes, "tracking bucket")
+		}
 		return decompressNotePayload(plaintext)
 	}
 	return plaintext, nil
@@ -3639,7 +3728,7 @@ func removeUnexpectedSyncFiles(syncRoot string) error {
 	}
 	for _, entry := range entries {
 		if entry.IsDir() ||
-			(entry.Name() != syncManifestFile && entry.Name() != syncFoldersFile) {
+			(entry.Name() != syncManifestFile && entry.Name() != syncFoldersFile && entry.Name() != syncTrackingFile) {
 			if err := os.RemoveAll(filepath.Join(syncRoot, entry.Name())); err != nil {
 				return fmt.Errorf("remove stale remote sync metadata: %w", err)
 			}

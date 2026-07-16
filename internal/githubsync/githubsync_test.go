@@ -803,6 +803,80 @@ func TestPullAdvancesPersistentCacheBeforeFollowingPush(t *testing.T) {
 	}
 }
 
+func TestGitLifecycleCarriesEncryptedTimeTracking(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is not installed")
+	}
+	remote := filepath.Join(t.TempDir(), "tracking.git")
+	runGitTestCommand(t, "", "init", "--quiet", "--bare", "--initial-branch=main", remote)
+	const secret = "correct horse battery staple"
+	first := vault.NewStore()
+	session, err := first.Create(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := first.CreateProject("Git Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := first.CreateTag("Git Tag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := first.StartTimeEntry("Git Running", project.ID, []string{tag.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultSettings(session.VaultID)
+	settings.RepositorySSH = remote
+	settings.PrivateKeyPath = filepath.Join(t.TempDir(), "unused-key")
+	settings.RepositoryPrivate = true
+	firstProvider := NewGitHubSSHProvider(t.TempDir(), t.TempDir())
+	if _, err := firstProvider.Link(context.Background(), settings, first); err != nil {
+		t.Fatal(err)
+	}
+	tree := runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
+	for _, required := range []string{"sync/tracking.enc", "tracking/catalog.enc", "tracking/objects/"} {
+		if !strings.Contains(tree, required) {
+			t.Fatalf("Git snapshot is missing tracking path %q:\n%s", required, tree)
+		}
+	}
+	secondProvider := NewGitHubSSHProvider(t.TempDir(), t.TempDir())
+	downloaded, err := secondProvider.Download(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := vault.NewStore()
+	if _, err := second.RestoreRemoteSnapshot(downloaded.CachePath, t.TempDir(), "Second Tracking Device", secret); err != nil {
+		t.Fatal(err)
+	}
+	restoredActive, err := second.GetActiveTimeEntry()
+	if err != nil || restoredActive == nil || restoredActive.ID != active.ID {
+		t.Fatalf("clone did not restore active tracking entry: %#v, %v", restoredActive, err)
+	}
+	if _, err := second.FinishActiveTimeEntry(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secondProvider.ForcePush(context.Background(), settings, second); err != nil {
+		t.Fatal(err)
+	}
+	pulled, err := firstProvider.Pull(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.MergeRemoteSnapshot(pulled.StagingPath); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := first.GetActiveTimeEntry()
+	if err != nil || remaining != nil {
+		t.Fatalf("pull did not reproduce finished timer: %#v, %v", remaining, err)
+	}
+	catalog, err := first.GetTimeTrackingCatalog()
+	if err != nil || len(catalog.Projects) != 1 || len(catalog.Tags) != 1 {
+		t.Fatalf("pull lost tracking labels: %#v, %v", catalog, err)
+	}
+}
+
 func runGitTestCommand(t *testing.T, directory string, arguments ...string) string {
 	t.Helper()
 	command := exec.Command("git", arguments...)

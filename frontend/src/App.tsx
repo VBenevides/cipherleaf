@@ -21,8 +21,12 @@ import type {
   NoteSummary,
   ReplaceResult,
   Session,
+  TimeEntry,
+  TimeTrackingConflict,
+  TimeTrackingCatalog,
   TrashItem,
   VaultSettings,
+  VaultStatistics,
 } from "../bindings/cipherleaf/internal/vault/models";
 import type {
   ConnectionResult,
@@ -41,6 +45,8 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
+import { formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
+import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -49,7 +55,14 @@ type Theme = "light" | "dark" | "archivist";
 type JournalLines = "none" | "full" | "dotted";
 type SettingsTab = "general" | "appearance";
 type SectionDefault = "expanded" | "collapsed";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "statistics" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "statistics" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "commandPalette" | "appDialog";
+type CommandPaletteCommand = {
+  id: string;
+  shortcut: string;
+  name: string;
+  description: string;
+  run: () => void;
+};
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -107,6 +120,7 @@ const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 const ObjectTreeView = lazy(() => import("./ObjectTreeView"));
 const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
 const GraphView = lazy(() => import("./GraphView").then(({ GraphView }) => ({ default: GraphView })));
+const TimeTrackingView = lazy(() => import("./TimeTrackingView"));
 
 function EditorLoading() {
   return <div className="settings-loading">Loading editor...</div>;
@@ -200,7 +214,7 @@ function Icon({
   name,
   size = 18,
 }: {
-  name: "book" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
+  name: "book" | "clock" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
   size?: number;
 }) {
   const paths = {
@@ -208,6 +222,12 @@ function Icon({
       <>
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+      </>
+    ),
+    clock: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
       </>
     ),
     copy: (
@@ -327,6 +347,18 @@ function isSameDay(left: Date, right: Date): boolean {
     left.getDate() === right.getDate();
 }
 
+function formatStorageSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -367,6 +399,18 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
+  const [timeTrackingOpen, setTimeTrackingOpen] = useState(false);
+  const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
+  const [timerNow, setTimerNow] = useState(() => new Date());
+  const [timerDialog, setTimerDialog] = useState<"start" | "finish" | null>(null);
+  const [timerCatalog, setTimerCatalog] = useState<TimeTrackingCatalog | null>(null);
+  const [timerTaskName, setTimerTaskName] = useState("");
+  const [timerClientID, setTimerClientID] = useState("");
+  const [timerProjectID, setTimerProjectID] = useState("");
+  const [timerTagIDs, setTimerTagIDs] = useState<string[]>([]);
+  const [timerBusy, setTimerBusy] = useState(false);
+  const [timerError, setTimerError] = useState("");
+  const [trackingConflicts, setTrackingConflicts] = useState<TimeTrackingConflict[]>([]);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -377,6 +421,7 @@ function App() {
   const [statisticsError, setStatisticsError] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
+  const [vaultStatistics, setVaultStatistics] = useState<VaultStatistics | null>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [noteVersions, setNoteVersions] = useState<NoteVersion[]>([]);
@@ -398,6 +443,9 @@ function App() {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [quickSwitcherQuery, setQuickSwitcherQuery] = useState("");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
@@ -526,6 +574,14 @@ function App() {
     setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
   }, []);
 
+  const openCommandPalette = useCallback(() => {
+    setTitlebarMenu(null);
+    bringWindowToFront("commandPalette");
+    setCommandPaletteQuery("");
+    setCommandPaletteIndex(0);
+    setCommandPaletteOpen(true);
+  }, [bringWindowToFront]);
+
   const openSettingsSection = (tab: SettingsTab, sectionID?: string) => {
     setSettingsTab(tab);
     if (sectionID) {
@@ -586,7 +642,7 @@ function App() {
           id: ++consoleEntryIDRef.current,
           level,
           message: values.map(stringify).join(" "),
-          timestamp: new Date().toLocaleTimeString(),
+          timestamp: new Date().toLocaleTimeString("en-US"),
         },
       ]);
     };
@@ -847,6 +903,17 @@ function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [bringWindowToFront, session?.locked]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (session?.locked || !(event.ctrlKey || event.metaKey) || !event.shiftKey || event.key.toLowerCase() !== "p") return;
+      if ((event.target as HTMLElement | null)?.closest("[role=dialog]")) return;
+      event.preventDefault();
+      openCommandPalette();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openCommandPalette, session?.locked]);
 
   useEffect(() => {
     if (!globalSearchOpen) return;
@@ -1197,8 +1264,69 @@ function App() {
   }, [autoLockMinutes, session?.vaultId, session?.locked]);
 
   useEffect(() => {
+    if (!session || session.locked) { setActiveTimeEntry(null); return; }
+    let active = true;
+    Promise.all([VaultService.GetActiveTimeEntry(), VaultService.ListTimeTrackingConflicts()]).then(([entry, conflicts]) => { if (active) { setActiveTimeEntry(entry); setTrackingConflicts(conflicts ?? []); } }).catch(() => { if (active) setActiveTimeEntry(null); });
+    return () => { active = false; };
+  }, [session?.vaultId, session?.locked]);
+
+  useEffect(() => {
+    if (!activeTimeEntry) return;
+    const refresh = () => setTimerNow(new Date());
+    refresh();
+    let interval: number | undefined;
+    const timeout = window.setTimeout(() => {
+      refresh();
+      interval = window.setInterval(refresh, 60_000);
+    }, millisecondsUntilNextDurationMinute(activeTimeEntry.startedAtUtc));
+    return () => {
+      window.clearTimeout(timeout);
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, [activeTimeEntry?.id, activeTimeEntry?.startedAtUtc]);
+
+  const openStartTimerDialog = () => {
+    setTimerDialog("start"); setTimerError("");
+    VaultService.GetTimeTrackingCatalog().then(setTimerCatalog).catch((reason) => setTimerError(errorText(reason)));
+  };
+
+  const startTimerFromDialog = async () => {
+    if (!timerTaskName.trim()) { setTimerError("Task name is required"); return; }
+    setTimerBusy(true); setTimerError("");
+    try {
+      const entry = await VaultService.StartTimeEntryForClient(timerTaskName, timerClientID, timerProjectID, timerTagIDs);
+      setActiveTimeEntry(entry); setTimerTaskName(""); setTimerClientID(""); setTimerProjectID(""); setTimerTagIDs([]); setTimerDialog(null);
+    } catch (reason) { setTimerError(errorText(reason)); }
+    finally { setTimerBusy(false); }
+  };
+
+  const finishTimerFromDialog = async () => {
+    if (!activeTimeEntry) return;
+    setTimerBusy(true); setTimerError("");
+    try { await VaultService.FinishActiveTimeEntry(); setActiveTimeEntry(null); setTimerDialog(null); }
+    catch (reason) { setTimerError(errorText(reason)); }
+    finally { setTimerBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!timerDialog) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setTimerDialog(null); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [timerDialog]);
+
+  useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.metaKey || session?.locked) return;
+      if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[role=dialog]")) return;
+      if (event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault(); openStartTimerDialog(); return;
+      }
+      if (event.shiftKey && event.key.toLowerCase() === "e") {
+        event.preventDefault(); setTimerError(""); setTimerDialog("finish"); return;
+      }
+      if (target?.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
         void persistCurrent();
@@ -1277,6 +1405,11 @@ function App() {
     setDirty(false);
     setRememberError("");
     setSidebarOpen(false);
+    setGraphOpen(false);
+    setTimeTrackingOpen(false);
+    setActiveTimeEntry(null);
+    setTimerDialog(null);
+    setTrackingConflicts([]);
     setVaultMenuOpen(false);
     setSaveState("idle");
     setGlobalSearchTarget(null);
@@ -1539,6 +1672,7 @@ function App() {
         setSyncConflicts(result.merge.conflicts);
         void startConflictResolution(result.merge.conflicts[0]);
       }
+      if (result.merge.trackingConflicts?.length) setTrackingConflicts(result.merge.trackingConflicts);
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -1603,6 +1737,31 @@ function App() {
       setError(errorText(reason));
       console.error(`Sync conflict resolution save failed: ${errorText(reason)}`);
     }
+  };
+
+  const resolveTrackingConflict = async (conflict: TimeTrackingConflict, choice: "local" | "remote" | "delete-local" | "delete-remote" | "finish") => {
+    setError("");
+    try {
+      if (choice === "remote" && conflict.remoteEntry?.endedAtUtc) {
+        const entry = conflict.remoteEntry;
+        await VaultService.UpdateTimeEntryForClient(entry.id, entry.name, entry.clientId ?? "", entry.projectId ?? "", entry.tagIds ?? [], entry.startedAtUtc, entry.endedAtUtc!);
+      } else if (choice === "remote" && conflict.remoteProject) {
+        await VaultService.UpdateProject(conflict.remoteProject.id, conflict.remoteProject.name, conflict.remoteProject.clientId ?? "");
+      } else if (choice === "remote" && conflict.remoteClient) {
+        await VaultService.RenameClient(conflict.remoteClient.id, conflict.remoteClient.name);
+      } else if (choice === "remote" && conflict.remoteTag) {
+        await VaultService.RenameTag(conflict.remoteTag.id, conflict.remoteTag.name);
+      } else if (choice === "delete-local" && conflict.localEntry) {
+        await VaultService.DeleteTimeEntry(conflict.localEntry.id);
+      } else if (choice === "delete-remote" && conflict.remoteEntry) {
+        await VaultService.DeleteTimeEntry(conflict.remoteEntry.id);
+      } else if (choice === "finish") {
+        const finished = await VaultService.FinishActiveTimeEntry(); setActiveTimeEntry(null);
+        if (!finished.id) throw new Error("Active timer could not be finished");
+      }
+      await VaultService.ResolveTimeTrackingConflict(conflict.id);
+      setTrackingConflicts((current) => current.filter((item) => item.id !== conflict.id));
+    } catch (reason) { setError(errorText(reason)); }
   };
 
   const forcePushLocalVault = async () => {
@@ -1883,6 +2042,7 @@ function App() {
         layer: "folderPassword",
         close: () => closeFolderPasswordPrompt(null),
       },
+      { open: commandPaletteOpen, layer: "commandPalette", close: () => setCommandPaletteOpen(false) },
       { open: quickSwitcherOpen, layer: "quickSwitcher", close: () => setQuickSwitcherOpen(false) },
       { open: globalSearchOpen, layer: "globalSearch", close: () => setGlobalSearchOpen(false) },
       { open: calendarOpen, layer: "calendar", close: () => setCalendarOpen(false) },
@@ -1918,6 +2078,7 @@ function App() {
     appDialog,
     appearanceSettingsOpen,
     calendarOpen,
+    commandPaletteOpen,
     folderPasswordPrompt,
     globalSearchOpen,
     quickSwitcherOpen,
@@ -2018,6 +2179,7 @@ function App() {
 
   const selectFolder = async (folder: Folder) => {
     if (!(await unlockFolderLineage(folder))) return;
+    setTimeTrackingOpen(false);
     setSelectedFolderID(folder.id);
   };
 
@@ -2025,6 +2187,7 @@ function App() {
     id: string,
     options: { appendTrail?: boolean; replaceTrail?: NoteCrumb[] } = {},
   ) => {
+    setTimeTrackingOpen(false);
     if (note?.id === id) {
       setSidebarOpen(false);
       return;
@@ -2489,12 +2652,12 @@ function App() {
     });
   }, [calendarMonth]);
 
-  const calendarTitle = calendarMonth.toLocaleDateString(undefined, {
+  const calendarTitle = calendarMonth.toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
   const compactDay = String(today.getDate()).padStart(2, "0");
-  const compactMonth = today.toLocaleDateString(undefined, { month: "short" }).toUpperCase();
+  const compactMonth = today.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
 
   const openWikilinkTitle = async (title: string) => {
     try {
@@ -2510,12 +2673,17 @@ function App() {
     bringWindowToFront("vaultSettings");
     setVaultSettingsOpen(true);
     setSyncSettings(null);
+    setVaultStatistics(null);
     setSettingsBusy(true);
     setConnectionResult(null);
     setError("");
     try {
-      const settings = await VaultService.GetSyncSettings();
+      const [settings, statistics] = await Promise.all([
+        VaultService.GetSyncSettings(),
+        VaultService.GetVaultStatistics(),
+      ]);
       setSyncSettings(settings);
+      setVaultStatistics(statistics);
       setSyncLinked(settings.linked);
       setLastSyncedAt(settings.lastSyncedAt);
     } catch (reason) {
@@ -2888,6 +3056,143 @@ function App() {
     } finally {
       setSettingsBusy(false);
     }
+  };
+
+  const commandPaletteCommands: CommandPaletteCommand[] = [
+    {
+      id: "new-note",
+      shortcut: "Ctrl + N",
+      name: "New note",
+      description: "Create a new encrypted note",
+      run: () => void createNote(),
+    },
+    {
+      id: "save-note",
+      shortcut: "Ctrl + S",
+      name: "Save note",
+      description: "Save the current note",
+      run: () => void persistCurrent(),
+    },
+    {
+      id: "quick-switcher",
+      shortcut: "Ctrl + K",
+      name: "Quick note switcher",
+      description: "Open a note by title",
+      run: () => {
+        bringWindowToFront("quickSwitcher");
+        setQuickSwitcherQuery("");
+        setQuickSwitcherOpen(true);
+      },
+    },
+    {
+      id: "find-notes",
+      shortcut: "Ctrl + Shift + F",
+      name: "Find in all notes",
+      description: "Search text across your vault",
+      run: () => {
+        bringWindowToFront("globalSearch");
+        setGlobalSearchReplace(false);
+        setGlobalSearchOpen(true);
+      },
+    },
+    {
+      id: "start-timer",
+      shortcut: "Ctrl + Shift + T",
+      name: "Start timer",
+      description: "Start tracking time without leaving this note",
+      run: openStartTimerDialog,
+    },
+    {
+      id: "finish-timer",
+      shortcut: "Ctrl + Shift + E",
+      name: "Finish timer",
+      description: "Finish the active timer",
+      run: () => {
+        setTimerError("");
+        setTimerDialog("finish");
+      },
+    },
+    {
+      id: "time-tracking",
+      shortcut: "",
+      name: "Time tracking",
+      description: "Open tracked entries, clients, projects, and tags",
+      run: () => {
+        setGraphOpen(false);
+        setTimeTrackingOpen(true);
+        setSidebarOpen(false);
+      },
+    },
+    {
+      id: "graph-view",
+      shortcut: "",
+      name: "Graph view",
+      description: "Explore links between notes",
+      run: () => {
+        setGraphOpen(true);
+        setTimeTrackingOpen(false);
+        setSidebarOpen(false);
+      },
+    },
+    {
+      id: "calendar",
+      shortcut: "",
+      name: "Calendar",
+      description: "Open daily notes and calendar settings",
+      run: () => {
+        setCalendarMonth(startOfMonth(calendarSelected));
+        bringWindowToFront("calendar");
+        setCalendarOpen(true);
+      },
+    },
+    {
+      id: "sync-vault",
+      shortcut: "Ctrl + Shift + R",
+      name: "Sync vault",
+      description: "Pull and push encrypted changes",
+      run: () => void syncNow(),
+    },
+    {
+      id: "vault-settings",
+      shortcut: "",
+      name: "Vault settings",
+      description: "Manage sync and view vault statistics",
+      run: () => void openVaultSettings(),
+    },
+    {
+      id: "recovery",
+      shortcut: "",
+      name: "Trash and version history",
+      description: "Restore deleted notes and earlier versions",
+      run: () => void openRecovery(),
+    },
+    {
+      id: "settings",
+      shortcut: "",
+      name: "Settings",
+      description: "Change application appearance and preferences",
+      run: () => {
+        bringWindowToFront("appearanceSettings");
+        setAppearanceSettingsOpen(true);
+      },
+    },
+  ];
+  const commandPaletteNeedle = commandPaletteQuery.trim().toLocaleLowerCase();
+  const matchingCommandPaletteCommands = commandPaletteCommands.filter((command) =>
+    !commandPaletteNeedle || [command.shortcut, command.name, command.description]
+      .some((value) => value.toLocaleLowerCase().includes(commandPaletteNeedle)),
+  );
+  const selectedCommandPaletteCommand = matchingCommandPaletteCommands[
+    Math.min(commandPaletteIndex, Math.max(0, matchingCommandPaletteCommands.length - 1))
+  ];
+  const commandPaletteSelectedIndex = Math.min(
+    commandPaletteIndex,
+    Math.max(0, matchingCommandPaletteCommands.length - 1),
+  );
+  const closeCommandPalette = () => setCommandPaletteOpen(false);
+  const runCommandPaletteCommand = (command: CommandPaletteCommand) => {
+    closeCommandPalette();
+    command.run();
   };
 
   if (session === null) {
@@ -3346,7 +3651,7 @@ function App() {
           <button
             type="button"
             className="calendar-button"
-            aria-label={`Open calendar for ${today.toLocaleDateString(undefined, { dateStyle: "full" })}`}
+            aria-label={`Open calendar for ${today.toLocaleDateString("en-US", { dateStyle: "full" })}`}
             title="Open calendar"
             onClick={() => {
               setCalendarMonth(startOfMonth(calendarSelected));
@@ -3366,11 +3671,24 @@ function App() {
           className={`graph-view-button ${graphOpen ? "active" : ""}`}
           onClick={() => {
             setGraphOpen(true);
+            setTimeTrackingOpen(false);
             setSidebarOpen(false);
           }}
         >
           <Icon name="graph" size={16} />
           <span>Graph view</span>
+        </button>
+        <button
+          type="button"
+          className={`graph-view-button time-tracking-view-button ${timeTrackingOpen ? "active" : ""}`}
+          onClick={() => {
+            setGraphOpen(false);
+            setTimeTrackingOpen(true);
+            setSidebarOpen(false);
+          }}
+        >
+          <Icon name="clock" size={16} />
+          <span>Time tracking</span>
         </button>
         <div className="notes-heading folders-heading">
           <span>Folders</span>
@@ -3383,6 +3701,7 @@ function App() {
             className={`folder-list-item ${selectedFolderID === "all" ? "active" : ""}`}
             onClick={() => {
               setGraphOpen(false);
+              setTimeTrackingOpen(false);
               setSelectedFolderID("all");
             }}
           >
@@ -3398,6 +3717,7 @@ function App() {
                 return;
               }
               setGraphOpen(false);
+              setTimeTrackingOpen(false);
               setSelectedFolderID("");
             }}
             onMouseEnter={(event) => {
@@ -3547,7 +3867,7 @@ function App() {
               <Icon name="file" size={16} />
               <span>
                 <strong>{item.title}</strong>
-                <small>{new Date(item.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
+                <small>{new Date(item.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
               </span>
             </button>
           ))}
@@ -3603,6 +3923,8 @@ function App() {
           <div className="breadcrumbs">
             {graphOpen ? (
               <span className="breadcrumb-item"><strong>Graph view</strong></span>
+            ) : timeTrackingOpen ? (
+              <span className="breadcrumb-item"><strong>Time tracking</strong></span>
             ) : (noteTrail.length ? noteTrail : [
               { id: "", title: folderName(session.path) },
               ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
@@ -3635,9 +3957,10 @@ function App() {
                   ? "Unsaved"
                   : "Saved locally"}
           </div>
+          {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
           <button
             className="save-file-button"
-            disabled={graphOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+            disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
             title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
             onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
           >
@@ -3649,7 +3972,7 @@ function App() {
           </div>
           <button
             className="save-and-sync-button"
-            disabled={graphOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
+            disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
             title={
               !note
                 ? "No note open"
@@ -3666,7 +3989,7 @@ function App() {
               {lastSyncLabel}
             </span>
           )}
-          {note && !graphOpen && (
+          {note && !graphOpen && !timeTrackingOpen && (
             <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
               <Icon name="trash" size={16} />
             </button>
@@ -3691,7 +4014,11 @@ function App() {
           </div>
         )}
 
-        {graphOpen ? (
+        {timeTrackingOpen ? (
+          <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
+            <TimeTrackingView key={session.vaultId} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
+          </Suspense>
+        ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
             <GraphView
               folders={graphFolders}
@@ -3795,7 +4122,7 @@ function App() {
                 aria-label="Note title"
               />
               <p>
-                Edited {new Date(note.updatedAt).toLocaleString(undefined, {
+                Edited {new Date(note.updatedAt).toLocaleString("en-US", {
                   month: "long",
                   day: "numeric",
                   hour: "numeric",
@@ -4018,7 +4345,7 @@ function App() {
               {trashItems.length === 0 && <p className="settings-loading">Trash is empty.</p>}
               {trashItems.map((item) => (
                 <div className="recovery-row" key={`${item.kind}:${item.id}`}>
-                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString()}</small></span>
+                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString("en-US")}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreTrashItem(item)}>Restore</button>
                   <button type="button" className="danger-button" disabled={recoveryBusy} onClick={() => void permanentlyDeleteTrashItem(item)}>Delete</button>
                 </div>
@@ -4030,7 +4357,7 @@ function App() {
               {note && noteVersions.length === 0 && <p className="settings-loading">No earlier versions.</p>}
               {noteVersions.map((version) => (
                 <div className="recovery-row" key={version.revision}>
-                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString()}</small></span>
+                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString("en-US")}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreNoteVersion(version)}>Restore</button>
                 </div>
               ))}
@@ -4261,6 +4588,12 @@ function App() {
             </button>
             <div className="modal-icon"><Icon name="lock" size={21} /></div>
             <p className="eyebrow">Vault settings</p>
+            <h2>Vault Statistics</h2>
+            <div className="vault-statistics">
+              <div><span>Notes</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.notesBytes) : "—"}</strong></div>
+              <div><span>Attachments</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.attachmentsBytes) : "—"}</strong></div>
+              <div><span>Time Tracking</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.timeTrackingBytes) : "—"}</strong></div>
+            </div>
             <h2>GitHub sync (experimental)</h2>
             <div className={`sync-link-state ${syncSettings?.linked ? "linked" : ""}`}>
               <span />
@@ -4590,6 +4923,29 @@ function App() {
           )}
         </div>
       )}
+      {timerDialog && (
+        <div className="modal-backdrop timer-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
+          <section className="vault-modal timer-modal" role="dialog" aria-modal="true" aria-labelledby="timer-dialog-title">
+            <button type="button" className="icon-button modal-close" aria-label="Close timer dialog" onClick={() => setTimerDialog(null)}><Icon name="x" /></button>
+            <p className="eyebrow">Time tracking</p>
+            {timerDialog === "start" ? <form onSubmit={(event) => { event.preventDefault(); void startTimerFromDialog(); }}>
+              <h2 id="timer-dialog-title">Start a timer</h2>
+              {activeTimeEntry && <p className="timer-modal-warning">“{activeTimeEntry.name}” is already running.</p>}
+              <label>Task name<input autoFocus value={timerTaskName} onChange={(event) => setTimerTaskName(event.target.value)} disabled={!!activeTimeEntry || timerBusy} /></label>
+              <ClientSelect clients={(timerCatalog?.clients ?? []).filter((item) => !item.archivedAtUtc)} selected={timerClientID} onChange={(id) => { setTimerClientID(id); if (timerProjectID && (timerCatalog?.projects ?? []).find((project) => project.id === timerProjectID)?.clientId !== id) setTimerProjectID(""); }} disabled={!!activeTimeEntry || timerBusy} />
+              <ProjectSelect projects={(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc && (!timerClientID || item.clientId === timerClientID))} selected={timerProjectID} onChange={(id) => { setTimerProjectID(id); if (!timerClientID) setTimerClientID((timerCatalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} disabled={!!activeTimeEntry || timerBusy} />
+              <TagMultiSelect tags={(timerCatalog?.tags ?? []).filter((item) => !item.archivedAtUtc)} selected={timerTagIDs} onChange={setTimerTagIDs} disabled={!!activeTimeEntry || timerBusy} />
+              {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
+              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>
+            </form> : <div>
+              <h2 id="timer-dialog-title">Finish active timer?</h2>
+              <p>{activeTimeEntry ? <>Finish <strong>{activeTimeEntry.name}</strong> at {formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}?</> : "There is no active timer."}</p>
+              {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
+              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button autoFocus type="button" className="primary-button" disabled={!activeTimeEntry || timerBusy} onClick={() => void finishTimerFromDialog()}>{timerBusy ? "Finishing…" : "Finish timer"}</button></div>
+            </div>}
+          </section>
+        </div>
+      )}
       {syncing && (
         <div className="sync-overlay" role="status" aria-live="polite" aria-busy="true">
           <div className="sync-spinner" aria-hidden="true" />
@@ -4637,6 +4993,16 @@ function App() {
           </section>
         </div>
       )}
+      {trackingConflicts.length > 0 && (
+        <div className="modal-backdrop conflict-backdrop tracking-conflict-backdrop" role="presentation">
+          <section className="vault-modal conflict-modal tracking-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="tracking-conflict-title">
+            <p className="eyebrow">Time tracking sync conflicts</p>
+            <h2 id="tracking-conflict-title">Choose each result explicitly</h2>
+            <p>Sync remains blocked until every preserved variant is resolved.</p>
+            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{conflict.localEntry.startedAtUtc} – {conflict.localEntry.endedAtUtc || "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{conflict.remoteEntry.startedAtUtc} – {conflict.remoteEntry.endedAtUtc || "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
+          </section>
+        </div>
+      )}
       {calendarOpen && (
         <div
           className="modal-backdrop calendar-backdrop"
@@ -4679,7 +5045,7 @@ function App() {
                 >
                   {Array.from({ length: 12 }, (_, month) => (
                     <option key={month} value={month}>
-                      {new Date(2000, month, 1).toLocaleDateString(undefined, { month: "long" })}
+                      {new Date(2000, month, 1).toLocaleDateString("en-US", { month: "long" })}
                     </option>
                   ))}
                 </select>
@@ -4698,7 +5064,7 @@ function App() {
             </div>
             <div className="calendar-weekdays" aria-hidden="true">
               {Array.from({ length: 7 }, (_, day) => (
-                <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString(undefined, { weekday: "narrow" })}</span>
+                <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString("en-US", { weekday: "narrow" })}</span>
               ))}
             </div>
             <div className="calendar-grid">
@@ -4707,7 +5073,7 @@ function App() {
                   type="button"
                   key={date.toISOString()}
                   className={`calendar-day${inMonth ? "" : " outside-month"}${isSameDay(date, today) ? " today" : ""}${isSameDay(date, calendarSelected) ? " selected" : ""}`}
-                  aria-label={date.toLocaleDateString(undefined, { dateStyle: "full" })}
+                  aria-label={date.toLocaleDateString("en-US", { dateStyle: "full" })}
                   aria-pressed={isSameDay(date, calendarSelected)}
                   onClick={() => {
                     setCalendarSelected(date);
@@ -4719,7 +5085,7 @@ function App() {
               ))}
             </div>
             <div className="calendar-footer">
-              <span>{calendarSelected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
+              <span>{calendarSelected.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
               <button type="button" className="primary-button" onClick={() => void openDailyNote(calendarSelected)}>
                 Open daily note
               </button>
@@ -4782,6 +5148,75 @@ function App() {
               )}
             </div>
           </div>
+        </div>
+      )}
+      {commandPaletteOpen && (
+        <div
+          className="global-search-scrim"
+          style={{ zIndex: windowLayers.commandPalette }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeCommandPalette();
+          }}
+        >
+          <section className="global-search-panel command-palette" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
+            <div className="global-search-header">
+              <span id="command-palette-title">Command palette</span>
+              <button type="button" className="icon-button" onClick={closeCommandPalette} aria-label="Close command palette"><Icon name="x" size={14} /></button>
+            </div>
+            <div className="global-search-row">
+              <input
+                className="global-search-input"
+                type="text"
+                autoFocus
+                value={commandPaletteQuery}
+                placeholder="Type a command"
+                aria-label="Search commands"
+                aria-activedescendant={selectedCommandPaletteCommand ? `command-palette-${selectedCommandPaletteCommand.id}` : undefined}
+                onChange={(event) => {
+                  setCommandPaletteQuery(event.target.value);
+                  setCommandPaletteIndex(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeCommandPalette();
+                    return;
+                  }
+                  if (event.key === "Enter" && selectedCommandPaletteCommand) {
+                    event.preventDefault();
+                    runCommandPaletteCommand(selectedCommandPaletteCommand);
+                    return;
+                  }
+                  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                  event.preventDefault();
+                  if (!matchingCommandPaletteCommands.length) return;
+                  const direction = event.key === "ArrowDown" ? 1 : -1;
+                  setCommandPaletteIndex((current) => (
+                    Math.min(current, matchingCommandPaletteCommands.length - 1) + direction + matchingCommandPaletteCommands.length
+                  ) % matchingCommandPaletteCommands.length);
+                }}
+              />
+            </div>
+            <div className="command-palette-results" role="listbox" aria-label="Matching commands">
+              {matchingCommandPaletteCommands.map((command, index) => (
+                <button
+                  type="button"
+                  key={command.id}
+                  id={`command-palette-${command.id}`}
+                  className="command-palette-command"
+                  role="option"
+                  aria-selected={index === commandPaletteSelectedIndex}
+                  onMouseEnter={() => setCommandPaletteIndex(index)}
+                  onClick={() => runCommandPaletteCommand(command)}
+                >
+                  <kbd>{command.shortcut || "—"}</kbd>
+                  <strong>{command.name}</strong>
+                  <span>{command.description}</span>
+                </button>
+              ))}
+              {!matchingCommandPaletteCommands.length && <p className="command-palette-empty">No matching commands.</p>}
+            </div>
+          </section>
         </div>
       )}
       {globalSearchOpen && (
