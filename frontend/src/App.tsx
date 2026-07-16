@@ -107,6 +107,7 @@ const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 const ObjectTreeView = lazy(() => import("./ObjectTreeView"));
 const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
 const GraphView = lazy(() => import("./GraphView").then(({ GraphView }) => ({ default: GraphView })));
+const TimeTrackingView = lazy(() => import("./TimeTrackingView"));
 
 function EditorLoading() {
   return <div className="settings-loading">Loading editor...</div>;
@@ -200,7 +201,7 @@ function Icon({
   name,
   size = 18,
 }: {
-  name: "book" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
+  name: "book" | "clock" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
   size?: number;
 }) {
   const paths = {
@@ -208,6 +209,12 @@ function Icon({
       <>
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+      </>
+    ),
+    clock: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
       </>
     ),
     copy: (
@@ -367,6 +374,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
+  const [timeTrackingOpen, setTimeTrackingOpen] = useState(false);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -1277,6 +1285,8 @@ function App() {
     setDirty(false);
     setRememberError("");
     setSidebarOpen(false);
+    setGraphOpen(false);
+    setTimeTrackingOpen(false);
     setVaultMenuOpen(false);
     setSaveState("idle");
     setGlobalSearchTarget(null);
@@ -2018,6 +2028,7 @@ function App() {
 
   const selectFolder = async (folder: Folder) => {
     if (!(await unlockFolderLineage(folder))) return;
+    setTimeTrackingOpen(false);
     setSelectedFolderID(folder.id);
   };
 
@@ -2025,6 +2036,7 @@ function App() {
     id: string,
     options: { appendTrail?: boolean; replaceTrail?: NoteCrumb[] } = {},
   ) => {
+    setTimeTrackingOpen(false);
     if (note?.id === id) {
       setSidebarOpen(false);
       return;
@@ -3366,11 +3378,24 @@ function App() {
           className={`graph-view-button ${graphOpen ? "active" : ""}`}
           onClick={() => {
             setGraphOpen(true);
+            setTimeTrackingOpen(false);
             setSidebarOpen(false);
           }}
         >
           <Icon name="graph" size={16} />
           <span>Graph view</span>
+        </button>
+        <button
+          type="button"
+          className={`graph-view-button time-tracking-view-button ${timeTrackingOpen ? "active" : ""}`}
+          onClick={() => {
+            setGraphOpen(false);
+            setTimeTrackingOpen(true);
+            setSidebarOpen(false);
+          }}
+        >
+          <Icon name="clock" size={16} />
+          <span>Time tracking</span>
         </button>
         <div className="notes-heading folders-heading">
           <span>Folders</span>
@@ -3383,6 +3408,7 @@ function App() {
             className={`folder-list-item ${selectedFolderID === "all" ? "active" : ""}`}
             onClick={() => {
               setGraphOpen(false);
+              setTimeTrackingOpen(false);
               setSelectedFolderID("all");
             }}
           >
@@ -3398,6 +3424,7 @@ function App() {
                 return;
               }
               setGraphOpen(false);
+              setTimeTrackingOpen(false);
               setSelectedFolderID("");
             }}
             onMouseEnter={(event) => {
@@ -3603,6 +3630,8 @@ function App() {
           <div className="breadcrumbs">
             {graphOpen ? (
               <span className="breadcrumb-item"><strong>Graph view</strong></span>
+            ) : timeTrackingOpen ? (
+              <span className="breadcrumb-item"><strong>Time tracking</strong></span>
             ) : (noteTrail.length ? noteTrail : [
               { id: "", title: folderName(session.path) },
               ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
@@ -3637,7 +3666,7 @@ function App() {
           </div>
           <button
             className="save-file-button"
-            disabled={graphOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+            disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
             title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
             onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
           >
@@ -3649,7 +3678,7 @@ function App() {
           </div>
           <button
             className="save-and-sync-button"
-            disabled={graphOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
+            disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
             title={
               !note
                 ? "No note open"
@@ -3666,7 +3695,7 @@ function App() {
               {lastSyncLabel}
             </span>
           )}
-          {note && !graphOpen && (
+          {note && !graphOpen && !timeTrackingOpen && (
             <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
               <Icon name="trash" size={16} />
             </button>
@@ -3691,7 +3720,11 @@ function App() {
           </div>
         )}
 
-        {graphOpen ? (
+        {timeTrackingOpen ? (
+          <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
+            <TimeTrackingView key={session.vaultId} />
+          </Suspense>
+        ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
             <GraphView
               folders={graphFolders}

@@ -3,13 +3,20 @@ import assert from "node:assert/strict";
 import {
   formatDuration,
   formatRunningDuration,
+  initialTimeTrackingTab,
   inclusiveLocalDateRange,
   localMonthRange,
   localWeekRange,
   runningElapsedSeconds,
+  TIME_TRACKING_TABS,
 } from "../src/timeTracking.ts";
 
 process.env.TZ = "America/New_York";
+
+test("time tracking opens on week and exposes the ordered workspace tabs", () => {
+  assert.equal(initialTimeTrackingTab(), "week");
+  assert.deepEqual(TIME_TRACKING_TABS, ["week", "month", "dashboard", "projects", "tags"]);
+});
 
 test("local weeks run Monday through Sunday across DST", () => {
   assert.deepEqual(localWeekRange(new Date("2026-03-08T16:00:00Z")), {

@@ -3,6 +3,13 @@ export interface UTCDateRange {
   endUTC: string;
 }
 
+export const TIME_TRACKING_TABS = ["week", "month", "dashboard", "projects", "tags"] as const;
+export type TimeTrackingTab = (typeof TIME_TRACKING_TABS)[number];
+
+export function initialTimeTrackingTab(): TimeTrackingTab {
+  return "week";
+}
+
 export function localWeekRange(reference: Date): UTCDateRange {
   const weekday = reference.getDay();
   const daysSinceMonday = (weekday + 6) % 7;
