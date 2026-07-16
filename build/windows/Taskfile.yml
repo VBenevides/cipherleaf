@@ -107,6 +107,8 @@ tasks:
   generate:syso:
     summary: Generates Windows `.syso` file
     dir: build
+    deps:
+      - task: common:update:build-assets
     cmds:
       - wails3 generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../wails_windows_{{.ARCH}}.syso
     vars:

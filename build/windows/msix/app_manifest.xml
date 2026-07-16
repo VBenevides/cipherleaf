@@ -10,13 +10,13 @@
   <Identity 
     Name="io.github.vbenevides.cipherleaf"
     Publisher="CN=vbenevides"
-    Version="0.1.0.0" 
+    Version="0.4.0.0"
     ProcessorArchitecture="x64" />
   
   <Properties>
     <DisplayName>Cipherleaf</DisplayName>
     <PublisherDisplayName>vbenevides</PublisherDisplayName>
-    <Description>Local-first encrypted Markdown notes</Description>
+    <Description>Note taking app with encryption</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   
@@ -32,7 +32,7 @@
     <Application Id="io.github.vbenevides.cipherleaf" Executable="cipherleaf" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="Cipherleaf"
-        Description="Local-first encrypted Markdown notes"
+        Description="Note taking app with encryption"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
