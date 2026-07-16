@@ -44,6 +44,11 @@ test("week days are keyboard-selectable and filter the activity list", () => {
   assert.match(view, /selectedWeekEntries\.map/);
 });
 
+test("completed tasks can resume with the same labels", () => {
+  assert.match(view, /StartTimeEntry\(entry\.name, entry\.projectId \?\? "", entry\.tagIds \?\? \[\]\)/);
+  assert.match(view, />Resume<\/button>/);
+});
+
 test("task tag choices use a reusable multi-select dropdown", () => {
   assert.match(tagSelect, /<details className=/);
   assert.match(tagSelect, /role="group" aria-label=\{label\}/);

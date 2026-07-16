@@ -134,6 +134,15 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
     finally { setBusy(false); }
   };
 
+  const resumeEntry = async (entry: TimeEntry) => {
+    setBusy(true); setError("");
+    try {
+      const started = await VaultService.StartTimeEntry(entry.name, entry.projectId ?? "", entry.tagIds ?? []);
+      setActiveEntry(started); onActiveEntryChange?.(started); await loadEntries();
+    } catch (reason) { setError(errorText(reason)); }
+    finally { setBusy(false); }
+  };
+
   const beginEdit = (entry: TimeEntry) => {
     setEditing(entry); setEditName(entry.name); setEditProjectID(entry.projectId ?? "");
     setEditTagIDs(entry.tagIds ?? []); setEditStartedAt(localDateTimeValue(entry.startedAtUtc));
@@ -263,7 +272,7 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
               <h3>{localWeekDates(weekAnchor).find((day) => localDateKey(day) === selectedWeekDay)?.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h3>
               {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
                 <div><strong>{entry.name}</strong><span>{new Date(entry.startedAtUtc).toLocaleString()} · {formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</span></div>
-                <div><button className="secondary-button" onClick={() => beginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => { setDeleting(entry); setConfirmAction("delete"); }}>Delete</button></div>
+                <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => void resumeEntry(entry)}>Resume</button><button className="secondary-button" onClick={() => beginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => { setDeleting(entry); setConfirmAction("delete"); }}>Delete</button></div>
               </article>)}
               {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
             </div>
