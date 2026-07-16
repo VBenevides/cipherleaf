@@ -1129,8 +1129,8 @@ function toggleLineStyle(): string {
   return "--toggle-padding-left: calc(var(--live-object-depth, 0) * 24px);";
 }
 
-function listLineStyle(markerWidth = "1.25em"): string {
-  return `--live-list-indent: calc(var(--live-object-depth, 0) * 24px); --live-list-marker-width: ${markerWidth};`;
+function listLineStyle(): string {
+  return "--live-list-indent: calc(var(--live-object-depth, 0) * 24px);";
 }
 
 function objectLineAttributes(
@@ -1411,14 +1411,13 @@ function buildLivePreviewState(
         isTask || listKind ? "cm-live-list-line" : "",
       ].filter(Boolean).join(" ");
 
-      const toggleMarkerWidth = isTask ? "1.45em" : listKind === "ordered" ? "2em" : "1.25em";
       decorations.push(
         Decoration.line({
           attributes: objectLineAttributes(
             lineNumber,
             classes,
             isTask || listKind
-              ? `${toggleLineStyle()} ${listLineStyle(toggleMarkerWidth)}`
+              ? `${toggleLineStyle()} ${listLineStyle()}`
               : toggleLineStyle(),
             depthByLine.get(lineNumber) ?? 0,
           ),
@@ -1609,7 +1608,7 @@ function buildLivePreviewState(
         attributes: objectLineAttributes(
           lineNumber,
           "cm-live-task-line cm-live-list-line",
-          listLineStyle("1.45em"),
+          listLineStyle(),
           depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));
@@ -1634,7 +1633,7 @@ function buildLivePreviewState(
         attributes: objectLineAttributes(
           lineNumber,
           "cm-live-list-line",
-          listLineStyle("2em"),
+          listLineStyle(),
           depthByLine.get(lineNumber) ?? 0,
         ),
       }).range(line.from));

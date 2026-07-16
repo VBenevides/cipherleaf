@@ -254,15 +254,16 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   if (bullet) {
     const checked = bullet[2]?.match(/^\[([ xX])\]\s*(.*)$/);
     const text = checked ? checked[2].trim() : bullet[2]?.trim() ?? "";
+    const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
     return {
       tag: "bulletpoint",
       tags,
       indent,
-      contentIndent: contentIndent + source.length - text.length,
+      contentIndent: visualIndent(prefix),
       text,
       checked: checked ? checked[1].toLowerCase() === "x" : undefined,
-      sourcePrefix: sourcePrefix(text),
+      sourcePrefix: prefix,
       listMarker: bullet[1],
       ...objectPrefix,
     };
@@ -272,15 +273,16 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   if (ordered) {
     const checked = ordered[2]?.match(/^\[([ xX])\]\s*(.*)$/);
     const text = checked ? checked[2].trim() : ordered[2]?.trim() ?? "";
+    const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
     return {
       tag: "bulletpoint",
       tags,
       indent,
-      contentIndent: contentIndent + source.length - text.length,
+      contentIndent: visualIndent(prefix),
       text,
       checked: checked ? checked[1].toLowerCase() === "x" : undefined,
-      sourcePrefix: sourcePrefix(text),
+      sourcePrefix: prefix,
       listMarker: ordered[1],
       ...objectPrefix,
     };

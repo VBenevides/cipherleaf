@@ -468,6 +468,13 @@ test("allows empty text and bullet objects", () => {
   assert.equal(tree[2].text, "");
 });
 
+test("keeps trailing list whitespace out of the hidden prefix", () => {
+  const document = parseObjectDocument(["- what ", "1. what "].join("\n"));
+
+  assert.equal(document.objects[0].textFrom, 2);
+  assert.equal(document.objects[1].textFrom, 11);
+});
+
 test("keeps plain blank lines as empty objects", () => {
   const tree = markdownObjectTree(["a", "", "b"].join("\n"));
 

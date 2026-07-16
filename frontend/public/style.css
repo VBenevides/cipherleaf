@@ -3181,8 +3181,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-list-marker {
   display: inline-block;
-  width: var(--live-list-marker-width, 2em);
-  padding-right: 0.35em;
+  margin-right: 0.4em;
   color: var(--green-dark);
   font-weight: 700;
   text-align: left;
