@@ -53,11 +53,11 @@ test("local month ranges include complete leap and DST months", () => {
   });
 });
 
-test("month grids include complete Monday-based leading and trailing weeks", () => {
+test("month grids include complete Sunday-based leading and trailing weeks", () => {
   const days = localMonthGrid(new Date("2026-02-15T12:00:00Z"));
-  assert.equal(days.length, 35);
-  assert.equal(localDateKey(days[0]), "2026-01-26");
-  assert.equal(localDateKey(days.at(-1)!), "2026-03-01");
+  assert.equal(days.length, 28);
+  assert.equal(localDateKey(days[0]), "2026-02-01");
+  assert.equal(localDateKey(days.at(-1)!), "2026-02-28");
 });
 
 test("inclusive local dates become half-open UTC ranges", () => {

@@ -270,7 +270,7 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
           </> : tab === "month" ? <>
             <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
             {busy ? <div className="settings-loading" role="status">Loading month...</div> : <div className="time-month-grid">
-              {localWeekDates(new Date(2026, 0, 5)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong>)}
+              {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong>)}
               {localMonthGrid(monthAnchor).map((day) => {
                 const key = localDateKey(day); const start = day.getTime(); const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
                 const items = monthEntries.filter((item) => new Date(item.startedAtUtc).getTime() < end && new Date(item.endedAtUtc).getTime() > start);
