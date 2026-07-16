@@ -27,6 +27,9 @@
   --green-dark: #4a6c8a;
   --green-pale: #d8dee9;
   --red: #bf616a;
+  --panel: var(--paper);
+  --modal-surface: #fbfaf6;
+  --modal-control-surface: #ffffff;
 }
 
 :root[data-theme="dark"] {
@@ -43,6 +46,8 @@
   --green-dark: #88c0d0;
   --green-pale: #3b4655;
   --red: #bf616a;
+  --modal-surface: #343b49;
+  --modal-control-surface: #272d38;
 }
 
 :root[data-theme="archivist"] {
@@ -64,6 +69,8 @@
   --surface: #f1e9da;
   --surface-hover: #e8dcc6;
   --surface-active: #dcc8a4;
+  --modal-surface: #f1e9da;
+  --modal-control-surface: #f7f3ea;
 }
 
 :root[data-theme="archivist"] ::selection {
@@ -518,7 +525,7 @@ a:focus-visible {
   padding: 36px;
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 17px;
-  background: #fbfaf6;
+  background: var(--modal-surface);
   box-shadow: 0 32px 90px rgba(24, 29, 23, 0.3);
 }
 
@@ -2424,14 +2431,14 @@ a:focus-visible {
 
 .time-entry-form input,
 .time-entry-form select,
-.time-tracking-dialog input,
+.time-tracking-dialog input:not([type="checkbox"]):not([type="radio"]),
 .time-tracking-dialog select {
   min-height: 36px;
   padding: 0 10px;
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--panel);
+  background: var(--modal-control-surface);
   font: inherit;
 }
 
@@ -2506,9 +2513,19 @@ a:focus-visible {
 
 .time-tracking-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(25, 28, 25, 0.46); }
 .time-tracking-dialog > form,
-.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--modal-surface); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.vault-modal,
+.time-tracking-dialog > form,
+.time-tracking-dialog > div,
+.global-search-panel { background-color: var(--modal-surface) !important; background-image: none !important; opacity: 1; }
+.vault-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.vault-modal select,
+.vault-modal textarea,
+.time-tracking-dialog input:not([type="checkbox"]):not([type="radio"]),
+.time-tracking-dialog select,
+.time-tracking-dialog textarea { background-color: var(--modal-control-surface) !important; opacity: 1; }
 .timer-modal-backdrop { z-index: 170; }
-.timer-modal { background: var(--paper); }
+.timer-modal { background: var(--modal-surface); }
 .timer-modal form, .timer-modal > div { display: grid; gap: 14px; }
 .timer-modal label { display: grid; gap: 6px; }
 .timer-modal select { min-height: 39px; padding: 0 11px; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; background: var(--canvas); }

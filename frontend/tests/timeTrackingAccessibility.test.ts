@@ -30,7 +30,12 @@ test("timer shortcuts open opaque modals without changing workspace views", () =
   assert.match(app, /event\.preventDefault\(\); openStartTimerDialog\(\); return;/);
   assert.match(app, /setTimerDialog\("finish"\); return;/);
   assert.match(app, /className="vault-modal timer-modal" role="dialog" aria-modal="true"/);
-  assert.match(style, /\.timer-modal \{ background: var\(--paper\); \}/);
+  assert.match(style, /\.timer-modal \{ background: var\(--modal-surface\); \}/);
+});
+
+test("all modal surfaces and controls use opaque theme colors", () => {
+  assert.match(style, /\.vault-modal,[\s\S]*\.global-search-panel \{ background-color: var\(--modal-surface\) !important; background-image: none !important; opacity: 1; \}/);
+  assert.match(style, /\.time-tracking-dialog textarea \{ background-color: var\(--modal-control-surface\) !important; opacity: 1; \}/);
 });
 
 test("week days are keyboard-selectable and filter the activity list", () => {
