@@ -265,6 +265,7 @@ export interface VaultSettings {
     "dailyNoteFolderId": string;
     "dailyTemplateNoteId": string;
     "autosaveIntervalSeconds": number;
+    "autoSyncMinutes": number;
     "autoLockMinutes": number;
     "sectionDefault": string;
     "modifiedAt": number;

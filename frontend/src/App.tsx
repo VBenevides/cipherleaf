@@ -463,6 +463,10 @@ function App() {
     const saved = Number(window.localStorage.getItem("cipherleaf-autosave-seconds"));
     return Number.isFinite(saved) && saved >= 60 ? saved : 60;
   });
+  const [autoSyncMinutes, setAutoSyncMinutes] = useState(() => {
+    const saved = Number(window.localStorage.getItem("cipherleaf-auto-sync-minutes"));
+    return Number.isFinite(saved) && saved >= 1 ? saved : 15;
+  });
   const [autoLockMinutes, setAutoLockMinutes] = useState(() => {
     const saved = Number(window.localStorage.getItem("cipherleaf-auto-lock-minutes"));
     return Number.isFinite(saved) && saved >= 1 ? saved : 15;
@@ -508,6 +512,7 @@ function App() {
   const nextWindowLayerRef = useRef(160);
   const vaultSettingsLoadedForRef = useRef("");
   const vaultSettingsSnapshotRef = useRef("");
+  const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
 
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
     theme,
@@ -517,11 +522,13 @@ function App() {
     dailyNoteFolderId: dailyNoteFolderID,
     dailyTemplateNoteId: dailyTemplateNoteID,
     autosaveIntervalSeconds,
+    autoSyncMinutes,
     autoLockMinutes,
     sectionDefault,
     modifiedAt: 0,
   }), [
     autoLockMinutes,
+    autoSyncMinutes,
     autosaveIntervalSeconds,
     dailyNoteFolderID,
     dailyNoteFormat,
@@ -543,6 +550,7 @@ function App() {
     setDailyNoteFolderID(settings.dailyNoteFolderId);
     setDailyTemplateNoteID(settings.dailyTemplateNoteId);
     setAutosaveIntervalSeconds(settings.autosaveIntervalSeconds);
+    setAutoSyncMinutes(settings.autoSyncMinutes);
     setAutoLockMinutes(settings.autoLockMinutes);
     setSectionDefault(settings.sectionDefault as SectionDefault);
   };
@@ -688,9 +696,10 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem("cipherleaf-autosave-seconds", String(autosaveIntervalSeconds));
+    window.localStorage.setItem("cipherleaf-auto-sync-minutes", String(autoSyncMinutes));
     window.localStorage.setItem("cipherleaf-auto-lock-minutes", String(autoLockMinutes));
     window.localStorage.setItem("cipherleaf-section-default", sectionDefault);
-  }, [autoLockMinutes, autosaveIntervalSeconds, sectionDefault]);
+  }, [autoLockMinutes, autoSyncMinutes, autosaveIntervalSeconds, sectionDefault]);
 
   useEffect(() => {
     if (!note || session?.locked) {
@@ -1243,12 +1252,12 @@ function App() {
   }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
 
   useEffect(() => {
-    if (!session || session.locked) return;
-    const delay = autoLockMinutes * 60 * 1000;
-    let timer = window.setTimeout(() => void autoLock(), delay);
+    if (!session || session.locked || !syncLinked || autoSyncMinutes === autoLockMinutes) return;
+    const delay = autoSyncMinutes * 60 * 1000;
+    let timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
     const reset = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => void autoLock(), delay);
+      timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
     };
     const events: (keyof WindowEventMap)[] = [
       "pointerdown",
@@ -1261,7 +1270,32 @@ function App() {
       window.clearTimeout(timer);
       events.forEach((event) => window.removeEventListener(event, reset));
     };
-  }, [autoLockMinutes, session?.vaultId, session?.locked]);
+  }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
+
+  useEffect(() => {
+    if (!session || session.locked) return;
+    const delay = autoLockMinutes * 60 * 1000;
+    const lock = async () => {
+      if (autoSyncMinutes === autoLockMinutes) await autoSyncVaultRef.current();
+      await autoLock();
+    };
+    let timer = window.setTimeout(() => void lock(), delay);
+    const reset = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void lock(), delay);
+    };
+    const events: (keyof WindowEventMap)[] = [
+      "pointerdown",
+      "keydown",
+      "mousemove",
+      "touchstart",
+    ];
+    events.forEach((event) => window.addEventListener(event, reset, { passive: true }));
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((event) => window.removeEventListener(event, reset));
+    };
+  }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked]);
 
   useEffect(() => {
     if (!session || session.locked) { setActiveTimeEntry(null); return; }
@@ -1678,6 +1712,11 @@ function App() {
     } finally {
       setSyncing(false);
     }
+  };
+
+  autoSyncVaultRef.current = async () => {
+    if (!syncLinked || syncing) return;
+    await syncNow();
   };
 
   async function startConflictResolution(conflict: MergeConflict) {
@@ -4396,6 +4435,7 @@ function App() {
                   <div className="settings-submenu">
                     <button type="button" onClick={() => openSettingsSection("general", "settings-daily-notes")}>Daily notes</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-autosave")}>Auto-save</button>
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-auto-sync")}>Auto-sync</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-auto-lock")}>Vault lock</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-section-default")}>Section state</button>
                   </div>
@@ -4452,6 +4492,18 @@ function App() {
                           step="1"
                           value={autosaveIntervalSeconds}
                           onChange={(event) => setAutosaveIntervalSeconds(Math.max(60, Number(event.target.value) || 60))}
+                        />
+                      </label>
+                    </div>
+                    <div id="settings-auto-sync" className="settings-section settings-section-card">
+                      <label>
+                        Auto-sync after inactivity (minutes)
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={autoSyncMinutes}
+                          onChange={(event) => setAutoSyncMinutes(Math.max(1, Number(event.target.value) || 1))}
                         />
                       </label>
                     </div>

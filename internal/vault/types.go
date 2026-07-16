@@ -125,6 +125,7 @@ type VaultSettings struct {
 	DailyNoteFolderID       string `json:"dailyNoteFolderId"`
 	DailyTemplateNoteID     string `json:"dailyTemplateNoteId"`
 	AutosaveIntervalSeconds int    `json:"autosaveIntervalSeconds"`
+	AutoSyncMinutes         int    `json:"autoSyncMinutes"`
 	AutoLockMinutes         int    `json:"autoLockMinutes"`
 	SectionDefault          string `json:"sectionDefault"`
 	ModifiedAt              int64  `json:"modifiedAt"`

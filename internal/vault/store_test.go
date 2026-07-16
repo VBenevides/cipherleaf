@@ -405,7 +405,7 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	}
 	want, err := first.SaveVaultSettings(VaultSettings{
 		Theme: "dark", JournalLines: "dotted", EditorFontSize: 18,
-		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90,
+		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90, AutoSyncMinutes: 20,
 		AutoLockMinutes: 30, SectionDefault: "expanded",
 	})
 	if err != nil {
@@ -430,7 +430,7 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 
 	newer, err := first.SaveVaultSettings(VaultSettings{
 		Theme: "archivist", JournalLines: "full", EditorFontSize: 20,
-		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120,
+		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120, AutoSyncMinutes: 25,
 		AutoLockMinutes: 45, SectionDefault: "collapsed",
 	})
 	if err != nil {
@@ -449,6 +449,12 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	got, err = restored.GetVaultSettings()
 	if err != nil || got != newer {
 		t.Fatalf("merged settings = %#v, %v; want %#v", got, err, newer)
+	}
+}
+
+func TestVaultSettingsDefaultAutoSyncInterval(t *testing.T) {
+	if got := normalizeVaultSettings(VaultSettings{}).AutoSyncMinutes; got != 15 {
+		t.Fatalf("auto-sync interval = %d, want 15", got)
 	}
 }
 
