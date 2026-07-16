@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const view = readFileSync(new URL("../src/TimeTrackingView.tsx", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+const tagSelect = readFileSync(new URL("../src/TagMultiSelect.tsx", import.meta.url), "utf8");
 
 test("time tracking navigation and dialogs expose keyboard semantics", () => {
   assert.match(view, /role="tablist"/);
@@ -41,4 +42,11 @@ test("all modal surfaces and controls use opaque theme colors", () => {
 test("week days are keyboard-selectable and filter the activity list", () => {
   assert.match(view, /role="button" tabIndex=\{0\} aria-pressed=\{selectedWeekDay === key\}/);
   assert.match(view, /selectedWeekEntries\.map/);
+});
+
+test("task tag choices use a reusable multi-select dropdown", () => {
+  assert.match(tagSelect, /<details className=/);
+  assert.match(tagSelect, /role="group" aria-label=\{label\}/);
+  assert.doesNotMatch(view, /<legend>Tags<\/legend>/);
+  assert.match(app, /<TagMultiSelect tags=/);
 });
