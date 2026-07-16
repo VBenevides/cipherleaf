@@ -6,7 +6,6 @@ import {
   formatLocalDateTime,
   dashboardPresetRange,
   formatRunningDuration,
-  initialTimeTrackingTab,
   inclusiveLocalDateRange,
   localMonthRange,
   localMonthGrid,
@@ -15,14 +14,14 @@ import {
   localDateKey,
   localWeekDates,
   localWeekRange,
+  millisecondsUntilNextDurationMinute,
   runningElapsedSeconds,
   TIME_TRACKING_TABS,
 } from "../src/timeTracking.ts";
 
 process.env.TZ = "America/New_York";
 
-test("time tracking opens on week and exposes the ordered workspace tabs", () => {
-  assert.equal(initialTimeTrackingTab(), "week");
+test("time tracking exposes the ordered workspace tabs", () => {
   assert.deepEqual(TIME_TRACKING_TABS, ["week", "month", "dashboard", "clients", "projects", "tags"]);
 });
 
@@ -86,6 +85,8 @@ test("durations and running clocks are safe and deterministic", () => {
   assert.equal(formatRunningDuration("2026-07-16T10:00:00Z", now), "1h 05m");
   assert.equal(runningElapsedSeconds("2026-07-16T12:00:00Z", now), 0);
   assert.equal(runningElapsedSeconds("invalid", now), 0);
+  assert.equal(millisecondsUntilNextDurationMinute("2026-07-16T11:00:00Z", now), 30_000);
+  assert.equal(millisecondsUntilNextDurationMinute("invalid", now), 60_000);
 });
 
 test("entry corrections convert local date-time fields to and from UTC", () => {

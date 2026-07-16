@@ -45,7 +45,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
-import { formatRunningDuration } from "./timeTracking";
+import { formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 
 type VaultAction = "create" | "open" | "clone";
@@ -1272,9 +1272,18 @@ function App() {
 
   useEffect(() => {
     if (!activeTimeEntry) return;
-    const timer = window.setInterval(() => setTimerNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, [activeTimeEntry?.id]);
+    const refresh = () => setTimerNow(new Date());
+    refresh();
+    let interval: number | undefined;
+    const timeout = window.setTimeout(() => {
+      refresh();
+      interval = window.setInterval(refresh, 60_000);
+    }, millisecondsUntilNextDurationMinute(activeTimeEntry.startedAtUtc));
+    return () => {
+      window.clearTimeout(timeout);
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, [activeTimeEntry?.id, activeTimeEntry?.startedAtUtc]);
 
   const openStartTimerDialog = () => {
     setTimerDialog("start"); setTimerError("");
@@ -4007,7 +4016,7 @@ function App() {
 
         {timeTrackingOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
-            <TimeTrackingView key={session.vaultId} onActiveEntryChange={setActiveTimeEntry} />
+            <TimeTrackingView key={session.vaultId} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
           </Suspense>
         ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>

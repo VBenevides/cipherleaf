@@ -2387,16 +2387,6 @@ a:focus-visible {
   font-weight: 500;
 }
 
-.time-tracking-active {
-  max-width: 45%;
-  overflow: hidden;
-  color: var(--green-dark);
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .time-tracking-tabs {
   display: flex;
   gap: 5px;
@@ -2455,9 +2445,7 @@ a:focus-visible {
 }
 
 .time-entry-form input,
-.time-entry-form select,
-.time-tracking-dialog input:not([type="checkbox"]):not([type="radio"]),
-.time-tracking-dialog select {
+.time-tracking-dialog input:not([type="checkbox"]):not([type="radio"]) {
   min-height: 36px;
   padding: 0 10px;
   color: var(--ink);
@@ -2466,11 +2454,6 @@ a:focus-visible {
   background: var(--modal-control-surface);
   font: inherit;
 }
-
-.time-entry-form fieldset,
-.time-tracking-dialog fieldset { margin: 0; border: 1px solid var(--line); border-radius: 7px; }
-.time-entry-form fieldset label,
-.time-tracking-dialog fieldset label { display: inline-flex; align-items: center; gap: 4px; margin-right: 9px; font-size: 10px; }
 
 .time-calendar-navigation { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
 .time-calendar-navigation strong { margin-right: auto; color: var(--ink); font-family: Georgia, "Times New Roman", serif; }
@@ -2551,7 +2534,6 @@ a:focus-visible {
 .vault-modal select,
 .vault-modal textarea,
 .time-tracking-dialog input:not([type="checkbox"]):not([type="radio"]),
-.time-tracking-dialog select,
 .time-tracking-dialog textarea { background-color: var(--modal-control-surface) !important; opacity: 1; }
 .timer-modal-backdrop { z-index: 170; }
 .timer-modal { background: var(--modal-surface); }

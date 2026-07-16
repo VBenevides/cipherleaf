@@ -9,7 +9,6 @@ import {
   formatLocalDateTime,
   dashboardPresetRange,
   inclusiveLocalDateRange,
-  initialTimeTrackingTab,
   localDateTimeToUTC,
   localDateTimeValue,
   localDateKey,
@@ -26,8 +25,28 @@ const TAB_LABELS: Record<TimeTrackingTab, string> = {
   week: "Week", month: "Month", dashboard: "Dashboard", clients: "Clients", projects: "Projects", tags: "Tags",
 };
 
-export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntryChange?: (entry: TimeEntry | null) => void }) {
-  const [tab, setTab] = useState<TimeTrackingTab>(initialTimeTrackingTab);
+type CalendarDay = {
+  date: Date;
+  key: string;
+  start: number;
+  end: number;
+  items: TimeEntryRangeItem[];
+  total: number;
+};
+
+function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals: TimeDashboardDay[]): CalendarDay[] {
+  const totalsByDate = new Map(totals.map((day) => [day.localDate, day.totalSeconds]));
+  const entryRanges = entries.map((item) => ({ item, start: new Date(item.entry.startedAtUtc).getTime(), end: new Date(item.entry.endedAtUtc ?? "").getTime() }));
+  return dates.map((date) => {
+    const start = date.getTime();
+    const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+    const key = localDateKey(date);
+    return { date, key, start, end, items: entryRanges.filter((item) => item.start < end && item.end > start).map((item) => item.item), total: totalsByDate.get(key) ?? 0 };
+  });
+}
+
+export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Date; onActiveEntryChange?: (entry: TimeEntry | null) => void }) {
+  const [tab, setTab] = useState<TimeTrackingTab>("week");
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
   const [rangeEntries, setRangeEntries] = useState<TimeEntryRangeItem[]>([]);
@@ -37,7 +56,6 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [monthEntries, setMonthEntries] = useState<TimeEntryRangeItem[]>([]);
   const [monthDays, setMonthDays] = useState<TimeDashboardDay[]>([]);
-  const [now, setNow] = useState(() => new Date());
   const [name, setName] = useState("");
   const [clientID, setClientID] = useState("");
   const [projectID, setProjectID] = useState("");
@@ -86,13 +104,6 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
     return () => { cancelled = true; };
   }, [loadEntries, onActiveEntryChange]);
 
-
-  useEffect(() => {
-    if (!activeEntry) return;
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, [activeEntry]);
-
   useEffect(() => {
     if (tab !== "month") return;
     const range = localMonthRange(monthAnchor);
@@ -107,13 +118,14 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
   const projects = useMemo(() => (catalog?.projects ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
   const taskProjects = useMemo(() => projects.filter((project) => !clientID || project.clientId === clientID), [clientID, projects]);
   const tags = useMemo(() => (catalog?.tags ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
+  const weekDates = useMemo(() => localWeekDates(weekAnchor), [weekAnchor]);
+  const weekDays = useMemo(() => buildCalendarDays(weekDates, rangeEntries, dayTotals), [dayTotals, rangeEntries, weekDates]);
+  const selectedWeekDate = useMemo(() => weekDays.find((day) => day.key === selectedWeekDay), [selectedWeekDay, weekDays]);
   const selectedWeekEntries = useMemo(() => {
-    const day = localWeekDates(weekAnchor).find((item) => localDateKey(item) === selectedWeekDay);
-    if (!day) return [];
-    const start = day.getTime();
-    const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-    return rangeEntries.filter((item) => item.entry.endedAtUtc && new Date(item.startedAtUtc).getTime() < end && new Date(item.endedAtUtc).getTime() > start);
-  }, [rangeEntries, selectedWeekDay, weekAnchor]);
+    return (selectedWeekDate?.items ?? []).filter((item) => item.entry.endedAtUtc);
+  }, [selectedWeekDate]);
+  const monthCalendarDays = useMemo(() => buildCalendarDays(localMonthGrid(monthAnchor), monthEntries, monthDays), [monthAnchor, monthDays, monthEntries]);
+  const todayKey = localDateKey(now);
 
   const navigateWeek = (days: number) => {
     const next = days === 0 ? new Date() : new Date(weekAnchor.getFullYear(), weekAnchor.getMonth(), weekAnchor.getDate() + days);
@@ -253,7 +265,43 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
 
   const dashboardView = () => {
     const maxDay = Math.max(1, ...(dashboard?.days ?? []).map((day) => day.totalSeconds));
-    return <div className="time-dashboard"><div className="dashboard-controls"><select aria-label="Period" value={dashboardCustom ? "custom" : dashboardPreset} onChange={(event) => { if (event.target.value === "custom") setDashboardCustom(true); else { setDashboardCustom(false); setDashboardPreset(event.target.value as DashboardPreset); } }}><option value="current-week">Current week</option><option value="last-week">Last week</option><option value="current-month">Current month</option><option value="last-month">Last month</option><option value="custom">Custom</option></select>{dashboardCustom && <><input aria-label="Start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /><input aria-label="End date" type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /><button className="secondary-button" onClick={() => void loadDashboard()}>Apply</button></>}<ClientSelect label="Filter client" clients={catalog?.clients ?? []} selected={dashboardClient} onChange={(id) => { setDashboardClient(id); if (id && dashboardProject && (catalog?.projects ?? []).find((project) => project.id === dashboardProject)?.clientId !== id) setDashboardProject(""); }} /><ProjectSelect label="Filter project" projects={(catalog?.projects ?? []).filter((project) => !dashboardClient || project.clientId === dashboardClient)} selected={dashboardProject} onChange={setDashboardProject} /><TagMultiSelect label="Filter tags" tags={catalog?.tags ?? []} selected={dashboardTags} onChange={setDashboardTags} /></div>{busy ? <div className="settings-loading" role="status">Loading dashboard...</div> : dashboard && <><div className="dashboard-counters"><div><strong>{dashboard.projectCount}</strong><span>Projects used</span></div><div><strong>{dashboard.tagCount}</strong><span>Tags used</span></div><div><strong>{formatDuration(dashboard.totalSeconds)}</strong><span>Total tracked</span></div><div><strong>{formatDuration(dashboard.averageDaySeconds)}</strong><span>Average per day</span></div></div><div className="dashboard-chart" role="img" aria-label="Tracked time by local calendar day">{(dashboard.days ?? []).map((day) => <div key={day.localDate}><span style={{ height: `${Math.max(2, day.totalSeconds / maxDay * 100)}%` }} aria-label={`${day.localDate}: ${formatDuration(day.totalSeconds)}`} /><small>{day.localDate.slice(5)}</small></div>)}</div><div className="dashboard-groups"><section><h3>Projects</h3>{(dashboard.projects ?? []).map((item) => <p key={item.id}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></p>)}</section><section><h3>Tags</h3><small>Entries with multiple tags count fully in each tag.</small>{(dashboard.tags ?? []).map((item) => <p key={item.id}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></p>)}</section><section><h3>Tasks</h3>{(dashboard.tasks ?? []).map((item) => <div key={item.name}><button onClick={() => void expandDashboardTask(item.name)} aria-expanded={!!dashboardDetails[item.name]}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></button>{dashboardDetails[item.name]?.map((entry) => <p key={entry.entry.id}><span>{formatLocalDateTime(new Date(entry.startedAtUtc))}</span><strong>{formatDuration(entry.totalSeconds)}</strong></p>)}</div>)}</section></div></>}</div>;
+    return <div className="time-dashboard">
+      <div className="dashboard-controls">
+        <select aria-label="Period" value={dashboardCustom ? "custom" : dashboardPreset} onChange={(event) => {
+          if (event.target.value === "custom") setDashboardCustom(true);
+          else { setDashboardCustom(false); setDashboardPreset(event.target.value as DashboardPreset); }
+        }}>
+          <option value="current-week">Current week</option>
+          <option value="last-week">Last week</option>
+          <option value="current-month">Current month</option>
+          <option value="last-month">Last month</option>
+          <option value="custom">Custom</option>
+        </select>
+        {dashboardCustom && <><input aria-label="Start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /><input aria-label="End date" type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></>}
+        <ClientSelect label="Filter client" clients={catalog?.clients ?? []} selected={dashboardClient} onChange={(id) => {
+          setDashboardClient(id);
+          if (id && dashboardProject && (catalog?.projects ?? []).find((project) => project.id === dashboardProject)?.clientId !== id) setDashboardProject("");
+        }} />
+        <ProjectSelect label="Filter project" projects={(catalog?.projects ?? []).filter((project) => !dashboardClient || project.clientId === dashboardClient)} selected={dashboardProject} onChange={setDashboardProject} />
+        <TagMultiSelect label="Filter tags" tags={catalog?.tags ?? []} selected={dashboardTags} onChange={setDashboardTags} />
+      </div>
+      {busy ? <div className="settings-loading" role="status">Loading dashboard...</div> : dashboard && <>
+        <div className="dashboard-counters">
+          <div><strong>{dashboard.projectCount}</strong><span>Projects used</span></div>
+          <div><strong>{dashboard.tagCount}</strong><span>Tags used</span></div>
+          <div><strong>{formatDuration(dashboard.totalSeconds)}</strong><span>Total tracked</span></div>
+          <div><strong>{formatDuration(dashboard.averageDaySeconds)}</strong><span>Average per day</span></div>
+        </div>
+        <div className="dashboard-chart" role="img" aria-label="Tracked time by local calendar day">
+          {(dashboard.days ?? []).map((day) => <div key={day.localDate}><span style={{ height: `${Math.max(2, day.totalSeconds / maxDay * 100)}%` }} aria-label={`${day.localDate}: ${formatDuration(day.totalSeconds)}`} /><small>{day.localDate.slice(5)}</small></div>)}
+        </div>
+        <div className="dashboard-groups">
+          <section><h3>Projects</h3>{(dashboard.projects ?? []).map((item) => <p key={item.id}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></p>)}</section>
+          <section><h3>Tags</h3><small>Entries with multiple tags count fully in each tag.</small>{(dashboard.tags ?? []).map((item) => <p key={item.id}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></p>)}</section>
+          <section><h3>Tasks</h3>{(dashboard.tasks ?? []).map((item) => <div key={item.name}><button onClick={() => void expandDashboardTask(item.name)} aria-expanded={!!dashboardDetails[item.name]}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></button>{dashboardDetails[item.name]?.map((entry) => <p key={entry.entry.id}><span>{formatLocalDateTime(new Date(entry.startedAtUtc))}</span><strong>{formatDuration(entry.totalSeconds)}</strong></p>)}</div>)}</section>
+        </div>
+      </>}
+    </div>;
   };
 
   return (
@@ -278,22 +326,17 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
             </form>
             <div className="time-calendar-navigation">
               <button className="secondary-button" onClick={() => navigateWeek(-7)}>Previous</button>
-              <strong>{formatLocalDate(localWeekDates(weekAnchor)[0])} – {formatLocalDate(localWeekDates(weekAnchor)[6])}</strong>
+              <strong>{formatLocalDate(weekDates[0])} – {formatLocalDate(weekDates[6])}</strong>
               <button className="secondary-button" onClick={() => navigateWeek(0)}>Current week</button>
               <button className="secondary-button" onClick={() => navigateWeek(7)}>Next</button>
             </div>
             <div className="time-week-grid">
-              {localWeekDates(weekAnchor).map((day) => {
-                const dayStart = day.getTime();
-                const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-                const items = rangeEntries.filter((item) => new Date(item.startedAtUtc).getTime() < dayEnd && new Date(item.endedAtUtc).getTime() > dayStart);
-                const total = dayTotals.find((item) => item.localDate === localDateKey(day))?.totalSeconds ?? 0;
-                const key = localDateKey(day);
-                return <section key={key} role="button" tabIndex={0} aria-pressed={selectedWeekDay === key} className={`${key === localDateKey(new Date()) ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => setSelectedWeekDay(key)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedWeekDay(key); } }}><header><strong>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), dayEnd) - Math.max(new Date(item.entry.startedAtUtc).getTime(), dayStart)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></section>;
+              {weekDays.map(({ date: day, end, items, key, start, total }) => {
+                return <section key={key} role="button" tabIndex={0} aria-pressed={selectedWeekDay === key} className={`${key === todayKey ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => setSelectedWeekDay(key)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedWeekDay(key); } }}><header><strong>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), end) - Math.max(new Date(item.entry.startedAtUtc).getTime(), start)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></section>;
               })}
             </div>
             <div className="time-entry-list">
-              <h3>{(() => { const day = localWeekDates(weekAnchor).find((item) => localDateKey(item) === selectedWeekDay); return day && formatLocalDate(day); })()}</h3>
+              <h3>{selectedWeekDate && formatLocalDate(selectedWeekDate.date)}</h3>
               {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
                 <div><strong>{entry.name}</strong><span>{formatLocalDateTime(new Date(entry.startedAtUtc))} · {formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</span></div>
                 <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => void resumeEntry(entry)}>Resume</button><button className="secondary-button" onClick={() => beginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => { setDeleting(entry); setConfirmAction("delete"); }}>Delete</button></div>
@@ -304,11 +347,8 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
             <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
             {busy ? <div className="settings-loading" role="status">Loading month...</div> : <div className="time-month-grid">
               {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
-              {localMonthGrid(monthAnchor).map((day) => {
-                const key = localDateKey(day); const start = day.getTime(); const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-                const items = monthEntries.filter((item) => new Date(item.startedAtUtc).getTime() < end && new Date(item.endedAtUtc).getTime() > start);
-                const total = monthDays.find((item) => item.localDate === key)?.totalSeconds ?? 0;
-                return <div key={key} tabIndex={0} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === localDateKey(new Date()) ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
+              {monthCalendarDays.map(({ date: day, items, key, total }) => {
+                return <div key={key} tabIndex={0} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === todayKey ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
               })}
             </div>}
           </> : tab === "dashboard" ? dashboardView() : tab === "clients" ? labelManager("client") : tab === "projects" ? labelManager("project") : labelManager("tag")}

@@ -7,10 +7,6 @@ export const TIME_TRACKING_TABS = ["week", "month", "dashboard", "clients", "pro
 export type TimeTrackingTab = (typeof TIME_TRACKING_TABS)[number];
 export type DashboardPreset = "current-week" | "last-week" | "current-month" | "last-month";
 
-export function initialTimeTrackingTab(): TimeTrackingTab {
-  return "week";
-}
-
 export function dashboardPresetRange(preset: DashboardPreset, now: Date): UTCDateRange {
   if (preset === "current-week") return localWeekRange(now);
   if (preset === "last-week") return localWeekRange(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
@@ -90,6 +86,14 @@ export function runningElapsedSeconds(startedAtUTC: string, now = new Date()): n
 
 export function formatRunningDuration(startedAtUTC: string, now = new Date()): string {
   return formatDuration(runningElapsedSeconds(startedAtUTC, now));
+}
+
+export function millisecondsUntilNextDurationMinute(startedAtUTC: string, now = new Date()): number {
+  const startedAt = new Date(startedAtUTC).getTime();
+  const current = now.getTime();
+  if (!Number.isFinite(startedAt) || !Number.isFinite(current)) return 60_000;
+  const elapsed = Math.max(0, current - startedAt);
+  return 60_000 - elapsed % 60_000;
 }
 
 export function localDateTimeValue(utc: string): string {
