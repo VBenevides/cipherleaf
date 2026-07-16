@@ -817,8 +817,8 @@ func (s *VaultService) PullAndLinkGitHubVault(
 	if err := s.sync.ActivateDownloadedVault(linkedSettings); err != nil {
 		return SyncResult{}, err
 	}
-	if len(merge.Conflicts) > 0 {
-		result.Warning = "Remote changes were pulled. Resolve note conflicts before pushing."
+	if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
+		result.Warning = "Remote changes were pulled. Resolve note or time-tracking conflicts before pushing."
 		return result, nil
 	}
 	push, err := s.sync.PushVault(context.Background(), vaultID, s.store)
@@ -944,8 +944,8 @@ func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 				return result, nil
 			}
 			result.Merge = merge
-			if len(merge.Conflicts) > 0 {
-				result.Warning = "Pull succeeded, but note conflicts must be resolved before pushing."
+			if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
+				result.Warning = "Pull succeeded, but note or time-tracking conflicts must be resolved before pushing."
 				return result, nil
 			}
 		} else {

@@ -159,6 +159,40 @@ func (s *Store) timeTrackingSnapshotMatchesLocked(remote *authenticatedTrackingS
 	return true, nil
 }
 
+func restoreTrackingCiphertext(source, target string, remote *authenticatedTrackingSnapshot) error {
+	sourceRoot := filepath.Join(source, trackingDirectory)
+	targetRoot := filepath.Join(target, trackingDirectory)
+	if err := ensurePrivateDirectory(filepath.Join(targetRoot, trackingObjectsDirectory)); err != nil {
+		return err
+	}
+	for _, relative := range []string{trackingCatalogFilename, trackingCatalogFilename + ".bak"} {
+		data, err := os.ReadFile(filepath.Join(sourceRoot, trackingCatalogFilename))
+		if err != nil {
+			return fmt.Errorf("read restored tracking catalog: %w", err)
+		}
+		if err := writeBytesAtomic(filepath.Join(targetRoot, relative), data); err != nil {
+			return fmt.Errorf("stage restored tracking catalog: %w", err)
+		}
+	}
+	for id := range remote.Buckets {
+		sourcePath := filepath.Join(sourceRoot, trackingObjectsDirectory, id[:2], id+".enc")
+		data, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return fmt.Errorf("read restored tracking bucket: %w", err)
+		}
+		directory := filepath.Join(targetRoot, trackingObjectsDirectory, id[:2])
+		if err := ensurePrivateDirectory(directory); err != nil {
+			return err
+		}
+		for _, suffix := range []string{".enc", ".enc.bak"} {
+			if err := writeBytesAtomic(filepath.Join(directory, id+suffix), data); err != nil {
+				return fmt.Errorf("stage restored tracking bucket: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
 	projectIDs := make(map[string]struct{}, len(catalog.Projects))
 	for _, project := range catalog.Projects {

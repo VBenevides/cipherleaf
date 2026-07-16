@@ -83,6 +83,9 @@ func TestTrackingMergePreservesEditAndInvariantConflicts(t *testing.T) {
 		t.Fatal("tracking conflicts were not persisted")
 	}
 	first.mu.Unlock()
+	if err := first.ExportRemoteSnapshot(t.TempDir()); err == nil {
+		t.Fatal("unresolved tracking conflicts did not block export")
+	}
 }
 
 func TestTrackingMergeDoesNotResurrectDeletedEntry(t *testing.T) {
@@ -232,6 +235,53 @@ func TestTrackingMergeWriteFailureRollsBackBuckets(t *testing.T) {
 		t.Fatal("failed merge left the remote entry live")
 	}
 	first.mu.Unlock()
+}
+
+func TestRestoreRemoteSnapshotRestoresNotesAndTracking(t *testing.T) {
+	source, _ := newTrackingTestStore(t)
+	note, err := source.CreateNote("Restored Note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.SaveNote(note.ID, note.Title, "restored content"); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := source.CreateProject("Restored Project")
+	tag, _ := source.CreateTag("Restored Tag")
+	deleted := createCompletedTrackingEntry(t, source, "Deleted", project.ID, []string{tag.ID}, "2026-07-10T10:00:00Z", "2026-07-10T11:00:00Z")
+	if err := source.DeleteTimeEntry(deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	setTrackingTestNow(source, "2026-07-11T10:00:00Z")
+	active, err := source.StartTimeEntry("Restored Running", project.ID, []string{tag.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := source.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	restored := NewStore()
+	if _, err := restored.RestoreRemoteSnapshot(remote, t.TempDir(), "Restored", "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	restoredNote, err := restored.GetNote(note.ID)
+	if err != nil || restoredNote.Content != "restored content" {
+		t.Fatalf("note was not restored with tracking: %#v, %v", restoredNote, err)
+	}
+	catalog, err := restored.GetTimeTrackingCatalog()
+	if err != nil || len(catalog.Projects) != 1 || len(catalog.Tags) != 1 {
+		t.Fatalf("tracking labels were not restored: %#v, %v", catalog, err)
+	}
+	restoredActive, err := restored.GetActiveTimeEntry()
+	if err != nil || restoredActive == nil || restoredActive.ID != active.ID {
+		t.Fatalf("active entry was not restored: %#v, %v", restoredActive, err)
+	}
+	restored.mu.Lock()
+	defer restored.mu.Unlock()
+	if len(restored.timeTrackingCatalog.DeletedEntries) != 1 || restored.timeTrackingCatalog.DeletedEntries[0].ID != deleted.ID {
+		t.Fatalf("tracking tombstone was not restored: %#v", restored.timeTrackingCatalog.DeletedEntries)
+	}
 }
 
 func cloneTrackingTestStore(t *testing.T, source string) *Store {

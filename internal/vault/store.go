@@ -1807,6 +1807,10 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 		s.mu.Unlock()
 		return err
 	}
+	if s.timeTrackingCatalog != nil && len(s.timeTrackingCatalog.Conflicts) > 0 {
+		s.mu.Unlock()
+		return errors.New("resolve time-tracking conflicts before exporting or pushing the vault")
+	}
 	s.mu.Unlock()
 	for attempt := 0; attempt < 3; attempt++ {
 		s.mu.RLock()
@@ -2917,6 +2921,13 @@ func (s *Store) RestoreRemoteSnapshot(
 			return Session{}, fmt.Errorf("restore encrypted attachments: %w", err)
 		}
 	}
+	if remote.Tracking != nil {
+		if err := restoreTrackingCiphertext(source, stagingRoot, remote.Tracking); err != nil {
+			return Session{}, err
+		}
+		tracking := cloneTimeTrackingCatalog(remote.Tracking.Catalog)
+		validator.timeTrackingCatalog = &tracking
+	}
 	validator.root = stagingRoot
 	validator.manifest = remote.Manifest
 	if err := validator.saveManifestLocked(); err != nil {
@@ -2934,6 +2945,10 @@ func (s *Store) RestoreRemoteSnapshot(
 	s.key = key
 	s.secret = []byte(passphrase)
 	s.manifest = remote.Manifest
+	if remote.Tracking != nil {
+		tracking := cloneTimeTrackingCatalog(remote.Tracking.Catalog)
+		s.timeTrackingCatalog = &tracking
+	}
 	s.searchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	keyOwnedByStore = true
