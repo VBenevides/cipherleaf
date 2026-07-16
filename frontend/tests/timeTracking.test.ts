@@ -8,6 +8,8 @@ import {
   localMonthRange,
   localDateTimeToUTC,
   localDateTimeValue,
+  localDateKey,
+  localWeekDates,
   localWeekRange,
   runningElapsedSeconds,
   TIME_TRACKING_TABS,
@@ -25,6 +27,11 @@ test("local weeks run Monday through Sunday across DST", () => {
     startUTC: "2026-03-02T05:00:00.000Z",
     endUTC: "2026-03-09T04:00:00.000Z",
   });
+});
+
+test("weekly calendar always contains Monday through Sunday", () => {
+  const days = localWeekDates(new Date("2026-07-16T12:00:00Z"));
+  assert.deepEqual(days.map(localDateKey), ["2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19"]);
 });
 
 test("local month ranges include complete leap and DST months", () => {

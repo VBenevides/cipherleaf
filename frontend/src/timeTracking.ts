@@ -18,6 +18,16 @@ export function localWeekRange(reference: Date): UTCDateRange {
   return utcRange(start, end);
 }
 
+export function localWeekDates(reference: Date): Date[] {
+  const weekday = reference.getDay();
+  const start = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate() - ((weekday + 6) % 7));
+  return Array.from({ length: 7 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+}
+
+export function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function localMonthRange(reference: Date): UTCDateRange {
   const start = new Date(reference.getFullYear(), reference.getMonth(), 1);
   const end = new Date(reference.getFullYear(), reference.getMonth() + 1, 1);

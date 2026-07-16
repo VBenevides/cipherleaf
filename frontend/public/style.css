@@ -2440,6 +2440,16 @@ a:focus-visible {
 .time-entry-form fieldset label,
 .time-tracking-dialog fieldset label { display: inline-flex; align-items: center; gap: 4px; margin-right: 9px; font-size: 10px; }
 
+.time-calendar-navigation { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
+.time-calendar-navigation strong { margin-right: auto; color: var(--ink); font-family: Georgia, "Times New Roman", serif; }
+.time-week-grid { display: grid; grid-template-columns: repeat(7, minmax(105px, 1fr)); gap: 7px; margin-bottom: 24px; overflow-x: auto; }
+.time-week-grid > section { min-height: 150px; display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: 8px; background: rgba(255,255,255,.28); }
+.time-week-grid > section.today { border-color: var(--green); }
+.time-week-grid header, .time-week-grid footer { display: flex; justify-content: space-between; padding: 8px; color: var(--muted); font-size: 10px; }
+.time-week-grid > section > div { flex: 1; display: grid; align-content: start; gap: 5px; padding: 3px 8px; }
+.time-week-grid > section > div > div { display: grid; gap: 2px; padding: 6px; border-radius: 5px; background: var(--green-pale); font-size: 9px; }
+.time-week-grid span, .time-week-grid small { color: var(--muted); font-size: 9px; }
+.time-week-grid footer { border-top: 1px solid var(--line-soft); font-weight: 800; }
 .time-entry-list { display: grid; gap: 8px; }
 .time-entry-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 8px; }
 .time-entry-list article > div { display: flex; gap: 8px; }

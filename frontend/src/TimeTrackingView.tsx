@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
-import type { TimeEntry, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
+import type { TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
 import {
   formatDuration,
   initialTimeTrackingTab,
   localDateTimeToUTC,
   localDateTimeValue,
+  localDateKey,
+  localWeekDates,
   localWeekRange,
   TIME_TRACKING_TABS,
   type TimeTrackingTab,
@@ -21,6 +23,10 @@ export default function TimeTrackingView() {
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [rangeEntries, setRangeEntries] = useState<TimeEntryRangeItem[]>([]);
+  const [dayTotals, setDayTotals] = useState<TimeDashboardDay[]>([]);
+  const [weekAnchor, setWeekAnchor] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date());
   const [name, setName] = useState("");
   const [projectID, setProjectID] = useState("");
   const [tagIDs, setTagIDs] = useState<string[]>([]);
@@ -37,10 +43,12 @@ export default function TimeTrackingView() {
   const [error, setError] = useState("");
 
   const loadEntries = useCallback(async () => {
-    const range = localWeekRange(new Date());
+    const range = localWeekRange(weekAnchor);
     const result = await VaultService.ListTimeEntries(range.startUTC, range.endUTC, { projectIds: [], tagIds: [] });
     setEntries((result.entries ?? []).map((item) => item.entry));
-  }, []);
+    setRangeEntries(result.entries ?? []);
+    setDayTotals(result.days ?? []);
+  }, [weekAnchor]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +60,12 @@ export default function TimeTrackingView() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [loadEntries]);
+
+  useEffect(() => {
+    if (!activeEntry) return;
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeEntry]);
 
   const projects = useMemo(() => (catalog?.projects ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
   const tags = useMemo(() => (catalog?.tags ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
@@ -126,6 +140,21 @@ export default function TimeTrackingView() {
               <fieldset disabled={!!activeEntry || busy}><legend>Tags</legend>{tags.length ? tags.map((item) => <label key={item.id}><input type="checkbox" checked={tagIDs.includes(item.id)} onChange={() => setTagIDs((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />{item.name}</label>) : <span>No tags</span>}</fieldset>
               <button className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
             </form>
+            <div className="time-calendar-navigation">
+              <button className="secondary-button" onClick={() => setWeekAnchor((date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() - 7))}>Previous</button>
+              <strong>{localWeekDates(weekAnchor)[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – {localWeekDates(weekAnchor)[6].toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</strong>
+              <button className="secondary-button" onClick={() => setWeekAnchor(new Date())}>Current week</button>
+              <button className="secondary-button" onClick={() => setWeekAnchor((date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 7))}>Next</button>
+            </div>
+            <div className="time-week-grid">
+              {localWeekDates(weekAnchor).map((day) => {
+                const dayStart = day.getTime();
+                const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+                const items = rangeEntries.filter((item) => new Date(item.startedAtUtc).getTime() < dayEnd && new Date(item.endedAtUtc).getTime() > dayStart);
+                const total = dayTotals.find((item) => item.localDate === localDateKey(day))?.totalSeconds ?? 0;
+                return <section key={localDateKey(day)} className={localDateKey(day) === localDateKey(new Date()) ? "today" : ""}><header><strong>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), dayEnd) - Math.max(new Date(item.entry.startedAtUtc).getTime(), dayStart)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></section>;
+              })}
+            </div>
             <div className="time-entry-list">
               {entries.filter((item) => item.endedAtUtc).map((entry) => <article key={entry.id}>
                 <div><strong>{entry.name}</strong><span>{new Date(entry.startedAtUtc).toLocaleString()} · {formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</span></div>
