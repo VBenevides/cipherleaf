@@ -342,8 +342,8 @@ const liveMarkdownTheme = EditorView.theme(
       boxSizing: "border-box",
       backgroundColor: "transparent",
       paddingLeft: "var(--toggle-padding-left, 0px)",
-      paddingTop: "2px",
-      paddingBottom: "2px",
+      paddingTop: "var(--editor-line-spacing)",
+      paddingBottom: "var(--editor-line-spacing)",
     },
 
     ".cm-live-toggle-button": {
