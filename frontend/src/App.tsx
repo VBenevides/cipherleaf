@@ -45,7 +45,7 @@ import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 import { formatRunningDuration } from "./timeTracking";
-import { TagMultiSelect } from "./TagMultiSelect";
+import { ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -4727,7 +4727,7 @@ function App() {
               <h2 id="timer-dialog-title">Start a timer</h2>
               {activeTimeEntry && <p className="timer-modal-warning">“{activeTimeEntry.name}” is already running.</p>}
               <label>Task name<input autoFocus value={timerTaskName} onChange={(event) => setTimerTaskName(event.target.value)} disabled={!!activeTimeEntry || timerBusy} /></label>
-              <label>Project<select value={timerProjectID} onChange={(event) => setTimerProjectID(event.target.value)} disabled={!!activeTimeEntry || timerBusy}><option value="">No project</option>{(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              <ProjectSelect projects={(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc)} selected={timerProjectID} onChange={setTimerProjectID} disabled={!!activeTimeEntry || timerBusy} />
               <TagMultiSelect tags={(timerCatalog?.tags ?? []).filter((item) => !item.archivedAtUtc)} selected={timerTagIDs} onChange={setTimerTagIDs} disabled={!!activeTimeEntry || timerBusy} />
               {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
               <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>

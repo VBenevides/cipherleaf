@@ -50,3 +50,10 @@ test("task tag choices use a reusable multi-select dropdown", () => {
   assert.doesNotMatch(view, /<legend>Tags<\/legend>/);
   assert.match(app, /<TagMultiSelect tags=/);
 });
+
+test("tracking project choices use the same themed custom dropdown", () => {
+  assert.match(tagSelect, /export function ProjectSelect/);
+  assert.match(tagSelect, /role="listbox" aria-label=\{label\}/);
+  assert.match(app, /<ProjectSelect projects=/);
+  assert.doesNotMatch(app, /<label>Project<select/);
+});

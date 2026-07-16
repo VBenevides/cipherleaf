@@ -1,4 +1,24 @@
-import type { TimeTag } from "../bindings/cipherleaf/internal/vault/models";
+import { useRef } from "react";
+import type { TimeProject, TimeTag } from "../bindings/cipherleaf/internal/vault/models";
+
+export function ProjectSelect({ projects, selected, onChange, label = "Project", disabled = false }: {
+  projects: TimeProject[];
+  selected: string;
+  onChange: (id: string) => void;
+  label?: string;
+  disabled?: boolean;
+}) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const choose = (id: string) => { onChange(id); if (details.current) details.current.open = false; };
+  const name = projects.find((project) => project.id === selected)?.name ?? (label === "Project" ? "No project" : "All projects");
+  return <details ref={details} className={`tag-multi-select tracking-project-select ${disabled ? "disabled" : ""}`} onToggle={(event) => { if (disabled) event.currentTarget.open = false; }}>
+    <summary aria-disabled={disabled}>{label}: {name}</summary>
+    <div className="tag-multi-select-options" role="listbox" aria-label={label}>
+      <button type="button" role="option" aria-selected={!selected} onClick={() => choose("")}>{label === "Project" ? "No project" : "All projects"}</button>
+      {projects.map((project) => <button type="button" role="option" aria-selected={selected === project.id} key={project.id} onClick={() => choose(project.id)}>{project.name}</button>)}
+    </div>
+  </details>;
+}
 
 export function TagMultiSelect({ tags, selected, onChange, label = "Tags", disabled = false }: {
   tags: TimeTag[];
