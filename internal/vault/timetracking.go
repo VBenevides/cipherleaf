@@ -217,6 +217,7 @@ func (s *Store) moveTimeTrackingEntryLocked(entry TimeEntry, sourceBucketID stri
 		Entry: entry, SourceBucketID: sourceBucketID,
 		DestinationBucketID: destinationID, DestinationMonthUTC: month,
 	}
+	advanceTrackingCatalogRevision(&catalog, time.Now().UTC())
 	if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
 		return err
 	}

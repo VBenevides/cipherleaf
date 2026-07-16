@@ -98,6 +98,7 @@ type Store struct {
 	timeTrackingBucketOrder  []string
 	timeTrackingBucketRead   func(string)
 	timeTrackingWriteHook    func(string, string) error
+	timeTrackingNow          func() time.Time
 }
 
 func NewStore() *Store {
@@ -2934,6 +2935,7 @@ func (s *Store) clearLocked() {
 	s.timeTrackingBucketOrder = nil
 	s.timeTrackingBucketRead = nil
 	s.timeTrackingWriteHook = nil
+	s.timeTrackingNow = nil
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
