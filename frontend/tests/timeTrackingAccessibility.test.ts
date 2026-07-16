@@ -57,3 +57,8 @@ test("tracking project choices use the same themed custom dropdown", () => {
   assert.match(app, /<ProjectSelect projects=/);
   assert.doesNotMatch(app, /<label>Project<select/);
 });
+
+test("dashboard tag guidance is subdued and expanded task rows are indented", () => {
+  assert.match(style, /section:nth-child\(2\) > small[^}]+color: var\(--muted\); font-size: 8px/);
+  assert.match(style, /section:nth-child\(3\) > div > p \{ padding-left: 18px/);
+});

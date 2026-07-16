@@ -2504,6 +2504,8 @@ a:focus-visible {
 .dashboard-groups section { padding: 13px; border: 1px solid var(--line-soft); border-radius: 8px; }
 .dashboard-groups p, .dashboard-groups button { width: 100%; display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 0; color: var(--ink); border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; font: inherit; font-size: 10px; text-align: left; }
 .dashboard-groups button { cursor: pointer; }
+.dashboard-groups > section:nth-child(2) > small { display: block; margin: -2px 0 7px; color: var(--muted); font-size: 8px; line-height: 1.4; }
+.dashboard-groups > section:nth-child(3) > div > p { padding-left: 18px; color: var(--muted); font-size: 9px; }
 @media (max-width: 780px) { .dashboard-counters { grid-template-columns: repeat(2, 1fr); } .dashboard-groups { grid-template-columns: 1fr; } }
 .time-entry-list { display: grid; gap: 8px; }
 .time-entry-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 8px; }
