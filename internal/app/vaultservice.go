@@ -495,6 +495,10 @@ func (s *VaultService) GetSession() vault.Session {
 	return s.store.Session()
 }
 
+func (s *VaultService) GetVaultStatistics() (vault.VaultStatistics, error) {
+	return s.store.GetVaultStatistics()
+}
+
 func (s *VaultService) GetTimeTrackingCatalog() (vault.TimeTrackingCatalog, error) {
 	return s.store.GetTimeTrackingCatalog()
 }

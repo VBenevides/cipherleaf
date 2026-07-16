@@ -929,6 +929,31 @@ a:focus-visible {
   margin-bottom: 8px;
 }
 
+.vault-statistics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.vault-statistics div {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--modal-control-surface);
+}
+
+.vault-statistics span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.vault-statistics strong {
+  font-size: 13px;
+}
+
 .appearance-settings-modal {
   box-sizing: border-box;
   width: min(720px, 100%);

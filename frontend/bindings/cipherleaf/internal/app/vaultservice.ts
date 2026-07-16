@@ -163,6 +163,10 @@ export function GetVaultSettings(): $CancellablePromise<vault$0.VaultSettings> {
     return $Call.ByID(4079532670);
 }
 
+export function GetVaultStatistics(): $CancellablePromise<vault$0.VaultStatistics> {
+    return $Call.ByID(3277829736);
+}
+
 export function ImportFileAttachment(noteID: string, path: string): $CancellablePromise<vault$0.AttachmentInfo> {
     return $Call.ByID(2182536893, noteID, path);
 }

@@ -26,6 +26,7 @@ import type {
   TimeTrackingCatalog,
   TrashItem,
   VaultSettings,
+  VaultStatistics,
 } from "../bindings/cipherleaf/internal/vault/models";
 import type {
   ConnectionResult,
@@ -339,6 +340,18 @@ function isSameDay(left: Date, right: Date): boolean {
     left.getDate() === right.getDate();
 }
 
+function formatStorageSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -400,6 +413,7 @@ function App() {
   const [statisticsError, setStatisticsError] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [vaultSettingsOpen, setVaultSettingsOpen] = useState(false);
+  const [vaultStatistics, setVaultStatistics] = useState<VaultStatistics | null>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [noteVersions, setNoteVersions] = useState<NoteVersion[]>([]);
@@ -2616,12 +2630,17 @@ function App() {
     bringWindowToFront("vaultSettings");
     setVaultSettingsOpen(true);
     setSyncSettings(null);
+    setVaultStatistics(null);
     setSettingsBusy(true);
     setConnectionResult(null);
     setError("");
     try {
-      const settings = await VaultService.GetSyncSettings();
+      const [settings, statistics] = await Promise.all([
+        VaultService.GetSyncSettings(),
+        VaultService.GetVaultStatistics(),
+      ]);
       setSyncSettings(settings);
+      setVaultStatistics(statistics);
       setSyncLinked(settings.linked);
       setLastSyncedAt(settings.lastSyncedAt);
     } catch (reason) {
@@ -4389,6 +4408,12 @@ function App() {
             </button>
             <div className="modal-icon"><Icon name="lock" size={21} /></div>
             <p className="eyebrow">Vault settings</p>
+            <h2>Vault Statistics</h2>
+            <div className="vault-statistics">
+              <div><span>Notes</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.notesBytes) : "—"}</strong></div>
+              <div><span>Attachments</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.attachmentsBytes) : "—"}</strong></div>
+              <div><span>Time Tracking</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.timeTrackingBytes) : "—"}</strong></div>
+            </div>
             <h2>GitHub sync (experimental)</h2>
             <div className={`sync-link-state ${syncSettings?.linked ? "linked" : ""}`}>
               <span />

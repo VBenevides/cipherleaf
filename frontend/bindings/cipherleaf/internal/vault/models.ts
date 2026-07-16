@@ -252,3 +252,9 @@ export interface VaultSettings {
     "sectionDefault": string;
     "modifiedAt": number;
 }
+
+export interface VaultStatistics {
+    "notesBytes": number;
+    "attachmentsBytes": number;
+    "timeTrackingBytes": number;
+}

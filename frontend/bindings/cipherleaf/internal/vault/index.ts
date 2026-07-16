@@ -30,5 +30,6 @@ export type {
     TimeTrackingCatalog,
     TimeTrackingConflict,
     TrashItem,
-    VaultSettings
+    VaultSettings,
+    VaultStatistics
 } from "./models.js";

@@ -15,6 +15,12 @@ type Session struct {
 	NoteCount int    `json:"noteCount"`
 }
 
+type VaultStatistics struct {
+	NotesBytes        int64 `json:"notesBytes"`
+	AttachmentsBytes  int64 `json:"attachmentsBytes"`
+	TimeTrackingBytes int64 `json:"timeTrackingBytes"`
+}
+
 type NoteSummary struct {
 	ID             string         `json:"id"`
 	Title          string         `json:"title"`
