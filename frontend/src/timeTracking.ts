@@ -5,9 +5,17 @@ export interface UTCDateRange {
 
 export const TIME_TRACKING_TABS = ["week", "month", "dashboard", "projects", "tags"] as const;
 export type TimeTrackingTab = (typeof TIME_TRACKING_TABS)[number];
+export type DashboardPreset = "current-week" | "last-week" | "current-month" | "last-month";
 
 export function initialTimeTrackingTab(): TimeTrackingTab {
   return "week";
+}
+
+export function dashboardPresetRange(preset: DashboardPreset, now: Date): UTCDateRange {
+  if (preset === "current-week") return localWeekRange(now);
+  if (preset === "last-week") return localWeekRange(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
+  if (preset === "current-month") return localMonthRange(now);
+  return localMonthRange(new Date(now.getFullYear(), now.getMonth() - 1, 1));
 }
 
 export function localWeekRange(reference: Date): UTCDateRange {

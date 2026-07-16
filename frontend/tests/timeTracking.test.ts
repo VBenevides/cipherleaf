@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   formatDuration,
+  dashboardPresetRange,
   formatRunningDuration,
   initialTimeTrackingTab,
   inclusiveLocalDateRange,
@@ -21,6 +22,12 @@ process.env.TZ = "America/New_York";
 test("time tracking opens on week and exposes the ordered workspace tabs", () => {
   assert.equal(initialTimeTrackingTab(), "week");
   assert.deepEqual(TIME_TRACKING_TABS, ["week", "month", "dashboard", "projects", "tags"]);
+});
+
+test("dashboard presets produce complete local periods", () => {
+  const now = new Date("2026-07-16T12:00:00Z");
+  assert.deepEqual(dashboardPresetRange("last-week", now), localWeekRange(new Date(2026, 6, 9)));
+  assert.deepEqual(dashboardPresetRange("last-month", now), localMonthRange(new Date(2026, 5, 1)));
 });
 
 test("local weeks run Monday through Sunday across DST", () => {

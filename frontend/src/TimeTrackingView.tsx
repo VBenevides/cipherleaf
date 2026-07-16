@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
-import type { TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
+import type { TimeDashboard, TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
 import {
   formatDuration,
+  dashboardPresetRange,
+  inclusiveLocalDateRange,
   initialTimeTrackingTab,
   localDateTimeToUTC,
   localDateTimeValue,
@@ -14,6 +16,7 @@ import {
   localWeekRange,
   TIME_TRACKING_TABS,
   type TimeTrackingTab,
+  type DashboardPreset,
 } from "./timeTracking";
 
 const TAB_LABELS: Record<TimeTrackingTab, string> = {
@@ -49,6 +52,14 @@ export default function TimeTrackingView() {
   const [labelName, setLabelName] = useState("");
   const [renamingLabelID, setRenamingLabelID] = useState("");
   const [labelAction, setLabelAction] = useState<{ kind: "project" | "tag"; id: string; restore: boolean } | null>(null);
+  const [dashboard, setDashboard] = useState<TimeDashboard | null>(null);
+  const [dashboardPreset, setDashboardPreset] = useState<DashboardPreset>("current-week");
+  const [customStart, setCustomStart] = useState(localDateKey(new Date()));
+  const [customEnd, setCustomEnd] = useState(localDateKey(new Date()));
+  const [dashboardCustom, setDashboardCustom] = useState(false);
+  const [dashboardProject, setDashboardProject] = useState("");
+  const [dashboardTags, setDashboardTags] = useState<string[]>([]);
+  const [dashboardDetails, setDashboardDetails] = useState<Record<string, TimeEntryRangeItem[]>>({});
 
   const loadEntries = useCallback(async () => {
     const range = localWeekRange(weekAnchor);
@@ -171,6 +182,34 @@ export default function TimeTrackingView() {
     return <div className="time-label-manager"><form onSubmit={(event) => { event.preventDefault(); void saveLabel(kind); }}><input aria-label={`${kind} name`} value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder={`New ${kind} name`} /><button className="primary-button" disabled={busy}>{renamingLabelID ? "Save rename" : `Create ${kind}`}</button>{renamingLabelID && <button type="button" className="secondary-button" onClick={() => { setRenamingLabelID(""); setLabelName(""); }}>Cancel</button>}</form><section><h3>Active</h3>{values.filter((item) => !item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => { setRenamingLabelID(item.id); setLabelName(item.name); }}>Rename</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, restore: false })}>Archive</button></div></article>)}</section><section><h3>Archived</h3>{values.filter((item) => item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => { setRenamingLabelID(item.id); setLabelName(item.name); }}>Rename</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, restore: true })}>Restore</button></div></article>)}</section></div>;
   };
 
+  const dashboardRange = () => dashboardCustom ? inclusiveLocalDateRange(customStart, customEnd) : dashboardPresetRange(dashboardPreset, new Date());
+  const dashboardFilters = () => ({ projectIds: dashboardProject ? [dashboardProject] : [], tagIds: dashboardTags });
+
+  const loadDashboard = useCallback(async () => {
+    if (tab !== "dashboard") return;
+    setBusy(true); setError("");
+    try {
+      const range = dashboardCustom ? inclusiveLocalDateRange(customStart, customEnd) : dashboardPresetRange(dashboardPreset, new Date());
+      setDashboard(await VaultService.GetTimeDashboard(range.startUTC, range.endUTC, { projectIds: dashboardProject ? [dashboardProject] : [], tagIds: dashboardTags }));
+      setDashboardDetails({});
+    } catch (reason) { setError(errorText(reason)); }
+    finally { setBusy(false); }
+  }, [customEnd, customStart, dashboardCustom, dashboardPreset, dashboardProject, dashboardTags, tab]);
+
+  useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+
+  const expandDashboardTask = async (name: string) => {
+    if (dashboardDetails[name]) { setDashboardDetails((current) => { const next = { ...current }; delete next[name]; return next; }); return; }
+    setError("");
+    try { const range = dashboardRange(); const details = await VaultService.ListTimeDashboardGroupEntries(name, range.startUTC, range.endUTC, dashboardFilters()); setDashboardDetails((current) => ({ ...current, [name]: details ?? [] })); }
+    catch (reason) { setError(errorText(reason)); }
+  };
+
+  const dashboardView = () => {
+    const maxDay = Math.max(1, ...(dashboard?.days ?? []).map((day) => day.totalSeconds));
+    return <div className="time-dashboard"><div className="dashboard-controls"><select aria-label="Period" value={dashboardCustom ? "custom" : dashboardPreset} onChange={(event) => { if (event.target.value === "custom") setDashboardCustom(true); else { setDashboardCustom(false); setDashboardPreset(event.target.value as DashboardPreset); } }}><option value="current-week">Current week</option><option value="last-week">Last week</option><option value="current-month">Current month</option><option value="last-month">Last month</option><option value="custom">Custom</option></select>{dashboardCustom && <><input aria-label="Start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /><input aria-label="End date" type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /><button className="secondary-button" onClick={() => void loadDashboard()}>Apply</button></>}<select aria-label="Filter project" value={dashboardProject} onChange={(event) => setDashboardProject(event.target.value)}><option value="">All projects</option>{(catalog?.projects ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><fieldset><legend>Filter tags</legend>{(catalog?.tags ?? []).map((item) => <label key={item.id}><input type="checkbox" checked={dashboardTags.includes(item.id)} onChange={() => setDashboardTags((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />{item.name}</label>)}</fieldset></div>{busy ? <div className="settings-loading" role="status">Loading dashboard...</div> : dashboard && <><div className="dashboard-counters"><div><strong>{dashboard.projectCount}</strong><span>Projects used</span></div><div><strong>{dashboard.tagCount}</strong><span>Tags used</span></div><div><strong>{formatDuration(dashboard.totalSeconds)}</strong><span>Total tracked</span></div><div><strong>{formatDuration(dashboard.averageDaySeconds)}</strong><span>Average per day</span></div></div><div className="dashboard-chart" role="img" aria-label="Tracked time by local calendar day">{(dashboard.days ?? []).map((day) => <div key={day.localDate}><span style={{ height: `${Math.max(2, day.totalSeconds / maxDay * 100)}%` }} aria-label={`${day.localDate}: ${formatDuration(day.totalSeconds)}`} /><small>{day.localDate.slice(5)}</small></div>)}</div><div className="dashboard-groups"><section><h3>Projects</h3>{(dashboard.projects ?? []).map((item) => <p key={item.id}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></p>)}</section><section><h3>Tags</h3><small>Entries with multiple tags count fully in each tag.</small>{(dashboard.tags ?? []).map((item) => <p key={item.id}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></p>)}</section><section><h3>Tasks</h3>{(dashboard.tasks ?? []).map((item) => <div key={item.name}><button onClick={() => void expandDashboardTask(item.name)} aria-expanded={!!dashboardDetails[item.name]}><span>{item.name}</span><strong>{formatDuration(item.totalSeconds)}</strong></button>{dashboardDetails[item.name]?.map((entry) => <p key={entry.entry.id}><span>{new Date(entry.startedAtUtc).toLocaleString()}</span><strong>{formatDuration(entry.totalSeconds)}</strong></p>)}</div>)}</section></div></>}</div>;
+  };
+
   return (
     <section className="time-tracking-view">
       <header className="time-tracking-header">
@@ -223,7 +262,7 @@ export default function TimeTrackingView() {
                 return <div key={key} tabIndex={0} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === localDateKey(new Date()) ? "today" : ""}`} aria-label={`${day.toLocaleDateString()}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
               })}
             </div>}
-          </> : tab === "projects" ? labelManager("project") : tab === "tags" ? labelManager("tag") : <div className="time-tracking-empty"><h3>{TAB_LABELS[tab]}</h3><p>No time tracked for this view.</p></div>}
+          </> : tab === "dashboard" ? dashboardView() : tab === "projects" ? labelManager("project") : labelManager("tag")}
         </>}
       </div>
       {editing && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3><label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><label>Project<select value={editProjectID} onChange={(event) => setEditProjectID(event.target.value)}><option value="">No project</option>{(catalog?.projects ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><fieldset><legend>Tags</legend>{(catalog?.tags ?? []).map((item) => <label key={item.id}><input type="checkbox" checked={editTagIDs.includes(item.id)} onChange={() => setEditTagIDs((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />{item.name}</label>)}</fieldset><label>Started<input type="datetime-local" value={editStartedAt} onChange={(event) => setEditStartedAt(event.target.value)} /></label><label>Ended<input type="datetime-local" value={editEndedAt} onChange={(event) => setEditEndedAt(event.target.value)} /></label><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" disabled={busy}>Save correction</button></div></form></div>}

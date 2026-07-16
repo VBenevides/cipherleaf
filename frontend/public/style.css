@@ -2466,6 +2466,24 @@ a:focus-visible {
 .time-label-manager section { display: grid; gap: 7px; }
 .time-label-manager article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid var(--line-soft); border-radius: 7px; }
 .time-label-manager article > div { display: flex; gap: 6px; }
+.time-dashboard { display: grid; gap: 20px; }
+.dashboard-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: start; }
+.dashboard-controls select, .dashboard-controls input { min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.dashboard-controls fieldset { margin: 0; border: 1px solid var(--line); border-radius: 6px; }
+.dashboard-controls label { margin-right: 8px; font-size: 9px; }
+.dashboard-counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.dashboard-counters div { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--line-soft); border-radius: 8px; }
+.dashboard-counters strong { color: var(--ink); font-size: 18px; }
+.dashboard-counters span { color: var(--muted); font-size: 9px; }
+.dashboard-chart { height: 170px; display: flex; align-items: end; gap: 4px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; }
+.dashboard-chart > div { height: 100%; min-width: 12px; flex: 1; display: flex; flex-direction: column; justify-content: end; gap: 5px; }
+.dashboard-chart span { display: block; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--green); }
+.dashboard-chart small { overflow: hidden; color: var(--muted); font-size: 7px; text-align: center; }
+.dashboard-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.dashboard-groups section { padding: 13px; border: 1px solid var(--line-soft); border-radius: 8px; }
+.dashboard-groups p, .dashboard-groups button { width: 100%; display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 0; color: var(--ink); border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; font: inherit; font-size: 10px; text-align: left; }
+.dashboard-groups button { cursor: pointer; }
+@media (max-width: 780px) { .dashboard-counters { grid-template-columns: repeat(2, 1fr); } .dashboard-groups { grid-template-columns: 1fr; } }
 .time-entry-list { display: grid; gap: 8px; }
 .time-entry-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 8px; }
 .time-entry-list article > div { display: flex; gap: 8px; }
