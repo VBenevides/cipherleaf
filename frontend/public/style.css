@@ -2412,6 +2412,54 @@ a:focus-visible {
   font-size: 12px;
 }
 
+.time-tracking-error { margin-bottom: 16px; }
+
+.time-entry-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.35fr) minmax(170px, 0.5fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.time-entry-form input,
+.time-entry-form select,
+.time-tracking-dialog input,
+.time-tracking-dialog select {
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  font: inherit;
+}
+
+.time-entry-form fieldset,
+.time-tracking-dialog fieldset { margin: 0; border: 1px solid var(--line); border-radius: 7px; }
+.time-entry-form fieldset label,
+.time-tracking-dialog fieldset label { display: inline-flex; align-items: center; gap: 4px; margin-right: 9px; font-size: 10px; }
+
+.time-entry-list { display: grid; gap: 8px; }
+.time-entry-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 8px; }
+.time-entry-list article > div { display: flex; gap: 8px; }
+.time-entry-list article > div:first-child { min-width: 0; flex-direction: column; }
+.time-entry-list article span { color: var(--muted); font-size: 10px; }
+
+.time-tracking-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(25, 28, 25, 0.46); }
+.time-tracking-dialog > form,
+.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.time-tracking-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+
+@media (max-width: 1050px) {
+  .time-entry-form { grid-template-columns: minmax(180px, 1fr) minmax(130px, .5fr); }
+}
+
+@media (max-width: 600px) {
+  .time-entry-form { grid-template-columns: minmax(0, 1fr); }
+  .time-entry-list article { align-items: flex-start; flex-direction: column; }
+}
+
 .graph-view-header {
   display: flex;
   align-items: end;

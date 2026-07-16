@@ -56,6 +56,19 @@ export function formatRunningDuration(startedAtUTC: string, now = new Date()): s
   return formatDuration(runningElapsedSeconds(startedAtUTC, now));
 }
 
+export function localDateTimeValue(utc: string): string {
+  const date = new Date(utc);
+  if (!Number.isFinite(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+export function localDateTimeToUTC(value: string): string {
+  const date = new Date(value);
+  if (!value || !Number.isFinite(date.getTime())) throw new Error("Date and time are required");
+  return date.toISOString();
+}
+
 function parseLocalDate(value: string): Date {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) {

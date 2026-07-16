@@ -6,6 +6,8 @@ import {
   initialTimeTrackingTab,
   inclusiveLocalDateRange,
   localMonthRange,
+  localDateTimeToUTC,
+  localDateTimeValue,
   localWeekRange,
   runningElapsedSeconds,
   TIME_TRACKING_TABS,
@@ -54,4 +56,10 @@ test("durations and running clocks are safe and deterministic", () => {
   assert.equal(formatRunningDuration("2026-07-16T10:00:00Z", now), "1h 05m");
   assert.equal(runningElapsedSeconds("2026-07-16T12:00:00Z", now), 0);
   assert.equal(runningElapsedSeconds("invalid", now), 0);
+});
+
+test("entry corrections convert local date-time fields to and from UTC", () => {
+  assert.equal(localDateTimeValue("2026-07-16T14:30:00Z"), "2026-07-16T10:30");
+  assert.equal(localDateTimeToUTC("2026-07-16T10:30"), "2026-07-16T14:30:00.000Z");
+  assert.throws(() => localDateTimeToUTC(""));
 });
