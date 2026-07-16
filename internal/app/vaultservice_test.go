@@ -1,9 +1,12 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"cipherleaf/internal/vault"
 )
 
 func TestRepositorySizesSeparatesGitMetadata(t *testing.T) {
@@ -21,6 +24,56 @@ func TestRepositorySizesSeparatesGitMetadata(t *testing.T) {
 	gitBytes, repositoryBytes := repositorySizes(root)
 	if gitBytes != 3 || repositoryBytes != 5 {
 		t.Fatalf("sizes = (%d, %d), want (3, 5)", gitBytes, repositoryBytes)
+	}
+}
+
+func TestVaultServiceDelegatesTimeTrackingAPIs(t *testing.T) {
+	service := NewVaultService()
+	if _, err := service.GetTimeTrackingCatalog(); !errors.Is(err, vault.ErrLocked) {
+		t.Fatalf("locked catalog error = %v", err)
+	}
+	if _, err := service.store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	project, err := service.CreateProject("Service Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := service.CreateTag("Service Tag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := service.StartTimeEntry("Service Entry", project.ID, []string{tag.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := service.GetActiveTimeEntry()
+	if err != nil || active == nil || active.ID != entry.ID {
+		t.Fatalf("active delegation failed: %#v, %v", active, err)
+	}
+	if _, err := service.FinishActiveTimeEntry(); err != nil {
+		t.Fatal(err)
+	}
+	rangeResult, err := service.ListTimeEntries("2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z", vault.TimeEntryFilters{})
+	if err != nil || len(rangeResult.Entries) != 1 {
+		t.Fatalf("range delegation failed: %#v, %v", rangeResult, err)
+	}
+	dashboard, err := service.GetTimeDashboard("2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z", vault.TimeEntryFilters{})
+	if err != nil || dashboard.TotalSeconds < 0 {
+		t.Fatalf("dashboard delegation failed: %#v, %v", dashboard, err)
+	}
+	catalog, err := service.GetTimeTrackingCatalog()
+	if err != nil || len(catalog.Projects) != 1 || len(catalog.Tags) != 1 {
+		t.Fatalf("catalog delegation failed: %#v, %v", catalog, err)
+	}
+	if _, err := service.ArchiveProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RestoreProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteTimeEntry(entry.ID); err != nil {
+		t.Fatal(err)
 	}
 }
 

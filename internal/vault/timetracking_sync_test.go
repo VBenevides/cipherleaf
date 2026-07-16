@@ -86,6 +86,18 @@ func TestTrackingMergePreservesEditAndInvariantConflicts(t *testing.T) {
 	if err := first.ExportRemoteSnapshot(t.TempDir()); err == nil {
 		t.Fatal("unresolved tracking conflicts did not block export")
 	}
+	conflicts, err := first.ListTimeTrackingConflicts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, conflict := range conflicts {
+		if err := first.ResolveTimeTrackingConflict(conflict.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := first.ExportRemoteSnapshot(t.TempDir()); err != nil {
+		t.Fatal("resolved tracking conflicts still blocked export:", err)
+	}
 }
 
 func TestTrackingMergeDoesNotResurrectDeletedEntry(t *testing.T) {

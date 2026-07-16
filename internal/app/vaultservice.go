@@ -495,6 +495,82 @@ func (s *VaultService) GetSession() vault.Session {
 	return s.store.Session()
 }
 
+func (s *VaultService) GetTimeTrackingCatalog() (vault.TimeTrackingCatalog, error) {
+	return s.store.GetTimeTrackingCatalog()
+}
+
+func (s *VaultService) CreateProject(name string) (vault.TimeProject, error) {
+	return s.store.CreateProject(name)
+}
+
+func (s *VaultService) RenameProject(id, name string) (vault.TimeProject, error) {
+	return s.store.RenameProject(id, name)
+}
+
+func (s *VaultService) ArchiveProject(id string) (vault.TimeProject, error) {
+	return s.store.ArchiveProject(id)
+}
+
+func (s *VaultService) RestoreProject(id string) (vault.TimeProject, error) {
+	return s.store.RestoreProject(id)
+}
+
+func (s *VaultService) CreateTag(name string) (vault.TimeTag, error) {
+	return s.store.CreateTag(name)
+}
+
+func (s *VaultService) RenameTag(id, name string) (vault.TimeTag, error) {
+	return s.store.RenameTag(id, name)
+}
+
+func (s *VaultService) ArchiveTag(id string) (vault.TimeTag, error) {
+	return s.store.ArchiveTag(id)
+}
+
+func (s *VaultService) RestoreTag(id string) (vault.TimeTag, error) {
+	return s.store.RestoreTag(id)
+}
+
+func (s *VaultService) StartTimeEntry(name, projectID string, tagIDs []string) (vault.TimeEntry, error) {
+	return s.store.StartTimeEntry(name, projectID, tagIDs)
+}
+
+func (s *VaultService) GetActiveTimeEntry() (*vault.TimeEntry, error) {
+	return s.store.GetActiveTimeEntry()
+}
+
+func (s *VaultService) FinishActiveTimeEntry() (vault.TimeEntry, error) {
+	return s.store.FinishActiveTimeEntry()
+}
+
+func (s *VaultService) UpdateTimeEntry(id, name, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (vault.TimeEntry, error) {
+	return s.store.UpdateTimeEntry(id, name, projectID, tagIDs, startedAtUTC, endedAtUTC)
+}
+
+func (s *VaultService) DeleteTimeEntry(id string) error {
+	return s.store.DeleteTimeEntry(id)
+}
+
+func (s *VaultService) ListTimeEntries(startUTC, endUTC string, filters vault.TimeEntryFilters) (vault.TimeEntryRangeResult, error) {
+	return s.store.ListTimeEntries(startUTC, endUTC, filters)
+}
+
+func (s *VaultService) GetTimeDashboard(startUTC, endUTC string, filters vault.TimeEntryFilters) (vault.TimeDashboard, error) {
+	return s.store.GetTimeDashboard(startUTC, endUTC, filters)
+}
+
+func (s *VaultService) ListTimeDashboardGroupEntries(name, startUTC, endUTC string, filters vault.TimeEntryFilters) ([]vault.TimeEntryRangeItem, error) {
+	return s.store.ListTimeDashboardGroupEntries(name, startUTC, endUTC, filters)
+}
+
+func (s *VaultService) ListTimeTrackingConflicts() ([]vault.TimeTrackingConflict, error) {
+	return s.store.ListTimeTrackingConflicts()
+}
+
+func (s *VaultService) ResolveTimeTrackingConflict(id string) error {
+	return s.store.ResolveTimeTrackingConflict(id)
+}
+
 func (s *VaultService) ListNotes() ([]vault.NoteSummary, error) {
 	return s.store.ListNotes()
 }

@@ -32,6 +32,41 @@ func (s *Store) GetTimeTrackingCatalog() (TimeTrackingCatalog, error) {
 	}, nil
 }
 
+func (s *Store) ListTimeTrackingConflicts() ([]TimeTrackingConflict, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	if s.timeTrackingCatalog == nil {
+		return []TimeTrackingConflict{}, nil
+	}
+	return slices.Clone(s.timeTrackingCatalog.Conflicts), nil
+}
+
+func (s *Store) ResolveTimeTrackingConflict(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if s.timeTrackingCatalog == nil {
+		return errors.New("time-tracking conflict not found")
+	}
+	catalog := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+	index := slices.IndexFunc(catalog.Conflicts, func(conflict TimeTrackingConflict) bool { return conflict.ID == id })
+	if index < 0 {
+		return errors.New("time-tracking conflict not found")
+	}
+	catalog.Conflicts = append(catalog.Conflicts[:index], catalog.Conflicts[index+1:]...)
+	advanceTrackingCatalogRevision(&catalog, time.Now().UTC())
+	if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+		return err
+	}
+	s.timeTrackingCatalog = &catalog
+	return nil
+}
+
 func (s *Store) CreateProject(name string) (TimeProject, error) {
 	return s.changeProject("", name, trackingLabelCreate)
 }
