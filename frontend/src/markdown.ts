@@ -1,4 +1,5 @@
 export type AttachmentAlignment = "left" | "center" | "right";
+export type AttachmentKind = "image" | "file";
 
 export function isHorizontalRule(line: string): boolean {
   return line.trim() === "---";
@@ -30,6 +31,13 @@ export function parseAttachmentMarkdown(line: string) {
   };
 }
 
+export function parseAttachmentReferenceMarkdown(line: string): { id: string; kind: AttachmentKind } | null {
+  const match = line.match(
+    /^\s*(!?)\[[^\]]*\]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$/,
+  );
+  return match ? { id: match[2], kind: match[1] ? "image" : "file" } : null;
+}
+
 export function attachmentMarkdown(
   id: string,
   width = 640,
@@ -38,16 +46,6 @@ export function attachmentMarkdown(
 ): string {
   const alignment = align === "left" ? "" : `&align=${align}`;
   return `![${alt}](attachment:${id}#width=${width}${alignment})`;
-}
-
-export function outlineSectionEnd(
-  start: number,
-  last: number,
-  isOutlineLine: (lineNumber: number) => boolean,
-): number {
-  let end = start;
-  while (end < last && isOutlineLine(end + 1)) end++;
-  return end;
 }
 
 export function embeddedClipboardImage(value: string): string | null {

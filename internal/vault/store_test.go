@@ -2004,6 +2004,8 @@ func TestDerivedMarkdownContentPreservesCodeObjects(t *testing.T) {
 func TestObjectDocumentConformance(t *testing.T) {
 	type expectedObject struct {
 		Tag, Text, SourcePrefix, Language string
+		AttachmentID, AttachmentKind      string
+		Tags                              []string
 		Indent, ContentIndent             int
 		Checked, Closed                   *bool
 	}
@@ -2029,6 +2031,8 @@ func TestObjectDocumentConformance(t *testing.T) {
 				got := document.Objects[index]
 				if got.Tag != want.Tag || got.Text != want.Text || got.SourcePrefix != want.SourcePrefix ||
 					got.Language != want.Language || got.Indent != want.Indent || got.ContentIndent != want.ContentIndent ||
+					got.AttachmentID != want.AttachmentID || got.AttachmentKind != want.AttachmentKind ||
+					(want.Tags != nil && !slices.Equal(got.Tags, want.Tags)) ||
 					!pointerEqual(got.Checked, want.Checked) || !pointerEqual(got.Closed, want.Closed) {
 					t.Fatalf("object %d = %+v, want %+v", index, got, want)
 				}

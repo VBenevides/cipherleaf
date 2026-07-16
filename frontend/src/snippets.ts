@@ -1,3 +1,5 @@
+import { type ObjectLine, parseObjectDocument } from "./objectDocument.ts";
+
 export type Snippet = {
   trigger: string;
   description: string;
@@ -88,97 +90,36 @@ Your name
 const loremParagraph =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
-type OutlineLine = {
-  indent: number;
-  content: string;
-};
-
-function visualIndent(text: string): number {
-  return text.replace(/\t/g, "  ").length;
+function isDatedSection(section: ObjectLine): boolean {
+  return section.tag === "section" && /^\s*\d{4}-\d{2}-\d{2}\b/.test(section.text);
 }
 
-function outlineLine(text: string): OutlineLine | null {
-  const match = text.match(/^([ \t]*)>([ \t]?)(.*)$/);
-  if (!match) return null;
-  return {
-    indent: visualIndent(match[1]),
-    content: match[3],
-  };
+function copyRolledObject(markdown: string, object: ObjectLine): string[] {
+  if (object.checked) return [];
+  return [
+    markdown.slice(object.from, object.to),
+    ...object.children.flatMap((child) => copyRolledObject(markdown, child)),
+  ];
 }
 
-function isDatedSectionStart(text: string): boolean {
-  return /^>\s*\d{4}-\d{2}-\d{2}(?:\b.*)?$/.test(text);
-}
+function rollDatedSection(markdown: string, now: Date, backward: boolean): string | null {
+  const document = parseObjectDocument(markdown);
+  const objects = backward ? [...document.objects].reverse() : document.objects;
+  const section = objects.find(isDatedSection);
+  if (!section) return null;
 
-function isRootNonOutlineLine(text: string): boolean {
-  return text.trim() !== "" && !/^[ \t]/.test(text) && !text.startsWith(">");
-}
-
-function isCheckedOutlineLine(line: OutlineLine): boolean {
-  return /^(?:[-+*]\s+|\d+[.)]\s+)?\[[xX]\]\s+/.test(line.content.trimStart());
+  return [
+    `> ${localDate(now)}`,
+    ...section.children.flatMap((child) => copyRolledObject(markdown, child)),
+  ].join("\n");
 }
 
 export function rollLastDatedSection(markdown: string, now = new Date()): string | null {
-  const lines = markdown.split("\n");
-  let start = -1;
-  for (let index = lines.length - 1; index >= 0; index--) {
-    if (isDatedSectionStart(lines[index])) {
-      start = index;
-      break;
-    }
-  }
-  if (start < 0) return null;
-
-  return rollDatedSectionLines(lines, start, now);
+  return rollDatedSection(markdown, now, true);
 }
 
 function rollFirstDatedSection(markdown: string, now = new Date()): string | null {
-  const lines = markdown.split("\n");
-  const start = lines.findIndex((line) => isDatedSectionStart(line));
-  if (start < 0) return null;
-  return rollDatedSectionLines(lines, start, now);
-}
-
-function rollDatedSectionLines(lines: string[], start: number, now: Date): string {
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index++) {
-    if (
-      lines[index].trim() === "" ||
-      isRootNonOutlineLine(lines[index]) ||
-      isDatedSectionStart(lines[index])
-    ) {
-      end = index;
-      break;
-    }
-  }
-
-  const rolled = [`> ${localDate(now)}`];
-  const skippedIndents: number[] = [];
-
-  for (const line of lines.slice(start + 1, end)) {
-    const outline = outlineLine(line);
-
-    if (!outline && skippedIndents.length > 0) continue;
-
-    while (
-      outline &&
-      skippedIndents.length > 0 &&
-      outline.indent <= skippedIndents[skippedIndents.length - 1]
-    ) {
-      skippedIndents.pop();
-    }
-
-    if (outline && skippedIndents.length > 0) continue;
-
-    if (outline && isCheckedOutlineLine(outline)) {
-      skippedIndents.push(outline.indent);
-      continue;
-    }
-
-    rolled.push(line);
-  }
-
-  return rolled.join("\n").replace(/\n+$/, "");
+  return rollDatedSection(markdown, now, false);
 }
 
 export const SNIPPETS: Snippet[] = [

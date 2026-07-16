@@ -14,6 +14,7 @@ import {
   parseObjectDocument,
   prepareNoteContent,
   remapObjectKeysByLine,
+  removeAttachmentReferences,
 } from "../src/objectDocument.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -63,6 +64,30 @@ test("recognizes image objects", () => {
   const tree = markdownObjectTree(`![Diagram](attachment:${"a".repeat(32)}#width=640)`);
 
   assert.equal(tree[0].tag, "image");
+});
+
+test("represents and removes image and file attachment objects", () => {
+  const imageID = "a".repeat(32);
+  const fileID = "b".repeat(32);
+  const markdown = [
+    `![Diagram](attachment:${imageID}#width=640)`,
+    "keep",
+    `[report.pdf](attachment:${fileID})`,
+  ].join("\n");
+  const document = parseObjectDocument(markdown);
+
+  assert.deepEqual(
+    document.objects.map(({ attachmentId, attachmentKind }) => ({ attachmentId, attachmentKind })),
+    [
+      { attachmentId: imageID, attachmentKind: "image" },
+      { attachmentId: undefined, attachmentKind: undefined },
+      { attachmentId: fileID, attachmentKind: "file" },
+    ],
+  );
+  assert.equal(removeAttachmentReferences(markdown, fileID), [
+    `![Diagram](attachment:${imageID}#width=640)`,
+    "keep",
+  ].join("\n"));
 });
 
 test("keeps fenced code as one typed object", () => {
@@ -126,6 +151,15 @@ test("round trips code language and content through canonical objects", () => {
   assert.equal(canonical.objects[0].tag, "code");
   assert.equal(canonical.objects[0].language, "rust");
   assert.equal(canonical.objects[0].closed, true);
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+});
+
+test("round trips fenced code without a language through canonical objects", () => {
+  const markdown = ["  ```", "plain code", "  ```"].join("\n");
+  const canonical = canonicalObjectDocumentFromMarkdown(markdown);
+
+  assert.equal(canonical.objects[0].tag, "code");
+  assert.equal(canonical.objects[0].language, undefined);
   assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
 });
 
@@ -432,6 +466,13 @@ test("allows empty text and bullet objects", () => {
   assert.equal(tree[1].text, "");
   assert.equal(tree[2].tag, "bulletpoint");
   assert.equal(tree[2].text, "");
+});
+
+test("keeps trailing list whitespace out of the hidden prefix", () => {
+  const document = parseObjectDocument(["- what ", "1. what "].join("\n"));
+
+  assert.equal(document.objects[0].textFrom, 2);
+  assert.equal(document.objects[1].textFrom, 11);
 });
 
 test("keeps plain blank lines as empty objects", () => {
