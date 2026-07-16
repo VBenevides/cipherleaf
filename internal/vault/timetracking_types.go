@@ -56,6 +56,19 @@ type TimeEntryRange struct {
 	EndUTC   string `json:"endUtc"`
 }
 
+type TimeEntryRangeResult struct {
+	Entries      []TimeEntryRangeItem `json:"entries"`
+	Days         []TimeDashboardDay   `json:"days"`
+	TotalSeconds int64                `json:"totalSeconds"`
+}
+
+type TimeEntryRangeItem struct {
+	Entry        TimeEntry `json:"entry"`
+	StartedAtUTC string    `json:"startedAtUtc"`
+	EndedAtUTC   string    `json:"endedAtUtc"`
+	TotalSeconds int64     `json:"totalSeconds"`
+}
+
 type TimeDashboard struct {
 	ProjectCount      int                 `json:"projectCount"`
 	TagCount          int                 `json:"tagCount"`
