@@ -46,6 +46,9 @@ export default function TimeTrackingView() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [labelName, setLabelName] = useState("");
+  const [renamingLabelID, setRenamingLabelID] = useState("");
+  const [labelAction, setLabelAction] = useState<{ kind: "project" | "tag"; id: string; restore: boolean } | null>(null);
 
   const loadEntries = useCallback(async () => {
     const range = localWeekRange(weekAnchor);
@@ -136,6 +139,38 @@ export default function TimeTrackingView() {
     finally { setBusy(false); }
   };
 
+  const saveLabel = async (kind: "project" | "tag") => {
+    if (!labelName.trim()) { setError("Name is required"); return; }
+    setBusy(true); setError("");
+    try {
+      const value = kind === "project"
+        ? renamingLabelID ? await VaultService.RenameProject(renamingLabelID, labelName) : await VaultService.CreateProject(labelName)
+        : renamingLabelID ? await VaultService.RenameTag(renamingLabelID, labelName) : await VaultService.CreateTag(labelName);
+      setCatalog((current) => current && ({ ...current, [kind === "project" ? "projects" : "tags"]: [...(current[kind === "project" ? "projects" : "tags"] ?? []).filter((item) => item.id !== value.id), value] }));
+      setLabelName(""); setRenamingLabelID("");
+    } catch (reason) { setError(errorText(reason)); }
+    finally { setBusy(false); }
+  };
+
+  const applyLabelAction = async () => {
+    if (!labelAction) return;
+    setBusy(true); setError("");
+    try {
+      const value = labelAction.kind === "project"
+        ? labelAction.restore ? await VaultService.RestoreProject(labelAction.id) : await VaultService.ArchiveProject(labelAction.id)
+        : labelAction.restore ? await VaultService.RestoreTag(labelAction.id) : await VaultService.ArchiveTag(labelAction.id);
+      const key = labelAction.kind === "project" ? "projects" : "tags";
+      setCatalog((current) => current && ({ ...current, [key]: [...(current[key] ?? []).filter((item) => item.id !== value.id), value] }));
+      setLabelAction(null);
+    } catch (reason) { setError(errorText(reason)); }
+    finally { setBusy(false); }
+  };
+
+  const labelManager = (kind: "project" | "tag") => {
+    const values = catalog?.[kind === "project" ? "projects" : "tags"] ?? [];
+    return <div className="time-label-manager"><form onSubmit={(event) => { event.preventDefault(); void saveLabel(kind); }}><input aria-label={`${kind} name`} value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder={`New ${kind} name`} /><button className="primary-button" disabled={busy}>{renamingLabelID ? "Save rename" : `Create ${kind}`}</button>{renamingLabelID && <button type="button" className="secondary-button" onClick={() => { setRenamingLabelID(""); setLabelName(""); }}>Cancel</button>}</form><section><h3>Active</h3>{values.filter((item) => !item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => { setRenamingLabelID(item.id); setLabelName(item.name); }}>Rename</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, restore: false })}>Archive</button></div></article>)}</section><section><h3>Archived</h3>{values.filter((item) => item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => { setRenamingLabelID(item.id); setLabelName(item.name); }}>Rename</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, restore: true })}>Restore</button></div></article>)}</section></div>;
+  };
+
   return (
     <section className="time-tracking-view">
       <header className="time-tracking-header">
@@ -188,11 +223,12 @@ export default function TimeTrackingView() {
                 return <div key={key} tabIndex={0} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === localDateKey(new Date()) ? "today" : ""}`} aria-label={`${day.toLocaleDateString()}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
               })}
             </div>}
-          </> : <div className="time-tracking-empty"><h3>{TAB_LABELS[tab]}</h3><p>{tab === "projects" ? `${catalog?.projects?.length ?? 0} projects` : tab === "tags" ? `${catalog?.tags?.length ?? 0} tags` : "No time tracked for this view."}</p></div>}
+          </> : tab === "projects" ? labelManager("project") : tab === "tags" ? labelManager("tag") : <div className="time-tracking-empty"><h3>{TAB_LABELS[tab]}</h3><p>No time tracked for this view.</p></div>}
         </>}
       </div>
       {editing && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3><label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><label>Project<select value={editProjectID} onChange={(event) => setEditProjectID(event.target.value)}><option value="">No project</option>{(catalog?.projects ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><fieldset><legend>Tags</legend>{(catalog?.tags ?? []).map((item) => <label key={item.id}><input type="checkbox" checked={editTagIDs.includes(item.id)} onChange={() => setEditTagIDs((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />{item.name}</label>)}</fieldset><label>Started<input type="datetime-local" value={editStartedAt} onChange={(event) => setEditStartedAt(event.target.value)} /></label><label>Ended<input type="datetime-local" value={editEndedAt} onChange={(event) => setEditEndedAt(event.target.value)} /></label><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" disabled={busy}>Save correction</button></div></form></div>}
       {confirmAction && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label={confirmAction === "finish" ? "Finish timer" : "Delete time entry"}><div><h3>{confirmAction === "finish" ? "Finish active timer?" : "Delete this entry?"}</h3><p>{confirmAction === "finish" ? activeEntry?.name : deleting?.name}</p><div className="settings-actions"><button className="secondary-button" onClick={() => { setConfirmAction(null); setDeleting(null); }}>Cancel</button><button className="primary-button" disabled={busy} onClick={() => confirmAction === "finish" ? void finishEntry() : void deleteEntry()}>{confirmAction === "finish" ? "Finish timer" : "Delete entry"}</button></div></div></div>}
+      {labelAction && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label={`${labelAction.restore ? "Restore" : "Archive"} ${labelAction.kind}`}><div><h3>{labelAction.restore ? "Restore" : "Archive"} this {labelAction.kind}?</h3><div className="settings-actions"><button className="secondary-button" onClick={() => setLabelAction(null)}>Cancel</button><button className="primary-button" disabled={busy} onClick={() => void applyLabelAction()}>Confirm</button></div></div></div>}
     </section>
   );
 }

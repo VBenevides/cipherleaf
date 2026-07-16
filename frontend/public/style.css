@@ -2460,6 +2460,12 @@ a:focus-visible {
 .time-month-details { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; min-width: 170px; display: none; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.14); }
 .time-month-grid > div:hover .time-month-details, .time-month-grid > div:focus .time-month-details { display: grid; }
 .time-month-details span { color: var(--ink); font-size: 9px; }
+.time-label-manager { display: grid; gap: 20px; }
+.time-label-manager form { display: flex; gap: 8px; }
+.time-label-manager form input { min-width: 180px; flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); }
+.time-label-manager section { display: grid; gap: 7px; }
+.time-label-manager article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid var(--line-soft); border-radius: 7px; }
+.time-label-manager article > div { display: flex; gap: 6px; }
 .time-entry-list { display: grid; gap: 8px; }
 .time-entry-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 8px; }
 .time-entry-list article > div { display: flex; gap: 8px; }
