@@ -22,6 +22,7 @@ import type {
   ReplaceResult,
   Session,
   TimeEntry,
+  TimeTrackingConflict,
   TrashItem,
   VaultSettings,
 } from "../bindings/cipherleaf/internal/vault/models";
@@ -381,6 +382,7 @@ function App() {
   const [timerNow, setTimerNow] = useState(() => new Date());
   const [startTimerRequest, setStartTimerRequest] = useState(0);
   const [finishTimerRequest, setFinishTimerRequest] = useState(0);
+  const [trackingConflicts, setTrackingConflicts] = useState<TimeTrackingConflict[]>([]);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -1213,7 +1215,7 @@ function App() {
   useEffect(() => {
     if (!session || session.locked) { setActiveTimeEntry(null); return; }
     let active = true;
-    VaultService.GetActiveTimeEntry().then((entry) => { if (active) setActiveTimeEntry(entry); }).catch(() => { if (active) setActiveTimeEntry(null); });
+    Promise.all([VaultService.GetActiveTimeEntry(), VaultService.ListTimeTrackingConflicts()]).then(([entry, conflicts]) => { if (active) { setActiveTimeEntry(entry); setTrackingConflicts(conflicts ?? []); } }).catch(() => { if (active) setActiveTimeEntry(null); });
     return () => { active = false; };
   }, [session?.vaultId, session?.locked]);
 
@@ -1315,6 +1317,7 @@ function App() {
     setGraphOpen(false);
     setTimeTrackingOpen(false);
     setActiveTimeEntry(null);
+    setTrackingConflicts([]);
     setVaultMenuOpen(false);
     setSaveState("idle");
     setGlobalSearchTarget(null);
@@ -1577,6 +1580,7 @@ function App() {
         setSyncConflicts(result.merge.conflicts);
         void startConflictResolution(result.merge.conflicts[0]);
       }
+      if (result.merge.trackingConflicts?.length) setTrackingConflicts(result.merge.trackingConflicts);
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -1641,6 +1645,29 @@ function App() {
       setError(errorText(reason));
       console.error(`Sync conflict resolution save failed: ${errorText(reason)}`);
     }
+  };
+
+  const resolveTrackingConflict = async (conflict: TimeTrackingConflict, choice: "local" | "remote" | "delete-local" | "delete-remote" | "finish") => {
+    setError("");
+    try {
+      if (choice === "remote" && conflict.remoteEntry?.endedAtUtc) {
+        const entry = conflict.remoteEntry;
+        await VaultService.UpdateTimeEntry(entry.id, entry.name, entry.projectId ?? "", entry.tagIds ?? [], entry.startedAtUtc, entry.endedAtUtc!);
+      } else if (choice === "remote" && conflict.remoteProject) {
+        await VaultService.RenameProject(conflict.remoteProject.id, conflict.remoteProject.name);
+      } else if (choice === "remote" && conflict.remoteTag) {
+        await VaultService.RenameTag(conflict.remoteTag.id, conflict.remoteTag.name);
+      } else if (choice === "delete-local" && conflict.localEntry) {
+        await VaultService.DeleteTimeEntry(conflict.localEntry.id);
+      } else if (choice === "delete-remote" && conflict.remoteEntry) {
+        await VaultService.DeleteTimeEntry(conflict.remoteEntry.id);
+      } else if (choice === "finish") {
+        const finished = await VaultService.FinishActiveTimeEntry(); setActiveTimeEntry(null);
+        if (!finished.id) throw new Error("Active timer could not be finished");
+      }
+      await VaultService.ResolveTimeTrackingConflict(conflict.id);
+      setTrackingConflicts((current) => current.filter((item) => item.id !== conflict.id));
+    } catch (reason) { setError(errorText(reason)); }
   };
 
   const forcePushLocalVault = async () => {
@@ -4696,6 +4723,16 @@ function App() {
                 Force push local vault
               </button>
             </div>
+          </section>
+        </div>
+      )}
+      {trackingConflicts.length > 0 && (
+        <div className="modal-backdrop conflict-backdrop tracking-conflict-backdrop" role="presentation">
+          <section className="vault-modal conflict-modal tracking-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="tracking-conflict-title">
+            <p className="eyebrow">Time tracking sync conflicts</p>
+            <h2 id="tracking-conflict-title">Choose each result explicitly</h2>
+            <p>Sync remains blocked until every preserved variant is resolved.</p>
+            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{conflict.localEntry.startedAtUtc} – {conflict.localEntry.endedAtUtc || "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{conflict.remoteEntry.startedAtUtc} – {conflict.remoteEntry.endedAtUtc || "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
           </section>
         </div>
       )}

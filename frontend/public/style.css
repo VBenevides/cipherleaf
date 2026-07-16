@@ -2470,6 +2470,14 @@ a:focus-visible {
 .global-timer-indicator { min-width: 0; max-width: 190px; display: flex; gap: 7px; align-items: center; padding: 5px 8px; color: var(--green-dark); border: 1px solid var(--green); border-radius: 6px; font-size: 9px; }
 .global-timer-indicator span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .global-timer-indicator strong { flex: 0 0 auto; }
+.tracking-conflict-backdrop { z-index: 40; }
+.tracking-conflict-modal { width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 60px); overflow: auto; }
+.tracking-conflict-list { display: grid; gap: 12px; }
+.tracking-conflict-list article { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.tracking-conflict-variants { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.tracking-conflict-variants > div { display: grid; gap: 5px; padding: 10px; background: var(--canvas); border-radius: 6px; }
+.tracking-conflict-variants small { overflow-wrap: anywhere; color: var(--muted); }
+@media (max-width: 600px) { .tracking-conflict-variants { grid-template-columns: 1fr; } }
 @media (max-width: 1050px) { .global-timer-indicator { max-width: 105px; } }
 .dashboard-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: start; }
 .dashboard-controls select, .dashboard-controls input { min-height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
