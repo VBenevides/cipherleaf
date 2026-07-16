@@ -21,6 +21,7 @@ import type {
   NoteSummary,
   ReplaceResult,
   Session,
+  TimeEntry,
   TrashItem,
   VaultSettings,
 } from "../bindings/cipherleaf/internal/vault/models";
@@ -41,6 +42,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
+import { formatRunningDuration } from "./timeTracking";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -375,6 +377,10 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
   const [timeTrackingOpen, setTimeTrackingOpen] = useState(false);
+  const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
+  const [timerNow, setTimerNow] = useState(() => new Date());
+  const [startTimerRequest, setStartTimerRequest] = useState(0);
+  const [finishTimerRequest, setFinishTimerRequest] = useState(0);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
@@ -1205,8 +1211,29 @@ function App() {
   }, [autoLockMinutes, session?.vaultId, session?.locked]);
 
   useEffect(() => {
+    if (!session || session.locked) { setActiveTimeEntry(null); return; }
+    let active = true;
+    VaultService.GetActiveTimeEntry().then((entry) => { if (active) setActiveTimeEntry(entry); }).catch(() => { if (active) setActiveTimeEntry(null); });
+    return () => { active = false; };
+  }, [session?.vaultId, session?.locked]);
+
+  useEffect(() => {
+    if (!activeTimeEntry) return;
+    const timer = window.setInterval(() => setTimerNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeTimeEntry?.id]);
+
+  useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.metaKey || session?.locked) return;
+      if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      if (event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault(); setGraphOpen(false); setTimeTrackingOpen(true); setStartTimerRequest((value) => value + 1); return;
+      }
+      if (event.shiftKey && event.key.toLowerCase() === "e") {
+        event.preventDefault(); setGraphOpen(false); setTimeTrackingOpen(true); setFinishTimerRequest((value) => value + 1); return;
+      }
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
         void persistCurrent();
@@ -1287,6 +1314,7 @@ function App() {
     setSidebarOpen(false);
     setGraphOpen(false);
     setTimeTrackingOpen(false);
+    setActiveTimeEntry(null);
     setVaultMenuOpen(false);
     setSaveState("idle");
     setGlobalSearchTarget(null);
@@ -3664,6 +3692,7 @@ function App() {
                   ? "Unsaved"
                   : "Saved locally"}
           </div>
+          {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
           <button
             className="save-file-button"
             disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
@@ -3722,7 +3751,7 @@ function App() {
 
         {timeTrackingOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
-            <TimeTrackingView key={session.vaultId} />
+            <TimeTrackingView key={session.vaultId} startRequest={startTimerRequest} finishRequest={finishTimerRequest} onActiveEntryChange={setActiveTimeEntry} />
           </Suspense>
         ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { TimeDashboard, TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
@@ -23,7 +23,7 @@ const TAB_LABELS: Record<TimeTrackingTab, string> = {
   week: "Week", month: "Month", dashboard: "Dashboard", projects: "Projects", tags: "Tags",
 };
 
-export default function TimeTrackingView() {
+export default function TimeTrackingView({ startRequest = 0, finishRequest = 0, onActiveEntryChange }: { startRequest?: number; finishRequest?: number; onActiveEntryChange?: (entry: TimeEntry | null) => void }) {
   const [tab, setTab] = useState<TimeTrackingTab>(initialTimeTrackingTab);
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
@@ -60,6 +60,7 @@ export default function TimeTrackingView() {
   const [dashboardProject, setDashboardProject] = useState("");
   const [dashboardTags, setDashboardTags] = useState<string[]>([]);
   const [dashboardDetails, setDashboardDetails] = useState<Record<string, TimeEntryRangeItem[]>>({});
+  const taskNameRef = useRef<HTMLInputElement>(null);
 
   const loadEntries = useCallback(async () => {
     const range = localWeekRange(weekAnchor);
@@ -73,12 +74,15 @@ export default function TimeTrackingView() {
     let cancelled = false;
     Promise.all([VaultService.GetTimeTrackingCatalog(), VaultService.GetActiveTimeEntry(), loadEntries()])
       .then(([nextCatalog, nextActiveEntry]) => {
-        if (!cancelled) { setCatalog(nextCatalog); setActiveEntry(nextActiveEntry); }
+        if (!cancelled) { setCatalog(nextCatalog); setActiveEntry(nextActiveEntry); onActiveEntryChange?.(nextActiveEntry); }
       })
       .catch((reason) => { if (!cancelled) setError(errorText(reason)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [loadEntries]);
+  }, [loadEntries, onActiveEntryChange]);
+
+  useEffect(() => { if (startRequest) { setTab("week"); window.setTimeout(() => taskNameRef.current?.focus()); } }, [startRequest]);
+  useEffect(() => { if (finishRequest && activeEntry) setConfirmAction("finish"); }, [activeEntry, finishRequest]);
 
   useEffect(() => {
     if (!activeEntry) return;
@@ -104,7 +108,7 @@ export default function TimeTrackingView() {
     setBusy(true); setError("");
     try {
       const started = await VaultService.StartTimeEntry(name, projectID, tagIDs);
-      setActiveEntry(started); setEntries((current) => [started, ...current]);
+      setActiveEntry(started); onActiveEntryChange?.(started); setEntries((current) => [started, ...current]);
       setName(""); setProjectID(""); setTagIDs([]);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
@@ -114,7 +118,7 @@ export default function TimeTrackingView() {
     setBusy(true); setError("");
     try {
       const finished = await VaultService.FinishActiveTimeEntry();
-      setActiveEntry(null); setEntries((current) => current.map((item) => item.id === finished.id ? finished : item));
+      setActiveEntry(null); onActiveEntryChange?.(null); setEntries((current) => current.map((item) => item.id === finished.id ? finished : item));
       setConfirmAction(null);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
@@ -224,7 +228,7 @@ export default function TimeTrackingView() {
           {error && <div className="time-tracking-error" role="alert">{error}</div>}
           {tab === "week" ? <>
             <form className="time-entry-form" onSubmit={(event) => { event.preventDefault(); void startEntry(); }}>
-              <input aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => setName(event.target.value)} disabled={!!activeEntry || busy} />
+              <input ref={taskNameRef} aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => setName(event.target.value)} disabled={!!activeEntry || busy} />
               <select aria-label="Project" value={projectID} onChange={(event) => setProjectID(event.target.value)} disabled={!!activeEntry || busy}><option value="">No project</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
               <fieldset disabled={!!activeEntry || busy}><legend>Tags</legend>{tags.length ? tags.map((item) => <label key={item.id}><input type="checkbox" checked={tagIDs.includes(item.id)} onChange={() => setTagIDs((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />{item.name}</label>) : <span>No tags</span>}</fieldset>
               <button className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
