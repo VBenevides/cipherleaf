@@ -32,3 +32,8 @@ test("timer shortcuts open opaque modals without changing workspace views", () =
   assert.match(app, /className="vault-modal timer-modal" role="dialog" aria-modal="true"/);
   assert.match(style, /\.timer-modal \{ background: var\(--paper\); \}/);
 });
+
+test("week days are keyboard-selectable and filter the activity list", () => {
+  assert.match(view, /role="button" tabIndex=\{0\} aria-pressed=\{selectedWeekDay === key\}/);
+  assert.match(view, /selectedWeekEntries\.map/);
+});

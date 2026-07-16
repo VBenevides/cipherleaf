@@ -27,10 +27,10 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
   const [tab, setTab] = useState<TimeTrackingTab>(initialTimeTrackingTab);
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [rangeEntries, setRangeEntries] = useState<TimeEntryRangeItem[]>([]);
   const [dayTotals, setDayTotals] = useState<TimeDashboardDay[]>([]);
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
+  const [selectedWeekDay, setSelectedWeekDay] = useState(() => localDateKey(new Date()));
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [monthEntries, setMonthEntries] = useState<TimeEntryRangeItem[]>([]);
   const [monthDays, setMonthDays] = useState<TimeDashboardDay[]>([]);
@@ -64,7 +64,6 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
   const loadEntries = useCallback(async () => {
     const range = localWeekRange(weekAnchor);
     const result = await VaultService.ListTimeEntries(range.startUTC, range.endUTC, { projectIds: [], tagIds: [] });
-    setEntries((result.entries ?? []).map((item) => item.entry));
     setRangeEntries(result.entries ?? []);
     setDayTotals(result.days ?? []);
   }, [weekAnchor]);
@@ -99,13 +98,26 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
 
   const projects = useMemo(() => (catalog?.projects ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
   const tags = useMemo(() => (catalog?.tags ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
+  const selectedWeekEntries = useMemo(() => {
+    const day = localWeekDates(weekAnchor).find((item) => localDateKey(item) === selectedWeekDay);
+    if (!day) return [];
+    const start = day.getTime();
+    const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+    return rangeEntries.filter((item) => item.entry.endedAtUtc && new Date(item.startedAtUtc).getTime() < end && new Date(item.endedAtUtc).getTime() > start);
+  }, [rangeEntries, selectedWeekDay, weekAnchor]);
+
+  const navigateWeek = (days: number) => {
+    const next = days === 0 ? new Date() : new Date(weekAnchor.getFullYear(), weekAnchor.getMonth(), weekAnchor.getDate() + days);
+    setWeekAnchor(next);
+    setSelectedWeekDay(days === 0 ? localDateKey(next) : localDateKey(localWeekDates(next)[0]));
+  };
 
   const startEntry = async () => {
     if (!name.trim()) { setError("Task name is required"); return; }
     setBusy(true); setError("");
     try {
       const started = await VaultService.StartTimeEntry(name, projectID, tagIDs);
-      setActiveEntry(started); onActiveEntryChange?.(started); setEntries((current) => [started, ...current]);
+      setActiveEntry(started); onActiveEntryChange?.(started); await loadEntries();
       setName(""); setProjectID(""); setTagIDs([]);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
@@ -114,8 +126,8 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
   const finishEntry = async () => {
     setBusy(true); setError("");
     try {
-      const finished = await VaultService.FinishActiveTimeEntry();
-      setActiveEntry(null); onActiveEntryChange?.(null); setEntries((current) => current.map((item) => item.id === finished.id ? finished : item));
+      await VaultService.FinishActiveTimeEntry();
+      setActiveEntry(null); onActiveEntryChange?.(null); await loadEntries();
       setConfirmAction(null);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
@@ -131,11 +143,11 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
     if (!editing || !editName.trim()) { setError("Task name is required"); return; }
     setBusy(true); setError("");
     try {
-      const updated = await VaultService.UpdateTimeEntry(
+      await VaultService.UpdateTimeEntry(
         editing.id, editName, editProjectID, editTagIDs,
         localDateTimeToUTC(editStartedAt), localDateTimeToUTC(editEndedAt),
       );
-      setEntries((current) => current.map((item) => item.id === updated.id ? updated : item)); setEditing(null);
+      await loadEntries(); setEditing(null);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
@@ -145,7 +157,7 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
     setBusy(true); setError("");
     try {
       await VaultService.DeleteTimeEntry(deleting.id);
-      setEntries((current) => current.filter((item) => item.id !== deleting.id));
+      await loadEntries();
       setDeleting(null); setConfirmAction(null);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
@@ -231,10 +243,10 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
               <button className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
             </form>
             <div className="time-calendar-navigation">
-              <button className="secondary-button" onClick={() => setWeekAnchor((date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() - 7))}>Previous</button>
+              <button className="secondary-button" onClick={() => navigateWeek(-7)}>Previous</button>
               <strong>{localWeekDates(weekAnchor)[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – {localWeekDates(weekAnchor)[6].toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</strong>
-              <button className="secondary-button" onClick={() => setWeekAnchor(new Date())}>Current week</button>
-              <button className="secondary-button" onClick={() => setWeekAnchor((date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 7))}>Next</button>
+              <button className="secondary-button" onClick={() => navigateWeek(0)}>Current week</button>
+              <button className="secondary-button" onClick={() => navigateWeek(7)}>Next</button>
             </div>
             <div className="time-week-grid">
               {localWeekDates(weekAnchor).map((day) => {
@@ -242,15 +254,17 @@ export default function TimeTrackingView({ onActiveEntryChange }: { onActiveEntr
                 const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
                 const items = rangeEntries.filter((item) => new Date(item.startedAtUtc).getTime() < dayEnd && new Date(item.endedAtUtc).getTime() > dayStart);
                 const total = dayTotals.find((item) => item.localDate === localDateKey(day))?.totalSeconds ?? 0;
-                return <section key={localDateKey(day)} className={localDateKey(day) === localDateKey(new Date()) ? "today" : ""}><header><strong>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), dayEnd) - Math.max(new Date(item.entry.startedAtUtc).getTime(), dayStart)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></section>;
+                const key = localDateKey(day);
+                return <section key={key} role="button" tabIndex={0} aria-pressed={selectedWeekDay === key} className={`${key === localDateKey(new Date()) ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => setSelectedWeekDay(key)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedWeekDay(key); } }}><header><strong>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), dayEnd) - Math.max(new Date(item.entry.startedAtUtc).getTime(), dayStart)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></section>;
               })}
             </div>
             <div className="time-entry-list">
-              {entries.filter((item) => item.endedAtUtc).map((entry) => <article key={entry.id}>
+              <h3>{localWeekDates(weekAnchor).find((day) => localDateKey(day) === selectedWeekDay)?.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h3>
+              {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
                 <div><strong>{entry.name}</strong><span>{new Date(entry.startedAtUtc).toLocaleString()} · {formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</span></div>
                 <div><button className="secondary-button" onClick={() => beginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => { setDeleting(entry); setConfirmAction("delete"); }}>Delete</button></div>
               </article>)}
-              {!entries.some((item) => item.endedAtUtc) && <div className="time-tracking-empty"><h3>Week</h3><p>No completed entries this week.</p></div>}
+              {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
             </div>
           </> : tab === "month" ? <>
             <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
