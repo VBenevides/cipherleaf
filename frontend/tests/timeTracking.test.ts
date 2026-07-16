@@ -6,6 +6,7 @@ import {
   initialTimeTrackingTab,
   inclusiveLocalDateRange,
   localMonthRange,
+  localMonthGrid,
   localDateTimeToUTC,
   localDateTimeValue,
   localDateKey,
@@ -43,6 +44,13 @@ test("local month ranges include complete leap and DST months", () => {
     startUTC: "2024-02-01T05:00:00.000Z",
     endUTC: "2024-03-01T05:00:00.000Z",
   });
+});
+
+test("month grids include complete Monday-based leading and trailing weeks", () => {
+  const days = localMonthGrid(new Date("2026-02-15T12:00:00Z"));
+  assert.equal(days.length, 35);
+  assert.equal(localDateKey(days[0]), "2026-01-26");
+  assert.equal(localDateKey(days.at(-1)!), "2026-03-01");
 });
 
 test("inclusive local dates become half-open UTC ranges", () => {

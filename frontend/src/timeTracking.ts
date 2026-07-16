@@ -34,6 +34,15 @@ export function localMonthRange(reference: Date): UTCDateRange {
   return utcRange(start, end);
 }
 
+export function localMonthGrid(reference: Date): Date[] {
+  const first = new Date(reference.getFullYear(), reference.getMonth(), 1);
+  const start = localWeekDates(first)[0];
+  const last = new Date(reference.getFullYear(), reference.getMonth() + 1, 0);
+  const end = localWeekDates(last)[6];
+  const length = Math.round((new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1).getTime() - start.getTime()) / 86_400_000);
+  return Array.from({ length }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+}
+
 export function inclusiveLocalDateRange(startDate: string, endDate: string): UTCDateRange {
   const start = parseLocalDate(startDate);
   const selectedEnd = parseLocalDate(endDate);

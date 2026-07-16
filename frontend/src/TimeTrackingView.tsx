@@ -8,6 +8,8 @@ import {
   localDateTimeToUTC,
   localDateTimeValue,
   localDateKey,
+  localMonthGrid,
+  localMonthRange,
   localWeekDates,
   localWeekRange,
   TIME_TRACKING_TABS,
@@ -26,6 +28,9 @@ export default function TimeTrackingView() {
   const [rangeEntries, setRangeEntries] = useState<TimeEntryRangeItem[]>([]);
   const [dayTotals, setDayTotals] = useState<TimeDashboardDay[]>([]);
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
+  const [monthAnchor, setMonthAnchor] = useState(() => new Date());
+  const [monthEntries, setMonthEntries] = useState<TimeEntryRangeItem[]>([]);
+  const [monthDays, setMonthDays] = useState<TimeDashboardDay[]>([]);
   const [now, setNow] = useState(() => new Date());
   const [name, setName] = useState("");
   const [projectID, setProjectID] = useState("");
@@ -66,6 +71,16 @@ export default function TimeTrackingView() {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, [activeEntry]);
+
+  useEffect(() => {
+    if (tab !== "month") return;
+    const range = localMonthRange(monthAnchor);
+    setBusy(true);
+    VaultService.ListTimeEntries(range.startUTC, range.endUTC, { projectIds: [], tagIds: [] })
+      .then((result) => { setMonthEntries(result.entries ?? []); setMonthDays(result.days ?? []); })
+      .catch((reason) => setError(errorText(reason)))
+      .finally(() => setBusy(false));
+  }, [monthAnchor, tab]);
 
   const projects = useMemo(() => (catalog?.projects ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
   const tags = useMemo(() => (catalog?.tags ?? []).filter((item) => !item.archivedAtUtc), [catalog]);
@@ -162,6 +177,17 @@ export default function TimeTrackingView() {
               </article>)}
               {!entries.some((item) => item.endedAtUtc) && <div className="time-tracking-empty"><h3>Week</h3><p>No completed entries this week.</p></div>}
             </div>
+          </> : tab === "month" ? <>
+            <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
+            {busy ? <div className="settings-loading" role="status">Loading month...</div> : <div className="time-month-grid">
+              {localWeekDates(new Date(2026, 0, 5)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong>)}
+              {localMonthGrid(monthAnchor).map((day) => {
+                const key = localDateKey(day); const start = day.getTime(); const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+                const items = monthEntries.filter((item) => new Date(item.startedAtUtc).getTime() < end && new Date(item.endedAtUtc).getTime() > start);
+                const total = monthDays.find((item) => item.localDate === key)?.totalSeconds ?? 0;
+                return <div key={key} tabIndex={0} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === localDateKey(new Date()) ? "today" : ""}`} aria-label={`${day.toLocaleDateString()}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
+              })}
+            </div>}
           </> : <div className="time-tracking-empty"><h3>{TAB_LABELS[tab]}</h3><p>{tab === "projects" ? `${catalog?.projects?.length ?? 0} projects` : tab === "tags" ? `${catalog?.tags?.length ?? 0} tags` : "No time tracked for this view."}</p></div>}
         </>}
       </div>

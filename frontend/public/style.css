@@ -2450,6 +2450,16 @@ a:focus-visible {
 .time-week-grid > section > div > div { display: grid; gap: 2px; padding: 6px; border-radius: 5px; background: var(--green-pale); font-size: 9px; }
 .time-week-grid span, .time-week-grid small { color: var(--muted); font-size: 9px; }
 .time-week-grid footer { border-top: 1px solid var(--line-soft); font-weight: 800; }
+.time-month-grid { display: grid; grid-template-columns: repeat(7, minmax(80px, 1fr)); gap: 6px; }
+.time-month-grid > strong { padding: 5px; color: var(--muted); font-size: 9px; text-align: center; }
+.time-month-grid > div { position: relative; min-height: 82px; display: flex; flex-direction: column; justify-content: space-between; padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; outline: none; }
+.time-month-grid > div.outside { opacity: .4; }
+.time-month-grid > div.today { border-color: var(--green); }
+.time-month-grid > div > span { color: var(--muted); font-size: 9px; }
+.time-month-grid > div > strong { color: var(--ink); font-size: 11px; }
+.time-month-details { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; min-width: 170px; display: none; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.14); }
+.time-month-grid > div:hover .time-month-details, .time-month-grid > div:focus .time-month-details { display: grid; }
+.time-month-details span { color: var(--ink); font-size: 9px; }
 .time-entry-list { display: grid; gap: 8px; }
 .time-entry-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: 8px; }
 .time-entry-list article > div { display: flex; gap: 8px; }
