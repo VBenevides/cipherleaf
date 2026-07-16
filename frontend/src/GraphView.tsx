@@ -192,10 +192,6 @@ export function GraphView({
           <h2>Graph view</h2>
         </div>
         <div className="graph-view-actions">
-          <div className="graph-zoom-controls graph-mode-controls" aria-label="Graph mode">
-            <button type="button" className={mode === "links" ? "active" : ""} onClick={() => setMode("links")}>Links</button>
-            <button type="button" className={mode === "folders" ? "active" : ""} onClick={() => setMode("folders")}>Folders</button>
-          </div>
           <div className="graph-zoom-controls" aria-label="Graph zoom controls">
             <button type="button" onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - ZOOM_STEP))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out">−</button>
             <button type="button" onClick={() => setZoom(DEFAULT_ZOOM)} aria-label="Reset zoom">{Math.round(zoom * 100)}%</button>
@@ -203,7 +199,11 @@ export function GraphView({
           </div>
         </div>
       </header>
-      <div className="graph-canvas">
+      <nav className="time-tracking-tabs" aria-label="Graph views" role="tablist">
+        <button type="button" role="tab" aria-selected={mode === "links"} className={mode === "links" ? "active" : ""} onClick={() => setMode("links")}>Links</button>
+        <button type="button" role="tab" aria-selected={mode === "folders"} className={mode === "folders" ? "active" : ""} onClick={() => setMode("folders")}>Folders</button>
+      </nav>
+      <div className="graph-canvas" role="tabpanel">
         {mode === "links" ? (!graphModeIsEmpty(mode, notes.length, nodes.length) ? <RelationshipGraph notes={notes} zoom={zoom} onSelectNote={onSelectNote} /> : <EmptyGraph mode={mode} />) : graphModeIsEmpty(mode, notes.length, nodes.length) ? <EmptyGraph mode={mode} /> : <svg viewBox={`0 0 ${width} ${height}`} width={width * zoom} height={height * zoom} role="img" aria-label="Folder and note hierarchy">
           <g className="graph-edges">
             {edges.map(({ from, to }) => (

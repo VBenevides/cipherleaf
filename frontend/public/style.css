@@ -2356,9 +2356,7 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 10% 5%, rgba(255, 255, 255, 0.64), transparent 31%),
-    var(--canvas);
+  background: var(--canvas);
 }
 
 .time-tracking-view {
@@ -2370,7 +2368,8 @@ a:focus-visible {
   background: var(--canvas);
 }
 
-.time-tracking-header {
+.time-tracking-header,
+.graph-view-header {
   display: flex;
   align-items: end;
   justify-content: space-between;
@@ -2380,6 +2379,7 @@ a:focus-visible {
 }
 
 .time-tracking-header h2,
+.graph-view-header h2,
 .time-tracking-empty h3 {
   margin: 0;
   color: var(--ink);
@@ -2649,27 +2649,6 @@ a:focus-visible {
   .time-entry-list article { align-items: flex-start; flex-direction: column; }
 }
 
-.graph-view-header {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 28px clamp(30px, 5.4vw, 76px) 21px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.graph-view-header .eyebrow {
-  margin-bottom: 7px;
-}
-
-.graph-view-header h2 {
-  margin: 0;
-  color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 26px;
-  font-weight: 500;
-}
-
 .graph-view-actions {
   max-width: 300px;
 }
@@ -2678,7 +2657,6 @@ a:focus-visible {
   display: flex;
   justify-content: flex-end;
   gap: 5px;
-  margin-top: 10px;
 }
 
 .graph-zoom-controls button {
@@ -2693,17 +2671,6 @@ a:focus-visible {
 .graph-zoom-controls button:nth-child(2) {
   min-width: 54px;
   font-size: 10px;
-}
-
-.graph-mode-controls button,
-.graph-mode-controls button:nth-child(2) {
-  min-width: 54px;
-  font-size: 11px;
-}
-
-.graph-mode-controls button.active {
-  background: var(--green-pale);
-  border-color: var(--green);
 }
 
 .graph-zoom-controls button:hover:not(:disabled) {

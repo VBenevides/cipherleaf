@@ -642,7 +642,7 @@ function App() {
           id: ++consoleEntryIDRef.current,
           level,
           message: values.map(stringify).join(" "),
-          timestamp: new Date().toLocaleTimeString(),
+          timestamp: new Date().toLocaleTimeString("en-US"),
         },
       ]);
     };
@@ -2643,12 +2643,12 @@ function App() {
     });
   }, [calendarMonth]);
 
-  const calendarTitle = calendarMonth.toLocaleDateString(undefined, {
+  const calendarTitle = calendarMonth.toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
   const compactDay = String(today.getDate()).padStart(2, "0");
-  const compactMonth = today.toLocaleDateString(undefined, { month: "short" }).toUpperCase();
+  const compactMonth = today.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
 
   const openWikilinkTitle = async (title: string) => {
     try {
@@ -3642,7 +3642,7 @@ function App() {
           <button
             type="button"
             className="calendar-button"
-            aria-label={`Open calendar for ${today.toLocaleDateString(undefined, { dateStyle: "full" })}`}
+            aria-label={`Open calendar for ${today.toLocaleDateString("en-US", { dateStyle: "full" })}`}
             title="Open calendar"
             onClick={() => {
               setCalendarMonth(startOfMonth(calendarSelected));
@@ -3858,7 +3858,7 @@ function App() {
               <Icon name="file" size={16} />
               <span>
                 <strong>{item.title}</strong>
-                <small>{new Date(item.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
+                <small>{new Date(item.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
               </span>
             </button>
           ))}
@@ -4113,7 +4113,7 @@ function App() {
                 aria-label="Note title"
               />
               <p>
-                Edited {new Date(note.updatedAt).toLocaleString(undefined, {
+                Edited {new Date(note.updatedAt).toLocaleString("en-US", {
                   month: "long",
                   day: "numeric",
                   hour: "numeric",
@@ -4336,7 +4336,7 @@ function App() {
               {trashItems.length === 0 && <p className="settings-loading">Trash is empty.</p>}
               {trashItems.map((item) => (
                 <div className="recovery-row" key={`${item.kind}:${item.id}`}>
-                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString()}</small></span>
+                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString("en-US")}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreTrashItem(item)}>Restore</button>
                   <button type="button" className="danger-button" disabled={recoveryBusy} onClick={() => void permanentlyDeleteTrashItem(item)}>Delete</button>
                 </div>
@@ -4348,7 +4348,7 @@ function App() {
               {note && noteVersions.length === 0 && <p className="settings-loading">No earlier versions.</p>}
               {noteVersions.map((version) => (
                 <div className="recovery-row" key={version.revision}>
-                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString()}</small></span>
+                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString("en-US")}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreNoteVersion(version)}>Restore</button>
                 </div>
               ))}
@@ -5036,7 +5036,7 @@ function App() {
                 >
                   {Array.from({ length: 12 }, (_, month) => (
                     <option key={month} value={month}>
-                      {new Date(2000, month, 1).toLocaleDateString(undefined, { month: "long" })}
+                      {new Date(2000, month, 1).toLocaleDateString("en-US", { month: "long" })}
                     </option>
                   ))}
                 </select>
@@ -5055,7 +5055,7 @@ function App() {
             </div>
             <div className="calendar-weekdays" aria-hidden="true">
               {Array.from({ length: 7 }, (_, day) => (
-                <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString(undefined, { weekday: "narrow" })}</span>
+                <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString("en-US", { weekday: "narrow" })}</span>
               ))}
             </div>
             <div className="calendar-grid">
@@ -5064,7 +5064,7 @@ function App() {
                   type="button"
                   key={date.toISOString()}
                   className={`calendar-day${inMonth ? "" : " outside-month"}${isSameDay(date, today) ? " today" : ""}${isSameDay(date, calendarSelected) ? " selected" : ""}`}
-                  aria-label={date.toLocaleDateString(undefined, { dateStyle: "full" })}
+                  aria-label={date.toLocaleDateString("en-US", { dateStyle: "full" })}
                   aria-pressed={isSameDay(date, calendarSelected)}
                   onClick={() => {
                     setCalendarSelected(date);
@@ -5076,7 +5076,7 @@ function App() {
               ))}
             </div>
             <div className="calendar-footer">
-              <span>{calendarSelected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
+              <span>{calendarSelected.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
               <button type="button" className="primary-button" onClick={() => void openDailyNote(calendarSelected)}>
                 Open daily note
               </button>

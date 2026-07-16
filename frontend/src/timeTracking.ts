@@ -36,6 +36,14 @@ export function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+export function formatLocalDate(date: Date): string {
+  return localDateKey(date).replace(/-/g, "/");
+}
+
+export function formatLocalDateTime(date: Date): string {
+  return `${formatLocalDate(date)}, ${date.toLocaleTimeString("en-US")}`;
+}
+
 export function localMonthRange(reference: Date): UTCDateRange {
   const start = new Date(reference.getFullYear(), reference.getMonth(), 1);
   const end = new Date(reference.getFullYear(), reference.getMonth() + 1, 1);

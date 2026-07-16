@@ -11,5 +11,5 @@ export function renderNoteTemplate(template: string, title: string, date: Date):
   return template
     .split("{{title}}").join(title)
     .split("{{date}}").join(formatDailyTitle(date, "YYYY-MM-DD"))
-    .split("{{time}}").join(date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    .split("{{time}}").join(date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
 }

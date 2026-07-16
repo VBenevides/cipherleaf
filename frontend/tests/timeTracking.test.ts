@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   formatDuration,
+  formatLocalDate,
+  formatLocalDateTime,
   dashboardPresetRange,
   formatRunningDuration,
   initialTimeTrackingTab,
@@ -40,6 +42,12 @@ test("local weeks run Monday through Sunday across DST", () => {
 test("weekly calendar always contains Monday through Sunday", () => {
   const days = localWeekDates(new Date("2026-07-16T12:00:00Z"));
   assert.deepEqual(days.map(localDateKey), ["2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19"]);
+});
+
+test("time entries use a local YYYY/MM/DD date prefix", () => {
+  const date = new Date("2026-07-16T12:00:00Z");
+  assert.equal(formatLocalDate(date), "2026/07/16");
+  assert.equal(formatLocalDateTime(date), "2026/07/16, 8:00:00 AM");
 });
 
 test("local month ranges include complete leap and DST months", () => {
