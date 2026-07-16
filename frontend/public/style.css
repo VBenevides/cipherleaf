@@ -2448,7 +2448,7 @@ a:focus-visible {
 
 .time-entry-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.35fr) minmax(170px, 0.5fr) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.35fr) minmax(130px, 0.35fr) minmax(170px, 0.5fr) auto;
   gap: 10px;
   align-items: start;
   margin-bottom: 24px;
@@ -2499,6 +2499,8 @@ a:focus-visible {
 .time-label-manager form input { min-width: 180px; flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); }
 .time-label-manager section { display: grid; gap: 7px; }
 .time-label-manager article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid var(--line-soft); border-radius: 7px; }
+.time-label-manager article > span { display: grid; gap: 3px; }
+.time-label-manager article > span small { color: var(--muted); font-size: 8px; }
 .time-label-manager article > div { display: flex; gap: 6px; }
 .time-dashboard { display: grid; gap: 20px; }
 .global-timer-indicator { min-width: 0; max-width: 190px; display: flex; gap: 7px; align-items: center; padding: 5px 8px; color: var(--green-dark); border: 1px solid var(--green); border-radius: 6px; font-size: 9px; }

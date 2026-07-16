@@ -45,7 +45,7 @@ test("week days are keyboard-selectable and filter the activity list", () => {
 });
 
 test("completed tasks can resume with the same labels", () => {
-  assert.match(view, /StartTimeEntry\(entry\.name, entry\.projectId \?\? "", entry\.tagIds \?\? \[\]\)/);
+  assert.match(view, /StartTimeEntryForClient\(entry\.name, resumedClientID, entry\.projectId \?\? "", entry\.tagIds \?\? \[\]\)/);
   assert.match(view, />Resume<\/button>/);
 });
 
@@ -61,6 +61,14 @@ test("tracking project choices use the same themed custom dropdown", () => {
   assert.match(tagSelect, /role="listbox" aria-label=\{label\}/);
   assert.match(app, /<ProjectSelect projects=/);
   assert.doesNotMatch(app, /<label>Project<select/);
+});
+
+test("client selection filters projects and project selection fills the client", () => {
+  assert.match(tagSelect, /export function ClientSelect/);
+  assert.match(view, /project\.clientId === clientID/);
+  assert.match(view, /if \(!clientID\) setClientID/);
+  assert.match(view, /label="Filter client"/);
+  assert.match(app, /<ClientSelect clients=/);
 });
 
 test("dashboard tag guidance is subdued and expanded task rows are indented", () => {

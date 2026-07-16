@@ -8,8 +8,10 @@ import (
 
 func TestTimeDashboardAggregatesAndLoadsGroupDetailsLazily(t *testing.T) {
 	store, _ := newTrackingTestStore(t)
-	projectA, _ := store.CreateProject("Alpha")
-	projectB, _ := store.CreateProject("Beta")
+	clientA, _ := store.CreateClient("Client A")
+	clientB, _ := store.CreateClient("Client B")
+	projectA, _ := store.CreateProject("Alpha", clientA.ID)
+	projectB, _ := store.CreateProject("Beta", clientB.ID)
 	tagA, _ := store.CreateTag("Focus")
 	tagB, _ := store.CreateTag("Billable")
 	store.mu.Lock()
@@ -72,6 +74,10 @@ func TestTimeDashboardAggregatesAndLoadsGroupDetailsLazily(t *testing.T) {
 	filtered, err := store.GetTimeDashboard("2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{ProjectIDs: []string{projectA.ID}, TagIDs: []string{tagB.ID}})
 	if err != nil || filtered.TotalSeconds != 3600 || filtered.ProjectCount != 1 || filtered.TagCount != 2 {
 		t.Fatalf("unexpected filtered dashboard: %#v, %v", filtered, err)
+	}
+	clientFiltered, err := store.GetTimeDashboard("2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{ClientIDs: []string{clientB.ID}})
+	if err != nil || clientFiltered.TotalSeconds != 7200 || len(clientFiltered.Projects) != 1 || clientFiltered.Projects[0].ID != projectB.ID {
+		t.Fatalf("unexpected client-filtered dashboard: %#v, %v", clientFiltered, err)
 	}
 }
 

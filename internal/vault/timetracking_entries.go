@@ -10,6 +10,16 @@ import (
 )
 
 func (s *Store) StartTimeEntry(name, projectID string, tagIDs []string) (TimeEntry, error) {
+	clientID := ""
+	s.mu.RLock()
+	if s.timeTrackingCatalog != nil {
+		clientID = trackingProjectClientID(*s.timeTrackingCatalog, projectID)
+	}
+	s.mu.RUnlock()
+	return s.StartTimeEntryForClient(name, clientID, projectID, tagIDs)
+}
+
+func (s *Store) StartTimeEntryForClient(name, clientID, projectID string, tagIDs []string) (TimeEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
@@ -25,7 +35,7 @@ func (s *Store) StartTimeEntry(name, projectID string, tagIDs []string) (TimeEnt
 	if err != nil {
 		return TimeEntry{}, err
 	}
-	if err := validateTimeEntryReferences(*s.timeTrackingCatalog, projectID, tagIDs, true); err != nil {
+	if err := validateTimeEntryReferences(*s.timeTrackingCatalog, clientID, projectID, tagIDs, true); err != nil {
 		return TimeEntry{}, err
 	}
 	now := s.timeTrackingNowLocked()
@@ -35,7 +45,7 @@ func (s *Store) StartTimeEntry(name, projectID string, tagIDs []string) (TimeEnt
 	}
 	stamp := now.Format(time.RFC3339Nano)
 	entry := TimeEntry{
-		ID: id, Name: name, ProjectID: projectID, TagIDs: slices.Clone(tagIDs),
+		ID: id, Name: name, ClientID: clientID, ProjectID: projectID, TagIDs: slices.Clone(tagIDs),
 		StartedAtUTC: stamp, CreatedAtUTC: stamp, UpdatedAtUTC: stamp,
 		ModifiedAt: now.UnixMilli(), Revision: 1,
 	}
@@ -121,6 +131,16 @@ func (s *Store) FinishActiveTimeEntry() (TimeEntry, error) {
 }
 
 func (s *Store) UpdateTimeEntry(id, name, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (TimeEntry, error) {
+	clientID := ""
+	s.mu.RLock()
+	if s.timeTrackingCatalog != nil {
+		clientID = trackingProjectClientID(*s.timeTrackingCatalog, projectID)
+	}
+	s.mu.RUnlock()
+	return s.UpdateTimeEntryForClient(id, name, clientID, projectID, tagIDs, startedAtUTC, endedAtUTC)
+}
+
+func (s *Store) UpdateTimeEntryForClient(id, name, clientID, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (TimeEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
@@ -133,7 +153,7 @@ func (s *Store) UpdateTimeEntry(id, name, projectID string, tagIDs []string, sta
 	if err != nil {
 		return TimeEntry{}, err
 	}
-	if err := validateTimeEntryReferences(*s.timeTrackingCatalog, projectID, tagIDs, false); err != nil {
+	if err := validateTimeEntryReferences(*s.timeTrackingCatalog, clientID, projectID, tagIDs, false); err != nil {
 		return TimeEntry{}, err
 	}
 	started, ended, err := parseCompletedTimeEntryRange(startedAtUTC, endedAtUTC)
@@ -151,6 +171,7 @@ func (s *Store) UpdateTimeEntry(id, name, projectID string, tagIDs []string, sta
 	entry := cloneTimeEntry(bucket.Entries[index])
 	now := s.timeTrackingNowLocked()
 	entry.Name = name
+	entry.ClientID = clientID
 	entry.ProjectID = projectID
 	entry.TagIDs = slices.Clone(tagIDs)
 	entry.StartedAtUTC = started.Format(time.RFC3339Nano)
@@ -278,11 +299,17 @@ func (s *Store) validateTimeEntryOverlapLocked(candidate TimeEntry) error {
 	return nil
 }
 
-func validateTimeEntryReferences(catalog timeTrackingCatalog, projectID string, tagIDs []string, activeOnly bool) error {
+func validateTimeEntryReferences(catalog timeTrackingCatalog, clientID, projectID string, tagIDs []string, activeOnly bool) error {
+	if err := validateProjectClient(catalog.Clients, clientID, activeOnly); err != nil {
+		return err
+	}
 	if projectID != "" {
 		index := slices.IndexFunc(catalog.Projects, func(project TimeProject) bool { return project.ID == projectID })
 		if index < 0 || (activeOnly && catalog.Projects[index].ArchivedAtUTC != "") {
 			return errors.New("project not found or archived")
+		}
+		if activeOnly && catalog.Projects[index].ClientID != clientID {
+			return errors.New("project does not belong to the selected client")
 		}
 	}
 	seen := make(map[string]struct{}, len(tagIDs))
@@ -297,6 +324,14 @@ func validateTimeEntryReferences(catalog timeTrackingCatalog, projectID string, 
 		}
 	}
 	return nil
+}
+
+func trackingProjectClientID(catalog timeTrackingCatalog, projectID string) string {
+	index := slices.IndexFunc(catalog.Projects, func(project TimeProject) bool { return project.ID == projectID })
+	if index < 0 {
+		return ""
+	}
+	return catalog.Projects[index].ClientID
 }
 
 func normalizeTimeEntryName(name string) (string, error) {
@@ -323,6 +358,7 @@ func parseCompletedTimeEntryRange(startedAtUTC, endedAtUTC string) (time.Time, t
 }
 
 func cloneTimeTrackingCatalog(catalog timeTrackingCatalog) timeTrackingCatalog {
+	catalog.Clients = slices.Clone(catalog.Clients)
 	catalog.Projects = slices.Clone(catalog.Projects)
 	catalog.Tags = slices.Clone(catalog.Tags)
 	catalog.Buckets = slices.Clone(catalog.Buckets)

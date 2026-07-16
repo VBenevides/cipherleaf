@@ -13,7 +13,11 @@ func TestTimeEntryStartReopenAndFinish(t *testing.T) {
 	if _, err := store.Create(root, "secret-secret-secret"); err != nil {
 		t.Fatal(err)
 	}
-	project, err := store.CreateProject("Project")
+	client, err := store.CreateClient("Client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := store.CreateProject("Project", client.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +30,7 @@ func TestTimeEntryStartReopenAndFinish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Name != "Review" || entry.EndedAtUTC != "" || entry.Revision != 1 {
+	if entry.Name != "Review" || entry.ClientID != client.ID || entry.EndedAtUTC != "" || entry.Revision != 1 {
 		t.Fatalf("unexpected active entry: %#v", entry)
 	}
 	if _, err := store.StartTimeEntry("Second", "", nil); err == nil {

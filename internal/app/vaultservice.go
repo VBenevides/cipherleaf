@@ -503,12 +503,36 @@ func (s *VaultService) GetTimeTrackingCatalog() (vault.TimeTrackingCatalog, erro
 	return s.store.GetTimeTrackingCatalog()
 }
 
+func (s *VaultService) CreateClient(name string) (vault.TimeClient, error) {
+	return s.store.CreateClient(name)
+}
+
+func (s *VaultService) RenameClient(id, name string) (vault.TimeClient, error) {
+	return s.store.RenameClient(id, name)
+}
+
+func (s *VaultService) ArchiveClient(id string) (vault.TimeClient, error) {
+	return s.store.ArchiveClient(id)
+}
+
+func (s *VaultService) RestoreClient(id string) (vault.TimeClient, error) {
+	return s.store.RestoreClient(id)
+}
+
 func (s *VaultService) CreateProject(name string) (vault.TimeProject, error) {
 	return s.store.CreateProject(name)
 }
 
+func (s *VaultService) CreateProjectForClient(name, clientID string) (vault.TimeProject, error) {
+	return s.store.CreateProject(name, clientID)
+}
+
 func (s *VaultService) RenameProject(id, name string) (vault.TimeProject, error) {
 	return s.store.RenameProject(id, name)
+}
+
+func (s *VaultService) UpdateProject(id, name, clientID string) (vault.TimeProject, error) {
+	return s.store.RenameProject(id, name, clientID)
 }
 
 func (s *VaultService) ArchiveProject(id string) (vault.TimeProject, error) {
@@ -539,6 +563,10 @@ func (s *VaultService) StartTimeEntry(name, projectID string, tagIDs []string) (
 	return s.store.StartTimeEntry(name, projectID, tagIDs)
 }
 
+func (s *VaultService) StartTimeEntryForClient(name, clientID, projectID string, tagIDs []string) (vault.TimeEntry, error) {
+	return s.store.StartTimeEntryForClient(name, clientID, projectID, tagIDs)
+}
+
 func (s *VaultService) GetActiveTimeEntry() (*vault.TimeEntry, error) {
 	return s.store.GetActiveTimeEntry()
 }
@@ -549,6 +577,10 @@ func (s *VaultService) FinishActiveTimeEntry() (vault.TimeEntry, error) {
 
 func (s *VaultService) UpdateTimeEntry(id, name, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (vault.TimeEntry, error) {
 	return s.store.UpdateTimeEntry(id, name, projectID, tagIDs, startedAtUTC, endedAtUTC)
+}
+
+func (s *VaultService) UpdateTimeEntryForClient(id, name, clientID, projectID string, tagIDs []string, startedAtUTC, endedAtUTC string) (vault.TimeEntry, error) {
+	return s.store.UpdateTimeEntryForClient(id, name, clientID, projectID, tagIDs, startedAtUTC, endedAtUTC)
 }
 
 func (s *VaultService) DeleteTimeEntry(id string) error {

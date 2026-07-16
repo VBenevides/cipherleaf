@@ -111,3 +111,21 @@ func TestListTimeEntriesRejectsInvalidAndEmptyRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestTimeEntryClientFilterUsesProjectRelationship(t *testing.T) {
+	clientID := fmt.Sprintf("%032x", 200)
+	projectID := fmt.Sprintf("%032x", 201)
+	catalog := newTimeTrackingCatalog(fmt.Sprintf("%032x", 202))
+	catalog.Clients = append(catalog.Clients, TimeClient{ID: clientID, Name: "Acme", Revision: 1})
+	catalog.Projects = append(catalog.Projects, TimeProject{ID: projectID, Name: "Website", ClientID: clientID, Revision: 1})
+	entry := TimeEntry{ProjectID: projectID}
+	if !timeEntryMatchesFilters(entry, TimeEntryFilters{ClientIDs: []string{clientID}}, catalog) {
+		t.Fatal("entry did not match its project's client")
+	}
+	if timeEntryMatchesFilters(entry, TimeEntryFilters{ClientIDs: []string{fmt.Sprintf("%032x", 203)}}, catalog) {
+		t.Fatal("entry matched a different client")
+	}
+	if !timeEntryMatchesFilters(TimeEntry{ClientID: clientID}, TimeEntryFilters{ClientIDs: []string{clientID}}, catalog) {
+		t.Fatal("client-only entry did not match its client")
+	}
+}

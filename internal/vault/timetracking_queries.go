@@ -30,7 +30,7 @@ func (s *Store) listTimeEntriesLocked(start, end time.Time, filters TimeEntryFil
 	entries := make(map[string]TimeEntry)
 	for _, bucket := range buckets {
 		for _, entry := range bucket.Entries {
-			if !timeEntryMatchesFilters(entry, filters) {
+			if !timeEntryMatchesFilters(entry, filters, *s.timeTrackingCatalog) {
 				continue
 			}
 			if current, found := entries[entry.ID]; !found || entry.Revision > current.Revision ||
@@ -98,7 +98,16 @@ func parseTimeTrackingRange(startUTC, endUTC string) (time.Time, time.Time, erro
 	return start, end, nil
 }
 
-func timeEntryMatchesFilters(entry TimeEntry, filters TimeEntryFilters) bool {
+func timeEntryMatchesFilters(entry TimeEntry, filters TimeEntryFilters, catalog timeTrackingCatalog) bool {
+	if len(filters.ClientIDs) > 0 {
+		clientID := entry.ClientID
+		if clientID == "" {
+			clientID = trackingProjectClientID(catalog, entry.ProjectID)
+		}
+		if !slices.Contains(filters.ClientIDs, clientID) {
+			return false
+		}
+	}
 	if len(filters.ProjectIDs) > 0 && !slices.Contains(filters.ProjectIDs, entry.ProjectID) {
 		return false
 	}

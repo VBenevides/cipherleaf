@@ -11,6 +11,7 @@ import (
 type TimeEntry struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
+	ClientID     string   `json:"clientId,omitempty"`
 	ProjectID    string   `json:"projectId,omitempty"`
 	TagIDs       []string `json:"tagIds"`
 	StartedAtUTC string   `json:"startedAtUtc"`
@@ -21,9 +22,20 @@ type TimeEntry struct {
 	Revision     uint64   `json:"revision"`
 }
 
+type TimeClient struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ArchivedAtUTC string `json:"archivedAtUtc,omitempty"`
+	CreatedAtUTC  string `json:"createdAtUtc"`
+	UpdatedAtUTC  string `json:"updatedAtUtc"`
+	ModifiedAt    int64  `json:"modifiedAt"`
+	Revision      uint64 `json:"revision"`
+}
+
 type TimeProject struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
+	ClientID      string `json:"clientId,omitempty"`
 	ArchivedAtUTC string `json:"archivedAtUtc,omitempty"`
 	CreatedAtUTC  string `json:"createdAtUtc"`
 	UpdatedAtUTC  string `json:"updatedAtUtc"`
@@ -42,11 +54,13 @@ type TimeTag struct {
 }
 
 type TimeTrackingCatalog struct {
+	Clients  []TimeClient  `json:"clients"`
 	Projects []TimeProject `json:"projects"`
 	Tags     []TimeTag     `json:"tags"`
 }
 
 type TimeEntryFilters struct {
+	ClientIDs  []string `json:"clientIds"`
 	ProjectIDs []string `json:"projectIds"`
 	TagIDs     []string `json:"tagIds"`
 }
@@ -101,6 +115,7 @@ type TimeTrackingConflictKind string
 
 const (
 	TimeEntryEditConflict     TimeTrackingConflictKind = "entry-edit"
+	TimeClientRenameConflict  TimeTrackingConflictKind = "client-rename"
 	TimeProjectRenameConflict TimeTrackingConflictKind = "project-rename"
 	TimeTagRenameConflict     TimeTrackingConflictKind = "tag-rename"
 	TimeEntryOverlapConflict  TimeTrackingConflictKind = "entry-overlap"
@@ -114,6 +129,8 @@ type TimeTrackingConflict struct {
 	Message       string                   `json:"message"`
 	LocalEntry    *TimeEntry               `json:"localEntry,omitempty"`
 	RemoteEntry   *TimeEntry               `json:"remoteEntry,omitempty"`
+	LocalClient   *TimeClient              `json:"localClient,omitempty"`
+	RemoteClient  *TimeClient              `json:"remoteClient,omitempty"`
 	LocalProject  *TimeProject             `json:"localProject,omitempty"`
 	RemoteProject *TimeProject             `json:"remoteProject,omitempty"`
 	LocalTag      *TimeTag                 `json:"localTag,omitempty"`
@@ -123,6 +140,7 @@ type TimeTrackingConflict struct {
 type timeTrackingCatalog struct {
 	FormatVersion   int                         `json:"format_version"`
 	VaultID         string                      `json:"vault_id"`
+	Clients         []TimeClient                `json:"clients"`
 	Projects        []TimeProject               `json:"projects"`
 	Tags            []TimeTag                   `json:"tags"`
 	Buckets         []timeTrackingBucketSummary `json:"buckets"`
@@ -170,6 +188,7 @@ func newTimeTrackingCatalog(vaultID string) timeTrackingCatalog {
 	return timeTrackingCatalog{
 		FormatVersion:   TimeTrackingCatalogFormatVersion,
 		VaultID:         vaultID,
+		Clients:         []TimeClient{},
 		Projects:        []TimeProject{},
 		Tags:            []TimeTag{},
 		Buckets:         []timeTrackingBucketSummary{},

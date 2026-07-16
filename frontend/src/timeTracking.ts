@@ -3,7 +3,7 @@ export interface UTCDateRange {
   endUTC: string;
 }
 
-export const TIME_TRACKING_TABS = ["week", "month", "dashboard", "projects", "tags"] as const;
+export const TIME_TRACKING_TABS = ["week", "month", "dashboard", "clients", "projects", "tags"] as const;
 export type TimeTrackingTab = (typeof TIME_TRACKING_TABS)[number];
 export type DashboardPreset = "current-week" | "last-week" | "current-month" | "last-month";
 

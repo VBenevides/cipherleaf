@@ -24,9 +24,10 @@ func (s *Store) GetTimeTrackingCatalog() (TimeTrackingCatalog, error) {
 		return TimeTrackingCatalog{}, err
 	}
 	if s.timeTrackingCatalog == nil {
-		return TimeTrackingCatalog{Projects: []TimeProject{}, Tags: []TimeTag{}}, nil
+		return TimeTrackingCatalog{Clients: []TimeClient{}, Projects: []TimeProject{}, Tags: []TimeTag{}}, nil
 	}
 	return TimeTrackingCatalog{
+		Clients:  slices.Clone(s.timeTrackingCatalog.Clients),
 		Projects: slices.Clone(s.timeTrackingCatalog.Projects),
 		Tags:     slices.Clone(s.timeTrackingCatalog.Tags),
 	}, nil
@@ -67,23 +68,91 @@ func (s *Store) ResolveTimeTrackingConflict(id string) error {
 	return nil
 }
 
-func (s *Store) CreateProject(name string) (TimeProject, error) {
-	return s.changeProject("", name, trackingLabelCreate)
+func (s *Store) CreateClient(name string) (TimeClient, error) {
+	return s.changeClient("", name, trackingLabelCreate)
 }
 
-func (s *Store) RenameProject(id, name string) (TimeProject, error) {
-	return s.changeProject(id, name, trackingLabelRename)
+func (s *Store) RenameClient(id, name string) (TimeClient, error) {
+	return s.changeClient(id, name, trackingLabelRename)
+}
+
+func (s *Store) ArchiveClient(id string) (TimeClient, error) {
+	return s.changeClient(id, "", trackingLabelArchive)
+}
+
+func (s *Store) RestoreClient(id string) (TimeClient, error) {
+	return s.changeClient(id, "", trackingLabelRestore)
+}
+
+func (s *Store) changeClient(id, name string, action trackingLabelAction) (TimeClient, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return TimeClient{}, err
+	}
+	if err := s.ensureTimeTrackingEnabledLocked(); err != nil {
+		return TimeClient{}, err
+	}
+	catalog := *s.timeTrackingCatalog
+	catalog.Clients = slices.Clone(catalog.Clients)
+	index := slices.IndexFunc(catalog.Clients, func(client TimeClient) bool { return client.ID == id })
+	now := time.Now().UTC()
+	if action == trackingLabelCreate {
+		var err error
+		name, err = normalizeTrackingLabelName(name)
+		if err != nil {
+			return TimeClient{}, err
+		}
+		if activeClientNameExists(catalog.Clients, name, "") {
+			return TimeClient{}, errors.New("an active client with that name already exists")
+		}
+		id, err = randomID(16)
+		if err != nil {
+			return TimeClient{}, err
+		}
+		stamp := now.Format(time.RFC3339Nano)
+		catalog.Clients = append(catalog.Clients, TimeClient{ID: id, Name: name, CreatedAtUTC: stamp, UpdatedAtUTC: stamp, ModifiedAt: now.UnixMilli(), Revision: 1})
+		index = len(catalog.Clients) - 1
+	} else if index < 0 {
+		return TimeClient{}, errors.New("client not found")
+	} else if action == trackingLabelArchive && slices.ContainsFunc(catalog.Projects, func(project TimeProject) bool { return project.ClientID == id && project.ArchivedAtUTC == "" }) {
+		return TimeClient{}, errors.New("client has active projects")
+	} else if err := updateClient(&catalog.Clients[index], catalog.Clients, name, action, now); err != nil {
+		return TimeClient{}, err
+	}
+	advanceTrackingCatalogRevision(&catalog, now)
+	if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+		return TimeClient{}, err
+	}
+	s.timeTrackingCatalog = &catalog
+	return catalog.Clients[index], nil
+}
+
+func (s *Store) CreateProject(name string, clientIDs ...string) (TimeProject, error) {
+	clientID := ""
+	if len(clientIDs) > 0 {
+		clientID = clientIDs[0]
+	}
+	return s.changeProject("", name, &clientID, trackingLabelCreate)
+}
+
+func (s *Store) RenameProject(id, name string, clientIDs ...string) (TimeProject, error) {
+	var clientID *string
+	if len(clientIDs) > 0 {
+		clientID = &clientIDs[0]
+	}
+	return s.changeProject(id, name, clientID, trackingLabelRename)
 }
 
 func (s *Store) ArchiveProject(id string) (TimeProject, error) {
-	return s.changeProject(id, "", trackingLabelArchive)
+	return s.changeProject(id, "", nil, trackingLabelArchive)
 }
 
 func (s *Store) RestoreProject(id string) (TimeProject, error) {
-	return s.changeProject(id, "", trackingLabelRestore)
+	return s.changeProject(id, "", nil, trackingLabelRestore)
 }
 
-func (s *Store) changeProject(id, name string, action trackingLabelAction) (TimeProject, error) {
+func (s *Store) changeProject(id, name string, clientID *string, action trackingLabelAction) (TimeProject, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
@@ -105,16 +174,19 @@ func (s *Store) changeProject(id, name string, action trackingLabelAction) (Time
 		if activeProjectNameExists(catalog.Projects, name, "") {
 			return TimeProject{}, errors.New("an active project with that name already exists")
 		}
+		if err := validateProjectClient(catalog.Clients, *clientID, true); err != nil {
+			return TimeProject{}, err
+		}
 		id, err = randomID(16)
 		if err != nil {
 			return TimeProject{}, err
 		}
 		stamp := now.Format(time.RFC3339Nano)
-		catalog.Projects = append(catalog.Projects, TimeProject{ID: id, Name: name, CreatedAtUTC: stamp, UpdatedAtUTC: stamp, ModifiedAt: now.UnixMilli(), Revision: 1})
+		catalog.Projects = append(catalog.Projects, TimeProject{ID: id, Name: name, ClientID: *clientID, CreatedAtUTC: stamp, UpdatedAtUTC: stamp, ModifiedAt: now.UnixMilli(), Revision: 1})
 		index = len(catalog.Projects) - 1
 	} else if index < 0 {
 		return TimeProject{}, errors.New("project not found")
-	} else if err := updateProject(&catalog.Projects[index], catalog.Projects, name, action, now); err != nil {
+	} else if err := updateProject(&catalog.Projects[index], catalog.Projects, catalog.Clients, name, clientID, action, now); err != nil {
 		return TimeProject{}, err
 	}
 	advanceTrackingCatalogRevision(&catalog, now)
@@ -183,7 +255,41 @@ func (s *Store) changeTag(id, name string, action trackingLabelAction) (TimeTag,
 	return catalog.Tags[index], nil
 }
 
-func updateProject(project *TimeProject, projects []TimeProject, name string, action trackingLabelAction, now time.Time) error {
+func updateClient(client *TimeClient, clients []TimeClient, name string, action trackingLabelAction, now time.Time) error {
+	switch action {
+	case trackingLabelRename:
+		var err error
+		name, err = normalizeTrackingLabelName(name)
+		if err != nil {
+			return err
+		}
+		if client.ArchivedAtUTC == "" && activeClientNameExists(clients, name, client.ID) {
+			return errors.New("an active client with that name already exists")
+		}
+		client.Name = name
+	case trackingLabelArchive:
+		if client.ArchivedAtUTC != "" {
+			return errors.New("client is already archived")
+		}
+		client.ArchivedAtUTC = now.Format(time.RFC3339Nano)
+	case trackingLabelRestore:
+		if client.ArchivedAtUTC == "" {
+			return errors.New("client is not archived")
+		}
+		if activeClientNameExists(clients, client.Name, client.ID) {
+			return errors.New("an active client with that name already exists")
+		}
+		client.ArchivedAtUTC = ""
+	default:
+		return errors.New("invalid client change")
+	}
+	client.UpdatedAtUTC = now.Format(time.RFC3339Nano)
+	client.ModifiedAt = now.UnixMilli()
+	client.Revision++
+	return nil
+}
+
+func updateProject(project *TimeProject, projects []TimeProject, clients []TimeClient, name string, clientID *string, action trackingLabelAction, now time.Time) error {
 	switch action {
 	case trackingLabelRename:
 		var err error
@@ -195,6 +301,12 @@ func updateProject(project *TimeProject, projects []TimeProject, name string, ac
 			return errors.New("an active project with that name already exists")
 		}
 		project.Name = name
+		if clientID != nil {
+			if err := validateProjectClient(clients, *clientID, project.ArchivedAtUTC == ""); err != nil {
+				return err
+			}
+			project.ClientID = *clientID
+		}
 	case trackingLabelArchive:
 		if project.ArchivedAtUTC != "" {
 			return errors.New("project is already archived")
@@ -203,6 +315,9 @@ func updateProject(project *TimeProject, projects []TimeProject, name string, ac
 	case trackingLabelRestore:
 		if project.ArchivedAtUTC == "" {
 			return errors.New("project is not archived")
+		}
+		if err := validateProjectClient(clients, project.ClientID, true); err != nil {
+			return err
 		}
 		if activeProjectNameExists(projects, project.Name, project.ID) {
 			return errors.New("an active project with that name already exists")
@@ -288,6 +403,23 @@ func activeProjectNameExists(projects []TimeProject, name, exceptID string) bool
 	return slices.ContainsFunc(projects, func(project TimeProject) bool {
 		return project.ID != exceptID && project.ArchivedAtUTC == "" && strings.EqualFold(project.Name, name)
 	})
+}
+
+func activeClientNameExists(clients []TimeClient, name, exceptID string) bool {
+	return slices.ContainsFunc(clients, func(client TimeClient) bool {
+		return client.ID != exceptID && client.ArchivedAtUTC == "" && strings.EqualFold(client.Name, name)
+	})
+}
+
+func validateProjectClient(clients []TimeClient, clientID string, activeOnly bool) error {
+	if clientID == "" {
+		return nil
+	}
+	index := slices.IndexFunc(clients, func(client TimeClient) bool { return client.ID == clientID })
+	if index < 0 || (activeOnly && clients[index].ArchivedAtUTC != "") {
+		return errors.New("client not found or archived")
+	}
+	return nil
 }
 
 func activeTagNameExists(tags []TimeTag, name, exceptID string) bool {

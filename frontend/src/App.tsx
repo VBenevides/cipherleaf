@@ -46,7 +46,7 @@ import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 import { formatRunningDuration } from "./timeTracking";
-import { ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
+import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -398,6 +398,7 @@ function App() {
   const [timerDialog, setTimerDialog] = useState<"start" | "finish" | null>(null);
   const [timerCatalog, setTimerCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [timerTaskName, setTimerTaskName] = useState("");
+  const [timerClientID, setTimerClientID] = useState("");
   const [timerProjectID, setTimerProjectID] = useState("");
   const [timerTagIDs, setTimerTagIDs] = useState<string[]>([]);
   const [timerBusy, setTimerBusy] = useState(false);
@@ -1255,8 +1256,8 @@ function App() {
     if (!timerTaskName.trim()) { setTimerError("Task name is required"); return; }
     setTimerBusy(true); setTimerError("");
     try {
-      const entry = await VaultService.StartTimeEntry(timerTaskName, timerProjectID, timerTagIDs);
-      setActiveTimeEntry(entry); setTimerTaskName(""); setTimerProjectID(""); setTimerTagIDs([]); setTimerDialog(null);
+      const entry = await VaultService.StartTimeEntryForClient(timerTaskName, timerClientID, timerProjectID, timerTagIDs);
+      setActiveTimeEntry(entry); setTimerTaskName(""); setTimerClientID(""); setTimerProjectID(""); setTimerTagIDs([]); setTimerDialog(null);
     } catch (reason) { setTimerError(errorText(reason)); }
     finally { setTimerBusy(false); }
   };
@@ -1705,9 +1706,11 @@ function App() {
     try {
       if (choice === "remote" && conflict.remoteEntry?.endedAtUtc) {
         const entry = conflict.remoteEntry;
-        await VaultService.UpdateTimeEntry(entry.id, entry.name, entry.projectId ?? "", entry.tagIds ?? [], entry.startedAtUtc, entry.endedAtUtc!);
+        await VaultService.UpdateTimeEntryForClient(entry.id, entry.name, entry.clientId ?? "", entry.projectId ?? "", entry.tagIds ?? [], entry.startedAtUtc, entry.endedAtUtc!);
       } else if (choice === "remote" && conflict.remoteProject) {
-        await VaultService.RenameProject(conflict.remoteProject.id, conflict.remoteProject.name);
+        await VaultService.UpdateProject(conflict.remoteProject.id, conflict.remoteProject.name, conflict.remoteProject.clientId ?? "");
+      } else if (choice === "remote" && conflict.remoteClient) {
+        await VaultService.RenameClient(conflict.remoteClient.id, conflict.remoteClient.name);
       } else if (choice === "remote" && conflict.remoteTag) {
         await VaultService.RenameTag(conflict.remoteTag.id, conflict.remoteTag.name);
       } else if (choice === "delete-local" && conflict.localEntry) {
@@ -4752,7 +4755,8 @@ function App() {
               <h2 id="timer-dialog-title">Start a timer</h2>
               {activeTimeEntry && <p className="timer-modal-warning">“{activeTimeEntry.name}” is already running.</p>}
               <label>Task name<input autoFocus value={timerTaskName} onChange={(event) => setTimerTaskName(event.target.value)} disabled={!!activeTimeEntry || timerBusy} /></label>
-              <ProjectSelect projects={(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc)} selected={timerProjectID} onChange={setTimerProjectID} disabled={!!activeTimeEntry || timerBusy} />
+              <ClientSelect clients={(timerCatalog?.clients ?? []).filter((item) => !item.archivedAtUtc)} selected={timerClientID} onChange={(id) => { setTimerClientID(id); if (timerProjectID && (timerCatalog?.projects ?? []).find((project) => project.id === timerProjectID)?.clientId !== id) setTimerProjectID(""); }} disabled={!!activeTimeEntry || timerBusy} />
+              <ProjectSelect projects={(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc && (!timerClientID || item.clientId === timerClientID))} selected={timerProjectID} onChange={(id) => { setTimerProjectID(id); if (!timerClientID) setTimerClientID((timerCatalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} disabled={!!activeTimeEntry || timerBusy} />
               <TagMultiSelect tags={(timerCatalog?.tags ?? []).filter((item) => !item.archivedAtUtc)} selected={timerTagIDs} onChange={setTimerTagIDs} disabled={!!activeTimeEntry || timerBusy} />
               {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
               <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>
@@ -4818,7 +4822,7 @@ function App() {
             <p className="eyebrow">Time tracking sync conflicts</p>
             <h2 id="tracking-conflict-title">Choose each result explicitly</h2>
             <p>Sync remains blocked until every preserved variant is resolved.</p>
-            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{conflict.localEntry.startedAtUtc} – {conflict.localEntry.endedAtUtc || "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{conflict.remoteEntry.startedAtUtc} – {conflict.remoteEntry.endedAtUtc || "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
+            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{conflict.localEntry.startedAtUtc} – {conflict.localEntry.endedAtUtc || "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{conflict.remoteEntry.startedAtUtc} – {conflict.remoteEntry.endedAtUtc || "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
           </section>
         </div>
       )}

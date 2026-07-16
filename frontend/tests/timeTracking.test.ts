@@ -21,7 +21,7 @@ process.env.TZ = "America/New_York";
 
 test("time tracking opens on week and exposes the ordered workspace tabs", () => {
   assert.equal(initialTimeTrackingTab(), "week");
-  assert.deepEqual(TIME_TRACKING_TABS, ["week", "month", "dashboard", "projects", "tags"]);
+  assert.deepEqual(TIME_TRACKING_TABS, ["week", "month", "dashboard", "clients", "projects", "tags"]);
 });
 
 test("dashboard presets produce complete local periods", () => {

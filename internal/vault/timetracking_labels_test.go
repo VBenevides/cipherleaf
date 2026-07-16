@@ -84,6 +84,40 @@ func TestTimeTrackingProjectAndTagCRUD(t *testing.T) {
 	}
 }
 
+func TestTimeTrackingClientProjectRelationship(t *testing.T) {
+	store, _ := newTrackingTestStore(t)
+	client, err := store.CreateClient("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := store.CreateProject("Website", client.ID)
+	if err != nil || project.ClientID != client.ID {
+		t.Fatalf("project client = %#v, %v", project, err)
+	}
+	if _, err := store.ArchiveClient(client.ID); err == nil {
+		t.Fatal("client with active projects was archived")
+	}
+	project, err = store.RenameProject(project.ID, project.Name, "")
+	if err != nil || project.ClientID != "" {
+		t.Fatalf("project client was not cleared: %#v, %v", project, err)
+	}
+	client, err = store.ArchiveClient(client.ID)
+	if err != nil || client.ArchivedAtUTC == "" {
+		t.Fatalf("unused client was not archived: %#v, %v", client, err)
+	}
+	if _, err := store.CreateProject("Invalid", client.ID); err == nil {
+		t.Fatal("project accepted an archived client")
+	}
+	client, err = store.RestoreClient(client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := store.StartTimeEntryForClient("Client-only task", client.ID, "", nil)
+	if err != nil || entry.ClientID != client.ID || entry.ProjectID != "" {
+		t.Fatalf("client-only task = %#v, %v", entry, err)
+	}
+}
+
 func TestTimeTrackingLabelRenamePreservesHistoricalReferences(t *testing.T) {
 	store, _ := newTrackingTestStore(t)
 	project, err := store.CreateProject("Original Project")

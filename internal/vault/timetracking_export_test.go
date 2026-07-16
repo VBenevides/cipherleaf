@@ -28,8 +28,14 @@ func TestTrackingMutationsChangeSnapshotRevision(t *testing.T) {
 		}
 		revision = next
 	}
+	var client TimeClient
+	assertChanged(func() error { var err error; client, err = store.CreateClient("Snapshot Client"); return err })
 	var project TimeProject
-	assertChanged(func() error { var err error; project, err = store.CreateProject("Snapshot Project"); return err })
+	assertChanged(func() error {
+		var err error
+		project, err = store.CreateProject("Snapshot Project", client.ID)
+		return err
+	})
 	var tag TimeTag
 	assertChanged(func() error { var err error; tag, err = store.CreateTag("Snapshot Tag"); return err })
 	setTrackingTestNow(store, "2026-07-16T10:00:00Z")

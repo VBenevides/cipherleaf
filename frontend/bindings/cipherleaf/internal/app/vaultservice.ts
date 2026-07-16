@@ -19,6 +19,10 @@ import * as application$0 from "../../../github.com/wailsapp/wails/v3/pkg/applic
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function ArchiveClient(id: string): $CancellablePromise<vault$0.TimeClient> {
+    return $Call.ByID(2587329448, id);
+}
+
 export function ArchiveProject(id: string): $CancellablePromise<vault$0.TimeProject> {
     return $Call.ByID(4168033684, id);
 }
@@ -43,6 +47,10 @@ export function CopyVaultSecret(secret: string): $CancellablePromise<void> {
     return $Call.ByID(3868872474, secret);
 }
 
+export function CreateClient(name: string): $CancellablePromise<vault$0.TimeClient> {
+    return $Call.ByID(4062770880, name);
+}
+
 export function CreateFolder(name: string, parentID: string): $CancellablePromise<vault$0.Folder> {
     return $Call.ByID(239305947, name, parentID);
 }
@@ -57,6 +65,10 @@ export function CreateNoteInFolder(title: string, folderID: string): $Cancellabl
 
 export function CreateProject(name: string): $CancellablePromise<vault$0.TimeProject> {
     return $Call.ByID(2039739724, name);
+}
+
+export function CreateProjectForClient(name: string, clientID: string): $CancellablePromise<vault$0.TimeProject> {
+    return $Call.ByID(1966438356, name, clientID);
 }
 
 export function CreateTag(name: string): $CancellablePromise<vault$0.TimeTag> {
@@ -287,6 +299,10 @@ export function RememberVaultSecret(): $CancellablePromise<void> {
     return $Call.ByID(4089226512);
 }
 
+export function RenameClient(id: string, name: string): $CancellablePromise<vault$0.TimeClient> {
+    return $Call.ByID(975015718, id, name);
+}
+
 export function RenameFolder(id: string, name: string): $CancellablePromise<vault$0.Folder> {
     return $Call.ByID(2836532501, id, name);
 }
@@ -321,6 +337,10 @@ export function ResolveNoteReference(reference: string): $CancellablePromise<vau
 
 export function ResolveTimeTrackingConflict(id: string): $CancellablePromise<void> {
     return $Call.ByID(2018735579, id);
+}
+
+export function RestoreClient(id: string): $CancellablePromise<vault$0.TimeClient> {
+    return $Call.ByID(2997005664, id);
 }
 
 export function RestoreNoteVersion(id: string, revision: number): $CancellablePromise<vault$0.Note> {
@@ -387,6 +407,10 @@ export function StartTimeEntry(name: string, projectID: string, tagIDs: string[]
     return $Call.ByID(1787308032, name, projectID, tagIDs);
 }
 
+export function StartTimeEntryForClient(name: string, clientID: string, projectID: string, tagIDs: string[] | null): $CancellablePromise<vault$0.TimeEntry> {
+    return $Call.ByID(4267492704, name, clientID, projectID, tagIDs);
+}
+
 /**
  * SyncNow performs a manual pull-merge-push against the linked GitHub
  * repository. Local notes newer than their remote counterpart are preserved;
@@ -418,6 +442,14 @@ export function UnlockFolder(id: string, password: string): $CancellablePromise<
     return $Call.ByID(3266411627, id, password);
 }
 
+export function UpdateProject(id: string, name: string, clientID: string): $CancellablePromise<vault$0.TimeProject> {
+    return $Call.ByID(3548001575, id, name, clientID);
+}
+
 export function UpdateTimeEntry(id: string, name: string, projectID: string, tagIDs: string[] | null, startedAtUTC: string, endedAtUTC: string): $CancellablePromise<vault$0.TimeEntry> {
     return $Call.ByID(1385339193, id, name, projectID, tagIDs, startedAtUTC, endedAtUTC);
+}
+
+export function UpdateTimeEntryForClient(id: string, name: string, clientID: string, projectID: string, tagIDs: string[] | null, startedAtUTC: string, endedAtUTC: string): $CancellablePromise<vault$0.TimeEntry> {
+    return $Call.ByID(1432466107, id, name, clientID, projectID, tagIDs, startedAtUTC, endedAtUTC);
 }

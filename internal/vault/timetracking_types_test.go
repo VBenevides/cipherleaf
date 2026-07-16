@@ -25,7 +25,7 @@ func TestTimeTrackingDomainJSONShape(t *testing.T) {
 			t.Fatalf("missing JSON field %q in %s", field, data)
 		}
 	}
-	for _, field := range []string{"projectId", "endedAtUtc"} {
+	for _, field := range []string{"clientId", "projectId", "endedAtUtc"} {
 		if _, found := value[field]; found {
 			t.Fatalf("optional JSON field %q unexpectedly present in %s", field, data)
 		}
@@ -38,7 +38,7 @@ func TestNewTimeTrackingCatalogDefaults(t *testing.T) {
 	if catalog.FormatVersion != TimeTrackingCatalogFormatVersion || catalog.VaultID != vaultID {
 		t.Fatalf("unexpected catalog identity: %#v", catalog)
 	}
-	if catalog.Projects == nil || catalog.Tags == nil || catalog.Buckets == nil ||
+	if catalog.Clients == nil || catalog.Projects == nil || catalog.Tags == nil || catalog.Buckets == nil ||
 		catalog.DeletedEntries == nil || catalog.DeletedProjects == nil || catalog.DeletedTags == nil {
 		t.Fatalf("catalog collections must default to empty arrays: %#v", catalog)
 	}

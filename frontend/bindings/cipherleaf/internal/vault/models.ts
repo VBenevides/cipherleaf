@@ -116,6 +116,16 @@ export interface Session {
     "noteCount": number;
 }
 
+export interface TimeClient {
+    "id": string;
+    "name": string;
+    "archivedAtUtc"?: string;
+    "createdAtUtc": string;
+    "updatedAtUtc": string;
+    "modifiedAt": number;
+    "revision": number;
+}
+
 export interface TimeDashboard {
     "projectCount": number;
     "tagCount": number;
@@ -145,6 +155,7 @@ export interface TimeDurationGroup {
 export interface TimeEntry {
     "id": string;
     "name": string;
+    "clientId"?: string;
     "projectId"?: string;
     "tagIds": string[] | null;
     "startedAtUtc": string;
@@ -156,6 +167,7 @@ export interface TimeEntry {
 }
 
 export interface TimeEntryFilters {
+    "clientIds": string[] | null;
     "projectIds": string[] | null;
     "tagIds": string[] | null;
 }
@@ -176,6 +188,7 @@ export interface TimeEntryRangeResult {
 export interface TimeProject {
     "id": string;
     "name": string;
+    "clientId"?: string;
     "archivedAtUtc"?: string;
     "createdAtUtc": string;
     "updatedAtUtc": string;
@@ -200,6 +213,7 @@ export interface TimeTaskGroup {
 }
 
 export interface TimeTrackingCatalog {
+    "clients": TimeClient[] | null;
     "projects": TimeProject[] | null;
     "tags": TimeTag[] | null;
 }
@@ -211,6 +225,8 @@ export interface TimeTrackingConflict {
     "message": string;
     "localEntry"?: TimeEntry | null;
     "remoteEntry"?: TimeEntry | null;
+    "localClient"?: TimeClient | null;
+    "remoteClient"?: TimeClient | null;
     "localProject"?: TimeProject | null;
     "remoteProject"?: TimeProject | null;
     "localTag"?: TimeTag | null;
@@ -224,6 +240,7 @@ export enum TimeTrackingConflictKind {
     $zero = "",
 
     TimeEntryEditConflict = "entry-edit",
+    TimeClientRenameConflict = "client-rename",
     TimeProjectRenameConflict = "project-rename",
     TimeTagRenameConflict = "tag-rename",
     TimeEntryOverlapConflict = "entry-overlap",

@@ -16,6 +16,9 @@ func TestTrackingMergeCombinesIndependentChanges(t *testing.T) {
 	if _, err := second.CreateTag("Remote Tag"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := second.CreateClient("Remote Client"); err != nil {
+		t.Fatal(err)
+	}
 	remote := t.TempDir()
 	if err := second.ExportRemoteSnapshot(remote); err != nil {
 		t.Fatal(err)
@@ -28,7 +31,7 @@ func TestTrackingMergeCombinesIndependentChanges(t *testing.T) {
 		t.Fatalf("unexpected merge result: %#v", result)
 	}
 	catalog, _ := first.GetTimeTrackingCatalog()
-	if len(catalog.Projects) != 1 || len(catalog.Tags) != 1 {
+	if len(catalog.Clients) != 1 || len(catalog.Projects) != 1 || len(catalog.Tags) != 1 {
 		t.Fatalf("independent changes were lost: %#v", catalog)
 	}
 }

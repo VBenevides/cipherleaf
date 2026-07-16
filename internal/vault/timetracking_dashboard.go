@@ -47,7 +47,7 @@ func (s *Store) getTimeDashboardLocked(start, end time.Time, filters TimeEntryFi
 			if err != nil {
 				return TimeDashboard{}, err
 			}
-			if !ok || !timeEntryMatchesFilters(entry, filters) {
+			if !ok || !timeEntryMatchesFilters(entry, filters, *s.timeTrackingCatalog) {
 				continue
 			}
 			duration := clippedEnd.Sub(clippedStart)
@@ -115,7 +115,7 @@ func (s *Store) ListTimeDashboardGroupEntries(name, startUTC, endUTC string, fil
 			return nil, err
 		}
 		for _, entry := range bucket.Entries {
-			if strings.TrimSpace(entry.Name) != name || !timeEntryMatchesFilters(entry, filters) {
+			if strings.TrimSpace(entry.Name) != name || !timeEntryMatchesFilters(entry, filters, *s.timeTrackingCatalog) {
 				continue
 			}
 			clippedStart, clippedEnd, ok, err := clippedTimeEntryRange(entry, start, end, now)

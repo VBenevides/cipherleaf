@@ -17,6 +17,7 @@ export type {
     PortabilityResult,
     ReplaceResult,
     Session,
+    TimeClient,
     TimeDashboard,
     TimeDashboardDay,
     TimeDurationGroup,

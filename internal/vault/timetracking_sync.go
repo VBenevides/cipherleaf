@@ -94,7 +94,11 @@ func (s *Store) readRemoteTimeTrackingLocked(source string) (*authenticatedTrack
 				return nil, errors.New("remote tracking data contains a duplicate entry")
 			}
 			seenEntries[entry.ID] = struct{}{}
-			if err := validateTimeEntryReferences(catalog, entry.ProjectID, entry.TagIDs, false); err != nil {
+			clientID := entry.ClientID
+			if clientID == "" {
+				clientID = trackingProjectClientID(catalog, entry.ProjectID)
+			}
+			if err := validateTimeEntryReferences(catalog, clientID, entry.ProjectID, entry.TagIDs, false); err != nil {
 				return nil, errors.New("remote tracking entry references a missing label")
 			}
 		}
@@ -194,6 +198,17 @@ func restoreTrackingCiphertext(source, target string, remote *authenticatedTrack
 }
 
 func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
+	clientIDs := make(map[string]struct{}, len(catalog.Clients))
+	for _, client := range catalog.Clients {
+		name, nameErr := normalizeTrackingLabelName(client.Name)
+		if !validID(client.ID) || client.Revision == 0 || nameErr != nil || name != client.Name {
+			return errors.New("remote tracking catalog contains an invalid client")
+		}
+		if _, duplicate := clientIDs[client.ID]; duplicate {
+			return errors.New("remote tracking catalog contains a duplicate client")
+		}
+		clientIDs[client.ID] = struct{}{}
+	}
 	projectIDs := make(map[string]struct{}, len(catalog.Projects))
 	for _, project := range catalog.Projects {
 		name, nameErr := normalizeTrackingLabelName(project.Name)
@@ -202,6 +217,11 @@ func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
 		}
 		if _, duplicate := projectIDs[project.ID]; duplicate {
 			return errors.New("remote tracking catalog contains a duplicate project")
+		}
+		if project.ClientID != "" {
+			if _, found := clientIDs[project.ClientID]; !found {
+				return errors.New("remote tracking project references a missing client")
+			}
 		}
 		projectIDs[project.ID] = struct{}{}
 	}
@@ -337,6 +357,7 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	}
 	localEntries := trackingEntriesByID(localBuckets)
 	remoteEntries := trackingEntriesByID(remote.Buckets)
+	clients, clientConflicts := mergeTimeClients(localCatalog.Clients, remote.Catalog.Clients)
 	projects, projectConflicts := mergeTimeProjects(localCatalog.Projects, remote.Catalog.Projects, localCatalog.DeletedProjects, remote.Catalog.DeletedProjects)
 	tags, tagConflicts := mergeTimeTags(localCatalog.Tags, remote.Catalog.Tags, localCatalog.DeletedTags, remote.Catalog.DeletedTags)
 	deletedProjects := mergeTrackingTombstones(localCatalog.DeletedProjects, remote.Catalog.DeletedProjects)
@@ -346,12 +367,14 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	projects = removeDeletedProjects(projects, deletedProjects)
 	tags = removeDeletedTags(tags, deletedTags)
 	entries = removeDeletedTimeEntries(entries, deletedEntries)
-	conflicts := append(projectConflicts, tagConflicts...)
+	conflicts := append(clientConflicts, projectConflicts...)
+	conflicts = append(conflicts, tagConflicts...)
 	conflicts = append(conflicts, entryConflicts...)
 	conflicts = append(conflicts, detectTimeEntryInvariantConflicts(entries)...)
 	conflicts = appendUniqueTrackingConflicts(localCatalog.Conflicts, conflicts...)
 
 	merged := newTimeTrackingCatalog(s.vaultID)
+	merged.Clients = clients
 	merged.Projects = projects
 	merged.Tags = tags
 	merged.DeletedProjects = deletedProjects
@@ -436,6 +459,29 @@ func trackingEntriesByID(buckets map[string]timeTrackingBucket) map[string]TimeE
 		}
 	}
 	return result
+}
+
+func mergeTimeClients(local, remote []TimeClient) ([]TimeClient, []TimeTrackingConflict) {
+	result := make(map[string]TimeClient, len(local)+len(remote))
+	for _, value := range local {
+		result[value.ID] = value
+	}
+	conflicts := []TimeTrackingConflict{}
+	for _, value := range remote {
+		current, found := result[value.ID]
+		if found && value.Revision == current.Revision && !reflect.DeepEqual(value, current) {
+			localCopy, remoteCopy := current, value
+			conflicts = append(conflicts, newClientTrackingConflict(value.ID, &localCopy, &remoteCopy))
+		} else if !found || versionIsNewer(value.Revision, value.ModifiedAt, current.Revision, current.ModifiedAt) {
+			result[value.ID] = value
+		}
+	}
+	values := make([]TimeClient, 0, len(result))
+	for _, value := range result {
+		values = append(values, value)
+	}
+	slices.SortFunc(values, func(a, b TimeClient) int { return stringsCompare(a.ID, b.ID) })
+	return values, conflicts
 }
 
 func mergeTimeProjects(local, remote []TimeProject, _, _ []Tombstone) ([]TimeProject, []TimeTrackingConflict) {
@@ -569,6 +615,11 @@ func newTrackingConflict(kind TimeTrackingConflictKind, objectID, message string
 	raw, _ := json.Marshal([]any{kind, objectID, localEntry, remoteEntry, localProject, remoteProject, localTag, remoteTag})
 	hash := sha256.Sum256(raw)
 	return TimeTrackingConflict{ID: hex.EncodeToString(hash[:16]), Kind: kind, ObjectID: objectID, Message: message, LocalEntry: localEntry, RemoteEntry: remoteEntry, LocalProject: localProject, RemoteProject: remoteProject, LocalTag: localTag, RemoteTag: remoteTag}
+}
+func newClientTrackingConflict(objectID string, local, remote *TimeClient) TimeTrackingConflict {
+	raw, _ := json.Marshal([]any{TimeClientRenameConflict, objectID, local, remote})
+	hash := sha256.Sum256(raw)
+	return TimeTrackingConflict{ID: hex.EncodeToString(hash[:16]), Kind: TimeClientRenameConflict, ObjectID: objectID, Message: "Client edits conflicted.", LocalClient: local, RemoteClient: remote}
 }
 func appendUniqueTrackingConflicts(existing []TimeTrackingConflict, additions ...TimeTrackingConflict) []TimeTrackingConflict {
 	result := slices.Clone(existing)
