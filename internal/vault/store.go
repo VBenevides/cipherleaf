@@ -33,6 +33,7 @@ const (
 	maxNoteBytes                 = 10 * 1024 * 1024
 	maxAttachmentBytes           = 10 * 1024 * 1024
 	maxFileAttachmentBytes       = 64 * 1024 * 1024
+	maxTimeTrackingBytes         = 32 * 1024 * 1024
 	maxEnvelopeBytes             = 96 * 1024 * 1024
 	maxTitleRunes                = 200
 	maxFolderRunes               = 120
@@ -92,6 +93,7 @@ type Store struct {
 	pendingSharedAttachments map[string]struct{}
 	savedManifestHash        [sha256.Size]byte
 	hasSavedManifestHash     bool
+	timeTrackingCatalog      *timeTrackingCatalog
 }
 
 func NewStore() *Store {
@@ -263,6 +265,12 @@ func (s *Store) Open(root, passphrase string) (Session, error) {
 	if err := s.loadManifestLocked(); err != nil {
 		s.clearLocked()
 		return Session{}, fmt.Errorf("open encrypted manifest: %w", err)
+	}
+	if hasTimeTrackingCapability(s.manifest) {
+		if err := s.loadTimeTrackingCatalogLocked(); err != nil {
+			s.clearLocked()
+			return Session{}, fmt.Errorf("open encrypted tracking catalog: %w", err)
+		}
 	}
 	_ = s.rebuildSearchIndexLocked()
 	return s.sessionLocked(), nil
@@ -2917,6 +2925,7 @@ func (s *Store) clearLocked() {
 	s.pendingSharedAttachments = nil
 	s.exportBaselines = nil
 	s.hasSavedManifestHash = false
+	s.timeTrackingCatalog = nil
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
@@ -3180,6 +3189,13 @@ func (s *Store) readNoteContentAtLocked(root, id string) (string, *Note, error) 
 }
 
 func (s *Store) saveManifestLocked() error {
+	if hasTimeTrackingCapability(s.manifest) && s.timeTrackingCatalog == nil {
+		catalog := newTimeTrackingCatalog(s.vaultID)
+		if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+			return fmt.Errorf("initialize tracking catalog: %w", err)
+		}
+		s.timeTrackingCatalog = &catalog
+	}
 	plaintext, err := json.Marshal(s.manifest)
 	if err != nil {
 		return fmt.Errorf("encode manifest: %w", err)
@@ -3373,7 +3389,8 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 		return nil, errors.New("encrypted object header is invalid")
 	}
 	if value.Compression != "" &&
-		(value.Compression != "gzip" || (objectType != "note" && objectType != "note-content")) {
+		(value.Compression != "gzip" ||
+			(objectType != "note" && objectType != "note-content" && objectType != trackingBucketObjectType)) {
 		return nil, errors.New("encrypted object compression is invalid")
 	}
 	nonce, err := base64.RawURLEncoding.DecodeString(value.Nonce)
@@ -3394,6 +3411,9 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 		return nil, err
 	}
 	if value.Compression == "gzip" {
+		if objectType == trackingBucketObjectType {
+			return decompressPayload(plaintext, maxTimeTrackingBytes, "tracking bucket")
+		}
 		return decompressNotePayload(plaintext)
 	}
 	return plaintext, nil
