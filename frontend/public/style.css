@@ -2504,7 +2504,15 @@ a:focus-visible {
 
 .time-tracking-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(25, 28, 25, 0.46); }
 .time-tracking-dialog > form,
-.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.timer-modal-backdrop { z-index: 170; }
+.timer-modal { background: var(--paper); }
+.timer-modal form, .timer-modal > div { display: grid; gap: 14px; }
+.timer-modal label { display: grid; gap: 6px; }
+.timer-modal select { min-height: 39px; padding: 0 11px; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; background: var(--canvas); }
+.timer-modal fieldset { border: 1px solid var(--line); border-radius: 7px; }
+.timer-modal fieldset label { display: inline-flex; align-items: center; gap: 5px; margin: 4px 10px 4px 0; }
+.timer-modal-warning, .timer-modal-error { color: var(--red); }
 .time-tracking-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
 
 @media (max-width: 1050px) {

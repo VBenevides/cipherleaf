@@ -23,6 +23,7 @@ import type {
   Session,
   TimeEntry,
   TimeTrackingConflict,
+  TimeTrackingCatalog,
   TrashItem,
   VaultSettings,
 } from "../bindings/cipherleaf/internal/vault/models";
@@ -380,8 +381,13 @@ function App() {
   const [timeTrackingOpen, setTimeTrackingOpen] = useState(false);
   const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
   const [timerNow, setTimerNow] = useState(() => new Date());
-  const [startTimerRequest, setStartTimerRequest] = useState(0);
-  const [finishTimerRequest, setFinishTimerRequest] = useState(0);
+  const [timerDialog, setTimerDialog] = useState<"start" | "finish" | null>(null);
+  const [timerCatalog, setTimerCatalog] = useState<TimeTrackingCatalog | null>(null);
+  const [timerTaskName, setTimerTaskName] = useState("");
+  const [timerProjectID, setTimerProjectID] = useState("");
+  const [timerTagIDs, setTimerTagIDs] = useState<string[]>([]);
+  const [timerBusy, setTimerBusy] = useState(false);
+  const [timerError, setTimerError] = useState("");
   const [trackingConflicts, setTrackingConflicts] = useState<TimeTrackingConflict[]>([]);
   const [titlebarMenu, setTitlebarMenu] = useState<TitlebarMenu | null>(null);
   const [logOpen, setLogOpen] = useState(false);
@@ -1225,17 +1231,48 @@ function App() {
     return () => window.clearInterval(timer);
   }, [activeTimeEntry?.id]);
 
+  const openStartTimerDialog = () => {
+    setTimerDialog("start"); setTimerError("");
+    VaultService.GetTimeTrackingCatalog().then(setTimerCatalog).catch((reason) => setTimerError(errorText(reason)));
+  };
+
+  const startTimerFromDialog = async () => {
+    if (!timerTaskName.trim()) { setTimerError("Task name is required"); return; }
+    setTimerBusy(true); setTimerError("");
+    try {
+      const entry = await VaultService.StartTimeEntry(timerTaskName, timerProjectID, timerTagIDs);
+      setActiveTimeEntry(entry); setTimerTaskName(""); setTimerProjectID(""); setTimerTagIDs([]); setTimerDialog(null);
+    } catch (reason) { setTimerError(errorText(reason)); }
+    finally { setTimerBusy(false); }
+  };
+
+  const finishTimerFromDialog = async () => {
+    if (!activeTimeEntry) return;
+    setTimerBusy(true); setTimerError("");
+    try { await VaultService.FinishActiveTimeEntry(); setActiveTimeEntry(null); setTimerDialog(null); }
+    catch (reason) { setTimerError(errorText(reason)); }
+    finally { setTimerBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!timerDialog) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setTimerDialog(null); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [timerDialog]);
+
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      if (target?.closest("[role=dialog]")) return;
       if (event.shiftKey && event.key.toLowerCase() === "t") {
-        event.preventDefault(); setGraphOpen(false); setTimeTrackingOpen(true); setStartTimerRequest((value) => value + 1); return;
+        event.preventDefault(); openStartTimerDialog(); return;
       }
       if (event.shiftKey && event.key.toLowerCase() === "e") {
-        event.preventDefault(); setGraphOpen(false); setTimeTrackingOpen(true); setFinishTimerRequest((value) => value + 1); return;
+        event.preventDefault(); setTimerError(""); setTimerDialog("finish"); return;
       }
+      if (target?.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
         void persistCurrent();
@@ -1317,6 +1354,7 @@ function App() {
     setGraphOpen(false);
     setTimeTrackingOpen(false);
     setActiveTimeEntry(null);
+    setTimerDialog(null);
     setTrackingConflicts([]);
     setVaultMenuOpen(false);
     setSaveState("idle");
@@ -3778,7 +3816,7 @@ function App() {
 
         {timeTrackingOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
-            <TimeTrackingView key={session.vaultId} startRequest={startTimerRequest} finishRequest={finishTimerRequest} onActiveEntryChange={setActiveTimeEntry} />
+            <TimeTrackingView key={session.vaultId} onActiveEntryChange={setActiveTimeEntry} />
           </Suspense>
         ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
@@ -4677,6 +4715,28 @@ function App() {
               </button>
             </>
           )}
+        </div>
+      )}
+      {timerDialog && (
+        <div className="modal-backdrop timer-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
+          <section className="vault-modal timer-modal" role="dialog" aria-modal="true" aria-labelledby="timer-dialog-title">
+            <button type="button" className="icon-button modal-close" aria-label="Close timer dialog" onClick={() => setTimerDialog(null)}><Icon name="x" /></button>
+            <p className="eyebrow">Time tracking</p>
+            {timerDialog === "start" ? <form onSubmit={(event) => { event.preventDefault(); void startTimerFromDialog(); }}>
+              <h2 id="timer-dialog-title">Start a timer</h2>
+              {activeTimeEntry && <p className="timer-modal-warning">“{activeTimeEntry.name}” is already running.</p>}
+              <label>Task name<input autoFocus value={timerTaskName} onChange={(event) => setTimerTaskName(event.target.value)} disabled={!!activeTimeEntry || timerBusy} /></label>
+              <label>Project<select value={timerProjectID} onChange={(event) => setTimerProjectID(event.target.value)} disabled={!!activeTimeEntry || timerBusy}><option value="">No project</option>{(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              <fieldset disabled={!!activeTimeEntry || timerBusy}><legend>Tags</legend>{(timerCatalog?.tags ?? []).filter((item) => !item.archivedAtUtc).map((item) => <label key={item.id}><input type="checkbox" checked={timerTagIDs.includes(item.id)} onChange={() => setTimerTagIDs((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />{item.name}</label>)}</fieldset>
+              {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
+              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>
+            </form> : <div>
+              <h2 id="timer-dialog-title">Finish active timer?</h2>
+              <p>{activeTimeEntry ? <>Finish <strong>{activeTimeEntry.name}</strong> at {formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}?</> : "There is no active timer."}</p>
+              {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
+              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button autoFocus type="button" className="primary-button" disabled={!activeTimeEntry || timerBusy} onClick={() => void finishTimerFromDialog()}>{timerBusy ? "Finishing…" : "Finish timer"}</button></div>
+            </div>}
+          </section>
         </div>
       )}
       {syncing && (
