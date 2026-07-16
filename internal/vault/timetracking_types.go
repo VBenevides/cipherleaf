@@ -41,6 +41,11 @@ type TimeTag struct {
 	Revision      uint64 `json:"revision"`
 }
 
+type TimeTrackingCatalog struct {
+	Projects []TimeProject `json:"projects"`
+	Tags     []TimeTag     `json:"tags"`
+}
+
 type TimeEntryFilters struct {
 	ProjectIDs []string `json:"projectIds"`
 	TagIDs     []string `json:"tagIds"`
