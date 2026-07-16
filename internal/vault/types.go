@@ -182,6 +182,20 @@ type remoteFolderManifest struct {
 	Settings      VaultSettings `json:"settings,omitempty"`
 }
 
+type remoteTrackingInventory struct {
+	FormatVersion int                    `json:"format_version"`
+	VaultID       string                 `json:"vault_id"`
+	Catalog       remoteTrackingObject   `json:"catalog"`
+	Buckets       []remoteTrackingObject `json:"buckets"`
+}
+
+type remoteTrackingObject struct {
+	ID             string `json:"id"`
+	CiphertextHash string `json:"ciphertext_hash"`
+	Revision       uint64 `json:"revision"`
+	ModifiedAt     int64  `json:"modified_at"`
+}
+
 type authenticatedRemoteSnapshot struct {
 	Config   vaultConfig
 	Manifest manifest

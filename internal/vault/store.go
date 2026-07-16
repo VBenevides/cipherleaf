@@ -30,6 +30,7 @@ const (
 	syncDirectory                = "sync"
 	syncManifestFile             = "manifest.enc"
 	syncFoldersFile              = "folders.enc"
+	syncTrackingFile             = "tracking.enc"
 	maxNoteBytes                 = 10 * 1024 * 1024
 	maxAttachmentBytes           = 10 * 1024 * 1024
 	maxFileAttachmentBytes       = 64 * 1024 * 1024
@@ -113,12 +114,19 @@ func (s *Store) SnapshotRevision() (string, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(s.manifest)
+	data, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 	if err != nil {
 		return "", fmt.Errorf("encode snapshot revision: %w", err)
 	}
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+func snapshotRevisionData(value manifest, tracking *timeTrackingCatalog) ([]byte, error) {
+	return json.Marshal(struct {
+		Manifest manifest             `json:"manifest"`
+		Tracking *timeTrackingCatalog `json:"tracking,omitempty"`
+	}{Manifest: value, Tracking: tracking})
 }
 
 // ReadVaultID returns the vault identifier stored in the configuration file
@@ -1806,7 +1814,7 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 			s.mu.RUnlock()
 			return err
 		}
-		manifestData, err := json.Marshal(s.manifest)
+		manifestData, err := snapshotRevisionData(s.manifest, s.timeTrackingCatalog)
 		if err != nil {
 			s.mu.RUnlock()
 			return err
@@ -1819,6 +1827,10 @@ func (s *Store) ExportRemoteSnapshot(destination string) error {
 		snapshot := &Store{
 			root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key), manifest: captured,
 			exportDirty: dirty, exportIncremental: incremental,
+		}
+		if s.timeTrackingCatalog != nil {
+			tracking := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+			snapshot.timeTrackingCatalog = &tracking
 		}
 		s.mu.RUnlock()
 		if err := snapshot.exportRemoteSnapshot(destination); err != nil {
@@ -1967,6 +1979,9 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 		return err
 	}
 	if err := s.exportAttachmentsLocked(destination); err != nil {
+		return err
+	}
+	if err := s.exportTimeTrackingLocked(destination); err != nil {
 		return err
 	}
 	inventoryPlaintext, err := json.Marshal(inventory)
@@ -3673,7 +3688,7 @@ func removeUnexpectedSyncFiles(syncRoot string) error {
 	}
 	for _, entry := range entries {
 		if entry.IsDir() ||
-			(entry.Name() != syncManifestFile && entry.Name() != syncFoldersFile) {
+			(entry.Name() != syncManifestFile && entry.Name() != syncFoldersFile && entry.Name() != syncTrackingFile) {
 			if err := os.RemoveAll(filepath.Join(syncRoot, entry.Name())); err != nil {
 				return fmt.Errorf("remove stale remote sync metadata: %w", err)
 			}
