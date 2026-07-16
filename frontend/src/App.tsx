@@ -55,7 +55,14 @@ type Theme = "light" | "dark" | "archivist";
 type JournalLines = "none" | "full" | "dotted";
 type SettingsTab = "general" | "appearance";
 type SectionDefault = "expanded" | "collapsed";
-type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "statistics" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "appDialog";
+type WindowLayer = "vaultAction" | "folderPassword" | "appearanceSettings" | "statistics" | "vaultSettings" | "recovery" | "syncConflicts" | "calendar" | "quickSwitcher" | "globalSearch" | "commandPalette" | "appDialog";
+type CommandPaletteCommand = {
+  id: string;
+  shortcut: string;
+  name: string;
+  description: string;
+  run: () => void;
+};
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -436,6 +443,9 @@ function App() {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [quickSwitcherQuery, setQuickSwitcherQuery] = useState("");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
@@ -563,6 +573,14 @@ function App() {
     nextWindowLayerRef.current += 1;
     setWindowLayers((current) => ({ ...current, [layer]: nextWindowLayerRef.current }));
   }, []);
+
+  const openCommandPalette = useCallback(() => {
+    setTitlebarMenu(null);
+    bringWindowToFront("commandPalette");
+    setCommandPaletteQuery("");
+    setCommandPaletteIndex(0);
+    setCommandPaletteOpen(true);
+  }, [bringWindowToFront]);
 
   const openSettingsSection = (tab: SettingsTab, sectionID?: string) => {
     setSettingsTab(tab);
@@ -885,6 +903,17 @@ function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [bringWindowToFront, session?.locked]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (session?.locked || !(event.ctrlKey || event.metaKey) || !event.shiftKey || event.key.toLowerCase() !== "p") return;
+      if ((event.target as HTMLElement | null)?.closest("[role=dialog]")) return;
+      event.preventDefault();
+      openCommandPalette();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openCommandPalette, session?.locked]);
 
   useEffect(() => {
     if (!globalSearchOpen) return;
@@ -2004,6 +2033,7 @@ function App() {
         layer: "folderPassword",
         close: () => closeFolderPasswordPrompt(null),
       },
+      { open: commandPaletteOpen, layer: "commandPalette", close: () => setCommandPaletteOpen(false) },
       { open: quickSwitcherOpen, layer: "quickSwitcher", close: () => setQuickSwitcherOpen(false) },
       { open: globalSearchOpen, layer: "globalSearch", close: () => setGlobalSearchOpen(false) },
       { open: calendarOpen, layer: "calendar", close: () => setCalendarOpen(false) },
@@ -2039,6 +2069,7 @@ function App() {
     appDialog,
     appearanceSettingsOpen,
     calendarOpen,
+    commandPaletteOpen,
     folderPasswordPrompt,
     globalSearchOpen,
     quickSwitcherOpen,
@@ -3016,6 +3047,143 @@ function App() {
     } finally {
       setSettingsBusy(false);
     }
+  };
+
+  const commandPaletteCommands: CommandPaletteCommand[] = [
+    {
+      id: "new-note",
+      shortcut: "Ctrl + N",
+      name: "New note",
+      description: "Create a new encrypted note",
+      run: () => void createNote(),
+    },
+    {
+      id: "save-note",
+      shortcut: "Ctrl + S",
+      name: "Save note",
+      description: "Save the current note",
+      run: () => void persistCurrent(),
+    },
+    {
+      id: "quick-switcher",
+      shortcut: "Ctrl + K",
+      name: "Quick note switcher",
+      description: "Open a note by title",
+      run: () => {
+        bringWindowToFront("quickSwitcher");
+        setQuickSwitcherQuery("");
+        setQuickSwitcherOpen(true);
+      },
+    },
+    {
+      id: "find-notes",
+      shortcut: "Ctrl + Shift + F",
+      name: "Find in all notes",
+      description: "Search text across your vault",
+      run: () => {
+        bringWindowToFront("globalSearch");
+        setGlobalSearchReplace(false);
+        setGlobalSearchOpen(true);
+      },
+    },
+    {
+      id: "start-timer",
+      shortcut: "Ctrl + Shift + T",
+      name: "Start timer",
+      description: "Start tracking time without leaving this note",
+      run: openStartTimerDialog,
+    },
+    {
+      id: "finish-timer",
+      shortcut: "Ctrl + Shift + E",
+      name: "Finish timer",
+      description: "Finish the active timer",
+      run: () => {
+        setTimerError("");
+        setTimerDialog("finish");
+      },
+    },
+    {
+      id: "time-tracking",
+      shortcut: "",
+      name: "Time tracking",
+      description: "Open tracked entries, clients, projects, and tags",
+      run: () => {
+        setGraphOpen(false);
+        setTimeTrackingOpen(true);
+        setSidebarOpen(false);
+      },
+    },
+    {
+      id: "graph-view",
+      shortcut: "",
+      name: "Graph view",
+      description: "Explore links between notes",
+      run: () => {
+        setGraphOpen(true);
+        setTimeTrackingOpen(false);
+        setSidebarOpen(false);
+      },
+    },
+    {
+      id: "calendar",
+      shortcut: "",
+      name: "Calendar",
+      description: "Open daily notes and calendar settings",
+      run: () => {
+        setCalendarMonth(startOfMonth(calendarSelected));
+        bringWindowToFront("calendar");
+        setCalendarOpen(true);
+      },
+    },
+    {
+      id: "sync-vault",
+      shortcut: "Ctrl + Shift + R",
+      name: "Sync vault",
+      description: "Pull and push encrypted changes",
+      run: () => void syncNow(),
+    },
+    {
+      id: "vault-settings",
+      shortcut: "",
+      name: "Vault settings",
+      description: "Manage sync and view vault statistics",
+      run: () => void openVaultSettings(),
+    },
+    {
+      id: "recovery",
+      shortcut: "",
+      name: "Trash and version history",
+      description: "Restore deleted notes and earlier versions",
+      run: () => void openRecovery(),
+    },
+    {
+      id: "settings",
+      shortcut: "",
+      name: "Settings",
+      description: "Change application appearance and preferences",
+      run: () => {
+        bringWindowToFront("appearanceSettings");
+        setAppearanceSettingsOpen(true);
+      },
+    },
+  ];
+  const commandPaletteNeedle = commandPaletteQuery.trim().toLocaleLowerCase();
+  const matchingCommandPaletteCommands = commandPaletteCommands.filter((command) =>
+    !commandPaletteNeedle || [command.shortcut, command.name, command.description]
+      .some((value) => value.toLocaleLowerCase().includes(commandPaletteNeedle)),
+  );
+  const selectedCommandPaletteCommand = matchingCommandPaletteCommands[
+    Math.min(commandPaletteIndex, Math.max(0, matchingCommandPaletteCommands.length - 1))
+  ];
+  const commandPaletteSelectedIndex = Math.min(
+    commandPaletteIndex,
+    Math.max(0, matchingCommandPaletteCommands.length - 1),
+  );
+  const closeCommandPalette = () => setCommandPaletteOpen(false);
+  const runCommandPaletteCommand = (command: CommandPaletteCommand) => {
+    closeCommandPalette();
+    command.run();
   };
 
   if (session === null) {
@@ -4971,6 +5139,75 @@ function App() {
               )}
             </div>
           </div>
+        </div>
+      )}
+      {commandPaletteOpen && (
+        <div
+          className="global-search-scrim"
+          style={{ zIndex: windowLayers.commandPalette }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeCommandPalette();
+          }}
+        >
+          <section className="global-search-panel command-palette" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
+            <div className="global-search-header">
+              <span id="command-palette-title">Command palette</span>
+              <button type="button" className="icon-button" onClick={closeCommandPalette} aria-label="Close command palette"><Icon name="x" size={14} /></button>
+            </div>
+            <div className="global-search-row">
+              <input
+                className="global-search-input"
+                type="text"
+                autoFocus
+                value={commandPaletteQuery}
+                placeholder="Type a command"
+                aria-label="Search commands"
+                aria-activedescendant={selectedCommandPaletteCommand ? `command-palette-${selectedCommandPaletteCommand.id}` : undefined}
+                onChange={(event) => {
+                  setCommandPaletteQuery(event.target.value);
+                  setCommandPaletteIndex(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeCommandPalette();
+                    return;
+                  }
+                  if (event.key === "Enter" && selectedCommandPaletteCommand) {
+                    event.preventDefault();
+                    runCommandPaletteCommand(selectedCommandPaletteCommand);
+                    return;
+                  }
+                  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                  event.preventDefault();
+                  if (!matchingCommandPaletteCommands.length) return;
+                  const direction = event.key === "ArrowDown" ? 1 : -1;
+                  setCommandPaletteIndex((current) => (
+                    Math.min(current, matchingCommandPaletteCommands.length - 1) + direction + matchingCommandPaletteCommands.length
+                  ) % matchingCommandPaletteCommands.length);
+                }}
+              />
+            </div>
+            <div className="command-palette-results" role="listbox" aria-label="Matching commands">
+              {matchingCommandPaletteCommands.map((command, index) => (
+                <button
+                  type="button"
+                  key={command.id}
+                  id={`command-palette-${command.id}`}
+                  className="command-palette-command"
+                  role="option"
+                  aria-selected={index === commandPaletteSelectedIndex}
+                  onMouseEnter={() => setCommandPaletteIndex(index)}
+                  onClick={() => runCommandPaletteCommand(command)}
+                >
+                  <kbd>{command.shortcut || "—"}</kbd>
+                  <strong>{command.name}</strong>
+                  <span>{command.description}</span>
+                </button>
+              ))}
+              {!matchingCommandPaletteCommands.length && <p className="command-palette-empty">No matching commands.</p>}
+            </div>
+          </section>
         </div>
       )}
       {globalSearchOpen && (
