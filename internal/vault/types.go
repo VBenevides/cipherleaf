@@ -1,8 +1,11 @@
 package vault
 
 const (
-	FormatVersion = 1
-	Algorithm     = "XChaCha20-Poly1305"
+	FormatVersion                     = 1
+	TimeTrackingManifestFormatVersion = 2
+	TimeTrackingCatalogFormatVersion  = 1
+	TimeTrackingCapability            = "time-tracking-v1"
+	Algorithm                         = "XChaCha20-Poly1305"
 )
 
 type Session struct {
@@ -99,6 +102,7 @@ type Tombstone struct {
 type manifest struct {
 	FormatVersion  int           `json:"format_version"`
 	VaultID        string        `json:"vault_id"`
+	Capabilities   []string      `json:"capabilities,omitempty"`
 	Folders        []Folder      `json:"folders"`
 	Notes          []NoteSummary `json:"notes"`
 	DeletedNotes   []Tombstone   `json:"deleted_notes,omitempty"`

@@ -1850,6 +1850,7 @@ func changedSnapshotNoteIDs(before, after manifest) map[string]struct{} {
 
 func cloneManifest(source manifest) manifest {
 	result := source
+	result.Capabilities = slices.Clone(source.Capabilities)
 	result.Folders = slices.Clone(source.Folders)
 	result.DeletedNotes = slices.Clone(source.DeletedNotes)
 	result.DeletedFolders = slices.Clone(source.DeletedFolders)
@@ -3225,8 +3226,11 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 	if err := json.Unmarshal(plaintext, &result); err != nil {
 		return manifest{}, fmt.Errorf("decode manifest: %w", err)
 	}
-	if result.FormatVersion != FormatVersion || result.VaultID != s.vaultID {
+	if result.VaultID != s.vaultID {
 		return manifest{}, errors.New("manifest belongs to another vault or format version")
+	}
+	if err := validateManifestCapabilities(result.FormatVersion, result.Capabilities); err != nil {
+		return manifest{}, err
 	}
 	result.Settings = normalizeVaultSettings(result.Settings)
 	for index, folder := range result.Folders {
