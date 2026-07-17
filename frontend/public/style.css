@@ -51,26 +51,28 @@
 }
 
 :root[data-theme="archivist"] {
-  color: #37332e;
-  background: #f5f0e6;
-  --ink: #37332e;
-  --muted: #786f64;
-  --paper: #f5f0e6;
-  --canvas: #f7f3ea;
-  --line: #d8ccb8;
-  --line-soft: #ded3c1;
-  --green: #7d4336;
-  --green-dark: #67362c;
-  --green-pale: #dfcfaa;
-  --red: #91493c;
-  --editor-bg: #f7f3ea;
-  --sidebar-bg: #eee4d2;
-  --toolbar-bg: #f0e7d7;
-  --surface: #f1e9da;
-  --surface-hover: #e8dcc6;
-  --surface-active: #dcc8a4;
-  --modal-surface: #f1e9da;
-  --modal-control-surface: #f7f3ea;
+  color: #3d352f;
+  background: #e8d9c9;
+  --ink: #3d352f;
+  --muted: #746b64;
+  --paper: #f6efe5;
+  --canvas: #e8d9c9;
+  --line: #c8cfcc;
+  --line-soft: #d9d6ce;
+  --green: #687155;
+  --green-dark: #596248;
+  --green-pale: #dcc19a;
+  --red: #743e38;
+  --editor-bg: #f6efe5;
+  --sidebar-bg: #e8d9c9;
+  --toolbar-bg: #ecdece;
+  --surface: #f0e3d4;
+  --surface-hover: #e3cfb3;
+  --surface-active: #dcc19a;
+  --modal-surface: #f0e3d4;
+  --modal-control-surface: #f6efe5;
+  --notebook-gutter: 80px;
+  --notebook-margin: 50px;
 }
 
 :root[data-theme="archivist"] ::selection {
@@ -96,7 +98,83 @@
 }
 
 :root[data-theme="archivist"] .document-body {
-  background-color: var(--editor-bg);
+  background: var(--editor-bg);
+}
+
+:root[data-theme="archivist"] .document-heading {
+  padding-top: 26px;
+  padding-bottom: 13px;
+}
+
+:root[data-theme="archivist"] .editor-shell {
+  background: var(--canvas);
+}
+
+:root[data-theme="archivist"] .app-menubar {
+  background: #e5d5c4;
+}
+
+:root[data-theme="archivist"] .document-heading,
+:root[data-theme="archivist"] .view-tabs,
+:root[data-theme="archivist"] .markdown-toolbar,
+:root[data-theme="archivist"] .document-footer,
+:root[data-theme="archivist"] .backlinks-panel {
+  padding-right: var(--notebook-gutter);
+  padding-left: var(--notebook-gutter);
+}
+
+:root[data-theme="archivist"] .document-heading p,
+:root[data-theme="archivist"] .breadcrumbs,
+:root[data-theme="archivist"] .save-status,
+:root[data-theme="archivist"] .sync-status,
+:root[data-theme="archivist"] .last-sync-label,
+:root[data-theme="archivist"] .app-menubar-title,
+:root[data-theme="archivist"] .note-list-item small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+:root[data-theme="archivist"] .view-tabs button,
+:root[data-theme="archivist"] .markdown-toolbar button {
+  color: #625850;
+}
+
+:root[data-theme="archivist"] .live-markdown-editor .cm-content {
+  padding: 34px var(--notebook-gutter) 76px;
+  font-style: normal;
+  background-image: linear-gradient(
+    to right,
+    transparent var(--notebook-margin),
+    rgba(184, 111, 104, 0.38) var(--notebook-margin),
+    rgba(184, 111, 104, 0.38) calc(var(--notebook-margin) + 1px),
+    transparent calc(var(--notebook-margin) + 1px)
+  );
+}
+
+:root[data-theme="archivist"] .document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line {
+  width: min(100%, 1040px);
+}
+
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-heading {
+  color: var(--ink);
+  font-style: italic;
+}
+
+:root[data-theme="archivist"] .cm-journal-rule {
+  right: 30px;
+  border-color: rgba(200, 207, 204, 0.62);
+}
+
+:root[data-theme="archivist"][data-journal-lines="dotted"] .cm-journal-rule {
+  background-image: radial-gradient(
+    circle,
+    rgba(150, 164, 166, 0.55) 1px,
+    transparent 1.2px
+  );
+}
+
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-horizontal-rule {
+  border-color: rgba(200, 207, 204, 0.72);
 }
 
 :root[data-theme="archivist"] .folder-list-item:hover,

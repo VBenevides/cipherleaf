@@ -1360,6 +1360,11 @@ function App() {
       if (event.shiftKey && event.key.toLowerCase() === "e") {
         event.preventDefault(); setTimerError(""); setTimerDialog("finish"); return;
       }
+      if (!event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        setSidebarCollapsed((current) => !current);
+        return;
+      }
       if (target?.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
@@ -3124,6 +3129,13 @@ function App() {
       },
     },
     {
+      id: "toggle-sidebar",
+      shortcut: "Ctrl + B",
+      name: "Toggle sidebar",
+      description: "Expand or collapse the sidebar",
+      run: () => setSidebarCollapsed((current) => !current),
+    },
+    {
       id: "find-notes",
       shortcut: "Ctrl + Shift + F",
       name: "Find in all notes",
@@ -3525,7 +3537,7 @@ function App() {
           className="sidebar-collapse-toggle"
           onClick={() => setSidebarCollapsed((current) => !current)}
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
         >
           {sidebarCollapsed ? ">>>" : "<<<"}
         </button>
