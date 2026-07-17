@@ -83,12 +83,24 @@ export function DeleteAttachment(noteID: string, id: string): $CancellablePromis
     return $Call.ByID(3811592289, noteID, id);
 }
 
+export function DeleteClient(id: string): $CancellablePromise<void> {
+    return $Call.ByID(25439555, id);
+}
+
 export function DeleteFolder(id: string): $CancellablePromise<void> {
     return $Call.ByID(925796928, id);
 }
 
 export function DeleteNote(id: string): $CancellablePromise<void> {
     return $Call.ByID(2625750688, id);
+}
+
+export function DeleteProject(id: string): $CancellablePromise<void> {
+    return $Call.ByID(2717384377, id);
+}
+
+export function DeleteTag(id: string): $CancellablePromise<void> {
+    return $Call.ByID(1642915612, id);
 }
 
 export function DeleteTimeEntry(id: string): $CancellablePromise<void> {

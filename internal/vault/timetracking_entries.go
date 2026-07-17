@@ -300,15 +300,15 @@ func (s *Store) validateTimeEntryOverlapLocked(candidate TimeEntry) error {
 }
 
 func validateTimeEntryReferences(catalog timeTrackingCatalog, clientID, projectID string, tagIDs []string, activeOnly bool) error {
-	if err := validateProjectClient(catalog.Clients, clientID, activeOnly); err != nil {
+	if err := validateProjectClient(catalog.Clients, clientID, activeOnly); err != nil && (activeOnly || !trackingTombstoneExists(catalog.DeletedClients, clientID)) {
 		return err
 	}
 	if projectID != "" {
 		index := slices.IndexFunc(catalog.Projects, func(project TimeProject) bool { return project.ID == projectID })
-		if index < 0 || (activeOnly && catalog.Projects[index].ArchivedAtUTC != "") {
+		if (index < 0 && (activeOnly || !trackingTombstoneExists(catalog.DeletedProjects, projectID))) || (index >= 0 && activeOnly && catalog.Projects[index].ArchivedAtUTC != "") {
 			return errors.New("project not found or archived")
 		}
-		if activeOnly && catalog.Projects[index].ClientID != clientID {
+		if activeOnly && index >= 0 && catalog.Projects[index].ClientID != clientID {
 			return errors.New("project does not belong to the selected client")
 		}
 	}
@@ -319,11 +319,16 @@ func validateTimeEntryReferences(catalog timeTrackingCatalog, clientID, projectI
 		}
 		seen[id] = struct{}{}
 		index := slices.IndexFunc(catalog.Tags, func(tag TimeTag) bool { return tag.ID == id })
-		if index < 0 || (activeOnly && catalog.Tags[index].ArchivedAtUTC != "") {
+		if (index < 0 && (activeOnly || !trackingTombstoneExists(catalog.DeletedTags, id))) || (index >= 0 && activeOnly && catalog.Tags[index].ArchivedAtUTC != "") {
 			return errors.New("tag not found or archived")
 		}
 	}
 	return nil
+}
+
+func trackingTombstoneExists(tombstones []Tombstone, id string) bool {
+	_, found := findTombstone(tombstones, id)
+	return found
 }
 
 func trackingProjectClientID(catalog timeTrackingCatalog, projectID string) string {
@@ -363,6 +368,7 @@ func cloneTimeTrackingCatalog(catalog timeTrackingCatalog) timeTrackingCatalog {
 	catalog.Tags = slices.Clone(catalog.Tags)
 	catalog.Buckets = slices.Clone(catalog.Buckets)
 	catalog.DeletedEntries = slices.Clone(catalog.DeletedEntries)
+	catalog.DeletedClients = slices.Clone(catalog.DeletedClients)
 	catalog.DeletedProjects = slices.Clone(catalog.DeletedProjects)
 	catalog.DeletedTags = slices.Clone(catalog.DeletedTags)
 	catalog.Conflicts = slices.Clone(catalog.Conflicts)

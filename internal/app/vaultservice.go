@@ -519,6 +519,10 @@ func (s *VaultService) RestoreClient(id string) (vault.TimeClient, error) {
 	return s.store.RestoreClient(id)
 }
 
+func (s *VaultService) DeleteClient(id string) error {
+	return s.store.DeleteClient(id)
+}
+
 func (s *VaultService) CreateProject(name string) (vault.TimeProject, error) {
 	return s.store.CreateProject(name)
 }
@@ -543,6 +547,10 @@ func (s *VaultService) RestoreProject(id string) (vault.TimeProject, error) {
 	return s.store.RestoreProject(id)
 }
 
+func (s *VaultService) DeleteProject(id string) error {
+	return s.store.DeleteProject(id)
+}
+
 func (s *VaultService) CreateTag(name string) (vault.TimeTag, error) {
 	return s.store.CreateTag(name)
 }
@@ -557,6 +565,10 @@ func (s *VaultService) ArchiveTag(id string) (vault.TimeTag, error) {
 
 func (s *VaultService) RestoreTag(id string) (vault.TimeTag, error) {
 	return s.store.RestoreTag(id)
+}
+
+func (s *VaultService) DeleteTag(id string) error {
+	return s.store.DeleteTag(id)
 }
 
 func (s *VaultService) StartTimeEntry(name, projectID string, tagIDs []string) (vault.TimeEntry, error) {

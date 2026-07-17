@@ -131,6 +131,7 @@ export interface TimeDashboard {
     "tagCount": number;
     "totalSeconds": number;
     "averageDaySeconds": number;
+    "clients": TimeDurationGroup[] | null;
     "projects": TimeDurationGroup[] | null;
     "tags": TimeDurationGroup[] | null;
     "tasks": TimeTaskGroup[] | null;

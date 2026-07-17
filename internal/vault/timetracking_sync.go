@@ -219,7 +219,7 @@ func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
 			return errors.New("remote tracking catalog contains a duplicate project")
 		}
 		if project.ClientID != "" {
-			if _, found := clientIDs[project.ClientID]; !found {
+			if _, found := clientIDs[project.ClientID]; !found && !trackingTombstoneExists(catalog.DeletedClients, project.ClientID) {
 				return errors.New("remote tracking project references a missing client")
 			}
 		}
@@ -255,6 +255,9 @@ func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
 		months[bucket.MonthUTC] = struct{}{}
 	}
 	if err := validateTrackingTombstones(catalog.DeletedEntries, nil); err != nil {
+		return err
+	}
+	if err := validateTrackingTombstones(catalog.DeletedClients, clientIDs); err != nil {
 		return err
 	}
 	if err := validateTrackingTombstones(catalog.DeletedProjects, projectIDs); err != nil {
@@ -357,13 +360,15 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	}
 	localEntries := trackingEntriesByID(localBuckets)
 	remoteEntries := trackingEntriesByID(remote.Buckets)
-	clients, clientConflicts := mergeTimeClients(localCatalog.Clients, remote.Catalog.Clients)
+	clients, clientConflicts := mergeTimeClients(localCatalog.Clients, remote.Catalog.Clients, localCatalog.DeletedClients, remote.Catalog.DeletedClients)
 	projects, projectConflicts := mergeTimeProjects(localCatalog.Projects, remote.Catalog.Projects, localCatalog.DeletedProjects, remote.Catalog.DeletedProjects)
 	tags, tagConflicts := mergeTimeTags(localCatalog.Tags, remote.Catalog.Tags, localCatalog.DeletedTags, remote.Catalog.DeletedTags)
+	deletedClients := mergeTrackingTombstones(localCatalog.DeletedClients, remote.Catalog.DeletedClients)
 	deletedProjects := mergeTrackingTombstones(localCatalog.DeletedProjects, remote.Catalog.DeletedProjects)
 	deletedTags := mergeTrackingTombstones(localCatalog.DeletedTags, remote.Catalog.DeletedTags)
 	deletedEntries := mergeTrackingTombstones(localCatalog.DeletedEntries, remote.Catalog.DeletedEntries)
 	entries, entryConflicts := mergeTimeEntries(localEntries, remoteEntries, deletedEntries)
+	clients = removeDeletedClients(clients, deletedClients)
 	projects = removeDeletedProjects(projects, deletedProjects)
 	tags = removeDeletedTags(tags, deletedTags)
 	entries = removeDeletedTimeEntries(entries, deletedEntries)
@@ -377,6 +382,7 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	merged.Clients = clients
 	merged.Projects = projects
 	merged.Tags = tags
+	merged.DeletedClients = deletedClients
 	merged.DeletedProjects = deletedProjects
 	merged.DeletedTags = deletedTags
 	merged.DeletedEntries = deletedEntries
@@ -461,7 +467,7 @@ func trackingEntriesByID(buckets map[string]timeTrackingBucket) map[string]TimeE
 	return result
 }
 
-func mergeTimeClients(local, remote []TimeClient) ([]TimeClient, []TimeTrackingConflict) {
+func mergeTimeClients(local, remote []TimeClient, _, _ []Tombstone) ([]TimeClient, []TimeTrackingConflict) {
 	result := make(map[string]TimeClient, len(local)+len(remote))
 	for _, value := range local {
 		result[value.ID] = value
@@ -556,6 +562,12 @@ func mergeTrackingTombstones(left, right []Tombstone) []Tombstone {
 }
 func removeDeletedProjects(values []TimeProject, deleted []Tombstone) []TimeProject {
 	return slices.DeleteFunc(values, func(v TimeProject) bool {
+		t, ok := findTombstone(deleted, v.ID)
+		return ok && !versionIsNewer(v.Revision, v.ModifiedAt, t.Revision, t.ModifiedAt)
+	})
+}
+func removeDeletedClients(values []TimeClient, deleted []Tombstone) []TimeClient {
+	return slices.DeleteFunc(values, func(v TimeClient) bool {
 		t, ok := findTombstone(deleted, v.ID)
 		return ok && !versionIsNewer(v.Revision, v.ModifiedAt, t.Revision, t.ModifiedAt)
 	})

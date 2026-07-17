@@ -54,6 +54,9 @@ func TestTimeDashboardAggregatesAndLoadsGroupDetailsLazily(t *testing.T) {
 	if len(result.Projects) != 2 || result.Projects[0].Name != "Beta" || result.Projects[0].TotalSeconds != 7200 {
 		t.Fatalf("unexpected project groups: %#v", result.Projects)
 	}
+	if len(result.Clients) != 2 || result.Clients[0].Name != "Client B" || result.Clients[0].TotalSeconds != 7200 {
+		t.Fatalf("unexpected client groups: %#v", result.Clients)
+	}
 	if len(result.Tags) != 2 || result.Tags[0].Name != "Focus" || result.Tags[0].TotalSeconds != 10800 || result.Tags[1].TotalSeconds != 3600 {
 		t.Fatalf("unexpected multi-tag groups: %#v", result.Tags)
 	}

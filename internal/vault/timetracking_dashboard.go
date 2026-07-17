@@ -25,6 +25,7 @@ func (s *Store) getTimeDashboardLocked(start, end time.Time, filters TimeEntryFi
 	if s.timeTrackingCatalog == nil {
 		return result, nil
 	}
+	clients := make(map[string]time.Duration)
 	projects := make(map[string]time.Duration)
 	tags := make(map[string]time.Duration)
 	tasks := make(map[string]time.Duration)
@@ -52,6 +53,13 @@ func (s *Store) getTimeDashboardLocked(start, end time.Time, filters TimeEntryFi
 			}
 			duration := clippedEnd.Sub(clippedStart)
 			result.TotalSeconds += int64(duration / time.Second)
+			clientID := entry.ClientID
+			if clientID == "" {
+				clientID = trackingProjectClientID(*s.timeTrackingCatalog, entry.ProjectID)
+			}
+			if clientID != "" {
+				clients[clientID] += duration
+			}
 			if entry.ProjectID != "" {
 				projects[entry.ProjectID] += duration
 			}
@@ -64,12 +72,15 @@ func (s *Store) getTimeDashboardLocked(start, end time.Time, filters TimeEntryFi
 			addTimeEntryLocalDays(days, clippedStart, clippedEnd, location)
 		}
 	}
-	projectNames, tagNames := trackingLabelNames(*s.timeTrackingCatalog)
+	clientNames, projectNames, tagNames := trackingLabelNames(*s.timeTrackingCatalog)
+	for id, duration := range clients {
+		result.Clients = append(result.Clients, TimeDurationGroup{ID: id, Name: trackingLabelName(clientNames, id, "Deleted client"), TotalSeconds: int64(duration / time.Second)})
+	}
 	for id, duration := range projects {
-		result.Projects = append(result.Projects, TimeDurationGroup{ID: id, Name: projectNames[id], TotalSeconds: int64(duration / time.Second)})
+		result.Projects = append(result.Projects, TimeDurationGroup{ID: id, Name: trackingLabelName(projectNames, id, "Deleted project"), TotalSeconds: int64(duration / time.Second)})
 	}
 	for id, duration := range tags {
-		result.Tags = append(result.Tags, TimeDurationGroup{ID: id, Name: tagNames[id], TotalSeconds: int64(duration / time.Second)})
+		result.Tags = append(result.Tags, TimeDurationGroup{ID: id, Name: trackingLabelName(tagNames, id, "Deleted tag"), TotalSeconds: int64(duration / time.Second)})
 	}
 	for name, duration := range tasks {
 		result.Tasks = append(result.Tasks, TimeTaskGroup{Name: name, TotalSeconds: int64(duration / time.Second), EntryCount: taskCounts[name]})
@@ -154,7 +165,7 @@ func clippedTimeEntryRange(entry TimeEntry, start, end, now time.Time) (time.Tim
 }
 
 func emptyTimeDashboard(start, end time.Time, location *time.Location) TimeDashboard {
-	result := TimeDashboard{Projects: []TimeDurationGroup{}, Tags: []TimeDurationGroup{}, Tasks: []TimeTaskGroup{}, Days: []TimeDashboardDay{}}
+	result := TimeDashboard{Clients: []TimeDurationGroup{}, Projects: []TimeDurationGroup{}, Tags: []TimeDurationGroup{}, Tasks: []TimeTaskGroup{}, Days: []TimeDashboardDay{}}
 	local := start.In(location)
 	cursor := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
 	for cursor.Before(end) {
@@ -164,7 +175,11 @@ func emptyTimeDashboard(start, end time.Time, location *time.Location) TimeDashb
 	return result
 }
 
-func trackingLabelNames(catalog timeTrackingCatalog) (map[string]string, map[string]string) {
+func trackingLabelNames(catalog timeTrackingCatalog) (map[string]string, map[string]string, map[string]string) {
+	clients := make(map[string]string, len(catalog.Clients))
+	for _, client := range catalog.Clients {
+		clients[client.ID] = client.Name
+	}
 	projects := make(map[string]string, len(catalog.Projects))
 	for _, project := range catalog.Projects {
 		projects[project.ID] = project.Name
@@ -173,10 +188,18 @@ func trackingLabelNames(catalog timeTrackingCatalog) (map[string]string, map[str
 	for _, tag := range catalog.Tags {
 		tags[tag.ID] = tag.Name
 	}
-	return projects, tags
+	return clients, projects, tags
+}
+
+func trackingLabelName(names map[string]string, id, fallback string) string {
+	if name := names[id]; name != "" {
+		return name
+	}
+	return fallback
 }
 
 func sortTimeDashboard(result *TimeDashboard) {
+	slices.SortFunc(result.Clients, compareDurationGroups)
 	slices.SortFunc(result.Projects, compareDurationGroups)
 	slices.SortFunc(result.Tags, compareDurationGroups)
 	slices.SortFunc(result.Tasks, func(left, right TimeTaskGroup) int {

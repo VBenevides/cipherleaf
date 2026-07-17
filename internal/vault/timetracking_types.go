@@ -88,6 +88,7 @@ type TimeDashboard struct {
 	TagCount          int                 `json:"tagCount"`
 	TotalSeconds      int64               `json:"totalSeconds"`
 	AverageDaySeconds int64               `json:"averageDaySeconds"`
+	Clients           []TimeDurationGroup `json:"clients"`
 	Projects          []TimeDurationGroup `json:"projects"`
 	Tags              []TimeDurationGroup `json:"tags"`
 	Tasks             []TimeTaskGroup     `json:"tasks"`
@@ -148,6 +149,7 @@ type timeTrackingCatalog struct {
 	PendingMove     *timeTrackingPendingMove    `json:"pending_move,omitempty"`
 	Conflicts       []TimeTrackingConflict      `json:"conflicts,omitempty"`
 	DeletedEntries  []Tombstone                 `json:"deleted_entries"`
+	DeletedClients  []Tombstone                 `json:"deleted_clients"`
 	DeletedProjects []Tombstone                 `json:"deleted_projects"`
 	DeletedTags     []Tombstone                 `json:"deleted_tags"`
 	ModifiedAt      int64                       `json:"modified_at"`
@@ -193,6 +195,7 @@ func newTimeTrackingCatalog(vaultID string) timeTrackingCatalog {
 		Tags:            []TimeTag{},
 		Buckets:         []timeTrackingBucketSummary{},
 		DeletedEntries:  []Tombstone{},
+		DeletedClients:  []Tombstone{},
 		DeletedProjects: []Tombstone{},
 		DeletedTags:     []Tombstone{},
 		Conflicts:       []TimeTrackingConflict{},

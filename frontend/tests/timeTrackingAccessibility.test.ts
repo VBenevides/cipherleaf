@@ -72,6 +72,20 @@ test("client selection filters projects and project selection fills the client",
 });
 
 test("dashboard tag guidance is subdued and expanded task rows are indented", () => {
-  assert.match(style, /section:nth-child\(2\) > small[^}]+color: var\(--muted\); font-size: 8px/);
-  assert.match(style, /section:nth-child\(3\) > div > p \{ padding-left: 18px/);
+	assert.match(style, /\.dashboard-groups header small \{ color: var\(--muted\); font-size: 8px/);
+	assert.match(style, /\.dashboard-group-rows > div > p \{ padding-left: 18px/);
+});
+
+test("dashboard groups clients with percentage durations in a scrollable two-column grid", () => {
+	assert.match(view, /<h3>Clients<\/h3>/);
+	assert.match(view, /formatDurationWithPercentage\(item\.totalSeconds, clientsTotal\)/);
+	assert.match(style, /\.dashboard-groups \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+	assert.match(style, /\.dashboard-groups section \{ height: 196px/);
+	assert.match(style, /\.dashboard-group-rows \{ min-height: 0; overflow-y: auto; \}/);
+});
+
+test("dashboard period selection uses the themed custom dropdown", () => {
+  assert.match(view, /<DashboardPeriodSelect value=\{dashboardCustom \? "custom" : dashboardPreset\}/);
+  assert.match(tagSelect, /export function DashboardPeriodSelect/);
+  assert.doesNotMatch(view, /<select aria-label="Period"/);
 });

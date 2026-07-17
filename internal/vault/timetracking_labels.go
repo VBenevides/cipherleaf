@@ -84,6 +84,36 @@ func (s *Store) RestoreClient(id string) (TimeClient, error) {
 	return s.changeClient(id, "", trackingLabelRestore)
 }
 
+// DeleteClient permanently removes an archived client without altering its time entries.
+func (s *Store) DeleteClient(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if s.timeTrackingCatalog == nil {
+		return errors.New("client not found")
+	}
+	catalog := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+	index := slices.IndexFunc(catalog.Clients, func(client TimeClient) bool { return client.ID == id })
+	if index < 0 {
+		return errors.New("client not found")
+	}
+	client := catalog.Clients[index]
+	if client.ArchivedAtUTC == "" {
+		return errors.New("client must be archived before deletion")
+	}
+	now := time.Now().UTC()
+	catalog.Clients = append(catalog.Clients[:index], catalog.Clients[index+1:]...)
+	catalog.DeletedClients = upsertTombstone(catalog.DeletedClients, Tombstone{ID: id, Revision: client.Revision + 1, ModifiedAt: now.UnixMilli()})
+	advanceTrackingCatalogRevision(&catalog, now)
+	if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+		return err
+	}
+	s.timeTrackingCatalog = &catalog
+	return nil
+}
+
 func (s *Store) changeClient(id, name string, action trackingLabelAction) (TimeClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,6 +182,36 @@ func (s *Store) RestoreProject(id string) (TimeProject, error) {
 	return s.changeProject(id, "", nil, trackingLabelRestore)
 }
 
+// DeleteProject permanently removes an archived project without altering its time entries.
+func (s *Store) DeleteProject(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if s.timeTrackingCatalog == nil {
+		return errors.New("project not found")
+	}
+	catalog := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+	index := slices.IndexFunc(catalog.Projects, func(project TimeProject) bool { return project.ID == id })
+	if index < 0 {
+		return errors.New("project not found")
+	}
+	project := catalog.Projects[index]
+	if project.ArchivedAtUTC == "" {
+		return errors.New("project must be archived before deletion")
+	}
+	now := time.Now().UTC()
+	catalog.Projects = append(catalog.Projects[:index], catalog.Projects[index+1:]...)
+	catalog.DeletedProjects = upsertTombstone(catalog.DeletedProjects, Tombstone{ID: id, Revision: project.Revision + 1, ModifiedAt: now.UnixMilli()})
+	advanceTrackingCatalogRevision(&catalog, now)
+	if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+		return err
+	}
+	s.timeTrackingCatalog = &catalog
+	return nil
+}
+
 func (s *Store) changeProject(id, name string, clientID *string, action trackingLabelAction) (TimeProject, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -211,6 +271,36 @@ func (s *Store) ArchiveTag(id string) (TimeTag, error) {
 
 func (s *Store) RestoreTag(id string) (TimeTag, error) {
 	return s.changeTag(id, "", trackingLabelRestore)
+}
+
+// DeleteTag permanently removes an archived tag without altering its time entries.
+func (s *Store) DeleteTag(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	if s.timeTrackingCatalog == nil {
+		return errors.New("tag not found")
+	}
+	catalog := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+	index := slices.IndexFunc(catalog.Tags, func(tag TimeTag) bool { return tag.ID == id })
+	if index < 0 {
+		return errors.New("tag not found")
+	}
+	tag := catalog.Tags[index]
+	if tag.ArchivedAtUTC == "" {
+		return errors.New("tag must be archived before deletion")
+	}
+	now := time.Now().UTC()
+	catalog.Tags = append(catalog.Tags[:index], catalog.Tags[index+1:]...)
+	catalog.DeletedTags = upsertTombstone(catalog.DeletedTags, Tombstone{ID: id, Revision: tag.Revision + 1, ModifiedAt: now.UnixMilli()})
+	advanceTrackingCatalogRevision(&catalog, now)
+	if err := s.writeTimeTrackingCatalogLocked(catalog); err != nil {
+		return err
+	}
+	s.timeTrackingCatalog = &catalog
+	return nil
 }
 
 func (s *Store) changeTag(id, name string, action trackingLabelAction) (TimeTag, error) {
