@@ -3,6 +3,7 @@ import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { TimeClient, TimeDashboard, TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeProject, TimeTag, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
 import { ClientSelect, DashboardPeriodSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
+import { ThemedDatePicker } from "./ThemedDatePicker";
 import {
   formatDuration,
   formatDurationWithPercentage,
@@ -166,6 +167,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
   };
 
   const beginEdit = (entry: TimeEntry) => {
+    setError("");
     setEditing(entry); setEditName(entry.name); setEditProjectID(entry.projectId ?? "");
     setEditClientID(entry.clientId ?? (catalog?.projects ?? []).find((project) => project.id === entry.projectId)?.clientId ?? "");
     setEditTagIDs(entry.tagIds ?? []); setEditStartedAt(localDateTimeValue(entry.startedAtUtc));
@@ -180,7 +182,8 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
         editing.id, editName, editClientID, editProjectID, editTagIDs,
         localDateTimeToUTC(editStartedAt), localDateTimeToUTC(editEndedAt),
       );
-      await loadEntries(); setEditing(null);
+      setEditing(null);
+      await loadEntries();
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
@@ -292,7 +295,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
           if (value === "custom") setDashboardCustom(true);
           else { setDashboardCustom(false); setDashboardPreset(value); }
         }} />
-        {dashboardCustom && <><input aria-label="Start date" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /><input aria-label="End date" type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></>}
+        {dashboardCustom && <><ThemedDatePicker ariaLabel="Start date" value={customStart} onChange={setCustomStart} /><ThemedDatePicker ariaLabel="End date" value={customEnd} onChange={setCustomEnd} /></>}
         <ClientSelect label="Filter client" clients={catalog?.clients ?? []} selected={dashboardClient} onChange={(id) => {
           setDashboardClient(id);
           if (id && dashboardProject && (catalog?.projects ?? []).find((project) => project.id === dashboardProject)?.clientId !== id) setDashboardProject("");
@@ -370,7 +373,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
           </> : tab === "dashboard" ? dashboardView() : tab === "clients" ? labelManager("client") : tab === "projects" ? labelManager("project") : labelManager("tag")}
         </>}
       </div>
-      {editing && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3><label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><ClientSelect clients={catalog?.clients ?? []} selected={editClientID} onChange={(id) => { setEditClientID(id); if (editProjectID && (catalog?.projects ?? []).find((project) => project.id === editProjectID)?.clientId !== id) setEditProjectID(""); }} /><ProjectSelect projects={(catalog?.projects ?? []).filter((project) => !editClientID || project.clientId === editClientID)} selected={editProjectID} onChange={(id) => { setEditProjectID(id); if (!editClientID) setEditClientID((catalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} /><TagMultiSelect tags={catalog?.tags ?? []} selected={editTagIDs} onChange={setEditTagIDs} /><label>Started<input type="datetime-local" value={editStartedAt} onChange={(event) => setEditStartedAt(event.target.value)} /></label><label>Ended<input type="datetime-local" value={editEndedAt} onChange={(event) => setEditEndedAt(event.target.value)} /></label><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button" disabled={busy}>Save correction</button></div></form></div>}
+      {editing && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3>{error && <div className="time-tracking-error" role="alert">{error}</div>}<label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><ClientSelect clients={catalog?.clients ?? []} selected={editClientID} onChange={(id) => { setEditClientID(id); if (editProjectID && (catalog?.projects ?? []).find((project) => project.id === editProjectID)?.clientId !== id) setEditProjectID(""); }} /><ProjectSelect projects={(catalog?.projects ?? []).filter((project) => !editClientID || project.clientId === editClientID)} selected={editProjectID} onChange={(id) => { setEditProjectID(id); if (!editClientID) setEditClientID((catalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} /><TagMultiSelect tags={catalog?.tags ?? []} selected={editTagIDs} onChange={setEditTagIDs} /><label>Started<ThemedDatePicker ariaLabel="Started" value={editStartedAt} onChange={setEditStartedAt} withTime /></label><label>Ended<ThemedDatePicker ariaLabel="Ended" value={editEndedAt} onChange={setEditEndedAt} withTime /></label><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setEditing(null); setError(""); }}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>Save correction</button></div></form></div>}
       {confirmAction && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label={confirmAction === "finish" ? "Finish timer" : "Delete time entry"}><div><h3>{confirmAction === "finish" ? "Finish active timer?" : "Delete this entry?"}</h3><p>{confirmAction === "finish" ? activeEntry?.name : deleting?.name}</p><div className="settings-actions"><button className="secondary-button" onClick={() => { setConfirmAction(null); setDeleting(null); }}>Cancel</button><button className="primary-button" disabled={busy} onClick={() => confirmAction === "finish" ? void finishEntry() : void deleteEntry()}>{confirmAction === "finish" ? "Finish timer" : "Delete entry"}</button></div></div></div>}
       {labelAction && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label={`${labelAction.action === "delete" ? "Delete" : labelAction.action === "restore" ? "Restore" : "Archive"} ${labelAction.kind}`}><div><h3>{labelAction.action === "delete" ? "Delete" : labelAction.action === "restore" ? "Restore" : "Archive"} this {labelAction.kind}?</h3>{labelAction.action === "delete" && <p>Historical time entries will not be changed.</p>}<div className="settings-actions"><button className="secondary-button" onClick={() => setLabelAction(null)}>Cancel</button><button className={labelAction.action === "delete" ? "danger-button" : "primary-button"} disabled={busy} onClick={() => void applyLabelAction()}>Confirm</button></div></div></div>}
     </section>

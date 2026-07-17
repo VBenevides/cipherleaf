@@ -69,6 +69,25 @@ const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "dark", label: "Dark (Nord)", swatch: "dark" },
   { value: "archivist", label: "Archivist", swatch: "archivist" },
 ];
+const NOTE_SORT_OPTIONS = [
+  { value: "manual", label: "Manual" },
+  { value: "title", label: "Title" },
+  { value: "updated", label: "Updated" },
+  { value: "created", label: "Created" },
+] as const;
+
+function NoteSortSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const label = NOTE_SORT_OPTIONS.find((option) => option.value === value)?.label ?? "Manual";
+  const choose = (next: string) => { onChange(next); if (details.current) details.current.open = false; };
+  return <details ref={details} className="notes-sort-select">
+    <summary aria-label="Sort notes">{label}</summary>
+    <div className="notes-sort-options" role="listbox" aria-label="Sort notes">
+      {NOTE_SORT_OPTIONS.map((option) => <button type="button" role="option" aria-selected={value === option.value} key={option.value} onClick={() => choose(option.value)}>{option.label}</button>)}
+    </div>
+  </details>;
+}
+
 type TitlebarMenu = "file" | "vault" | "settings";
 type ContextMenuState =
   | { kind: "note"; id: string; label: string; x: number; y: number }
@@ -3858,17 +3877,7 @@ function App() {
                 ? "Unfiled"
                 : folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes"}
           </span>
-          <select
-            className="notes-sort-select"
-            value={currentSortMode}
-            onChange={(event) => setCurrentSortMode(event.target.value)}
-            aria-label="Sort notes"
-          >
-            <option value="manual">Manual</option>
-            <option value="title">Title</option>
-            <option value="updated">Updated</option>
-            <option value="created">Created</option>
-          </select>
+          <NoteSortSelect value={currentSortMode} onChange={setCurrentSortMode} />
           <button className="icon-button" onClick={() => void createNote()} aria-label="Create note" title="New note (Ctrl + N)">
             <Icon name="plus" size={17} />
           </button>

@@ -75,13 +75,13 @@ func TestTrackingMergePreservesEditAndInvariantConflicts(t *testing.T) {
 	for _, conflict := range result.TrackingConflicts {
 		kinds[conflict.Kind] = true
 	}
-	for _, kind := range []TimeTrackingConflictKind{TimeProjectRenameConflict, TimeEntryEditConflict, TimeEntryOverlapConflict, TimeActiveEntriesConflict} {
+	for _, kind := range []TimeTrackingConflictKind{TimeProjectRenameConflict, TimeEntryEditConflict, TimeActiveEntriesConflict} {
 		if !kinds[kind] {
 			t.Fatalf("missing conflict %q: %#v", kind, result.TrackingConflicts)
 		}
 	}
 	first.mu.Lock()
-	if len(first.timeTrackingCatalog.Conflicts) < 4 {
+	if len(first.timeTrackingCatalog.Conflicts) < 3 {
 		first.mu.Unlock()
 		t.Fatal("tracking conflicts were not persisted")
 	}

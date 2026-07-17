@@ -116,9 +116,6 @@ func (s *Store) FinishActiveTimeEntry() (TimeEntry, error) {
 	entry.UpdatedAtUTC = entry.EndedAtUTC
 	entry.ModifiedAt = now.UnixMilli()
 	entry.Revision++
-	if err := s.validateTimeEntryOverlapLocked(entry); err != nil {
-		return TimeEntry{}, err
-	}
 	bucket.Entries[index] = entry
 	catalog := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
 	catalog.ActiveEntry = nil
@@ -179,9 +176,6 @@ func (s *Store) UpdateTimeEntryForClient(id, name, clientID, projectID string, t
 	entry.UpdatedAtUTC = now.Format(time.RFC3339Nano)
 	entry.ModifiedAt = now.UnixMilli()
 	entry.Revision++
-	if err := s.validateTimeEntryOverlapLocked(entry); err != nil {
-		return TimeEntry{}, err
-	}
 	oldMonth, _ := timeEntryMonthUTC(bucket.Entries[index])
 	newMonth := started.Format("2006-01")
 	if oldMonth != newMonth {
@@ -271,32 +265,6 @@ func (s *Store) findTimeTrackingEntryLocked(id string) (timeTrackingBucket, int,
 		}
 	}
 	return timeTrackingBucket{}, -1, errors.New("time entry not found")
-}
-
-func (s *Store) validateTimeEntryOverlapLocked(candidate TimeEntry) error {
-	start, end, err := parseCompletedTimeEntryRange(candidate.StartedAtUTC, candidate.EndedAtUTC)
-	if err != nil {
-		return err
-	}
-	for _, summary := range s.timeTrackingCatalog.Buckets {
-		bucket, err := s.readTimeTrackingBucketLocked(summary.ID)
-		if err != nil {
-			return err
-		}
-		for _, entry := range bucket.Entries {
-			if entry.ID == candidate.ID || entry.EndedAtUTC == "" {
-				continue
-			}
-			otherStart, otherEnd, err := parseCompletedTimeEntryRange(entry.StartedAtUTC, entry.EndedAtUTC)
-			if err != nil {
-				return errors.New("stored time entry has an invalid range")
-			}
-			if start.Before(otherEnd) && otherStart.Before(end) {
-				return errors.New("time entry overlaps another completed entry")
-			}
-		}
-	}
-	return nil
 }
 
 func validateTimeEntryReferences(catalog timeTrackingCatalog, clientID, projectID string, tagIDs []string, activeOnly bool) error {

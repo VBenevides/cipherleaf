@@ -81,8 +81,8 @@ func TestTimeEntryValidationCorrectionAndDeletion(t *testing.T) {
 
 	first := createCompletedTrackingEntry(t, store, "First", project.ID, []string{tag.ID}, "2026-07-10T10:00:00Z", "2026-07-10T11:00:00Z")
 	second := createCompletedTrackingEntry(t, store, "Second", "", nil, "2026-07-10T12:00:00Z", "2026-07-10T13:00:00Z")
-	if _, err := store.UpdateTimeEntry(second.ID, "Second", "", nil, "2026-07-10T10:30:00Z", "2026-07-10T12:30:00Z"); err == nil {
-		t.Fatal("overlapping correction was accepted")
+	if _, err := store.UpdateTimeEntry(second.ID, "Second", "", nil, "2026-07-10T10:30:00Z", "2026-07-10T12:30:00Z"); err != nil {
+		t.Fatal("overlapping correction was rejected:", err)
 	}
 	if _, err := store.UpdateTimeEntry(second.ID, "Second", "", nil, "2026-07-10T14:00:00Z", "2026-07-10T14:00:00Z"); err == nil {
 		t.Fatal("zero-duration correction was accepted")

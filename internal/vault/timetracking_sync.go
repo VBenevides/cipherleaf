@@ -604,22 +604,6 @@ func detectTimeEntryInvariantConflicts(entries map[string]TimeEntry) []TimeTrack
 		a, b := active[0], active[1]
 		conflicts = append(conflicts, newTrackingConflict(TimeActiveEntriesConflict, a.ID, "Multiple active timers require resolution.", &a, &b, nil, nil, nil, nil))
 	}
-	for i := 0; i < len(values); i++ {
-		if values[i].EndedAtUTC == "" {
-			continue
-		}
-		aStart, aEnd, _ := parseCompletedTimeEntryRange(values[i].StartedAtUTC, values[i].EndedAtUTC)
-		for j := i + 1; j < len(values); j++ {
-			if values[j].EndedAtUTC == "" {
-				continue
-			}
-			bStart, bEnd, _ := parseCompletedTimeEntryRange(values[j].StartedAtUTC, values[j].EndedAtUTC)
-			if aStart.Before(bEnd) && bStart.Before(aEnd) {
-				a, b := values[i], values[j]
-				conflicts = append(conflicts, newTrackingConflict(TimeEntryOverlapConflict, a.ID, "Merged time entries overlap.", &a, &b, nil, nil, nil, nil))
-			}
-		}
-	}
 	return conflicts
 }
 

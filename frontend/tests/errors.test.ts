@@ -10,5 +10,6 @@ test("presents actionable vault and file errors", () => {
 
 test("preserves useful validation errors and handles unknown values", () => {
   assert.equal(errorText("vault name is required"), "vault name is required");
+  assert.equal(errorText('{"message":"time entry end must be later than its start"}'), "time entry end must be later than its start");
   assert.equal(errorText({}), "Something went wrong. Please try again.");
 });

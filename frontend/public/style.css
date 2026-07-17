@@ -7,6 +7,7 @@
 }
 
 :root {
+  color-scheme: light;
   --ui-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --title-font: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   --editor-font: Charter, "Bitstream Charter", Georgia, "Times New Roman", serif;
@@ -48,6 +49,23 @@
   --red: #bf616a;
   --modal-surface: #343b49;
   --modal-control-surface: #272d38;
+}
+
+:root:not([data-theme="dark"]) select,
+:root:not([data-theme="dark"]) input[type="date"],
+:root:not([data-theme="dark"]) input[type="datetime-local"] {
+  color-scheme: light !important;
+}
+
+:root:not([data-theme="dark"]) select option {
+  color: var(--ink);
+  background: var(--modal-control-surface);
+}
+
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] input[type="datetime-local"] {
+  color-scheme: dark;
 }
 
 :root[data-theme="archivist"] {
@@ -1138,9 +1156,9 @@ a:focus-visible {
   height: 43px;
   padding: 0 13px;
   color: var(--ink);
-  border: 1px solid #d8d2c6;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--modal-control-surface);
 }
 
 .appearance-fieldset {
@@ -1776,18 +1794,63 @@ a:focus-visible {
 }
 
 .notes-sort-select {
+  position: relative;
   min-width: 82px;
   height: 25px;
   margin-left: auto;
-  padding: 0 7px;
-  color: #77736a;
-  border: 1px solid var(--line-soft);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.5);
+  color: var(--muted);
   font-size: 9px;
   font-weight: 700;
   text-transform: none;
 }
+
+.notes-sort-select summary {
+  height: 25px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px 0 7px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--modal-control-surface);
+  cursor: pointer;
+  list-style: none;
+}
+
+.notes-sort-select summary::-webkit-details-marker { display: none; }
+.notes-sort-select summary::after { position: absolute; right: 8px; content: "▾"; }
+.notes-sort-select summary:focus-visible { outline: none; border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 24%, transparent); }
+
+.notes-sort-options {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--modal-surface);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .18);
+}
+
+.notes-sort-options button {
+  min-height: 24px;
+  padding: 3px 7px;
+  color: var(--ink);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+}
+
+.notes-sort-options button:hover,
+.notes-sort-options button[aria-selected="true"] { color: var(--green-dark); background: var(--green-pale); }
 
 .folders-heading {
   padding-top: 1px;
@@ -2033,9 +2096,9 @@ a:focus-visible {
   min-width: 0;
   display: flex;
   align-items: center;
-  color: #747067;
-  border: 1px solid #d4cfc2;
-  background: rgba(255, 255, 255, 0.43);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: var(--modal-control-surface);
   cursor: pointer;
   font-size: 10px;
   text-align: left;
@@ -2065,8 +2128,8 @@ a:focus-visible {
 .vault-selector-menu button:hover,
 .vault-selector-menu button.active {
   color: var(--green-dark);
-  border-color: #aeb8aa;
-  background: rgba(255, 255, 255, 0.72);
+  border-color: var(--green-dark);
+  background: var(--green-pale);
 }
 
 .vault-selector-menu {
@@ -2076,7 +2139,7 @@ a:focus-visible {
   left: 0;
   width: 100%;
   overflow: hidden;
-  border: 1px solid #d4cfc2;
+  border: 1px solid var(--line);
   border-radius: 7px;
   box-shadow: 0 8px 20px rgba(50, 55, 48, 0.16);
 }
@@ -2089,7 +2152,7 @@ a:focus-visible {
 }
 
 .vault-selector-menu button + button {
-  border-top: 1px solid #e0dbd0;
+  border-top: 1px solid var(--line);
 }
 
 .editor-shell {
@@ -2163,10 +2226,10 @@ a:focus-visible {
   left: 0;
   width: 220px;
   padding: 6px;
-  color: #55534b;
-  border: 1px solid #d4cfc2;
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: rgba(251, 250, 246, 0.99);
+  background: var(--modal-surface);
   box-shadow: 0 18px 48px rgba(42, 43, 36, 0.22);
   backdrop-filter: blur(14px);
 }
@@ -2199,7 +2262,7 @@ a:focus-visible {
 
 .titlebar-menu-popover kbd {
   margin-left: auto;
-  color: #a29e94;
+  color: var(--muted);
   font-family: inherit;
   font-size: 8px;
 }
@@ -2647,6 +2710,49 @@ a:focus-visible {
 .timer-modal fieldset label { display: inline-flex; align-items: center; gap: 5px; margin: 4px 10px 4px 0; }
 .timer-modal-warning, .timer-modal-error { color: var(--red); }
 .time-tracking-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+
+.themed-date-picker { position: relative; min-width: 0; }
+.themed-date-picker-trigger {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--modal-control-surface);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.themed-date-picker-trigger:focus-visible { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.themed-date-picker-popover {
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 252px;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--modal-surface);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .22);
+}
+.themed-date-picker-header { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; text-align: center; }
+.themed-date-picker-header button { height: 25px; color: var(--muted); border: 0; border-radius: 5px; background: transparent; cursor: pointer; font-size: 19px; line-height: 1; }
+.themed-date-picker-header button:hover { color: var(--green-dark); background: var(--green-pale); }
+.themed-date-picker-header strong { font-size: 10px; text-transform: capitalize; }
+.themed-date-picker-weekdays,
+.themed-date-picker-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.themed-date-picker-weekdays span { padding: 2px 0; color: var(--muted); font-size: 9px; font-weight: 700; }
+.themed-date-picker-days button { height: 27px; color: var(--ink); border: 0; border-radius: 5px; background: transparent; cursor: pointer; font: inherit; font-size: 10px; }
+.themed-date-picker-days button:hover { color: var(--green-dark); background: var(--green-pale); }
+.themed-date-picker-days button.selected { color: var(--modal-surface); background: var(--green-dark); }
+.themed-date-picker-days button.outside { color: var(--muted); opacity: .5; }
+.themed-date-picker-time { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; padding-top: 3px; color: var(--muted); font-size: 10px; }
+.themed-date-picker-time input { min-height: 30px; padding: 0 8px; color: var(--ink); border: 1px solid var(--line); border-radius: 5px; background: var(--modal-control-surface); font: inherit; }
 
 .tag-multi-select {
   position: relative;
@@ -3774,10 +3880,10 @@ a:focus-visible {
   max-height: min(360px, calc(100vh - 20px));
   overflow-y: auto;
   padding: 6px;
-  color: #55534b;
-  border: 1px solid #d4cfc2;
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: rgba(251, 250, 246, 0.98);
+  background: var(--modal-surface);
   box-shadow: 0 18px 48px rgba(42, 43, 36, 0.22);
   backdrop-filter: blur(14px);
 }
