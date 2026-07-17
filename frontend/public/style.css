@@ -71,8 +71,8 @@
   --surface-active: #dcc19a;
   --modal-surface: #f0e3d4;
   --modal-control-surface: #f6efe5;
-  --notebook-gutter: 80px;
-  --notebook-margin: 50px;
+  --notebook-gutter: 70px;
+  --notebook-margin: 60px;
 }
 
 :root[data-theme="archivist"] ::selection {
@@ -151,6 +151,10 @@
   );
 }
 
+:root[data-theme="archivist"] .live-markdown-editor .cm-live-object-handle {
+  left: calc(var(--notebook-margin) - var(--notebook-gutter) - 24px);
+}
+
 :root[data-theme="archivist"] .document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line {
   width: min(100%, 1040px);
 }
@@ -220,6 +224,7 @@
 .cm-journal-rule {
   position: absolute;
   right: 0;
+  opacity: 0.6;
 }
 
 :root[data-journal-lines="full"] .cm-journal-rule {
@@ -2097,6 +2102,21 @@ a:focus-visible {
   background: var(--paper);
 }
 
+@media (min-width: 781px) {
+  .document-body {
+    position: relative;
+  }
+
+  .document-body::after {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    box-shadow: inset 10px 0 22px rgba(42, 43, 36, 0.14);
+  }
+}
+
 .editor-topbar {
   min-height: 50px;
   display: flex;
@@ -2967,11 +2987,13 @@ a:focus-visible {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1;
-  opacity: 0.72;
+  opacity: 0;
+  transition: opacity 120ms ease;
   user-select: none;
 }
 
-.object-tree-row:hover .object-tree-handle {
+.object-tree-row:hover .object-tree-handle,
+.object-tree-row.is-dragging .object-tree-handle {
   opacity: 1;
 }
 
@@ -3122,7 +3144,8 @@ a:focus-visible {
   gap: 3px;
   color: var(--muted);
   cursor: grab;
-  opacity: 0.72;
+  opacity: 0;
+  transition: opacity 120ms ease;
   transform: translateY(-50%);
   user-select: none;
 }
@@ -3135,7 +3158,8 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-object-line:hover .cm-live-object-handle,
-.live-markdown-editor .cm-live-object-handle:hover {
+.live-markdown-editor .cm-live-object-handle:hover,
+.live-markdown-editor .cm-live-object-handle.is-dragging {
   opacity: 1;
 }
 
