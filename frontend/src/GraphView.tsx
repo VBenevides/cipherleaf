@@ -216,7 +216,7 @@ export function GraphView({
           </g>
           {nodes.map((node) => {
             const fill = nodeFill(node);
-            const textFill = node.depth >= 3 ? "#1f2937" : "#ffffff";
+            const textFill = node.depth >= 3 ? "var(--ink)" : "var(--on-accent)";
             return (
               <g
                 key={`${node.kind}-${node.id}`}

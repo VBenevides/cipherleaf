@@ -363,7 +363,7 @@ const liveMarkdownTheme = EditorView.theme(
     },
 
     ".cm-live-toggle-button:hover": {
-      backgroundColor: "rgba(127, 127, 127, 0.14)",
+      backgroundColor: "color-mix(in srgb, var(--ink) 14%, transparent)",
       borderRadius: "3px",
     },
 
