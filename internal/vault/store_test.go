@@ -452,6 +452,58 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	}
 }
 
+func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "correct horse battery staple"
+	remoteStore := NewStore()
+	if _, err := remoteStore.Create(t.TempDir(), secret); err != nil {
+		t.Fatal(err)
+	}
+	archivist, err := remoteStore.SaveVaultSettings(VaultSettings{Theme: "archivist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteStore.mu.Lock()
+	remoteStore.manifest.Settings.ModifiedAt = time.Now().Add(time.Hour).UnixMilli()
+	if err := remoteStore.saveManifestLocked(); err != nil {
+		remoteStore.mu.Unlock()
+		t.Fatal(err)
+	}
+	remoteStore.mu.Unlock()
+	remote := t.TempDir()
+	if err := remoteStore.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	localStore := NewStore()
+	if _, err := localStore.RestoreRemoteSnapshot(remote, t.TempDir(), "restored", secret); err != nil {
+		t.Fatal(err)
+	}
+	archivist.Theme = "dark"
+	dark, err := localStore.SaveVaultSettings(archivist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dark.Revision <= archivist.Revision {
+		t.Fatalf("local settings revision = %d, want greater than %d", dark.Revision, archivist.Revision)
+	}
+	merge, err := localStore.MergeRemoteSnapshot(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merge.UpdatedSettings {
+		t.Fatal("older remote settings replaced newer local settings")
+	}
+	got, err := localStore.GetVaultSettings()
+	if err != nil || got.Theme != "dark" {
+		t.Fatalf("merged settings = %#v, %v; want dark theme", got, err)
+	}
+}
+
 func TestVaultSettingsDefaultAutoSyncInterval(t *testing.T) {
 	if got := normalizeVaultSettings(VaultSettings{}).AutoSyncMinutes; got != 15 {
 		t.Fatalf("auto-sync interval = %d, want 15", got)

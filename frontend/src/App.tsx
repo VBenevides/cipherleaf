@@ -545,6 +545,7 @@ function App() {
     autoSyncMinutes,
     autoLockMinutes,
     sectionDefault,
+    revision: 0,
     modifiedAt: 0,
   }), [
     autoLockMinutes,
@@ -559,7 +560,7 @@ function App() {
     theme,
   ]);
 
-  const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, modifiedAt: 0 });
+  const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, revision: 0, modifiedAt: 0 });
 
   const applyVaultSettings = (settings: VaultSettings) => {
     vaultSettingsSnapshotRef.current = settingsSnapshot(settings);

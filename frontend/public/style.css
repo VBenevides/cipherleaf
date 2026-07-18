@@ -47,6 +47,8 @@
   --panel: var(--paper);
   --modal-surface: #fbfaf6;
   --modal-control-surface: #ffffff;
+  --notebook-gutter: 70px;
+  --notebook-margin: 60px;
 }
 
 :root[data-theme="dark"] {
@@ -135,7 +137,7 @@
   --notebook-margin: 60px;
 }
 
-:root[data-theme="archivist"] ::selection {
+::selection {
   background: var(--green-pale);
 }
 
@@ -283,7 +285,8 @@
 
 .cm-journal-rule {
   position: absolute;
-  right: 0;
+  right: 30px;
+  border-color: color-mix(in srgb, var(--line) 62%, transparent);
   opacity: 0.6;
 }
 
@@ -296,7 +299,7 @@
   height: 2px;
   background-image: radial-gradient(
     circle,
-    color-mix(in srgb, var(--line) 90%, var(--ink)) 1px,
+    color-mix(in srgb, var(--line) 55%, transparent) 1px,
     transparent 1.2px
   );
   background-repeat: repeat-x;
@@ -1499,8 +1502,8 @@ a:focus-visible {
   align-items: center;
   gap: 3px;
   padding: 0 8px;
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--modal-control-surface) 98%, transparent);
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
   --wails-draggable: drag;
 }
 
@@ -1562,10 +1565,8 @@ a:focus-visible {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--modal-control-surface);
-  background:
-    linear-gradient(color-mix(in srgb, var(--modal-control-surface) 95%, transparent), color-mix(in srgb, var(--modal-control-surface) 97%, transparent)),
-    var(--canvas);
+  border-right: 1px solid var(--line);
+  background: var(--sidebar-bg);
 }
 
 .workspace.sidebar-collapsed .sidebar {
@@ -2072,7 +2073,7 @@ a:focus-visible {
 .note-list-item small {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .empty-list {
@@ -2204,22 +2205,7 @@ a:focus-visible {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--editor-bg);
-}
-
-@media (min-width: 781px) {
-  .document-body {
-    position: relative;
-  }
-
-  .document-body::after {
-    position: absolute;
-    z-index: 2;
-    inset: 0;
-    content: "";
-    pointer-events: none;
-    box-shadow: inset 10px 0 22px color-mix(in srgb, var(--ink) 14%, transparent);
-  }
+  background: var(--canvas);
 }
 
 .editor-topbar {
@@ -2228,8 +2214,8 @@ a:focus-visible {
   align-items: center;
   gap: 14px;
   padding: 0 20px;
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--modal-control-surface) 93%, transparent);
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
 }
 
 .titlebar-menus {
@@ -2341,7 +2327,7 @@ a:focus-visible {
   align-items: center;
   gap: 9px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .breadcrumb-item {
@@ -2385,7 +2371,7 @@ a:focus-visible {
   gap: 7px;
   margin-left: auto;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .sync-status {
@@ -2393,7 +2379,7 @@ a:focus-visible {
   align-items: center;
   gap: 7px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .sync-now-button {
@@ -2437,7 +2423,7 @@ a:focus-visible {
 
 .last-sync-label {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -2495,7 +2481,7 @@ a:focus-visible {
 }
 
 .document-heading {
-  padding: 32px clamp(30px, 5.4vw, 76px) 17px;
+  padding: 26px var(--notebook-gutter) 13px;
 }
 
 .title-input {
@@ -2518,15 +2504,15 @@ a:focus-visible {
 .document-heading p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .view-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 clamp(30px, 5.4vw, 76px) 7px;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 0 var(--notebook-gutter) 7px;
+  border-bottom: 1px solid var(--line);
 }
 
 .view-tabs button {
@@ -2551,6 +2537,7 @@ a:focus-visible {
   flex: 1;
   display: grid;
   overflow: hidden;
+  background: var(--editor-bg);
 }
 
 .graph-view {
@@ -3286,7 +3273,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-object-handle {
   position: absolute;
-  left: -24px;
+  left: calc(var(--notebook-margin) - var(--notebook-gutter) - 24px);
   top: 50%;
   width: 20px;
   height: 20px;
@@ -3347,9 +3334,9 @@ a:focus-visible {
   width: 100%;
   align-items: center;
   gap: 3px;
-  padding: 3px clamp(30px, 5vw, 72px);
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--modal-control-surface) 72%, transparent);
+  padding: 3px var(--notebook-gutter);
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
 }
 
 .markdown-toolbar button {
@@ -3432,12 +3419,24 @@ a:focus-visible {
 
 .live-markdown-editor .cm-content {
   min-height: 100%;
-  padding: 30px 24px 70px;
+  padding: 34px var(--notebook-gutter) 76px;
   caret-color: var(--green-dark);
+  font-style: normal;
+  background-image: linear-gradient(
+    to right,
+    transparent var(--notebook-margin),
+    color-mix(in srgb, var(--red) 38%, transparent) var(--notebook-margin),
+    color-mix(in srgb, var(--red) 38%, transparent) calc(var(--notebook-margin) + 1px),
+    transparent calc(var(--notebook-margin) + 1px)
+  );
 }
 
 .live-markdown-editor .cm-line {
   padding: var(--editor-line-spacing) 0;
+}
+
+.document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line {
+  width: min(100%, 1040px);
 }
 
 .live-markdown-editor .cm-gutters,
@@ -3479,6 +3478,7 @@ a:focus-visible {
   font-family: inherit;
   font-weight: 500;
   letter-spacing: -0.025em;
+  font-style: italic;
 }
 
 .live-markdown-editor .cm-live-h1 {
@@ -3756,7 +3756,7 @@ a:focus-visible {
   width: 100%;
   height: 1px;
   display: inline-block;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
   cursor: text;
 }
 
@@ -3779,7 +3779,7 @@ a:focus-visible {
 .live-markdown-editor .cm-live-task-line:has(.cm-live-task input:checked) {
   color: var(--muted);
   text-decoration: line-through;
-  text-decoration-color: var(--muted);
+  text-decoration-color: var(--line);
 }
 
 .live-markdown-editor .cm-live-wikilink {
@@ -3802,9 +3802,9 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 0 20px;
+  padding: 0 var(--notebook-gutter);
   color: var(--muted);
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--line);
   font-size: 8px;
 }
 
@@ -3819,8 +3819,8 @@ a:focus-visible {
 .backlinks-panel {
   display: grid;
   gap: 6px;
-  padding: 9px clamp(30px, 5vw, 72px) 13px;
-  border-top: 1px solid var(--line-soft);
+  padding: 9px var(--notebook-gutter) 13px;
+  border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--modal-control-surface) 58%, transparent);
 }
 

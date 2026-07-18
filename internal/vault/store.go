@@ -358,6 +358,7 @@ func (s *Store) SaveVaultSettings(settings VaultSettings) (VaultSettings, error)
 		return VaultSettings{}, err
 	}
 	settings = normalizeVaultSettings(settings)
+	settings.Revision = max(settings.Revision, s.manifest.Settings.Revision) + 1
 	settings.ModifiedAt = time.Now().UnixMilli()
 	s.manifest.Settings = settings
 	if err := s.saveManifestLocked(); err != nil {
@@ -2383,7 +2384,7 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 		return MergeResult{}, fmt.Errorf("merged folder hierarchy %w", err)
 	}
 	mergedSettings := s.manifest.Settings
-	if remote.Manifest.Settings.ModifiedAt > mergedSettings.ModifiedAt {
+	if settingsVersionIsNewer(remote.Manifest.Settings, mergedSettings) {
 		mergedSettings = remote.Manifest.Settings
 		result.UpdatedSettings = true
 		result.UpToDate = false
@@ -2411,6 +2412,13 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 	s.searchIndex = nil
 	_ = s.rebuildSearchIndexLocked()
 	return result, nil
+}
+
+func settingsVersionIsNewer(left, right VaultSettings) bool {
+	if left.Revision != right.Revision {
+		return left.Revision > right.Revision
+	}
+	return left.ModifiedAt > right.ModifiedAt
 }
 
 func copyRemoteNoteObject(source, localRoot, id string) error {

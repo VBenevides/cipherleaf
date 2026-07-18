@@ -128,6 +128,7 @@ type VaultSettings struct {
 	AutoSyncMinutes         int    `json:"autoSyncMinutes"`
 	AutoLockMinutes         int    `json:"autoLockMinutes"`
 	SectionDefault          string `json:"sectionDefault"`
+	Revision                uint64 `json:"revision"`
 	ModifiedAt              int64  `json:"modifiedAt"`
 }
 

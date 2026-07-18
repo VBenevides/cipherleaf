@@ -269,6 +269,7 @@ export interface VaultSettings {
     "autoSyncMinutes": number;
     "autoLockMinutes": number;
     "sectionDefault": string;
+    "revision": number;
     "modifiedAt": number;
 }
 
