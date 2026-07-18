@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Events } from "@wailsio/runtime";
@@ -1244,6 +1245,18 @@ function App() {
       setError(errorText(reason));
       throw reason;
     }
+  };
+
+  const saveCurrentDraft = () => {
+    const snapshot = noteRef.current;
+    if (!snapshot || !dirtyRef.current) return;
+    setNote(snapshot);
+    void persistCurrent(snapshot);
+  };
+
+  const persistWhenEditorLosesFocus = (event: ReactFocusEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    saveCurrentDraft();
   };
 
   const quitApplication = async () => {
@@ -2531,6 +2544,7 @@ function App() {
 
   const setEditorView = (nextView: EditorView) => {
     syncDraftNote();
+    saveCurrentDraft();
     setView(nextView);
   };
 
@@ -3188,6 +3202,7 @@ function App() {
       name: "Time tracking",
       description: "Open tracked entries, clients, projects, and tags",
       run: () => {
+        saveCurrentDraft();
         setGraphOpen(false);
         setTimeTrackingOpen(true);
         setSidebarOpen(false);
@@ -3199,6 +3214,7 @@ function App() {
       name: "Graph view",
       description: "Explore links between notes",
       run: () => {
+        saveCurrentDraft();
         setGraphOpen(true);
         setTimeTrackingOpen(false);
         setSidebarOpen(false);
@@ -3740,6 +3756,7 @@ function App() {
           type="button"
           className={`graph-view-button ${graphOpen ? "active" : ""}`}
           onClick={() => {
+            saveCurrentDraft();
             setGraphOpen(true);
             setTimeTrackingOpen(false);
             setSidebarOpen(false);
@@ -3752,6 +3769,7 @@ function App() {
           type="button"
           className={`graph-view-button time-tracking-view-button ${timeTrackingOpen ? "active" : ""}`}
           onClick={() => {
+            saveCurrentDraft();
             setGraphOpen(false);
             setTimeTrackingOpen(true);
             setSidebarOpen(false);
@@ -3975,7 +3993,7 @@ function App() {
         </div>
       </aside>
 
-      <section className="editor-shell">
+      <section className="editor-shell" onBlur={persistWhenEditorLosesFocus}>
         <header className="editor-topbar">
           <button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
             <Icon name="menu" />
