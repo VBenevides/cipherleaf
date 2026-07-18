@@ -102,6 +102,11 @@
   color-scheme: dark;
 }
 
+:root[data-theme="dark"] select option {
+  color: var(--ink);
+  background: var(--modal-control-surface);
+}
+
 :root[data-theme="archivist"] {
   color: var(--ink);
   background: var(--canvas);
@@ -643,7 +648,7 @@ a:focus-visible {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--green-dark) 52%, transparent);
+  background: color-mix(in srgb, var(--green-dark) 5%, transparent);
   backdrop-filter: blur(7px);
 }
 
