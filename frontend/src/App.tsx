@@ -36,6 +36,8 @@ import type {
 import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
+import { createSerialTaskRunner } from "./serialTask";
+import { canReplaceSearch, isAdvancedSearchQuery, searchResultsKey } from "./globalSearch";
 import {
   markdownFromCanonicalObjectDocument,
   parseCanonicalObjectDocumentText,
@@ -469,6 +471,8 @@ function App() {
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
+  const [globalSearchCaseSensitive, setGlobalSearchCaseSensitive] = useState(false);
+  const [globalSearchWholeWord, setGlobalSearchWholeWord] = useState(false);
   const [globalSearchMatches, setGlobalSearchMatches] = useState<FindMatch[]>([]);
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
@@ -520,9 +524,11 @@ function App() {
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
   const editVersion = useRef(0);
+  const runSerializedSave = useRef(createSerialTaskRunner()).current;
   const noteRef = useRef<Note | null>(null);
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
   const globalSearchRequestRef = useRef(0);
+  const globalSearchResultsKeyRef = useRef("");
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
@@ -877,6 +883,7 @@ function App() {
   useEffect(() => {
     if (globalSearchOpen) return;
     globalSearchRequestRef.current++;
+    globalSearchResultsKeyRef.current = "";
     setGlobalSearchMatches([]);
     setGlobalSearchBusy(false);
   }, [globalSearchOpen]);
@@ -885,6 +892,7 @@ function App() {
     const request = ++globalSearchRequestRef.current;
     const trimmed = query.trim();
     if (!trimmed) {
+      globalSearchResultsKeyRef.current = "";
       setGlobalSearchMatches([]);
       setGlobalSearchBusy(false);
       return;
@@ -892,9 +900,10 @@ function App() {
     setGlobalSearchBusy(true);
     setGlobalSearchError("");
     try {
-      const results = await VaultService.FindInNotes(trimmed);
+      const results = await VaultService.FindInNotes(trimmed, globalSearchCaseSensitive, globalSearchWholeWord);
       const folderByID = new Map(folders.map((folder) => [folder.id, folder]));
       if (request !== globalSearchRequestRef.current) return;
+      globalSearchResultsKeyRef.current = searchResultsKey(trimmed, globalSearchCaseSensitive, globalSearchWholeWord);
       setGlobalSearchMatches(
         (results ?? []).filter(
           (match) => !folderIsLocked(match.folderId, folderByID, unlockedFolderIDs),
@@ -902,12 +911,13 @@ function App() {
       );
     } catch (reason) {
       if (request !== globalSearchRequestRef.current) return;
+      globalSearchResultsKeyRef.current = "";
       setGlobalSearchError(errorText(reason));
       setGlobalSearchMatches([]);
     } finally {
       if (request === globalSearchRequestRef.current) setGlobalSearchBusy(false);
     }
-  }, [folders, unlockedFolderIDs]);
+  }, [folders, globalSearchCaseSensitive, globalSearchWholeWord, unlockedFolderIDs]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -998,7 +1008,18 @@ function App() {
   };
 
   const runGlobalReplace = async () => {
-    if (!globalSearchQuery.trim()) return;
+    if (!canReplaceSearch(
+      globalSearchQuery,
+      globalSearchResultsKeyRef.current,
+      globalSearchBusy,
+      globalSearchCaseSensitive,
+      globalSearchWholeWord,
+    )) {
+      if (isAdvancedSearchQuery(globalSearchQuery)) {
+        setGlobalSearchError("Replace All supports plain-text searches only.");
+      }
+      return;
+    }
     const noteIDs = Array.from(new Set(globalSearchMatches.map((m) => m.noteId)));
     const confirmMessage =
       noteIDs.length === 0
@@ -1024,6 +1045,8 @@ function App() {
         globalSearchQuery,
         globalSearchReplacement,
         noteIDs,
+        globalSearchCaseSensitive,
+        globalSearchWholeWord,
       );
       await refreshNotes();
       await refreshFolders();
@@ -1220,32 +1243,35 @@ function App() {
     setSaveState(state);
   };
 
-  const persistCurrent = async (snapshot = noteRef.current) => {
-    if (!snapshot || !dirtyRef.current) return snapshot;
+  const persistCurrent = (snapshot = noteRef.current) => {
+    if (!snapshot || !dirtyRef.current) return Promise.resolve(snapshot);
+    const version = editVersion.current;
     setSaveState("saving");
-    try {
-      const version = editVersion.current;
-      const saved = await VaultService.SaveNote(
-        snapshot.id,
-        snapshot.title,
-        markdownForEditing(snapshot.content),
-      );
-      updateSummary(saved);
-      setNotes((await VaultService.ListNotes()) ?? []);
-      const prepared = noteForEditing(saved);
-      if (version === editVersion.current) {
-        noteRef.current = prepared.note;
-        dirtyRef.current = false;
-        setNote(prepared.note);
-        setDirty(false);
-        setSaveState("saved");
+    return runSerializedSave(async () => {
+      setSaveState("saving");
+      try {
+        const saved = await VaultService.SaveNote(
+          snapshot.id,
+          snapshot.title,
+          markdownForEditing(snapshot.content),
+        );
+        updateSummary(saved);
+        setNotes((await VaultService.ListNotes()) ?? []);
+        const prepared = noteForEditing(saved);
+        if (version === editVersion.current) {
+          noteRef.current = prepared.note;
+          dirtyRef.current = false;
+          setNote(prepared.note);
+          setDirty(false);
+          setSaveState("saved");
+        }
+        return prepared.note;
+      } catch (reason) {
+        setSaveState("error");
+        setError(errorText(reason));
+        throw reason;
       }
-      return prepared.note;
-    } catch (reason) {
-      setSaveState("error");
-      setError(errorText(reason));
-      throw reason;
-    }
+    });
   };
 
   const saveCurrentDraft = () => {
@@ -5342,9 +5368,16 @@ function App() {
               <input
                 className="global-search-input"
                 type="text"
-                placeholder="Search text, tag:name, folder:name, property:key=value, or re:pattern"
+                placeholder={globalSearchReplace ? "Search plain text to replace" : "Search text, tag:name, folder:name, property:key=value, or re:pattern"}
                 value={globalSearchQuery}
-                onChange={(event) => setGlobalSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  const query = event.target.value;
+                  globalSearchRequestRef.current++;
+                  globalSearchResultsKeyRef.current = "";
+                  setGlobalSearchMatches([]);
+                  setGlobalSearchBusy(Boolean(query.trim()));
+                  setGlobalSearchQuery(query);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     setGlobalSearchOpen(false);
@@ -5352,6 +5385,36 @@ function App() {
                 }}
                 autoFocus
               />
+            </div>
+            <div className="global-search-options" aria-label="Search options">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={globalSearchCaseSensitive}
+                  onChange={(event) => {
+                    globalSearchRequestRef.current++;
+                    globalSearchResultsKeyRef.current = "";
+                    setGlobalSearchMatches([]);
+                    setGlobalSearchBusy(Boolean(globalSearchQuery.trim()));
+                    setGlobalSearchCaseSensitive(event.target.checked);
+                  }}
+                />
+                Case sensitive
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={globalSearchWholeWord}
+                  onChange={(event) => {
+                    globalSearchRequestRef.current++;
+                    globalSearchResultsKeyRef.current = "";
+                    setGlobalSearchMatches([]);
+                    setGlobalSearchBusy(Boolean(globalSearchQuery.trim()));
+                    setGlobalSearchWholeWord(event.target.checked);
+                  }}
+                />
+                Match whole word
+              </label>
             </div>
             {globalSearchReplace && (
               <div className="global-search-row">
@@ -5372,7 +5435,13 @@ function App() {
                 <button
                   type="button"
                   className="sync-now-button"
-                  disabled={globalSearchBusy || !globalSearchQuery.trim()}
+                  disabled={!canReplaceSearch(
+                    globalSearchQuery,
+                    globalSearchResultsKeyRef.current,
+                    globalSearchBusy,
+                    globalSearchCaseSensitive,
+                    globalSearchWholeWord,
+                  )}
                   onClick={() => void runGlobalReplace()}
                 >
                   Replace all

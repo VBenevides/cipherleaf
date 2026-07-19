@@ -4436,6 +4436,21 @@ a:focus-visible {
   border-color: var(--green-dark);
 }
 
+.global-search-options {
+  display: flex;
+  gap: 18px;
+  padding: 8px 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.global-search-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
 .global-search-results {
   flex: 1;
   overflow-y: auto;

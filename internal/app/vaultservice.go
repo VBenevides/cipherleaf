@@ -859,12 +859,12 @@ func (s *VaultService) ListBacklinks(noteID string) ([]vault.FindMatch, error) {
 	return s.store.ListBacklinks(noteID)
 }
 
-func (s *VaultService) FindInNotes(query string) ([]vault.FindMatch, error) {
-	return s.store.FindInNotes(query, 20)
+func (s *VaultService) FindInNotes(query string, caseSensitive, wholeWord bool) ([]vault.FindMatch, error) {
+	return s.store.FindInNotesWithOptions(query, 20, vault.SearchOptions{CaseSensitive: caseSensitive, WholeWord: wholeWord})
 }
 
-func (s *VaultService) ReplaceAcrossNotes(find, replace string, noteIDs []string) (vault.ReplaceResult, error) {
-	return s.store.ReplaceAcrossNotes(find, replace, noteIDs)
+func (s *VaultService) ReplaceAcrossNotes(find, replace string, noteIDs []string, caseSensitive, wholeWord bool) (vault.ReplaceResult, error) {
+	return s.store.ReplaceAcrossNotesWithOptions(find, replace, noteIDs, vault.SearchOptions{CaseSensitive: caseSensitive, WholeWord: wholeWord})
 }
 
 func (s *VaultService) GetVaultSettings() (vault.VaultSettings, error) {

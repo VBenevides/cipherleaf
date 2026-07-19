@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,60 @@ func TestGeneralFileAttachmentRoundTripAndExport(t *testing.T) {
 	attachments, err := imported.ListFileAttachments(importedNotes[0].ID)
 	if err != nil || len(attachments) != 1 || attachments[0].Filename != "report.txt" {
 		t.Fatalf("imported file attachments = %#v, %v", attachments, err)
+	}
+}
+
+func TestMarkdownExportKeepsDuplicateAttachmentNamesPortable(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "file-attachment-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []AttachmentInfo
+	for index, body := range []string{"first", "second"} {
+		directory := filepath.Join(t.TempDir(), string(rune('a'+index)))
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(directory, "report 2026.txt")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		attachment, err := store.ImportFileAttachment(note.ID, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attachments = append(attachments, attachment)
+	}
+	content := "[first](attachment:" + attachments[0].ID + ")\n[second](attachment:" + attachments[1].ID + ")"
+	if _, err := store.SaveNote(note.ID, note.Title, content); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := store.ExportMarkdown(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	markdown, err := os.ReadFile(filepath.Join(exported.Path, "Documents.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markdown), "report%202026.txt") || !strings.Contains(string(markdown), "report%202026%20%282%29.txt") {
+		t.Fatalf("exported Markdown = %q", markdown)
+	}
+	imported := NewStore()
+	if _, err := imported.Create(t.TempDir(), "import-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := imported.ImportMarkdown(exported.Path); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ := imported.ListNotes()
+	files, err := imported.ListFileAttachments(notes[0].ID)
+	if err != nil || len(files) != 2 || files[0].Filename == files[1].Filename {
+		t.Fatalf("imported attachments = %#v, %v", files, err)
 	}
 }
 

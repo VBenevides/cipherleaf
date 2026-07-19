@@ -1770,6 +1770,87 @@ func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
 	}
 }
 
+func TestSearchAndReplacePreserveUnicodeByteRanges(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Kelvin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Value K"); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.FindInNotes("k", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range matches {
+		source := "Value K"
+		if match.Field == "title" {
+			source = "Kelvin"
+		}
+		if source[match.Offset:match.Offset+match.MatchLength] != "K" {
+			t.Fatalf("match range = %d:%d in %q", match.Offset, match.MatchLength, source)
+		}
+	}
+	if len(matches) != 2 {
+		t.Fatalf("matches = %#v, want title and content matches", matches)
+	}
+	if _, err := store.ReplaceAcrossNotes("k", "K", nil); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "Kelvin" || updated.Content != "Value K" {
+		t.Fatalf("updated note = %#v", updated)
+	}
+}
+
+func TestReplaceAcrossNotesRejectsAdvancedSearchQueries(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReplaceAcrossNotes("tag:work", "done", nil); err == nil {
+		t.Fatal("advanced replacement query was accepted")
+	}
+}
+
+func TestFindAndReplaceOptionsControlCaseAndWholeWords(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "search-options-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Options")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Cat concatenate cat café caféine"); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.FindInNotesWithOptions("cat", 20, SearchOptions{CaseSensitive: true, WholeWord: true})
+	if err != nil || len(matches) != 1 || matches[0].Snippet != "Cat concatenate cat café caféine" {
+		t.Fatalf("case-sensitive whole-word matches = %#v, %v", matches, err)
+	}
+	if _, err := store.ReplaceAcrossNotesWithOptions("Cat", "Dog", nil, SearchOptions{CaseSensitive: true, WholeWord: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReplaceAcrossNotesWithOptions("café", "tea", nil, SearchOptions{WholeWord: true}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Content != "Dog concatenate cat tea caféine" {
+		t.Fatalf("updated content = %q", updated.Content)
+	}
+}
+
 func TestRemoteTombstonesDeleteAndDoNotResurrectNotesOrFolders(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024

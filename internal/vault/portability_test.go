@@ -119,3 +119,35 @@ func TestMarkdownImportRejectsSymlinks(t *testing.T) {
 		t.Fatalf("ImportMarkdown() error = %v", err)
 	}
 }
+
+func TestMarkdownImportFailureLeavesVaultUnchanged(t *testing.T) {
+	source := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(source, "Projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "Projects", "Valid.md"), []byte("valid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "Broken.md"), []byte("[missing](attachments/missing.txt)"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "atomic-import-secret"); err != nil {
+		t.Fatal(err)
+	}
+	existing, err := store.CreateNote("Existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ImportMarkdown(source); err == nil {
+		t.Fatal("import with a missing attachment succeeded")
+	}
+	notes, err := store.ListNotes()
+	if err != nil || len(notes) != 1 || notes[0].ID != existing.ID {
+		t.Fatalf("notes after failed import = %#v, %v", notes, err)
+	}
+	folders, err := store.ListFolders()
+	if err != nil || len(folders) != 0 {
+		t.Fatalf("folders after failed import = %#v, %v", folders, err)
+	}
+}

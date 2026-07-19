@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"cipherleaf/internal/secure"
@@ -1578,11 +1579,20 @@ func (s *Store) ListUnlinkedMentions(noteID string) ([]FindMatch, error) {
 	return result, nil
 }
 
-// FindInNotes decrypts every note, locates all case-insensitive matches of
-// query, and returns up to maxPerNote snippets per note. Matches report the
+type SearchOptions struct {
+	CaseSensitive bool
+	WholeWord     bool
+}
+
+// FindInNotes decrypts every note, locates matches of query, and returns up
+// to maxPerNote snippets per note. Matches report the
 // exact offset and length inside the note's plain-text content so the
 // editor can scroll to them.
 func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
+	return s.FindInNotesWithOptions(query, maxPerNote, SearchOptions{})
+}
+
+func (s *Store) FindInNotesWithOptions(query string, maxPerNote int, options SearchOptions) ([]FindMatch, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := s.requireUnlocked(); err != nil {
@@ -1592,10 +1602,9 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 	if _, advanced, err := parseAdvancedQuery(rawQuery); err != nil {
 		return nil, err
 	} else if advanced {
-		return s.findAdvancedLocked(rawQuery, maxPerNote)
+		return s.findAdvancedLocked(rawQuery, maxPerNote, options)
 	}
-	query = strings.ToLower(rawQuery)
-	if query == "" {
+	if rawQuery == "" {
 		return []FindMatch{}, nil
 	}
 	if maxPerNote <= 0 {
@@ -1608,26 +1617,20 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 		if s.requireNoteAccessibleLocked(item) != nil {
 			continue
 		}
-		haystack := strings.ToLower(item.Title)
-		idx := 0
-		for count := 0; count < maxPerNote; count++ {
-			at := strings.Index(haystack[idx:], query)
-			if at < 0 {
-				break
-			}
+		titleMatches, err := literalMatches(item.Title, rawQuery, options, maxPerNote)
+		if err != nil {
+			return nil, err
+		}
+		for _, match := range titleMatches {
 			results = append(results, withUTF16Range(FindMatch{
 				NoteID:      item.ID,
 				Title:       item.Title,
 				FolderID:    item.FolderID,
 				Field:       "title",
-				Snippet:     makeSnippet(item.Title, idx+at, len(query)),
-				Offset:      idx + at,
-				MatchLength: len(query),
+				Snippet:     makeSnippet(item.Title, match[0], match[1]-match[0]),
+				Offset:      match[0],
+				MatchLength: match[1] - match[0],
 			}, item.Title))
-			idx += at + len(query)
-			if idx >= len(haystack) {
-				break
-			}
 		}
 		content, indexed := s.searchIndex[item.ID]
 		if !indexed {
@@ -1637,27 +1640,20 @@ func (s *Store) FindInNotes(query string, maxPerNote int) ([]FindMatch, error) {
 			}
 			content = derivedMarkdownContent(note.Content)
 		}
-		lowerContent := strings.ToLower(content)
-		cidx := 0
-		for count := 0; count < maxPerNote; count++ {
-			at := strings.Index(lowerContent[cidx:], query)
-			if at < 0 {
-				break
-			}
-			abs := cidx + at
+		contentMatches, err := literalMatches(content, rawQuery, options, maxPerNote)
+		if err != nil {
+			return nil, err
+		}
+		for _, match := range contentMatches {
 			results = append(results, withUTF16Range(FindMatch{
 				NoteID:      item.ID,
 				Title:       item.Title,
 				FolderID:    item.FolderID,
 				Field:       "content",
-				Snippet:     makeSnippet(content, abs, len(query)),
-				Offset:      abs,
-				MatchLength: len(query),
+				Snippet:     makeSnippet(content, match[0], match[1]-match[0]),
+				Offset:      match[0],
+				MatchLength: match[1] - match[0],
 			}, content))
-			cidx = abs + len(query)
-			if cidx >= len(lowerContent) {
-				break
-			}
 		}
 	}
 	return results, nil
@@ -1684,12 +1680,16 @@ func makeSnippet(haystack string, offset, length int) string {
 	return prefix + haystack[start:end] + suffix
 }
 
-// ReplaceAcrossNotes performs a case-insensitive substring replacement of
-// find with replace. When noteIDs is empty every note is processed;
+// ReplaceAcrossNotes performs a literal replacement of find with replace.
+// When noteIDs is empty every note is processed;
 // otherwise only the listed notes are updated. The encrypted envelope and
 // ModifiedAt are refreshed for every modified note so sync reconciles the
 // new content.
 func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (ReplaceResult, error) {
+	return s.ReplaceAcrossNotesWithOptions(find, replace, noteIDs, SearchOptions{})
+}
+
+func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []string, options SearchOptions) (ReplaceResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
@@ -1701,12 +1701,16 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 	if strings.Contains(find, "\n") {
 		return ReplaceResult{}, errors.New("search text cannot contain line breaks")
 	}
+	if _, advanced, err := parseAdvancedQuery(strings.TrimSpace(find)); err != nil {
+		return ReplaceResult{}, err
+	} else if advanced {
+		return ReplaceResult{}, errors.New("advanced search queries cannot be replaced")
+	}
 	allowed := make(map[string]struct{}, len(noteIDs))
 	for _, id := range noteIDs {
 		allowed[id] = struct{}{}
 	}
 	restricted := len(noteIDs) > 0
-
 	result := ReplaceResult{}
 	indexedContent := make(map[string]string)
 	for index, item := range s.manifest.Notes {
@@ -1727,23 +1731,28 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 		}
 		titleChanged := false
 		newTitle := note.Title
-		if strings.Contains(strings.ToLower(note.Title), strings.ToLower(find)) {
-			newTitle = replaceInsensitive(note.Title, find, replace)
+		titleMatches, err := literalMatches(note.Title, find, options, -1)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+		if len(titleMatches) > 0 {
+			newTitle = replaceLiteralMatches(note.Title, titleMatches, replace)
 			titleChanged = newTitle != note.Title
 		}
 		content := derivedMarkdownContent(note.Content)
 		newContent := note.Content
-		count := strings.Count(strings.ToLower(content), strings.ToLower(find))
+		contentMatches, err := literalMatches(content, find, options, -1)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+		count := len(contentMatches)
 		if count > 0 {
-			newContent = canonicalizeNoteContent(replaceInsensitive(content, find, replace))
+			newContent = canonicalizeNoteContent(replaceLiteralMatches(content, contentMatches, replace))
 		}
 		if !titleChanged && count == 0 {
 			continue
 		}
-		titleCount := 0
-		if titleChanged {
-			titleCount = strings.Count(strings.ToLower(note.Title), strings.ToLower(find))
-		}
+		titleCount := len(titleMatches)
 		now := time.Now().UTC()
 		updated := Note{
 			ID:         note.ID,
@@ -1779,23 +1788,54 @@ func (s *Store) ReplaceAcrossNotes(find, replace string, noteIDs []string) (Repl
 	return result, nil
 }
 
-func replaceInsensitive(haystack, find, replace string) string {
-	lower := strings.ToLower(haystack)
-	lowerFind := strings.ToLower(find)
-	var builder strings.Builder
-	builder.Grow(len(haystack))
-	idx := 0
-	for {
-		at := strings.Index(lower[idx:], lowerFind)
-		if at < 0 {
-			builder.WriteString(haystack[idx:])
+func literalMatches(value, query string, options SearchOptions, limit int) ([][]int, error) {
+	expression := regexp.QuoteMeta(query)
+	if !options.CaseSensitive {
+		expression = `(?i:` + expression + `)`
+	}
+	pattern, err := regexp.Compile(expression)
+	if err != nil {
+		return nil, err
+	}
+	matches := pattern.FindAllStringIndex(value, -1)
+	result := make([][]int, 0, len(matches))
+	for _, match := range matches {
+		if options.WholeWord && !isWholeWordMatch(value, match[0], match[1]) {
+			continue
+		}
+		result = append(result, match)
+		if limit > 0 && len(result) >= limit {
 			break
 		}
-		abs := idx + at
-		builder.WriteString(haystack[idx:abs])
-		builder.WriteString(replace)
-		idx = abs + len(lowerFind)
 	}
+	return result, nil
+}
+
+func isWholeWordMatch(value string, start, end int) bool {
+	if start > 0 {
+		before, _ := utf8.DecodeLastRuneInString(value[:start])
+		if unicode.IsLetter(before) || unicode.IsNumber(before) || before == '_' {
+			return false
+		}
+	}
+	if end < len(value) {
+		after, _ := utf8.DecodeRuneInString(value[end:])
+		if unicode.IsLetter(after) || unicode.IsNumber(after) || after == '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func replaceLiteralMatches(value string, matches [][]int, replacement string) string {
+	var builder strings.Builder
+	start := 0
+	for _, match := range matches {
+		builder.WriteString(value[start:match[0]])
+		builder.WriteString(replacement)
+		start = match[1]
+	}
+	builder.WriteString(value[start:])
 	return builder.String()
 }
 
