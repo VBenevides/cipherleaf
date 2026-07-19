@@ -405,7 +405,7 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	}
 	want, err := first.SaveVaultSettings(VaultSettings{
 		Theme: "dark", JournalLines: "dotted", EditorFontSize: 18,
-		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90,
+		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90, AutoSyncMinutes: 20,
 		AutoLockMinutes: 30, SectionDefault: "expanded",
 	})
 	if err != nil {
@@ -430,7 +430,7 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 
 	newer, err := first.SaveVaultSettings(VaultSettings{
 		Theme: "archivist", JournalLines: "full", EditorFontSize: 20,
-		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120,
+		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120, AutoSyncMinutes: 25,
 		AutoLockMinutes: 45, SectionDefault: "collapsed",
 	})
 	if err != nil {
@@ -449,6 +449,64 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	got, err = restored.GetVaultSettings()
 	if err != nil || got != newer {
 		t.Fatalf("merged settings = %#v, %v; want %#v", got, err, newer)
+	}
+}
+
+func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	const secret = "correct horse battery staple"
+	remoteStore := NewStore()
+	if _, err := remoteStore.Create(t.TempDir(), secret); err != nil {
+		t.Fatal(err)
+	}
+	archivist, err := remoteStore.SaveVaultSettings(VaultSettings{Theme: "archivist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteStore.mu.Lock()
+	remoteStore.manifest.Settings.ModifiedAt = time.Now().Add(time.Hour).UnixMilli()
+	if err := remoteStore.saveManifestLocked(); err != nil {
+		remoteStore.mu.Unlock()
+		t.Fatal(err)
+	}
+	remoteStore.mu.Unlock()
+	remote := t.TempDir()
+	if err := remoteStore.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	localStore := NewStore()
+	if _, err := localStore.RestoreRemoteSnapshot(remote, t.TempDir(), "restored", secret); err != nil {
+		t.Fatal(err)
+	}
+	archivist.Theme = "dark"
+	dark, err := localStore.SaveVaultSettings(archivist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dark.Revision <= archivist.Revision {
+		t.Fatalf("local settings revision = %d, want greater than %d", dark.Revision, archivist.Revision)
+	}
+	merge, err := localStore.MergeRemoteSnapshot(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merge.UpdatedSettings {
+		t.Fatal("older remote settings replaced newer local settings")
+	}
+	got, err := localStore.GetVaultSettings()
+	if err != nil || got.Theme != "dark" {
+		t.Fatalf("merged settings = %#v, %v; want dark theme", got, err)
+	}
+}
+
+func TestVaultSettingsDefaultAutoSyncInterval(t *testing.T) {
+	if got := normalizeVaultSettings(VaultSettings{}).AutoSyncMinutes; got != 15 {
+		t.Fatalf("auto-sync interval = %d, want 15", got)
 	}
 }
 
@@ -1709,6 +1767,87 @@ func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
 	}
 	if !isCanonicalObjectDocument(raw.Content) {
 		t.Fatalf("replace corrupted canonical content: %q", raw.Content)
+	}
+}
+
+func TestSearchAndReplacePreserveUnicodeByteRanges(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Kelvin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Value K"); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.FindInNotes("k", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range matches {
+		source := "Value K"
+		if match.Field == "title" {
+			source = "Kelvin"
+		}
+		if source[match.Offset:match.Offset+match.MatchLength] != "K" {
+			t.Fatalf("match range = %d:%d in %q", match.Offset, match.MatchLength, source)
+		}
+	}
+	if len(matches) != 2 {
+		t.Fatalf("matches = %#v, want title and content matches", matches)
+	}
+	if _, err := store.ReplaceAcrossNotes("k", "K", nil); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "Kelvin" || updated.Content != "Value K" {
+		t.Fatalf("updated note = %#v", updated)
+	}
+}
+
+func TestReplaceAcrossNotesRejectsAdvancedSearchQueries(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReplaceAcrossNotes("tag:work", "done", nil); err == nil {
+		t.Fatal("advanced replacement query was accepted")
+	}
+}
+
+func TestFindAndReplaceOptionsControlCaseAndWholeWords(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "search-options-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Options")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "Cat concatenate cat café caféine"); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.FindInNotesWithOptions("cat", 20, SearchOptions{CaseSensitive: true, WholeWord: true})
+	if err != nil || len(matches) != 1 || matches[0].Snippet != "Cat concatenate cat café caféine" {
+		t.Fatalf("case-sensitive whole-word matches = %#v, %v", matches, err)
+	}
+	if _, err := store.ReplaceAcrossNotesWithOptions("Cat", "Dog", nil, SearchOptions{CaseSensitive: true, WholeWord: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReplaceAcrossNotesWithOptions("café", "tea", nil, SearchOptions{WholeWord: true}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Content != "Dog concatenate cat tea caféine" {
+		t.Fatalf("updated content = %q", updated.Content)
 	}
 }
 

@@ -39,7 +39,7 @@ func TestNewTimeTrackingCatalogDefaults(t *testing.T) {
 		t.Fatalf("unexpected catalog identity: %#v", catalog)
 	}
 	if catalog.Clients == nil || catalog.Projects == nil || catalog.Tags == nil || catalog.Buckets == nil ||
-		catalog.DeletedEntries == nil || catalog.DeletedProjects == nil || catalog.DeletedTags == nil {
+		catalog.DeletedEntries == nil || catalog.DeletedClients == nil || catalog.DeletedProjects == nil || catalog.DeletedTags == nil {
 		t.Fatalf("catalog collections must default to empty arrays: %#v", catalog)
 	}
 	if catalog.ActiveEntry != nil || catalog.Revision != 0 || catalog.ModifiedAt != 0 {

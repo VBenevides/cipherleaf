@@ -83,12 +83,24 @@ export function DeleteAttachment(noteID: string, id: string): $CancellablePromis
     return $Call.ByID(3811592289, noteID, id);
 }
 
+export function DeleteClient(id: string): $CancellablePromise<void> {
+    return $Call.ByID(25439555, id);
+}
+
 export function DeleteFolder(id: string): $CancellablePromise<void> {
     return $Call.ByID(925796928, id);
 }
 
 export function DeleteNote(id: string): $CancellablePromise<void> {
     return $Call.ByID(2625750688, id);
+}
+
+export function DeleteProject(id: string): $CancellablePromise<void> {
+    return $Call.ByID(2717384377, id);
+}
+
+export function DeleteTag(id: string): $CancellablePromise<void> {
+    return $Call.ByID(1642915612, id);
 }
 
 export function DeleteTimeEntry(id: string): $CancellablePromise<void> {
@@ -103,8 +115,8 @@ export function ExportMarkdown(path: string): $CancellablePromise<vault$0.Portab
     return $Call.ByID(1927621820, path);
 }
 
-export function FindInNotes(query: string): $CancellablePromise<vault$0.FindMatch[] | null> {
-    return $Call.ByID(991868496, query);
+export function FindInNotes(query: string, caseSensitive: boolean, wholeWord: boolean): $CancellablePromise<vault$0.FindMatch[] | null> {
+    return $Call.ByID(991868496, query, caseSensitive, wholeWord);
 }
 
 export function FinishActiveTimeEntry(): $CancellablePromise<vault$0.TimeEntry> {
@@ -327,8 +339,8 @@ export function ReorderNotes(folderID: string, orderedIDs: string[] | null): $Ca
     return $Call.ByID(2800466995, folderID, orderedIDs);
 }
 
-export function ReplaceAcrossNotes(find: string, replace: string, noteIDs: string[] | null): $CancellablePromise<vault$0.ReplaceResult> {
-    return $Call.ByID(1932071061, find, replace, noteIDs);
+export function ReplaceAcrossNotes(find: string, replace: string, noteIDs: string[] | null, caseSensitive: boolean, wholeWord: boolean): $CancellablePromise<vault$0.ReplaceResult> {
+    return $Call.ByID(1932071061, find, replace, noteIDs, caseSensitive, wholeWord);
 }
 
 export function ResolveNoteReference(reference: string): $CancellablePromise<vault$0.NoteSummary> {

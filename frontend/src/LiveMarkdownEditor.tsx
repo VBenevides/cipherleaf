@@ -49,6 +49,7 @@ import {
   objectOwnerLineNumber,
   normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
+  precedingObjectPrefix,
   replaceExclusiveObjectPrefix,
   remapObjectKeysByLine,
   repeatedObjectPrefix,
@@ -363,7 +364,7 @@ const liveMarkdownTheme = EditorView.theme(
     },
 
     ".cm-live-toggle-button:hover": {
-      backgroundColor: "rgba(127, 127, 127, 0.14)",
+      backgroundColor: "color-mix(in srgb, var(--ink) 14%, transparent)",
       borderRadius: "3px",
     },
 
@@ -2061,7 +2062,12 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
   if (!isCodeContent && !object) return false;
 
-  const inserted = isCodeContent
+  const prefixBeforeObject = range.head === line.from && object?.tag !== "code"
+    ? precedingObjectPrefix(line.text)
+    : null;
+  const inserted = prefixBeforeObject
+    ? `${prefixBeforeObject}\n`
+    : isCodeContent
     ? `\n${indentation}`
     : object?.tag === "code"
     ? "\n"
@@ -2072,7 +2078,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
       from: range.head,
       insert: inserted,
     },
-    selection: EditorSelection.cursor(range.head + inserted.length),
+    selection: EditorSelection.cursor(range.head + (prefixBeforeObject?.length ?? inserted.length)),
   });
 
   view.focus();

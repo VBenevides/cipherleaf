@@ -6,11 +6,12 @@ const view = readFileSync(new URL("../src/TimeTrackingView.tsx", import.meta.url
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
 const tagSelect = readFileSync(new URL("../src/TagMultiSelect.tsx", import.meta.url), "utf8");
+const themedDatePicker = readFileSync(new URL("../src/ThemedDatePicker.tsx", import.meta.url), "utf8");
 
 test("time tracking navigation and dialogs expose keyboard semantics", () => {
   assert.match(view, /role="tablist"/);
   assert.match(view, /aria-selected=\{tab === item\}/);
-  assert.match(view, /type="datetime-local"/);
+  assert.match(view, /<ThemedDatePicker ariaLabel="Started"/);
   assert.match(view, /aria-modal="true"/);
   assert.match(view, /tabIndex=\{0\}/);
 });
@@ -72,6 +73,48 @@ test("client selection filters projects and project selection fills the client",
 });
 
 test("dashboard tag guidance is subdued and expanded task rows are indented", () => {
-  assert.match(style, /section:nth-child\(2\) > small[^}]+color: var\(--muted\); font-size: 8px/);
-  assert.match(style, /section:nth-child\(3\) > div > p \{ padding-left: 18px/);
+	assert.match(style, /\.dashboard-groups header small \{ color: var\(--muted\); font-size: 8px/);
+	assert.match(style, /\.dashboard-group-rows > div > p \{ padding-left: 18px/);
+});
+
+test("dashboard groups clients with percentage durations in a scrollable two-column grid", () => {
+	assert.match(view, /<h3>Clients<\/h3>/);
+	assert.match(view, /formatDurationWithPercentage\(item\.totalSeconds, clientsTotal\)/);
+	assert.match(style, /\.dashboard-groups \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+	assert.match(style, /\.dashboard-groups section \{ height: 196px/);
+	assert.match(style, /\.dashboard-group-rows \{ min-height: 0; overflow-y: auto; \}/);
+});
+
+test("dashboard period selection uses the themed custom dropdown", () => {
+  assert.match(view, /<DashboardPeriodSelect value=\{dashboardCustom \? "custom" : dashboardPreset\}/);
+  assert.match(tagSelect, /export function DashboardPeriodSelect/);
+  assert.doesNotMatch(view, /<select aria-label="Period"/);
+});
+
+test("task correction saves before refreshing and shows save errors", () => {
+  assert.match(view, /setEditing\(null\);\n      await loadEntries\(\);/);
+  assert.match(view, /\{error && <div className="time-tracking-error" role="alert">\{error\}<\/div>\}/);
+});
+
+test("native and popover menus use theme surfaces", () => {
+  assert.match(style, /\.settings-content select \{[\s\S]*background: var\(--modal-control-surface\);/);
+  assert.match(app, /<NoteSortSelect value=\{currentSortMode\} onChange=\{setCurrentSortMode\} \/>/);
+  assert.match(style, /\.notes-sort-options \{[\s\S]*background: var\(--modal-surface\);/);
+  assert.match(style, /\.titlebar-menu-popover \{[\s\S]*background: var\(--modal-surface\);/);
+  assert.match(style, /\.context-menu \{[\s\S]*background: var\(--modal-surface\);/);
+  assert.match(style, /\.vault-selector-button,[\s\S]*background: var\(--modal-control-surface\);/);
+});
+
+test("native date and time pickers follow the selected theme", () => {
+  assert.match(style, /:root \{\n  color-scheme: light;/);
+  assert.match(style, /:root:not\(\[data-theme="dark"\]\) select,[\s\S]*color-scheme: light !important;/);
+  assert.match(style, /:root\[data-theme="dark"\] select,[\s\S]*color-scheme: dark;/);
+  assert.match(style, /:root:not\(\[data-theme="dark"\]\) select option \{[\s\S]*background: var\(--modal-control-surface\);/);
+});
+
+test("task correction and custom periods use the themed calendar", () => {
+  assert.match(view, /<ThemedDatePicker ariaLabel="Start date" value=\{customStart\}/);
+  assert.match(view, /<ThemedDatePicker ariaLabel="Started" value=\{editStartedAt\}/);
+  assert.match(themedDatePicker, /themed-date-picker-popover/);
+  assert.match(themedDatePicker, /type="text" inputMode="numeric"/);
 });

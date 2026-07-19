@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Events } from "@wailsio/runtime";
@@ -35,6 +36,8 @@ import type {
 import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/internal/app/models";
 import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
+import { createSerialTaskRunner } from "./serialTask";
+import { canReplaceSearch, isAdvancedSearchQuery, searchResultsKey } from "./globalSearch";
 import {
   markdownFromCanonicalObjectDocument,
   parseCanonicalObjectDocumentText,
@@ -69,6 +72,25 @@ const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "dark", label: "Dark (Nord)", swatch: "dark" },
   { value: "archivist", label: "Archivist", swatch: "archivist" },
 ];
+const NOTE_SORT_OPTIONS = [
+  { value: "manual", label: "Manual" },
+  { value: "title", label: "Title" },
+  { value: "updated", label: "Updated" },
+  { value: "created", label: "Created" },
+] as const;
+
+function NoteSortSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const label = NOTE_SORT_OPTIONS.find((option) => option.value === value)?.label ?? "Manual";
+  const choose = (next: string) => { onChange(next); if (details.current) details.current.open = false; };
+  return <details ref={details} className="notes-sort-select">
+    <summary aria-label="Sort notes">{label}</summary>
+    <div className="notes-sort-options" role="listbox" aria-label="Sort notes">
+      {NOTE_SORT_OPTIONS.map((option) => <button type="button" role="option" aria-selected={value === option.value} key={option.value} onClick={() => choose(option.value)}>{option.label}</button>)}
+    </div>
+  </details>;
+}
+
 type TitlebarMenu = "file" | "vault" | "settings";
 type ContextMenuState =
   | { kind: "note"; id: string; label: string; x: number; y: number }
@@ -449,6 +471,8 @@ function App() {
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
+  const [globalSearchCaseSensitive, setGlobalSearchCaseSensitive] = useState(false);
+  const [globalSearchWholeWord, setGlobalSearchWholeWord] = useState(false);
   const [globalSearchMatches, setGlobalSearchMatches] = useState<FindMatch[]>([]);
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
@@ -462,6 +486,10 @@ function App() {
   const [autosaveIntervalSeconds, setAutosaveIntervalSeconds] = useState(() => {
     const saved = Number(window.localStorage.getItem("cipherleaf-autosave-seconds"));
     return Number.isFinite(saved) && saved >= 60 ? saved : 60;
+  });
+  const [autoSyncMinutes, setAutoSyncMinutes] = useState(() => {
+    const saved = Number(window.localStorage.getItem("cipherleaf-auto-sync-minutes"));
+    return Number.isFinite(saved) && saved >= 1 ? saved : 15;
   });
   const [autoLockMinutes, setAutoLockMinutes] = useState(() => {
     const saved = Number(window.localStorage.getItem("cipherleaf-auto-lock-minutes"));
@@ -496,9 +524,11 @@ function App() {
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
   const editVersion = useRef(0);
+  const runSerializedSave = useRef(createSerialTaskRunner()).current;
   const noteRef = useRef<Note | null>(null);
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
   const globalSearchRequestRef = useRef(0);
+  const globalSearchResultsKeyRef = useRef("");
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
@@ -508,6 +538,7 @@ function App() {
   const nextWindowLayerRef = useRef(160);
   const vaultSettingsLoadedForRef = useRef("");
   const vaultSettingsSnapshotRef = useRef("");
+  const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
 
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
     theme,
@@ -517,11 +548,14 @@ function App() {
     dailyNoteFolderId: dailyNoteFolderID,
     dailyTemplateNoteId: dailyTemplateNoteID,
     autosaveIntervalSeconds,
+    autoSyncMinutes,
     autoLockMinutes,
     sectionDefault,
+    revision: 0,
     modifiedAt: 0,
   }), [
     autoLockMinutes,
+    autoSyncMinutes,
     autosaveIntervalSeconds,
     dailyNoteFolderID,
     dailyNoteFormat,
@@ -532,7 +566,7 @@ function App() {
     theme,
   ]);
 
-  const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, modifiedAt: 0 });
+  const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, revision: 0, modifiedAt: 0 });
 
   const applyVaultSettings = (settings: VaultSettings) => {
     vaultSettingsSnapshotRef.current = settingsSnapshot(settings);
@@ -543,6 +577,7 @@ function App() {
     setDailyNoteFolderID(settings.dailyNoteFolderId);
     setDailyTemplateNoteID(settings.dailyTemplateNoteId);
     setAutosaveIntervalSeconds(settings.autosaveIntervalSeconds);
+    setAutoSyncMinutes(settings.autoSyncMinutes);
     setAutoLockMinutes(settings.autoLockMinutes);
     setSectionDefault(settings.sectionDefault as SectionDefault);
   };
@@ -688,9 +723,10 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem("cipherleaf-autosave-seconds", String(autosaveIntervalSeconds));
+    window.localStorage.setItem("cipherleaf-auto-sync-minutes", String(autoSyncMinutes));
     window.localStorage.setItem("cipherleaf-auto-lock-minutes", String(autoLockMinutes));
     window.localStorage.setItem("cipherleaf-section-default", sectionDefault);
-  }, [autoLockMinutes, autosaveIntervalSeconds, sectionDefault]);
+  }, [autoLockMinutes, autoSyncMinutes, autosaveIntervalSeconds, sectionDefault]);
 
   useEffect(() => {
     if (!note || session?.locked) {
@@ -847,6 +883,7 @@ function App() {
   useEffect(() => {
     if (globalSearchOpen) return;
     globalSearchRequestRef.current++;
+    globalSearchResultsKeyRef.current = "";
     setGlobalSearchMatches([]);
     setGlobalSearchBusy(false);
   }, [globalSearchOpen]);
@@ -855,6 +892,7 @@ function App() {
     const request = ++globalSearchRequestRef.current;
     const trimmed = query.trim();
     if (!trimmed) {
+      globalSearchResultsKeyRef.current = "";
       setGlobalSearchMatches([]);
       setGlobalSearchBusy(false);
       return;
@@ -862,9 +900,10 @@ function App() {
     setGlobalSearchBusy(true);
     setGlobalSearchError("");
     try {
-      const results = await VaultService.FindInNotes(trimmed);
+      const results = await VaultService.FindInNotes(trimmed, globalSearchCaseSensitive, globalSearchWholeWord);
       const folderByID = new Map(folders.map((folder) => [folder.id, folder]));
       if (request !== globalSearchRequestRef.current) return;
+      globalSearchResultsKeyRef.current = searchResultsKey(trimmed, globalSearchCaseSensitive, globalSearchWholeWord);
       setGlobalSearchMatches(
         (results ?? []).filter(
           (match) => !folderIsLocked(match.folderId, folderByID, unlockedFolderIDs),
@@ -872,12 +911,13 @@ function App() {
       );
     } catch (reason) {
       if (request !== globalSearchRequestRef.current) return;
+      globalSearchResultsKeyRef.current = "";
       setGlobalSearchError(errorText(reason));
       setGlobalSearchMatches([]);
     } finally {
       if (request === globalSearchRequestRef.current) setGlobalSearchBusy(false);
     }
-  }, [folders, unlockedFolderIDs]);
+  }, [folders, globalSearchCaseSensitive, globalSearchWholeWord, unlockedFolderIDs]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -968,7 +1008,18 @@ function App() {
   };
 
   const runGlobalReplace = async () => {
-    if (!globalSearchQuery.trim()) return;
+    if (!canReplaceSearch(
+      globalSearchQuery,
+      globalSearchResultsKeyRef.current,
+      globalSearchBusy,
+      globalSearchCaseSensitive,
+      globalSearchWholeWord,
+    )) {
+      if (isAdvancedSearchQuery(globalSearchQuery)) {
+        setGlobalSearchError("Replace All supports plain-text searches only.");
+      }
+      return;
+    }
     const noteIDs = Array.from(new Set(globalSearchMatches.map((m) => m.noteId)));
     const confirmMessage =
       noteIDs.length === 0
@@ -994,6 +1045,8 @@ function App() {
         globalSearchQuery,
         globalSearchReplacement,
         noteIDs,
+        globalSearchCaseSensitive,
+        globalSearchWholeWord,
       );
       await refreshNotes();
       await refreshFolders();
@@ -1190,32 +1243,47 @@ function App() {
     setSaveState(state);
   };
 
-  const persistCurrent = async (snapshot = noteRef.current) => {
-    if (!snapshot || !dirtyRef.current) return snapshot;
+  const persistCurrent = (snapshot = noteRef.current) => {
+    if (!snapshot || !dirtyRef.current) return Promise.resolve(snapshot);
+    const version = editVersion.current;
     setSaveState("saving");
-    try {
-      const version = editVersion.current;
-      const saved = await VaultService.SaveNote(
-        snapshot.id,
-        snapshot.title,
-        markdownForEditing(snapshot.content),
-      );
-      updateSummary(saved);
-      setNotes((await VaultService.ListNotes()) ?? []);
-      const prepared = noteForEditing(saved);
-      if (version === editVersion.current) {
-        noteRef.current = prepared.note;
-        dirtyRef.current = false;
-        setNote(prepared.note);
-        setDirty(false);
-        setSaveState("saved");
+    return runSerializedSave(async () => {
+      setSaveState("saving");
+      try {
+        const saved = await VaultService.SaveNote(
+          snapshot.id,
+          snapshot.title,
+          markdownForEditing(snapshot.content),
+        );
+        updateSummary(saved);
+        setNotes((await VaultService.ListNotes()) ?? []);
+        const prepared = noteForEditing(saved);
+        if (version === editVersion.current) {
+          noteRef.current = prepared.note;
+          dirtyRef.current = false;
+          setNote(prepared.note);
+          setDirty(false);
+          setSaveState("saved");
+        }
+        return prepared.note;
+      } catch (reason) {
+        setSaveState("error");
+        setError(errorText(reason));
+        throw reason;
       }
-      return prepared.note;
-    } catch (reason) {
-      setSaveState("error");
-      setError(errorText(reason));
-      throw reason;
-    }
+    });
+  };
+
+  const saveCurrentDraft = () => {
+    const snapshot = noteRef.current;
+    if (!snapshot || !dirtyRef.current) return;
+    setNote(snapshot);
+    void persistCurrent(snapshot);
+  };
+
+  const persistWhenEditorLosesFocus = (event: ReactFocusEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    saveCurrentDraft();
   };
 
   const quitApplication = async () => {
@@ -1243,12 +1311,12 @@ function App() {
   }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
 
   useEffect(() => {
-    if (!session || session.locked) return;
-    const delay = autoLockMinutes * 60 * 1000;
-    let timer = window.setTimeout(() => void autoLock(), delay);
+    if (!session || session.locked || !syncLinked || autoSyncMinutes === autoLockMinutes) return;
+    const delay = autoSyncMinutes * 60 * 1000;
+    let timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
     const reset = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => void autoLock(), delay);
+      timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
     };
     const events: (keyof WindowEventMap)[] = [
       "pointerdown",
@@ -1261,7 +1329,32 @@ function App() {
       window.clearTimeout(timer);
       events.forEach((event) => window.removeEventListener(event, reset));
     };
-  }, [autoLockMinutes, session?.vaultId, session?.locked]);
+  }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
+
+  useEffect(() => {
+    if (!session || session.locked) return;
+    const delay = autoLockMinutes * 60 * 1000;
+    const lock = async () => {
+      if (autoSyncMinutes === autoLockMinutes) await autoSyncVaultRef.current();
+      await autoLock();
+    };
+    let timer = window.setTimeout(() => void lock(), delay);
+    const reset = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void lock(), delay);
+    };
+    const events: (keyof WindowEventMap)[] = [
+      "pointerdown",
+      "keydown",
+      "mousemove",
+      "touchstart",
+    ];
+    events.forEach((event) => window.addEventListener(event, reset, { passive: true }));
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((event) => window.removeEventListener(event, reset));
+    };
+  }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked]);
 
   useEffect(() => {
     if (!session || session.locked) { setActiveTimeEntry(null); return; }
@@ -1325,6 +1418,11 @@ function App() {
       }
       if (event.shiftKey && event.key.toLowerCase() === "e") {
         event.preventDefault(); setTimerError(""); setTimerDialog("finish"); return;
+      }
+      if (!event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        setSidebarCollapsed((current) => !current);
+        return;
       }
       if (target?.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
@@ -1678,6 +1776,11 @@ function App() {
     } finally {
       setSyncing(false);
     }
+  };
+
+  autoSyncVaultRef.current = async () => {
+    if (!syncLinked || syncing) return;
+    await syncNow();
   };
 
   async function startConflictResolution(conflict: MergeConflict) {
@@ -2468,6 +2571,7 @@ function App() {
 
   const setEditorView = (nextView: EditorView) => {
     syncDraftNote();
+    saveCurrentDraft();
     setView(nextView);
   };
 
@@ -3085,6 +3189,13 @@ function App() {
       },
     },
     {
+      id: "toggle-sidebar",
+      shortcut: "Ctrl + B",
+      name: "Toggle sidebar",
+      description: "Expand or collapse the sidebar",
+      run: () => setSidebarCollapsed((current) => !current),
+    },
+    {
       id: "find-notes",
       shortcut: "Ctrl + Shift + F",
       name: "Find in all notes",
@@ -3118,6 +3229,7 @@ function App() {
       name: "Time tracking",
       description: "Open tracked entries, clients, projects, and tags",
       run: () => {
+        saveCurrentDraft();
         setGraphOpen(false);
         setTimeTrackingOpen(true);
         setSidebarOpen(false);
@@ -3129,6 +3241,7 @@ function App() {
       name: "Graph view",
       description: "Explore links between notes",
       run: () => {
+        saveCurrentDraft();
         setGraphOpen(true);
         setTimeTrackingOpen(false);
         setSidebarOpen(false);
@@ -3486,7 +3599,7 @@ function App() {
           className="sidebar-collapse-toggle"
           onClick={() => setSidebarCollapsed((current) => !current)}
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
         >
           {sidebarCollapsed ? ">>>" : "<<<"}
         </button>
@@ -3670,6 +3783,7 @@ function App() {
           type="button"
           className={`graph-view-button ${graphOpen ? "active" : ""}`}
           onClick={() => {
+            saveCurrentDraft();
             setGraphOpen(true);
             setTimeTrackingOpen(false);
             setSidebarOpen(false);
@@ -3682,6 +3796,7 @@ function App() {
           type="button"
           className={`graph-view-button time-tracking-view-button ${timeTrackingOpen ? "active" : ""}`}
           onClick={() => {
+            saveCurrentDraft();
             setGraphOpen(false);
             setTimeTrackingOpen(true);
             setSidebarOpen(false);
@@ -3807,17 +3922,7 @@ function App() {
                 ? "Unfiled"
                 : folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes"}
           </span>
-          <select
-            className="notes-sort-select"
-            value={currentSortMode}
-            onChange={(event) => setCurrentSortMode(event.target.value)}
-            aria-label="Sort notes"
-          >
-            <option value="manual">Manual</option>
-            <option value="title">Title</option>
-            <option value="updated">Updated</option>
-            <option value="created">Created</option>
-          </select>
+          <NoteSortSelect value={currentSortMode} onChange={setCurrentSortMode} />
           <button className="icon-button" onClick={() => void createNote()} aria-label="Create note" title="New note (Ctrl + N)">
             <Icon name="plus" size={17} />
           </button>
@@ -3915,7 +4020,7 @@ function App() {
         </div>
       </aside>
 
-      <section className="editor-shell">
+      <section className="editor-shell" onBlur={persistWhenEditorLosesFocus}>
         <header className="editor-topbar">
           <button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
             <Icon name="menu" />
@@ -4396,6 +4501,7 @@ function App() {
                   <div className="settings-submenu">
                     <button type="button" onClick={() => openSettingsSection("general", "settings-daily-notes")}>Daily notes</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-autosave")}>Auto-save</button>
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-auto-sync")}>Auto-sync</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-auto-lock")}>Vault lock</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-section-default")}>Section state</button>
                   </div>
@@ -4452,6 +4558,18 @@ function App() {
                           step="1"
                           value={autosaveIntervalSeconds}
                           onChange={(event) => setAutosaveIntervalSeconds(Math.max(60, Number(event.target.value) || 60))}
+                        />
+                      </label>
+                    </div>
+                    <div id="settings-auto-sync" className="settings-section settings-section-card">
+                      <label>
+                        Auto-sync after inactivity (minutes)
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={autoSyncMinutes}
+                          onChange={(event) => setAutoSyncMinutes(Math.max(1, Number(event.target.value) || 1))}
                         />
                       </label>
                     </div>
@@ -5250,9 +5368,16 @@ function App() {
               <input
                 className="global-search-input"
                 type="text"
-                placeholder="Search text, tag:name, folder:name, property:key=value, or re:pattern"
+                placeholder={globalSearchReplace ? "Search plain text to replace" : "Search text, tag:name, folder:name, property:key=value, or re:pattern"}
                 value={globalSearchQuery}
-                onChange={(event) => setGlobalSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  const query = event.target.value;
+                  globalSearchRequestRef.current++;
+                  globalSearchResultsKeyRef.current = "";
+                  setGlobalSearchMatches([]);
+                  setGlobalSearchBusy(Boolean(query.trim()));
+                  setGlobalSearchQuery(query);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     setGlobalSearchOpen(false);
@@ -5260,6 +5385,36 @@ function App() {
                 }}
                 autoFocus
               />
+            </div>
+            <div className="global-search-options" aria-label="Search options">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={globalSearchCaseSensitive}
+                  onChange={(event) => {
+                    globalSearchRequestRef.current++;
+                    globalSearchResultsKeyRef.current = "";
+                    setGlobalSearchMatches([]);
+                    setGlobalSearchBusy(Boolean(globalSearchQuery.trim()));
+                    setGlobalSearchCaseSensitive(event.target.checked);
+                  }}
+                />
+                Case sensitive
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={globalSearchWholeWord}
+                  onChange={(event) => {
+                    globalSearchRequestRef.current++;
+                    globalSearchResultsKeyRef.current = "";
+                    setGlobalSearchMatches([]);
+                    setGlobalSearchBusy(Boolean(globalSearchQuery.trim()));
+                    setGlobalSearchWholeWord(event.target.checked);
+                  }}
+                />
+                Match whole word
+              </label>
             </div>
             {globalSearchReplace && (
               <div className="global-search-row">
@@ -5280,7 +5435,13 @@ function App() {
                 <button
                   type="button"
                   className="sync-now-button"
-                  disabled={globalSearchBusy || !globalSearchQuery.trim()}
+                  disabled={!canReplaceSearch(
+                    globalSearchQuery,
+                    globalSearchResultsKeyRef.current,
+                    globalSearchBusy,
+                    globalSearchCaseSensitive,
+                    globalSearchWholeWord,
+                  )}
                   onClick={() => void runGlobalReplace()}
                 >
                   Replace all

@@ -131,6 +131,7 @@ export interface TimeDashboard {
     "tagCount": number;
     "totalSeconds": number;
     "averageDaySeconds": number;
+    "clients": TimeDurationGroup[] | null;
     "projects": TimeDurationGroup[] | null;
     "tags": TimeDurationGroup[] | null;
     "tasks": TimeTaskGroup[] | null;
@@ -265,8 +266,10 @@ export interface VaultSettings {
     "dailyNoteFolderId": string;
     "dailyTemplateNoteId": string;
     "autosaveIntervalSeconds": number;
+    "autoSyncMinutes": number;
     "autoLockMinutes": number;
     "sectionDefault": string;
+    "revision": number;
     "modifiedAt": number;
 }
 

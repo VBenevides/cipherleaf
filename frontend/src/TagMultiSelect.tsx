@@ -1,5 +1,25 @@
 import { useRef } from "react";
 import type { TimeClient, TimeProject, TimeTag } from "../bindings/cipherleaf/internal/vault/models";
+import type { DashboardPreset } from "./timeTracking";
+
+const DASHBOARD_PERIOD_LABELS: Record<DashboardPreset | "custom", string> = {
+  "current-week": "Current week",
+  "last-week": "Last week",
+  "current-month": "Current month",
+  "last-month": "Last month",
+  custom: "Custom",
+};
+
+export function DashboardPeriodSelect({ value, onChange }: { value: DashboardPreset | "custom"; onChange: (value: DashboardPreset | "custom") => void }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const choose = (next: DashboardPreset | "custom") => { onChange(next); if (details.current) details.current.open = false; };
+  return <details ref={details} className="tag-multi-select tracking-period-select">
+    <summary aria-label="Period">{DASHBOARD_PERIOD_LABELS[value]}</summary>
+    <div className="tag-multi-select-options" role="listbox" aria-label="Period">
+      {(Object.keys(DASHBOARD_PERIOD_LABELS) as (DashboardPreset | "custom")[]).map((option) => <button type="button" role="option" aria-selected={value === option} key={option} onClick={() => choose(option)}>{DASHBOARD_PERIOD_LABELS[option]}</button>)}
+    </div>
+  </details>;
+}
 
 export function ClientSelect({ clients, selected, onChange, label = "Client", disabled = false }: {
   clients: TimeClient[];

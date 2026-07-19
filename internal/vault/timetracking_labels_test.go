@@ -162,6 +162,67 @@ func TestTimeTrackingLabelRenamePreservesHistoricalReferences(t *testing.T) {
 	}
 }
 
+func TestDeletingArchivedLabelsPreservesHistoricalTimeEntries(t *testing.T) {
+	store, _ := newTrackingTestStore(t)
+	client, err := store.CreateClient("Acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := store.CreateProject("Website", client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := store.CreateTag("Billable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucketID := strings.Repeat("6", 32)
+	entry := TimeEntry{ID: strings.Repeat("7", 32), Name: "Historical", ClientID: client.ID, ProjectID: project.ID, TagIDs: []string{tag.ID}, StartedAtUTC: "2026-07-01T10:00:00Z", EndedAtUTC: "2026-07-01T11:00:00Z", CreatedAtUTC: "2026-07-01T10:00:00Z", UpdatedAtUTC: "2026-07-01T11:00:00Z", Revision: 1}
+	store.mu.Lock()
+	bucket := timeTrackingBucket{FormatVersion: TimeTrackingCatalogFormatVersion, ID: bucketID, Entries: []TimeEntry{entry}}
+	if err := store.writeTimeTrackingBucketLocked(bucket); err != nil {
+		store.mu.Unlock()
+		t.Fatal(err)
+	}
+	catalog := cloneTimeTrackingCatalog(*store.timeTrackingCatalog)
+	catalog.Buckets = updateTimeTrackingBucketSummary(catalog.Buckets, bucket)
+	if err := store.writeTimeTrackingCatalogLocked(catalog); err != nil {
+		store.mu.Unlock()
+		t.Fatal(err)
+	}
+	store.timeTrackingCatalog = &catalog
+	store.mu.Unlock()
+	if _, err := store.ArchiveProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ArchiveClient(client.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ArchiveTag(tag.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteClient(client.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteTag(tag.ID); err != nil {
+		t.Fatal(err)
+	}
+	historicalCatalog, err := store.GetTimeTrackingCatalog()
+	if err != nil || len(historicalCatalog.Clients) != 0 || len(historicalCatalog.Projects) != 0 || len(historicalCatalog.Tags) != 0 {
+		t.Fatalf("archived labels were not deleted: %#v, %v", historicalCatalog, err)
+	}
+	store.mu.Lock()
+	stored, err := store.readTimeTrackingBucketLocked(bucketID)
+	validErr := validateTimeEntryReferences(*store.timeTrackingCatalog, entry.ClientID, entry.ProjectID, entry.TagIDs, false)
+	store.mu.Unlock()
+	if err != nil || validErr != nil || stored.Entries[0].ClientID != entry.ClientID || stored.Entries[0].ProjectID != entry.ProjectID || stored.Entries[0].TagIDs[0] != entry.TagIDs[0] {
+		t.Fatalf("deleting labels changed a historical entry: %#v, %v, %v", stored, err, validErr)
+	}
+}
+
 func TestTimeTrackingLabelMutationRollsBackAfterWriteFailure(t *testing.T) {
 	store, root := newTrackingTestStore(t)
 	project, err := store.CreateProject("Stable")

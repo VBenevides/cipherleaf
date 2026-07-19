@@ -46,7 +46,7 @@ func main() {
 		Title:     appTitle,
 		Width:     1280,
 		Height:    800,
-		MinWidth:  920,
+		MinWidth:  620,
 		MinHeight: 620,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,

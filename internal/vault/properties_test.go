@@ -33,6 +33,12 @@ func TestTypedFrontmatterPropertiesAndAdvancedSearch(t *testing.T) {
 	if matches, err := store.FindInNotes("case:true secret", 20); err != nil || len(matches) != 0 {
 		t.Fatalf("case-sensitive query = %#v, %v", matches, err)
 	}
+	if matches, err := store.FindInNotes("re:secret case:true", 20); err != nil || len(matches) != 0 {
+		t.Fatalf("ordered case-sensitive regex query = %#v, %v", matches, err)
+	}
+	if matches, err := store.FindInNotesWithOptions("re:secret", 20, SearchOptions{CaseSensitive: true}); err != nil || len(matches) != 0 {
+		t.Fatalf("case-sensitive regex option = %#v, %v", matches, err)
+	}
 }
 
 func TestFrontmatterUnknownLinesRemainInContent(t *testing.T) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeStackedExclusiveObjectPrefix,
+  precedingObjectPrefix,
   repeatedObjectPrefix,
   replaceExclusiveObjectPrefix,
 } from "../src/objectDocument.ts";
@@ -23,4 +24,12 @@ test("continues numbering from the previous numbered object", () => {
 
 test("continues bare text objects at the same indentation", () => {
   assert.equal(repeatedObjectPrefix("  < Text"), "  < ");
+});
+
+test("inserting before an object preserves its existing marker", () => {
+  assert.equal(precedingObjectPrefix("> Section"), "> ");
+  assert.equal(precedingObjectPrefix("  < Text"), "  < ");
+  assert.equal(precedingObjectPrefix("* Item"), "* ");
+  assert.equal(precedingObjectPrefix("[x] Done"), "[ ] ");
+  assert.equal(precedingObjectPrefix("3. Third"), "3. ");
 });

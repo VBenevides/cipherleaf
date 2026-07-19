@@ -9,7 +9,19 @@ import (
 type advancedQuery struct {
 	text, title, tag, folder, property, propertyValue string
 	caseSensitive                                     bool
+	patternSource                                     string
 	pattern                                           *regexp.Regexp
+}
+
+func compileAdvancedPattern(source string, caseSensitive bool) (*regexp.Regexp, error) {
+	if !caseSensitive {
+		source = "(?i)" + source
+	}
+	compiled, err := regexp.Compile(source)
+	if err != nil {
+		return nil, fmt.Errorf("invalid search expression: %w", err)
+	}
+	return compiled, nil
 }
 
 func parseAdvancedQuery(value string) (advancedQuery, bool, error) {
@@ -35,43 +47,47 @@ func parseAdvancedQuery(value string) (advancedQuery, bool, error) {
 		case "case":
 			query.caseSensitive, advanced = strings.EqualFold(item, "true"), true
 		case "re":
-			pattern := item
-			if !query.caseSensitive {
-				pattern = "(?i)" + pattern
-			}
-			compiled, err := regexp.Compile(pattern)
-			if err != nil {
-				return query, true, fmt.Errorf("invalid search expression: %w", err)
-			}
-			query.pattern, advanced = compiled, true
+			query.patternSource, advanced = item, true
 		default:
 			terms = append(terms, token)
 		}
 	}
 	query.text = strings.Join(terms, " ")
+	if query.patternSource != "" {
+		var err error
+		query.pattern, err = compileAdvancedPattern(query.patternSource, query.caseSensitive)
+		if err != nil {
+			return query, true, err
+		}
+	}
 	return query, advanced, nil
 }
 
-func containsSearch(value, query string, caseSensitive bool) bool {
-	if !caseSensitive {
-		value, query = strings.ToLower(value), strings.ToLower(query)
-	}
-	return strings.Contains(value, query)
+func containsSearch(value, query string, options SearchOptions) bool {
+	matches, err := literalMatches(value, query, options, 1)
+	return err == nil && len(matches) > 0
 }
 
 func propertyText(value any) string { return strings.TrimSpace(fmt.Sprint(value)) }
 
-func (s *Store) findAdvancedLocked(raw string, maxPerNote int) ([]FindMatch, error) {
+func (s *Store) findAdvancedLocked(raw string, maxPerNote int, options SearchOptions) ([]FindMatch, error) {
 	query, _, err := parseAdvancedQuery(raw)
 	if err != nil {
 		return nil, err
+	}
+	options.CaseSensitive = options.CaseSensitive || query.caseSensitive
+	if query.patternSource != "" && options.CaseSensitive != query.caseSensitive {
+		query.pattern, err = compileAdvancedPattern(query.patternSource, options.CaseSensitive)
+		if err != nil {
+			return nil, err
+		}
 	}
 	result := make([]FindMatch, 0)
 	for _, item := range s.manifest.Notes {
 		if s.requireNoteAccessibleLocked(item) != nil {
 			continue
 		}
-		if query.title != "" && !containsSearch(item.Title, query.title, query.caseSensitive) {
+		if query.title != "" && !containsSearch(item.Title, query.title, options) {
 			continue
 		}
 		if query.tag != "" {
@@ -88,13 +104,13 @@ func (s *Store) findAdvancedLocked(raw string, maxPerNote int) ([]FindMatch, err
 		}
 		if query.folder != "" {
 			folder, found := s.folderByIDLocked(item.FolderID)
-			if !found || !containsSearch(folder.Name, query.folder, query.caseSensitive) {
+			if !found || !containsSearch(folder.Name, query.folder, options) {
 				continue
 			}
 		}
 		if query.property != "" {
 			value, found := item.Properties[query.property]
-			if !found || (query.propertyValue != "" && !containsSearch(propertyText(value), query.propertyValue, query.caseSensitive)) {
+			if !found || (query.propertyValue != "" && !containsSearch(propertyText(value), query.propertyValue, options)) {
 				continue
 			}
 		}
@@ -115,15 +131,15 @@ func (s *Store) findAdvancedLocked(raw string, maxPerNote int) ([]FindMatch, err
 			}
 			offset, length = match[0], match[1]-match[0]
 		case query.text != "":
-			haystack, needle := content, query.text
-			if !query.caseSensitive {
-				haystack, needle = strings.ToLower(haystack), strings.ToLower(needle)
+			matches, err := literalMatches(content, query.text, options, 1)
+			if err != nil {
+				return nil, err
 			}
-			offset = strings.Index(haystack, needle)
-			if offset < 0 {
+			if len(matches) == 0 {
 				continue
 			}
-			length = len(needle)
+			match := matches[0]
+			offset, length = match[0], match[1]-match[0]
 		default:
 			length = len(item.Title)
 		}

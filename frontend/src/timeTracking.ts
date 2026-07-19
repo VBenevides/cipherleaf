@@ -76,6 +76,11 @@ export function formatDuration(totalSeconds: number): string {
   return `${minutes}m`;
 }
 
+export function formatDurationWithPercentage(totalSeconds: number, sectionTotalSeconds: number): string {
+	const percentage = sectionTotalSeconds > 0 ? Math.round(totalSeconds / sectionTotalSeconds * 100) : 0;
+	return `${formatDuration(totalSeconds)} (${percentage}%)`;
+}
+
 export function runningElapsedSeconds(startedAtUTC: string, now = new Date()): number {
   const started = new Date(startedAtUTC);
   if (!Number.isFinite(started.getTime()) || !Number.isFinite(now.getTime())) {

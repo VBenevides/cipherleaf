@@ -1,10 +1,16 @@
 export function errorText(error: unknown): string {
-  const message =
+  let message =
     typeof error === "string"
       ? error
       : error instanceof Error
         ? error.message
         : "";
+  try {
+    const parsed = JSON.parse(message) as { message?: unknown };
+    if (typeof parsed.message === "string") message = parsed.message;
+  } catch {
+    // Wails errors are not always JSON.
+  }
   const normalized = message.toLocaleLowerCase();
 
   if (normalized.includes("no encrypted vault exists")) {
