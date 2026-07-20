@@ -19,10 +19,10 @@ import {
   placeholder,
   type DecorationSet,
 } from "@codemirror/view";
-import { LanguageDescription, highlightingFor } from "@codemirror/language";
+import { HighlightStyle, LanguageDescription, highlightingFor, syntaxHighlighting } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { highlightTree } from "@lezer/highlight";
+import { highlightTree, tags } from "@lezer/highlight";
 import { minimalSetup } from "codemirror";
 import { history, redo, undo } from "@codemirror/commands";
 import {
@@ -99,6 +99,15 @@ type ObjectDocumentContext = {
 };
 
 const setDeepCodeHighlights = StateEffect.define<DecorationSet>();
+
+const codeHighlightStyle = HighlightStyle.define([
+  { tag: tags.keyword, color: "var(--syntax-keyword)" },
+  { tag: tags.function(tags.variableName), color: "var(--syntax-function)" },
+  { tag: [tags.typeName, tags.className], color: "var(--syntax-type)" },
+  { tag: tags.string, color: "var(--syntax-string)" },
+  { tag: [tags.number, tags.bool], color: "var(--syntax-number)" },
+  { tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
+]);
 
 const deepCodeHighlightField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -2477,6 +2486,7 @@ export default function LiveMarkdownEditor({
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
           markdown({ codeLanguages: languages }),
+          syntaxHighlighting(codeHighlightStyle),
           deepCodeHighlightField,
           deepCodeHighlightLoader,
           liveMarkdownTheme,

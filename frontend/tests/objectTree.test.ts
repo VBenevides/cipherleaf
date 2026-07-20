@@ -263,8 +263,11 @@ test("preserves bare text depth in portable markdown", () => {
 test("does not indent fenced code contents", () => {
   assert.equal(portableMarkdown("  ```ts\nconst answer = 42;\n  ```"), "  ```ts\nconst answer = 42;\n  ```");
   const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.match(style, /\.cm-line\.cm-live-object-line:not\(\.cm-live-code-block\)/);
   assert.doesNotMatch(style, /\.cm-live-code-content span/);
+  assert.match(editor, /syntaxHighlighting\(codeHighlightStyle\)/);
+  assert.match(style, /:root\[data-theme="dark"\][\s\S]*--syntax-keyword: #c792ea/);
 });
 
 test("keeps every section after the first as an indented quote", () => {
