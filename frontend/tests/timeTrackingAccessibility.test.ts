@@ -50,6 +50,10 @@ test("completed tasks can resume with the same labels", () => {
   assert.match(view, />Resume<\/button>/);
 });
 
+test("finishing the global timer refreshes the open tracking view", () => {
+  assert.match(app, /<TimeTrackingView key=\{`\$\{session\.vaultId\}:\$\{activeTimeEntry\?\.id \?\? "idle"\}`\}/);
+});
+
 test("task tag choices use a reusable multi-select dropdown", () => {
   assert.match(tagSelect, /<details className=/);
   assert.match(tagSelect, /role="group" aria-label=\{label\}/);

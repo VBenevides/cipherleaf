@@ -198,7 +198,7 @@ func prepareSSHFiles(runtimeDir string) (string, string, error) {
 }
 
 var remoteObjectPath = regexp.MustCompile(`^objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
-var remoteAttachmentPath = regexp.MustCompile(`^attachments/([a-f0-9]{32})/([a-f0-9]{32})\.enc$`)
+var remoteAttachmentPath = regexp.MustCompile(`^attachments/(?:[a-f0-9]{32}|shared)/([a-f0-9]{32})\.enc$`)
 var remoteTrackingObjectPath = regexp.MustCompile(`^tracking/objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
 var remoteVaultID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 

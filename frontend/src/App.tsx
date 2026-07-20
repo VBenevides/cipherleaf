@@ -4121,7 +4121,7 @@ function App() {
 
         {timeTrackingOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
-            <TimeTrackingView key={session.vaultId} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
+            <TimeTrackingView key={`${session.vaultId}:${activeTimeEntry?.id ?? "idle"}`} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
           </Suspense>
         ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>

@@ -365,6 +365,20 @@ func TestManagerUsesValidatedSettingsForConnection(t *testing.T) {
 	}
 }
 
+func TestWorkingTreeLayoutAcceptsSharedAttachment(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "attachments", "shared", strings.Repeat("a", 32)+".enc")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWorkingTreeLayout(root); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type successfulDownloadProvider struct{}
 
 func (successfulDownloadProvider) Link(
