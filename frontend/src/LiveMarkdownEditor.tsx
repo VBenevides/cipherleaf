@@ -747,13 +747,6 @@ function cachedAttachmentData(noteID: string, attachmentID: string) {
   return request;
 }
 
-function forgetAttachmentData(noteID: string, attachmentID: string) {
-  const key = attachmentCacheKey(noteID, attachmentID);
-  attachmentCacheBytes -= (attachmentDataCache.get(key)?.length ?? 0) * 2;
-  attachmentDataCache.delete(key);
-  attachmentDataRequests.delete(key);
-}
-
 class AttachmentWidget extends WidgetType {
   constructor(
     readonly noteID: string,
@@ -881,9 +874,6 @@ class AttachmentWidget extends WidgetType {
           },
         });
         view.focus();
-        forgetAttachmentData(this.noteID, this.attachmentID);
-        void VaultService.DeleteAttachment(this.noteID, this.attachmentID)
-          .catch(this.onError);
       });
       queueMicrotask(() => document.addEventListener("pointerdown", close));
     });
@@ -1371,7 +1361,7 @@ function buildLivePreviewState(
     }
 
     const attachment = parseAttachmentMarkdown(line.text);
-    if (attachment && !lineIsActive(state, lineNumber)) {
+    if (attachment) {
       decorations.push(
         Decoration.line({
           attributes: lineAttributes(lineNumber, "cm-live-attachment-line"),
@@ -1446,7 +1436,7 @@ function buildLivePreviewState(
         new QuoteToggleWidget(line.from, collapsed, !hasChildren),
       );
 
-      if (toggleAttachment && !lineIsActive(state, lineNumber)) {
+      if (toggleAttachment) {
         addHiddenRange(
           contentOffset,
           line.to,

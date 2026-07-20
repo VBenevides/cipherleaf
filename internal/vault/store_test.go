@@ -287,6 +287,10 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	duplicateID, err := store.SaveAttachment(note.ID, slices.Clone(webp))
+	if err != nil || duplicateID != id {
+		t.Fatalf("duplicate attachment ID = %q, %v; want %q", duplicateID, err, id)
+	}
 	path := filepath.Join(session.Path, "attachments", sharedAttachmentFolder, id+".enc")
 	encrypted, err := os.ReadFile(path)
 	if err != nil {
@@ -313,7 +317,7 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if !bytes.Equal(loadedFromOtherNote, webp) {
 		t.Fatal("shared attachment differs when read from another note")
 	}
-	staleID, err := store.SaveAttachment(note.ID, webp)
+	staleID, err := store.SaveAttachment(note.ID, append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("stale pixels")...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +331,7 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if _, err := store.GetAttachment(note.ID, staleID); err == nil {
 		t.Fatal("unreferenced attachment remains after saving")
 	}
-	syncStaleID, err := store.SaveAttachment(note.ID, webp)
+	syncStaleID, err := store.SaveAttachment(note.ID, append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("sync stale pixels")...))
 	if err != nil {
 		t.Fatal(err)
 	}

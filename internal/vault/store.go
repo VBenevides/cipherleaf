@@ -996,6 +996,21 @@ func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
 	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
 		return "", errors.New("image is not valid WebP data")
 	}
+	ids, err := s.sharedAttachmentIDsLocked()
+	if err != nil {
+		return "", err
+	}
+	// ponytail: O(n) encrypted scan; add a keyed hash index if paste latency becomes measurable.
+	for existingID := range ids {
+		existing, err := s.readEnvelopeLocked(
+			s.sharedAttachmentPathLocked(existingID),
+			"attachment",
+			sharedAttachmentAAD(existingID),
+		)
+		if err == nil && bytes.Equal(existing, data) {
+			return existingID, nil
+		}
+	}
 	id, err := randomID(16)
 	if err != nil {
 		return "", fmt.Errorf("create attachment ID: %w", err)

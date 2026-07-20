@@ -110,6 +110,13 @@ test("keeps fenced code as one typed object", () => {
   assert.equal(tree[1].text, "after");
 });
 
+test("keeps image attachments rendered when selected", () => {
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(editor, /attachment && !lineIsActive/);
+  assert.doesNotMatch(editor, /toggleAttachment && !lineIsActive/);
+  assert.doesNotMatch(editor, /VaultService\.DeleteAttachment\(this\.noteID/);
+});
+
 test("moves a complete code block without changing its contents", () => {
   const markdown = [
     "> Parent",
