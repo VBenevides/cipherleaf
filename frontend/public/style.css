@@ -2744,7 +2744,9 @@ a:focus-visible {
 .timer-modal fieldset label { display: inline-flex; align-items: center; gap: 5px; margin: 4px 10px 4px 0; }
 .timer-modal-warning, .timer-modal-error { color: var(--red); }
 .time-tracking-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
-.time-tracking-date-time { display: grid; grid-template-columns: 1fr 100px; gap: 10px; }
+.time-tracking-date-time { display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 10px; }
+.time-tracking-date-time > label { min-width: 0; }
+.time-tracking-date-time input { width: 100%; min-width: 0; }
 
 .themed-date-picker { position: relative; min-width: 0; }
 .themed-date-picker-trigger {

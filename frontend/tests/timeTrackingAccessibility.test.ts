@@ -118,6 +118,7 @@ test("task correction separates themed calendars from validated time fields", ()
   assert.match(view, /aria-label="Started time" type="text" inputMode="numeric" maxLength=\{5\} pattern="\(\?:\[01\]\[0-9\]\|2\[0-3\]\):\[0-5\]\[0-9\]"/);
   assert.match(themedDatePicker, /themed-date-picker-popover/);
   assert.doesNotMatch(themedDatePicker, /withTime/);
+  assert.match(style, /\.time-tracking-date-time input \{ width: 100%; min-width: 0; \}/);
 });
 
 test("every modal backdrop uses a ten percent tint", () => {
