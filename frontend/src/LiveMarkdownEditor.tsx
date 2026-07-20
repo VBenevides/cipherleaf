@@ -1316,6 +1316,10 @@ function buildLivePreviewState(
       decorations.push(Decoration.line({
         attributes: lineAttributes(lineNumber, `cm-live-code-block ${edge}`),
       }).range(line.from));
+      if (edge !== "cm-live-code-content") {
+        const indentation = line.text.length - line.text.trimStart().length;
+        hideSyntaxRange(line.from, line.from + indentation, decorations, atomicRanges);
+      }
       if (lineNumber === codeObject.lineNumber) {
         const languageFrom = line.text.indexOf(codeObject.language ?? "");
         if (languageFrom >= 0 && codeObject.language) {
