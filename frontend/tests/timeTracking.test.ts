@@ -5,6 +5,7 @@ import {
   formatDurationWithPercentage,
   formatLocalDate,
   formatLocalDateTime,
+  formatLocalTime,
   dashboardPresetRange,
   formatRunningDuration,
   inclusiveLocalDateRange,
@@ -47,7 +48,9 @@ test("weekly calendar always contains Monday through Sunday", () => {
 test("time entries use a local YYYY/MM/DD date prefix", () => {
   const date = new Date("2026-07-16T12:00:00Z");
   assert.equal(formatLocalDate(date), "2026/07/16");
-  assert.equal(formatLocalDateTime(date), "2026/07/16, 8:00:00 AM");
+  assert.equal(formatLocalTime(date), "08:00");
+  assert.equal(formatLocalDateTime(date), "2026/07/16, 08:00");
+  assert.equal(formatLocalTime(new Date("2026-07-16T04:00:00Z")), "00:00");
 });
 
 test("local month ranges include complete leap and DST months", () => {

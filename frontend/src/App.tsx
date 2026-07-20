@@ -48,7 +48,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
-import { formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
+import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 
 type VaultAction = "create" | "open" | "clone";
@@ -677,7 +677,7 @@ function App() {
           id: ++consoleEntryIDRef.current,
           level,
           message: values.map(stringify).join(" "),
-          timestamp: new Date().toLocaleTimeString("en-US"),
+          timestamp: formatLocalTime(new Date()),
         },
       ]);
     };
@@ -4230,8 +4230,9 @@ function App() {
                 Edited {new Date(note.updatedAt).toLocaleString("en-US", {
                   month: "long",
                   day: "numeric",
-                  hour: "numeric",
+                  hour: "2-digit",
                   minute: "2-digit",
+                  hourCycle: "h23",
                 })}
               </p>
             </div>
@@ -4450,7 +4451,7 @@ function App() {
               {trashItems.length === 0 && <p className="settings-loading">Trash is empty.</p>}
               {trashItems.map((item) => (
                 <div className="recovery-row" key={`${item.kind}:${item.id}`}>
-                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString("en-US")}</small></span>
+                  <span><strong>{item.title}</strong><small>{item.kind} · {formatLocalDateTime(new Date(item.deletedAt))}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreTrashItem(item)}>Restore</button>
                   <button type="button" className="danger-button" disabled={recoveryBusy} onClick={() => void permanentlyDeleteTrashItem(item)}>Delete</button>
                 </div>
@@ -4462,7 +4463,7 @@ function App() {
               {note && noteVersions.length === 0 && <p className="settings-loading">No earlier versions.</p>}
               {noteVersions.map((version) => (
                 <div className="recovery-row" key={version.revision}>
-                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString("en-US")}</small></span>
+                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {formatLocalDateTime(new Date(version.updatedAt))}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreNoteVersion(version)}>Restore</button>
                 </div>
               ))}
@@ -5117,7 +5118,7 @@ function App() {
             <p className="eyebrow">Time tracking sync conflicts</p>
             <h2 id="tracking-conflict-title">Choose each result explicitly</h2>
             <p>Sync remains blocked until every preserved variant is resolved.</p>
-            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{conflict.localEntry.startedAtUtc} – {conflict.localEntry.endedAtUtc || "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{conflict.remoteEntry.startedAtUtc} – {conflict.remoteEntry.endedAtUtc || "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
+            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{formatLocalDateTime(new Date(conflict.localEntry.startedAtUtc))} – {conflict.localEntry.endedAtUtc ? formatLocalDateTime(new Date(conflict.localEntry.endedAtUtc)) : "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{formatLocalDateTime(new Date(conflict.remoteEntry.startedAtUtc))} – {conflict.remoteEntry.endedAtUtc ? formatLocalDateTime(new Date(conflict.remoteEntry.endedAtUtc)) : "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
           </section>
         </div>
       )}
