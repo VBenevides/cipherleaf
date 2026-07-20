@@ -16,12 +16,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"cipherleaf/internal/atomicfile"
 	"cipherleaf/internal/secure"
 )
 
@@ -40,7 +42,8 @@ const (
 	maxTitleRunes                = 200
 	maxFolderRunes               = 120
 	folderPasswordSaltBytes      = 16
-	folderPasswordVerifierPrefix = "sha256-salt-v1:"
+	folderPasswordVerifierPrefix = "argon2id-v1:"
+	legacyFolderVerifierPrefix   = "sha256-salt-v1:"
 	maxNoteHistory               = 20
 )
 
@@ -82,7 +85,6 @@ type Store struct {
 	root                     string
 	vaultID                  string
 	key                      []byte
-	secret                   []byte
 	manifest                 manifest
 	searchIndex              map[string]string
 	authorizedFolders        map[string]struct{}
@@ -101,6 +103,7 @@ type Store struct {
 	timeTrackingBucketRead   func(string)
 	timeTrackingWriteHook    func(string, string) error
 	timeTrackingNow          func() time.Time
+	manifestWriteHook        func() error
 }
 
 func NewStore() *Store {
@@ -228,7 +231,6 @@ func (s *Store) Create(root, passphrase string) (Session, error) {
 	s.vaultID = vaultID
 	s.key = masterKey
 	masterKeyOwnedByStore = true
-	s.secret = []byte(passphrase)
 	s.manifest = manifest{
 		FormatVersion: FormatVersion,
 		VaultID:       vaultID,
@@ -275,7 +277,6 @@ func (s *Store) Open(root, passphrase string) (Session, error) {
 	s.root = root
 	s.vaultID = config.VaultID
 	s.key = key
-	s.secret = []byte(passphrase)
 	if err := s.loadManifestLocked(); err != nil {
 		s.clearLocked()
 		return Session{}, fmt.Errorf("open encrypted manifest: %w", err)
@@ -440,6 +441,9 @@ func (s *Store) ListFolders() ([]Folder, error) {
 		return nil, err
 	}
 	result := slices.Clone(s.manifest.Folders)
+	for index := range result {
+		result[index] = folderForClient(result[index])
+	}
 	sortFolders(result)
 	return result, nil
 }
@@ -481,7 +485,7 @@ func (s *Store) CreateFolder(name string, parentIDs ...string) (Folder, error) {
 		s.manifest.Folders = s.manifest.Folders[:len(s.manifest.Folders)-1]
 		return Folder{}, err
 	}
-	return folder, nil
+	return folderForClient(folder), nil
 }
 
 func (s *Store) RenameFolder(id, name string) (Folder, error) {
@@ -508,7 +512,7 @@ func (s *Store) RenameFolder(id, name string) (Folder, error) {
 		s.manifest.Folders[index] = original
 		return Folder{}, err
 	}
-	return s.manifest.Folders[index], nil
+	return folderForClient(s.manifest.Folders[index]), nil
 }
 
 func (s *Store) ReorderFolders(orderedIDs []string) error {
@@ -572,7 +576,7 @@ func (s *Store) MoveFolder(id, parentID string) (Folder, error) {
 		return Folder{}, err
 	}
 	if s.manifest.Folders[index].ParentID == parentID {
-		return s.manifest.Folders[index], nil
+		return folderForClient(s.manifest.Folders[index]), nil
 	}
 	if s.folderNameExistsLocked(s.manifest.Folders[index].Name, parentID, id) {
 		return Folder{}, errors.New("a folder with this name already exists")
@@ -585,7 +589,7 @@ func (s *Store) MoveFolder(id, parentID string) (Folder, error) {
 		s.manifest.Folders[index] = original
 		return Folder{}, err
 	}
-	return s.manifest.Folders[index], nil
+	return folderForClient(s.manifest.Folders[index]), nil
 }
 
 func (s *Store) SetFolderHidden(id string, hidden bool) (Folder, error) {
@@ -621,7 +625,7 @@ func (s *Store) LockFolder(id, password string) (Folder, error) {
 			delete(s.authorizedFolders, authorizedID)
 		}
 	}
-	return s.manifest.Folders[index], nil
+	return folderForClient(s.manifest.Folders[index]), nil
 }
 
 func (s *Store) UnlockFolder(id, password string) (Folder, error) {
@@ -646,7 +650,7 @@ func (s *Store) UnlockFolder(id, password string) (Folder, error) {
 		return Folder{}, err
 	}
 	delete(s.authorizedFolders, id)
-	return s.manifest.Folders[index], nil
+	return folderForClient(s.manifest.Folders[index]), nil
 }
 
 func (s *Store) CheckFolderPassword(id, password string) error {
@@ -661,6 +665,18 @@ func (s *Store) CheckFolderPassword(id, password string) error {
 	}
 	if !verifyFolderPassword(s.manifest.Folders[index].LockPasswordHash, password) {
 		return errors.New("folder password is incorrect")
+	}
+	if !strings.HasPrefix(s.manifest.Folders[index].LockPasswordHash, folderPasswordVerifierPrefix) {
+		verifier, err := deriveFolderPasswordVerifier(password)
+		if err != nil {
+			return err
+		}
+		original := s.manifest.Folders[index].LockPasswordHash
+		s.manifest.Folders[index].LockPasswordHash = verifier
+		if err := s.saveManifestLocked(); err != nil {
+			s.manifest.Folders[index].LockPasswordHash = original
+			return err
+		}
 	}
 	if s.authorizedFolders == nil {
 		s.authorizedFolders = make(map[string]struct{})
@@ -714,7 +730,12 @@ func (s *Store) updateFolderLocked(id string, update func(*Folder)) (Folder, err
 		s.manifest.Folders[index] = original
 		return Folder{}, err
 	}
-	return s.manifest.Folders[index], nil
+	return folderForClient(s.manifest.Folders[index]), nil
+}
+
+func folderForClient(folder Folder) Folder {
+	folder.LockPasswordHash = ""
+	return folder
 }
 
 func (s *Store) DeleteFolder(id string) error {
@@ -862,13 +883,6 @@ func (s *Store) ReorderNotes(folderID string, orderedIDs []string) error {
 	return nil
 }
 
-func (s *Store) restoreReorderedNotesLocked(manifest []NoteSummary, notes map[string]Note) {
-	s.manifest.Notes = manifest
-	for _, note := range notes {
-		_, _ = s.writeNoteLocked(note)
-	}
-}
-
 func (s *Store) GetNote(id string) (Note, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -915,6 +929,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		return Note{}, err
 	}
 	originalSummary := s.manifest.Notes[index]
+	originalManifest := cloneManifest(s.manifest)
 	contentMatches := current.Content == storedContent || derivedMarkdownContent(current.Content) == content
 	if current.Title == title && contentMatches {
 		if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
@@ -937,16 +952,18 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	current.ModifiedAt = nextModifiedAt(current.ModifiedAt)
 	current.Revision++
 	hash := originalSummary.CiphertextHash
+	originals := make(map[string]Note)
 	if current.Content != original.Content {
 		hash, err = s.writeNoteLocked(current)
 		if err != nil {
 			return Note{}, err
 		}
+		originals[id] = original
 	}
 	s.manifest.Notes[index] = summaryFromNote(current)
 	s.manifest.Notes[index].CiphertextHash = hash
 	if err := s.saveManifestLocked(); err != nil {
-		return Note{}, err
+		return Note{}, s.rollbackNoteWritesLocked(originalManifest, originals, err)
 	}
 	s.updateSharedAttachmentRefsLocked(originalSummary.AttachmentIDs, s.manifest.Notes[index].AttachmentIDs)
 	s.updateSearchIndexLocked(id, derivedMarkdownContent(current.Content))
@@ -1610,6 +1627,10 @@ func (s *Store) FindInNotesWithOptions(query string, maxPerNote int, options Sea
 	if maxPerNote <= 0 {
 		maxPerNote = 20
 	}
+	pattern, err := compileLiteralPattern(rawQuery, options)
+	if err != nil {
+		return nil, err
+	}
 	items := slices.Clone(s.manifest.Notes)
 	sortSummaries(items)
 	results := make([]FindMatch, 0)
@@ -1617,10 +1638,7 @@ func (s *Store) FindInNotesWithOptions(query string, maxPerNote int, options Sea
 		if s.requireNoteAccessibleLocked(item) != nil {
 			continue
 		}
-		titleMatches, err := literalMatches(item.Title, rawQuery, options, maxPerNote)
-		if err != nil {
-			return nil, err
-		}
+		titleMatches := literalMatches(item.Title, pattern, options.WholeWord, maxPerNote)
 		for _, match := range titleMatches {
 			results = append(results, withUTF16Range(FindMatch{
 				NoteID:      item.ID,
@@ -1640,10 +1658,7 @@ func (s *Store) FindInNotesWithOptions(query string, maxPerNote int, options Sea
 			}
 			content = derivedMarkdownContent(note.Content)
 		}
-		contentMatches, err := literalMatches(content, rawQuery, options, maxPerNote)
-		if err != nil {
-			return nil, err
-		}
+		contentMatches := literalMatches(content, pattern, options.WholeWord, maxPerNote)
 		for _, match := range contentMatches {
 			results = append(results, withUTF16Range(FindMatch{
 				NoteID:      item.ID,
@@ -1706,6 +1721,10 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 	} else if advanced {
 		return ReplaceResult{}, errors.New("advanced search queries cannot be replaced")
 	}
+	pattern, err := compileLiteralPattern(find, options)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
 	allowed := make(map[string]struct{}, len(noteIDs))
 	for _, id := range noteIDs {
 		allowed[id] = struct{}{}
@@ -1713,6 +1732,11 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 	restricted := len(noteIDs) > 0
 	result := ReplaceResult{}
 	indexedContent := make(map[string]string)
+	originalManifest := cloneManifest(s.manifest)
+	originals := make(map[string]Note)
+	rollback := func(err error) (ReplaceResult, error) {
+		return ReplaceResult{}, s.rollbackNoteWritesLocked(originalManifest, originals, err)
+	}
 	for index, item := range s.manifest.Notes {
 		if restricted {
 			if _, ok := allowed[item.ID]; !ok {
@@ -1721,30 +1745,24 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 		}
 		if err := s.requireNoteAccessibleLocked(item); err != nil {
 			if restricted {
-				return ReplaceResult{}, err
+				return rollback(err)
 			}
 			continue
 		}
 		note, err := s.readNoteLocked(item.ID)
 		if err != nil {
-			return ReplaceResult{}, err
+			return rollback(err)
 		}
 		titleChanged := false
 		newTitle := note.Title
-		titleMatches, err := literalMatches(note.Title, find, options, -1)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
+		titleMatches := literalMatches(note.Title, pattern, options.WholeWord, -1)
 		if len(titleMatches) > 0 {
 			newTitle = replaceLiteralMatches(note.Title, titleMatches, replace)
 			titleChanged = newTitle != note.Title
 		}
 		content := derivedMarkdownContent(note.Content)
 		newContent := note.Content
-		contentMatches, err := literalMatches(content, find, options, -1)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
+		contentMatches := literalMatches(content, pattern, options.WholeWord, -1)
 		count := len(contentMatches)
 		if count > 0 {
 			newContent = canonicalizeNoteContent(replaceLiteralMatches(content, contentMatches, replace))
@@ -1767,8 +1785,9 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 		}
 		hash, err := s.writeNoteLocked(updated)
 		if err != nil {
-			return ReplaceResult{}, err
+			return rollback(err)
 		}
+		originals[note.ID] = note
 		s.manifest.Notes[index] = summaryFromNote(updated)
 		s.manifest.Notes[index].CiphertextHash = hash
 		if count > 0 {
@@ -1779,7 +1798,7 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 	}
 	if result.ReplacedNotes > 0 {
 		if err := s.saveManifestLocked(); err != nil {
-			return ReplaceResult{}, err
+			return rollback(err)
 		}
 		for id, content := range indexedContent {
 			s.updateSearchIndexLocked(id, content)
@@ -1788,19 +1807,19 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 	return result, nil
 }
 
-func literalMatches(value, query string, options SearchOptions, limit int) ([][]int, error) {
+func compileLiteralPattern(query string, options SearchOptions) (*regexp.Regexp, error) {
 	expression := regexp.QuoteMeta(query)
 	if !options.CaseSensitive {
 		expression = `(?i:` + expression + `)`
 	}
-	pattern, err := regexp.Compile(expression)
-	if err != nil {
-		return nil, err
-	}
+	return regexp.Compile(expression)
+}
+
+func literalMatches(value string, pattern *regexp.Regexp, wholeWord bool, limit int) [][]int {
 	matches := pattern.FindAllStringIndex(value, -1)
 	result := make([][]int, 0, len(matches))
 	for _, match := range matches {
-		if options.WholeWord && !isWholeWordMatch(value, match[0], match[1]) {
+		if wholeWord && !isWholeWordMatch(value, match[0], match[1]) {
 			continue
 		}
 		result = append(result, match)
@@ -1808,7 +1827,7 @@ func literalMatches(value, query string, options SearchOptions, limit int) ([][]
 			break
 		}
 	}
-	return result, nil
+	return result
 }
 
 func isWholeWordMatch(value string, start, end int) bool {
@@ -1932,6 +1951,27 @@ func cloneManifest(source manifest) manifest {
 		result.Notes[index] = *cloneNoteSummary(note)
 	}
 	return result
+}
+
+func (s *Store) rollbackNoteWritesLocked(original manifest, notes map[string]Note, cause error) error {
+	s.manifest = cloneManifest(original)
+	s.noteIndexes = nil
+	var rollbackErr error
+	for id, note := range notes {
+		hash, err := s.writeNoteLocked(note)
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+			continue
+		}
+		if index, found := s.findNoteLocked(id); found {
+			s.manifest.Notes[index].CiphertextHash = hash
+		}
+	}
+	if len(notes) > 0 {
+		s.hasSavedManifestHash = false
+		rollbackErr = errors.Join(rollbackErr, s.saveManifestLocked())
+	}
+	return errors.Join(cause, rollbackErr)
 }
 
 func (s *Store) exportRemoteSnapshot(destination string) error {
@@ -2994,7 +3034,6 @@ func (s *Store) RestoreRemoteSnapshot(
 	s.root = finalRoot
 	s.vaultID = remote.Config.VaultID
 	s.key = key
-	s.secret = []byte(passphrase)
 	s.manifest = remote.Manifest
 	if remote.Tracking != nil {
 		tracking := cloneTimeTrackingCatalog(remote.Tracking.Catalog)
@@ -3022,9 +3061,7 @@ func (s *Store) requireUnlocked() error {
 
 func (s *Store) clearLocked() {
 	secure.Zero(s.key)
-	secure.Zero(s.secret)
 	s.key = nil
-	s.secret = nil
 	s.root = ""
 	s.vaultID = ""
 	s.manifest = manifest{}
@@ -3042,6 +3079,7 @@ func (s *Store) clearLocked() {
 	s.timeTrackingBucketRead = nil
 	s.timeTrackingWriteHook = nil
 	s.timeTrackingNow = nil
+	s.manifestWriteHook = nil
 }
 
 func (s *Store) updateSearchIndexLocked(id, content string) {
@@ -3062,20 +3100,6 @@ func (s *Store) rebuildSearchIndexLocked() error {
 	}
 	s.searchIndex = index
 	return nil
-}
-
-// UnlockedSecret returns a copy of the secret currently holding the vault
-// open together with a boolean indicating whether the store is unlocked. The
-// caller is responsible for zeroing the returned slice when finished.
-func (s *Store) UnlockedSecret() ([]byte, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if len(s.key) == 0 || len(s.secret) == 0 {
-		return nil, false
-	}
-	clone := make([]byte, len(s.secret))
-	copy(clone, s.secret)
-	return clone, true
 }
 
 func (s *Store) findNoteLocked(id string) (int, bool) {
@@ -3319,6 +3343,11 @@ func (s *Store) saveManifestLocked() error {
 	hash := sha256.Sum256(plaintext)
 	if s.hasSavedManifestHash && hash == s.savedManifestHash {
 		return nil
+	}
+	if s.manifestWriteHook != nil {
+		if err := s.manifestWriteHook(); err != nil {
+			return err
+		}
 	}
 	if err := s.writeEnvelopeLocked(filepath.Join(s.root, manifestFilename), "manifest", "manifest", plaintext); err != nil {
 		return err
@@ -3687,34 +3716,7 @@ func writeBytesAtomicFast(path string, data []byte) error {
 }
 
 func writeBytesAtomicWithSync(path string, data []byte, syncFile bool) error {
-	directory := filepath.Dir(path)
-	temp, err := os.CreateTemp(directory, ".emv-write-*")
-	if err != nil {
-		return fmt.Errorf("create encrypted temporary file: %w", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return fmt.Errorf("set encrypted file permissions: %w", err)
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return fmt.Errorf("write encrypted temporary file: %w", err)
-	}
-	if syncFile {
-		if err := temp.Sync(); err != nil {
-			temp.Close()
-			return fmt.Errorf("flush encrypted temporary file: %w", err)
-		}
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close encrypted temporary file: %w", err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("replace encrypted file: %w", err)
-	}
-	return nil
+	return atomicfile.Write(path, data, syncFile)
 }
 
 func copyFileAtomic(source, target string) error {
@@ -3992,8 +3994,6 @@ func (s *Store) RenameVault(newName string) (Session, error) {
 	s.root = target
 	secure.Zero(s.key)
 	s.key = nil
-	secure.Zero(s.secret)
-	s.secret = nil
 	s.manifest = manifest{}
 	return Session{Locked: true, Path: target, VaultID: s.vaultID}, nil
 }
@@ -4646,19 +4646,58 @@ func normalizeSortMode(mode string) string {
 }
 
 func newFolderPasswordVerifier(password string) (string, error) {
+	if utf8.RuneCountInString(password) < 8 {
+		return "", errors.New("folder password must contain at least 8 characters")
+	}
+	return deriveFolderPasswordVerifier(password)
+}
+
+func deriveFolderPasswordVerifier(password string) (string, error) {
 	salt := make([]byte, folderPasswordSaltBytes)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate folder password salt: %w", err)
 	}
-	hash := saltedFolderPasswordHash(password, salt)
-	return folderPasswordVerifierPrefix +
-		base64.RawURLEncoding.EncodeToString(salt) + ":" +
-		hex.EncodeToString(hash), nil
+	hash, err := secure.DeriveKey(password, salt, defaultKDF)
+	if err != nil {
+		return "", err
+	}
+	defer secure.Zero(hash)
+	return fmt.Sprintf("%s%s:%d:%d:%d:%s", folderPasswordVerifierPrefix,
+		base64.RawURLEncoding.EncodeToString(salt), defaultKDF.Time, defaultKDF.Memory,
+		defaultKDF.Threads, hex.EncodeToString(hash)), nil
 }
 
 func verifyFolderPassword(verifier, password string) bool {
 	if strings.HasPrefix(verifier, folderPasswordVerifierPrefix) {
 		payload := strings.TrimPrefix(verifier, folderPasswordVerifierPrefix)
+		parts := strings.Split(payload, ":")
+		if len(parts) != 5 {
+			return false
+		}
+		salt, err := base64.RawURLEncoding.DecodeString(parts[0])
+		if err != nil || len(salt) != folderPasswordSaltBytes {
+			return false
+		}
+		timeCost, timeErr := strconv.ParseUint(parts[1], 10, 32)
+		memory, memoryErr := strconv.ParseUint(parts[2], 10, 32)
+		threads, threadsErr := strconv.ParseUint(parts[3], 10, 8)
+		kdf := kdfConfiguration{Time: uint32(timeCost), MemoryKiB: uint32(memory), Parallelism: uint8(threads)}
+		if timeErr != nil || memoryErr != nil || threadsErr != nil || !supportedKDFProfile(kdf) {
+			return false
+		}
+		expected, err := hex.DecodeString(parts[4])
+		if err != nil || len(expected) != sha256.Size {
+			return false
+		}
+		actual, err := secure.DeriveKey(password, salt, secure.KDFParams{Time: kdf.Time, Memory: kdf.MemoryKiB, Threads: kdf.Parallelism})
+		if err != nil {
+			return false
+		}
+		defer secure.Zero(actual)
+		return subtle.ConstantTimeCompare(actual, expected) == 1
+	}
+	if strings.HasPrefix(verifier, legacyFolderVerifierPrefix) {
+		payload := strings.TrimPrefix(verifier, legacyFolderVerifierPrefix)
 		parts := strings.Split(payload, ":")
 		if len(parts) != 2 {
 			return false
@@ -4671,8 +4710,7 @@ func verifyFolderPassword(verifier, password string) bool {
 		if err != nil || len(expected) != sha256.Size {
 			return false
 		}
-		actual := saltedFolderPasswordHash(password, salt)
-		return subtle.ConstantTimeCompare(actual, expected) == 1
+		return subtle.ConstantTimeCompare(saltedFolderPasswordHash(password, salt), expected) == 1
 	}
 
 	// Backward compatibility for folders locked before salted verifiers existed.

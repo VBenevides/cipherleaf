@@ -144,7 +144,10 @@ func (m *Manager) LinkVault(
 	}
 	validated.Linked = true
 	validated.LastCommit = result.LastCommit
-	validated.LastSnapshotRev, _ = snapshotRevision(snapshot)
+	validated.LastSnapshotRev, err = snapshotRevision(snapshot)
+	if err != nil {
+		return LinkResult{}, err
+	}
 	if err := m.settings.Save(validated); err != nil {
 		return LinkResult{}, err
 	}
@@ -266,7 +269,9 @@ func (m *Manager) PushVault(
 	settings.LastSyncedAt = time.Now().UTC().Unix()
 	settings.LastSnapshotRev = revision
 	settings.LastCommit = result.LastCommit
-	_ = m.settings.Save(settings)
+	if err := m.settings.Save(settings); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -291,11 +296,20 @@ func (m *Manager) ForcePushVault(
 	if !ok {
 		return PushResult{}, errors.New("GitHub synchronization provider does not support force push")
 	}
+	revision, err := snapshotRevision(snapshot)
+	if err != nil {
+		return PushResult{}, err
+	}
 	result, err := provider.ForcePush(ctx, settings, snapshot)
 	if err != nil {
 		return PushResult{}, err
 	}
-	m.recordSync(vaultID)
+	settings.LastSyncedAt = time.Now().UTC().Unix()
+	settings.LastSnapshotRev = revision
+	settings.LastCommit = result.LastCommit
+	if err := m.settings.Save(settings); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 

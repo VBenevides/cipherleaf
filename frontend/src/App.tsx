@@ -1663,7 +1663,7 @@ function App() {
       setLastVaultPath(opened.path);
       if (rememberSecret) {
         try {
-          await VaultService.RememberVaultSecret();
+          await VaultService.RememberVaultSecret(completedAction === "create" ? vaultSecret : passphrase);
         } catch (reason) {
           setRememberError(
             "Your vault secret could not be saved to the system keychain. You will be asked for it again next time. (" + errorText(reason) + ")",

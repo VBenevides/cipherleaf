@@ -303,12 +303,11 @@ export function RememberTheme(theme: string): $CancellablePromise<void> {
 }
 
 /**
- * RememberVaultSecret stores the open vault's secret in the OS keychain so
- * the user does not have to paste it again for the configured TTL. It must
- * be called only after a successful Open so the secret is known to be valid.
+ * RememberVaultSecret stores the just-validated secret without retaining it
+ * in the unlocked vault store.
  */
-export function RememberVaultSecret(): $CancellablePromise<void> {
-    return $Call.ByID(4089226512);
+export function RememberVaultSecret(secret: string): $CancellablePromise<void> {
+    return $Call.ByID(4089226512, secret);
 }
 
 export function RenameClient(id: string, name: string): $CancellablePromise<vault$0.TimeClient> {

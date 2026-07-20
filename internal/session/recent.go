@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"cipherleaf/internal/atomicfile"
 )
 
 const recentFilename = "last-vault.json"
@@ -92,28 +94,7 @@ func (s *RecentVaultStore) RememberWithTheme(path, theme string) error {
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return fmt.Errorf("protect recent vault directory: %w", err)
 	}
-	temp, err := os.CreateTemp(directory, ".recent-vault-*")
-	if err != nil {
-		return fmt.Errorf("create recent vault temporary file: %w", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return fmt.Errorf("protect recent vault file: %w", err)
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return fmt.Errorf("write recent vault file: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return fmt.Errorf("flush recent vault file: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close recent vault file: %w", err)
-	}
-	if err := os.Rename(tempPath, s.path); err != nil {
+	if err := atomicfile.Write(s.path, data, true); err != nil {
 		return fmt.Errorf("replace recent vault file: %w", err)
 	}
 	return nil

@@ -11,7 +11,7 @@ const themedDatePicker = readFileSync(new URL("../src/ThemedDatePicker.tsx", imp
 test("time tracking navigation and dialogs expose keyboard semantics", () => {
   assert.match(view, /role="tablist"/);
   assert.match(view, /aria-selected=\{tab === item\}/);
-  assert.match(view, /<ThemedDatePicker ariaLabel="Started"/);
+  assert.match(view, /<ThemedDatePicker ariaLabel="Started date"/);
   assert.match(view, /aria-modal="true"/);
   assert.match(view, /tabIndex=\{0\}/);
 });
@@ -112,9 +112,16 @@ test("native date and time pickers follow the selected theme", () => {
   assert.match(style, /:root:not\(\[data-theme="dark"\]\) select option \{[\s\S]*background: var\(--modal-control-surface\);/);
 });
 
-test("task correction and custom periods use the themed calendar", () => {
+test("task correction separates themed calendars from validated time fields", () => {
   assert.match(view, /<ThemedDatePicker ariaLabel="Start date" value=\{customStart\}/);
-  assert.match(view, /<ThemedDatePicker ariaLabel="Started" value=\{editStartedAt\}/);
+  assert.match(view, /<ThemedDatePicker ariaLabel="Started date" value=\{editStartedAt\.slice\(0, 10\)\}/);
+  assert.match(view, /aria-label="Started time" type="text" inputMode="numeric" maxLength=\{5\} pattern="\(\?:\[01\]\[0-9\]\|2\[0-3\]\):\[0-5\]\[0-9\]"/);
   assert.match(themedDatePicker, /themed-date-picker-popover/);
-  assert.match(themedDatePicker, /type="text" inputMode="numeric"/);
+  assert.doesNotMatch(themedDatePicker, /withTime/);
+});
+
+test("every modal backdrop uses a ten percent tint", () => {
+  assert.match(style, /\.modal-backdrop \{[\s\S]*?background: color-mix\(in srgb, var\(--green-dark\) 10%, transparent\);/);
+  assert.match(style, /\.time-tracking-dialog \{[^}]*background: color-mix\(in srgb, var\(--green-dark\) 10%, transparent\);/);
+  assert.match(style, /\.global-search-scrim \{[\s\S]*?background: color-mix\(in srgb, var\(--green-dark\) 10%, transparent\);/);
 });

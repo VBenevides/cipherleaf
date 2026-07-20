@@ -49,6 +49,16 @@ func (s *Store) ExportMarkdown(parent string) (PortabilityResult, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return PortabilityResult{}, err
 	}
+	for _, folder := range s.manifest.Folders {
+		if err := s.requireFolderAccessibleLocked(folder.ID); err != nil {
+			return PortabilityResult{}, err
+		}
+	}
+	for _, note := range s.manifest.Notes {
+		if err := s.requireNoteAccessibleLocked(note); err != nil {
+			return PortabilityResult{}, err
+		}
+	}
 	parent, err := filepath.Abs(strings.TrimSpace(parent))
 	if err != nil {
 		return PortabilityResult{}, err

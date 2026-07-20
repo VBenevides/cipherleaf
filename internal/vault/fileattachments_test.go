@@ -2,11 +2,76 @@ package vault
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLockedFolderProtectsEveryContentAPI(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "locked-content-secret"); err != nil {
+		t.Fatal(err)
+	}
+	folder, _ := store.CreateFolder("Private")
+	note, _ := store.CreateNoteInFolder("Secret", folder.ID)
+	trashed, _ := store.CreateNoteInFolder("Deleted secret", folder.ID)
+	source := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(source, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attachment, err := store.ImportFileAttachment(note.ID, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "[secret](attachment:"+attachment.ID+")"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "changed"); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := store.LockFolder(folder.ID, "folder-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if locked.LockPasswordHash != "" {
+		t.Fatal("folder verifier returned to client")
+	}
+	if err := store.CheckFolderPassword(folder.ID, "folder-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteNote(trashed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LockFolderSession(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := []func() error{
+		func() error { _, err := store.ImportFileAttachment(note.ID, source); return err },
+		func() error { _, _, err := store.FileAttachment(note.ID, attachment.ID); return err },
+		func() error { _, err := store.ListFileAttachments(note.ID); return err },
+		func() error { _, err := store.ExportFileAttachment(note.ID, attachment.ID, t.TempDir()); return err },
+		func() error { _, err := store.ExportMarkdown(t.TempDir()); return err },
+		func() error { _, err := store.ListNoteVersions(note.ID); return err },
+		func() error { _, err := store.RestoreNoteVersion(note.ID, 1); return err },
+		func() error { return store.RestoreTrashItem("note", trashed.ID) },
+	}
+	for index, check := range checks {
+		if err := check(); !errors.Is(err, ErrFolderLocked) {
+			t.Fatalf("locked API %d error = %v, want ErrFolderLocked", index, err)
+		}
+	}
+	trash, err := store.ListTrash()
+	if err != nil || len(trash) != 0 {
+		t.Fatalf("ListTrash() = %#v, %v", trash, err)
+	}
+	folders, err := store.ListFolders()
+	if err != nil || len(folders) != 1 || folders[0].LockPasswordHash != "" {
+		t.Fatalf("ListFolders() = %#v, %v", folders, err)
+	}
+}
 
 func TestGeneralFileAttachmentRoundTripAndExport(t *testing.T) {
 	store := NewStore()
@@ -39,6 +104,10 @@ func TestGeneralFileAttachmentRoundTripAndExport(t *testing.T) {
 		t.Fatalf("file attachment = %#v, %q, %v", loadedInfo, loaded, err)
 	}
 	destination := t.TempDir()
+	existingPath := filepath.Join(destination, "report.txt")
+	if err := os.WriteFile(existingPath, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	path, err := store.ExportFileAttachment(note.ID, info.ID, destination)
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +115,9 @@ func TestGeneralFileAttachmentRoundTripAndExport(t *testing.T) {
 	exported, _ := os.ReadFile(path)
 	if !bytes.Equal(exported, plaintext) {
 		t.Fatalf("exported = %q", exported)
+	}
+	if existing, _ := os.ReadFile(existingPath); string(existing) != "keep me" || path == existingPath {
+		t.Fatalf("existing attachment was overwritten: path=%q content=%q", path, existing)
 	}
 	remote := t.TempDir()
 	if err := store.ExportRemoteSnapshot(remote); err != nil {

@@ -135,7 +135,7 @@ func (t *GitConnectionTester) TestConnection(
 		},
 	}
 	for _, arguments := range localCommands {
-		output, err = t.runner.Run(contextWithTimeout, "git", arguments, localGitEnvironment())
+		_, err = t.runner.Run(contextWithTimeout, "git", arguments, localGitEnvironment())
 		if err != nil {
 			return ConnectionResult{}, errors.New("Git could not prepare its temporary write-permission test")
 		}
