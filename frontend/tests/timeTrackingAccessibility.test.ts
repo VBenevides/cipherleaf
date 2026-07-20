@@ -22,6 +22,11 @@ test("dashboard chart and global timer have accessible descriptions", () => {
   assert.match(app, /closest\("\[role=dialog\]"\)/);
 });
 
+test("global timer is centered before the local save status", () => {
+  assert.ok(app.indexOf('className="global-timer-indicator"') < app.indexOf("className={`save-status"));
+  assert.match(style, /\.global-timer-indicator \{ position: absolute; left: 50%; transform: translateX\(-50%\)/);
+});
+
 test("tracking conflicts require an explicit accessible dialog choice", () => {
   assert.match(app, /aria-labelledby="tracking-conflict-title"/);
   assert.match(app, />Keep local</);

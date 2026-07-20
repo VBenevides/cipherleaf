@@ -4052,6 +4052,7 @@ function App() {
               </span>
             ))}
           </div>
+          {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
           <div className={`save-status ${saveState}`}>
             <span />
             {saveState === "saving"
@@ -4062,7 +4063,6 @@ function App() {
                   ? "Unsaved"
                   : "Saved locally"}
           </div>
-          {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
           <button
             className="save-file-button"
             disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
