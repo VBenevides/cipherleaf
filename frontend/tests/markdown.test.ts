@@ -1,14 +1,37 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   attachmentMarkdown,
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  markdownCitation,
+  markdownCitations,
   normalizeArrowText,
   parseAttachmentMarkdown,
   tableCells,
 } from "../src/markdown.ts";
+
+const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+
+test("renders safe Markdown citations without treating images as links", () => {
+  assert.deepEqual(markdownCitations("See [Cipherleaf](https://cipherleaf.test/docs)."), [{
+    label: "Cipherleaf",
+    url: "https://cipherleaf.test/docs",
+    index: 4,
+    length: 42,
+  }]);
+  assert.deepEqual(markdownCitations("[bad](javascript:alert(1)) ![image](https://example.com/a.png)"), []);
+  assert.equal(markdownCitation(" Updated name ", " https://example.com/new "), "[Updated name](https://example.com/new)");
+  assert.equal(markdownCitation("Bad]name", "javascript:alert(1)"), null);
+});
+
+test("edits a citation in one themed dialog", () => {
+  assert.match(editor, /document\.createElement\("dialog"\)/);
+  assert.match(editor, /nameLabel\.append\("Name"\)[\s\S]*urlLabel\.append\("Link"\)/);
+  assert.doesNotMatch(editor, /window\.prompt/);
+});
 
 test("stores ASCII arrows as Unicode arrows", () => {
   assert.equal(normalizeArrowText("first -> second -> third"), "first → second → third");

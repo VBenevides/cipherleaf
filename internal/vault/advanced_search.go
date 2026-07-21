@@ -63,9 +63,8 @@ func parseAdvancedQuery(value string) (advancedQuery, bool, error) {
 	return query, advanced, nil
 }
 
-func containsSearch(value, query string, options SearchOptions) bool {
-	matches, err := literalMatches(value, query, options, 1)
-	return err == nil && len(matches) > 0
+func containsSearch(value string, pattern *regexp.Regexp, wholeWord bool) bool {
+	return len(literalMatches(value, pattern, wholeWord, 1)) > 0
 }
 
 func propertyText(value any) string { return strings.TrimSpace(fmt.Sprint(value)) }
@@ -82,12 +81,22 @@ func (s *Store) findAdvancedLocked(raw string, maxPerNote int, options SearchOpt
 			return nil, err
 		}
 	}
+	patterns := make(map[string]*regexp.Regexp)
+	for _, value := range []string{query.title, query.folder, query.propertyValue, query.text} {
+		if value == "" {
+			continue
+		}
+		patterns[value], err = compileLiteralPattern(value, options)
+		if err != nil {
+			return nil, err
+		}
+	}
 	result := make([]FindMatch, 0)
 	for _, item := range s.manifest.Notes {
 		if s.requireNoteAccessibleLocked(item) != nil {
 			continue
 		}
-		if query.title != "" && !containsSearch(item.Title, query.title, options) {
+		if query.title != "" && !containsSearch(item.Title, patterns[query.title], options.WholeWord) {
 			continue
 		}
 		if query.tag != "" {
@@ -104,13 +113,13 @@ func (s *Store) findAdvancedLocked(raw string, maxPerNote int, options SearchOpt
 		}
 		if query.folder != "" {
 			folder, found := s.folderByIDLocked(item.FolderID)
-			if !found || !containsSearch(folder.Name, query.folder, options) {
+			if !found || !containsSearch(folder.Name, patterns[query.folder], options.WholeWord) {
 				continue
 			}
 		}
 		if query.property != "" {
 			value, found := item.Properties[query.property]
-			if !found || (query.propertyValue != "" && !containsSearch(propertyText(value), query.propertyValue, options)) {
+			if !found || (query.propertyValue != "" && !containsSearch(propertyText(value), patterns[query.propertyValue], options.WholeWord)) {
 				continue
 			}
 		}
@@ -131,10 +140,7 @@ func (s *Store) findAdvancedLocked(raw string, maxPerNote int, options SearchOpt
 			}
 			offset, length = match[0], match[1]-match[0]
 		case query.text != "":
-			matches, err := literalMatches(content, query.text, options, 1)
-			if err != nil {
-				return nil, err
-			}
+			matches := literalMatches(content, patterns[query.text], options.WholeWord, 1)
 			if len(matches) == 0 {
 				continue
 			}

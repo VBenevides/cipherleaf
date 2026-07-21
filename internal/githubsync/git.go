@@ -135,7 +135,7 @@ func (t *GitConnectionTester) TestConnection(
 		},
 	}
 	for _, arguments := range localCommands {
-		output, err = t.runner.Run(contextWithTimeout, "git", arguments, localGitEnvironment())
+		_, err = t.runner.Run(contextWithTimeout, "git", arguments, localGitEnvironment())
 		if err != nil {
 			return ConnectionResult{}, errors.New("Git could not prepare its temporary write-permission test")
 		}
@@ -198,7 +198,7 @@ func prepareSSHFiles(runtimeDir string) (string, string, error) {
 }
 
 var remoteObjectPath = regexp.MustCompile(`^objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
-var remoteAttachmentPath = regexp.MustCompile(`^attachments/([a-f0-9]{32})/([a-f0-9]{32})\.enc$`)
+var remoteAttachmentPath = regexp.MustCompile(`^attachments/(?:[a-f0-9]{32}|shared)/([a-f0-9]{32})\.enc$`)
 var remoteTrackingObjectPath = regexp.MustCompile(`^tracking/objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
 var remoteVaultID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 

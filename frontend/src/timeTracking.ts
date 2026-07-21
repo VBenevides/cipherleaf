@@ -36,8 +36,12 @@ export function formatLocalDate(date: Date): string {
   return localDateKey(date).replace(/-/g, "/");
 }
 
+export function formatLocalTime(date: Date): string {
+  return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
 export function formatLocalDateTime(date: Date): string {
-  return `${formatLocalDate(date)}, ${date.toLocaleTimeString("en-US")}`;
+  return `${formatLocalDate(date)}, ${formatLocalTime(date)}`;
 }
 
 export function localMonthRange(reference: Date): UTCDateRange {

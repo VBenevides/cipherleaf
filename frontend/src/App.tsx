@@ -48,7 +48,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
-import { formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
+import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 
 type VaultAction = "create" | "open" | "clone";
@@ -129,6 +129,13 @@ type AppDialogState =
 type NoteCrumb = {
   id: string;
   title: string;
+};
+
+type EditorTab = {
+  id: number;
+  noteID: string;
+  title: string;
+  lastActiveAt: number;
 };
 
 type ConflictResolution = {
@@ -386,6 +393,8 @@ function App() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [note, setNote] = useState<Note | null>(null);
+  const [tabs, setTabs] = useState<EditorTab[]>(() => [{ id: 1, noteID: "", title: "New tab", lastActiveAt: Date.now() }]);
+  const [activeTabID, setActiveTabID] = useState(1);
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
   const [fileAttachments, setFileAttachments] = useState<AttachmentInfo[]>([]);
@@ -526,6 +535,10 @@ function App() {
   const editVersion = useRef(0);
   const runSerializedSave = useRef(createSerialTaskRunner()).current;
   const noteRef = useRef<Note | null>(null);
+  const tabsRef = useRef(tabs);
+  const activeTabIDRef = useRef(activeTabID);
+  const nextTabIDRef = useRef(2);
+  const tabNoteCacheRef = useRef(new Map<number, Note>());
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
   const globalSearchRequestRef = useRef(0);
   const globalSearchResultsKeyRef = useRef("");
@@ -630,6 +643,21 @@ function App() {
     noteRef.current = note;
   }, [note]);
 
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  useEffect(() => { activeTabIDRef.current = activeTabID; }, [activeTabID]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const cutoff = Date.now() - 60_000;
+      for (const tab of tabsRef.current) {
+        if (tab.id !== activeTabIDRef.current && tab.lastActiveAt <= cutoff) {
+          tabNoteCacheRef.current.delete(tab.id);
+        }
+      }
+    }, 10_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const interval = window.setInterval(() => setToday(new Date()), 60_000);
     return () => window.clearInterval(interval);
@@ -677,7 +705,7 @@ function App() {
           id: ++consoleEntryIDRef.current,
           level,
           message: values.map(stringify).join(" "),
-          timestamp: new Date().toLocaleTimeString("en-US"),
+          timestamp: formatLocalTime(new Date()),
         },
       ]);
     };
@@ -1228,6 +1256,9 @@ function App() {
   const applyLoadedNote = (loaded: Note | null, state: SaveState = "idle") => {
     setGlobalSearchTarget(null);
     if (!loaded) {
+      setTabs((current) => current.map((tab) => tab.id === activeTabIDRef.current
+        ? { ...tab, noteID: "", title: "New tab", lastActiveAt: Date.now() }
+        : tab));
       noteRef.current = null;
       dirtyRef.current = false;
       setNote(null);
@@ -1236,6 +1267,10 @@ function App() {
       return;
     }
     const prepared = noteForEditing(loaded);
+    tabNoteCacheRef.current.delete(activeTabIDRef.current);
+    setTabs((current) => current.map((tab) => tab.id === activeTabIDRef.current
+      ? { ...tab, noteID: prepared.note.id, title: prepared.note.title || "Untitled", lastActiveAt: Date.now() }
+      : tab));
     noteRef.current = prepared.note;
     dirtyRef.current = false;
     setNote(prepared.note);
@@ -1283,6 +1318,7 @@ function App() {
 
   const persistWhenEditorLosesFocus = (event: ReactFocusEvent<HTMLElement>) => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (!event.relatedTarget && !document.hasFocus()) return;
     saveCurrentDraft();
   };
 
@@ -1493,6 +1529,12 @@ function App() {
   const resetToLocked = (locked: Session) => {
     unlockedRef.current = false;
     noteCaretOffsetsRef.current.clear();
+    tabNoteCacheRef.current.clear();
+    const emptyTab = { id: nextTabIDRef.current++, noteID: "", title: "New tab", lastActiveAt: Date.now() };
+    tabsRef.current = [emptyTab];
+    activeTabIDRef.current = emptyTab.id;
+    setTabs([emptyTab]);
+    setActiveTabID(emptyTab.id);
     setUnlockedFolderIDs(new Set());
     setSession(locked);
     setFolders([]);
@@ -1663,7 +1705,7 @@ function App() {
       setLastVaultPath(opened.path);
       if (rememberSecret) {
         try {
-          await VaultService.RememberVaultSecret();
+          await VaultService.RememberVaultSecret(completedAction === "create" ? vaultSecret : passphrase);
         } catch (reason) {
           setRememberError(
             "Your vault secret could not be saved to the system keychain. You will be asked for it again next time. (" + errorText(reason) + ")",
@@ -2322,6 +2364,106 @@ function App() {
     }
   };
 
+  const openNoteInNewTab = async (id: string) => {
+    try {
+      const saved = await persistCurrent();
+      if (saved) tabNoteCacheRef.current.set(activeTabIDRef.current, saved);
+      const tab = { id: nextTabIDRef.current++, noteID: id, title: notes.find((item) => item.id === id)?.title || "Untitled", lastActiveAt: Date.now() };
+      setTabs((current) => [...current, tab]);
+      setActiveTabID(tab.id);
+      activeTabIDRef.current = tab.id;
+      await selectNote(id);
+    } catch {
+      // persistCurrent and selectNote already present actionable errors.
+    }
+  };
+
+  const openEmptyTab = async () => {
+    try {
+      await persistCurrent();
+      const currentTab = tabsRef.current.find((tab) => tab.id === activeTabIDRef.current);
+      if (currentTab && noteRef.current) {
+        tabNoteCacheRef.current.set(currentTab.id, noteRef.current);
+      }
+      const tab = { id: nextTabIDRef.current++, noteID: "", title: "New tab", lastActiveAt: Date.now() };
+      setTabs((current) => [...current.map((item) => item.id === activeTabIDRef.current ? { ...item, lastActiveAt: Date.now() } : item), tab]);
+      setActiveTabID(tab.id);
+      activeTabIDRef.current = tab.id;
+      setGraphOpen(false);
+      setTimeTrackingOpen(false);
+      applyLoadedNote(null);
+      setNoteTrail([]);
+    } catch {
+      // persistCurrent already presents the actionable error.
+    }
+  };
+
+  const switchTab = async (tabID: number) => {
+    if (tabID === activeTabIDRef.current) return;
+    try {
+      const saved = await persistCurrent();
+      const previousID = activeTabIDRef.current;
+      if (saved) tabNoteCacheRef.current.set(previousID, saved);
+      const now = Date.now();
+      const target = tabsRef.current.find((tab) => tab.id === tabID);
+      if (!target) return;
+      setTabs((current) => current.map((tab) => tab.id === previousID || tab.id === tabID ? { ...tab, lastActiveAt: now } : tab));
+      setActiveTabID(tabID);
+      activeTabIDRef.current = tabID;
+      setGraphOpen(false);
+      setTimeTrackingOpen(false);
+      const cached = now - target.lastActiveAt < 60_000 ? tabNoteCacheRef.current.get(tabID) : undefined;
+      if (cached) applyLoadedNote(cached);
+      else if (target.noteID) applyLoadedNote(await VaultService.GetNote(target.noteID));
+      else applyLoadedNote(null);
+      setNoteTrail([]);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const closeTab = async (tabID: number) => {
+    const current = tabsRef.current;
+    const index = current.findIndex((tab) => tab.id === tabID);
+    if (index < 0) return;
+    if (tabID !== activeTabIDRef.current) {
+      tabNoteCacheRef.current.delete(tabID);
+      setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
+      return;
+    }
+    if (current.length === 1) {
+      await openEmptyTab();
+      tabNoteCacheRef.current.delete(tabID);
+      setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
+      return;
+    }
+    const next = current[index + 1] ?? current[index - 1];
+    await switchTab(next.id);
+    tabNoteCacheRef.current.delete(tabID);
+    setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
+  };
+
+  useEffect(() => {
+    const handleTabs = (event: KeyboardEvent) => {
+      if (session?.locked || event.shiftKey || event.metaKey) return;
+      if (event.altKey && /^\d$/.test(event.key)) {
+        const index = event.key === "0" ? 9 : Number(event.key) - 1;
+        const tab = tabsRef.current[index];
+        if (!tab) return;
+        event.preventDefault();
+        void switchTab(tab.id);
+      } else if (event.ctrlKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        void openEmptyTab();
+      } else if (event.ctrlKey && event.key.toLowerCase() === "w") {
+        event.preventDefault();
+        void closeTab(activeTabIDRef.current);
+      }
+    };
+    window.addEventListener("keydown", handleTabs);
+    return () => window.removeEventListener("keydown", handleTabs);
+  }, [session?.locked]);
+
   const deleteNote = async (id = note?.id, title = note?.title) => {
     if (!id) return;
     if (
@@ -2517,6 +2659,11 @@ function App() {
     if ("content" in patch) setGlobalSearchTarget(null);
     noteRef.current = next;
     markDirty();
+    if ("title" in patch) {
+      setTabs((currentTabs) => currentTabs.map((tab) => tab.id === activeTabIDRef.current
+        ? { ...tab, title: next.title || "Untitled" }
+        : tab));
+    }
     if (syncState) {
       setNote(next);
     }
@@ -3779,32 +3926,34 @@ function App() {
             <Icon name="x" />
           </button>
         </div>
-        <button
-          type="button"
-          className={`graph-view-button ${graphOpen ? "active" : ""}`}
-          onClick={() => {
-            saveCurrentDraft();
-            setGraphOpen(true);
-            setTimeTrackingOpen(false);
-            setSidebarOpen(false);
-          }}
-        >
-          <Icon name="graph" size={16} />
-          <span>Graph view</span>
-        </button>
-        <button
-          type="button"
-          className={`graph-view-button time-tracking-view-button ${timeTrackingOpen ? "active" : ""}`}
-          onClick={() => {
-            saveCurrentDraft();
-            setGraphOpen(false);
-            setTimeTrackingOpen(true);
-            setSidebarOpen(false);
-          }}
-        >
-          <Icon name="clock" size={16} />
-          <span>Time tracking</span>
-        </button>
+        <div className="sidebar-view-buttons">
+          <button
+            type="button"
+            className={`graph-view-button ${graphOpen ? "active" : ""}`}
+            onClick={() => {
+              saveCurrentDraft();
+              setGraphOpen(true);
+              setTimeTrackingOpen(false);
+              setSidebarOpen(false);
+            }}
+          >
+            <Icon name="graph" size={16} />
+            <span>Graph view</span>
+          </button>
+          <button
+            type="button"
+            className={`graph-view-button time-tracking-view-button ${timeTrackingOpen ? "active" : ""}`}
+            onClick={() => {
+              saveCurrentDraft();
+              setGraphOpen(false);
+              setTimeTrackingOpen(true);
+              setSidebarOpen(false);
+            }}
+          >
+            <Icon name="clock" size={16} />
+            <span>Time tracking</span>
+          </button>
+        </div>
         <div className="notes-heading folders-heading">
           <span>Folders</span>
           <button className="icon-button" onClick={() => void createFolder()} aria-label="Create folder" title="New folder">
@@ -3984,38 +4133,40 @@ function App() {
         </nav>
         <div className="sidebar-footer">
           <div className="encrypted-status"><span /> Encrypted locally</div>
-          <button className="lock-button" onClick={() => void lockVault()}>
-            <Icon name="lock" size={15} /> Lock vault
-          </button>
-          <div className="vault-selector">
-            <button
-              type="button"
-              className="vault-selector-button"
-              aria-haspopup="menu"
-              aria-expanded={vaultMenuOpen}
-              onClick={() => setVaultMenuOpen((open) => !open)}
-            >
-              <span>{folderName(session.path)}</span><small>⌃</small>
+          <div className="sidebar-vault-buttons">
+            <button className="lock-button" onClick={() => void lockVault()}>
+              <Icon name="lock" size={15} /> Lock vault
             </button>
-            {vaultMenuOpen && (
-              <div className="vault-selector-menu" role="menu" aria-label="Recent vaults">
-                {(recentVaultPaths.includes(session.path)
-                  ? recentVaultPaths
-                  : [...recentVaultPaths, session.path]
-                ).slice(-5).map((path) => (
-                  <button
-                    key={path}
-                    type="button"
-                    role="menuitem"
-                    className={path === session.path ? "active" : ""}
-                    title={path}
-                    onClick={() => void openRecentVault(path)}
-                  >
-                    {folderName(path)}
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="vault-selector">
+              <button
+                type="button"
+                className="vault-selector-button"
+                aria-haspopup="menu"
+                aria-expanded={vaultMenuOpen}
+                onClick={() => setVaultMenuOpen((open) => !open)}
+              >
+                <span>{folderName(session.path)}</span><small>⌃</small>
+              </button>
+              {vaultMenuOpen && (
+                <div className="vault-selector-menu" role="menu" aria-label="Recent vaults">
+                  {(recentVaultPaths.includes(session.path)
+                    ? recentVaultPaths
+                    : [...recentVaultPaths, session.path]
+                  ).slice(-5).map((path) => (
+                    <button
+                      key={path}
+                      type="button"
+                      role="menuitem"
+                      className={path === session.path ? "active" : ""}
+                      title={path}
+                      onClick={() => void openRecentVault(path)}
+                    >
+                      {folderName(path)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </aside>
@@ -4052,17 +4203,19 @@ function App() {
               </span>
             ))}
           </div>
-          <div className={`save-status ${saveState}`}>
-            <span />
-            {saveState === "saving"
-              ? "Encrypting…"
-              : saveState === "error"
-                ? "Save failed"
-                : dirty
-                  ? "Unsaved"
-                  : "Saved locally"}
+          <div className="save-indicators">
+            {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
+            <div className={`save-status ${saveState}`}>
+              <span />
+              {saveState === "saving"
+                ? "Encrypting…"
+                : saveState === "error"
+                  ? "Save failed"
+                  : dirty
+                    ? "Unsaved"
+                    : "Saved locally"}
+            </div>
           </div>
-          {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
           <button
             className="save-file-button"
             disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
@@ -4101,6 +4254,24 @@ function App() {
           )}
         </header>
 
+        <nav className="note-tabs" aria-label="Open notes" role="tablist">
+          {tabs.map((tab, index) => (
+            <div className={`note-tab ${tab.id === activeTabID ? "active" : ""}`} key={tab.id}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab.id === activeTabID}
+                title={`${tab.title} (Alt+${index === 9 ? 0 : index + 1})`}
+                onClick={() => void switchTab(tab.id)}
+              >
+                <span>{tab.title}</span>
+              </button>
+              <button type="button" aria-label={`Close ${tab.title}`} onClick={() => void closeTab(tab.id)}>×</button>
+            </div>
+          ))}
+          <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
+        </nav>
+
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -4121,7 +4292,7 @@ function App() {
 
         {timeTrackingOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
-            <TimeTrackingView key={session.vaultId} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
+            <TimeTrackingView key={`${session.vaultId}:${activeTimeEntry?.id ?? "idle"}`} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
           </Suspense>
         ) : graphOpen ? (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
@@ -4230,8 +4401,9 @@ function App() {
                 Edited {new Date(note.updatedAt).toLocaleString("en-US", {
                   month: "long",
                   day: "numeric",
-                  hour: "numeric",
+                  hour: "2-digit",
                   minute: "2-digit",
+                  hourCycle: "h23",
                 })}
               </p>
             </div>
@@ -4450,7 +4622,7 @@ function App() {
               {trashItems.length === 0 && <p className="settings-loading">Trash is empty.</p>}
               {trashItems.map((item) => (
                 <div className="recovery-row" key={`${item.kind}:${item.id}`}>
-                  <span><strong>{item.title}</strong><small>{item.kind} · {new Date(item.deletedAt).toLocaleString("en-US")}</small></span>
+                  <span><strong>{item.title}</strong><small>{item.kind} · {formatLocalDateTime(new Date(item.deletedAt))}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreTrashItem(item)}>Restore</button>
                   <button type="button" className="danger-button" disabled={recoveryBusy} onClick={() => void permanentlyDeleteTrashItem(item)}>Delete</button>
                 </div>
@@ -4462,7 +4634,7 @@ function App() {
               {note && noteVersions.length === 0 && <p className="settings-loading">No earlier versions.</p>}
               {noteVersions.map((version) => (
                 <div className="recovery-row" key={version.revision}>
-                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {new Date(version.updatedAt).toLocaleString("en-US")}</small></span>
+                  <span><strong>{version.title}</strong><small>Revision {version.revision} · {formatLocalDateTime(new Date(version.updatedAt))}</small></span>
                   <button type="button" className="secondary-button" disabled={recoveryBusy} onClick={() => void restoreNoteVersion(version)}>Restore</button>
                 </div>
               ))}
@@ -4879,6 +5051,18 @@ function App() {
           {contextMenu.kind === "note" ? (
             <>
               <button
+                role="menuitem"
+                onClick={() => {
+                  const id = contextMenu.id;
+                  setContextMenu(null);
+                  void openNoteInNewTab(id);
+                }}
+              >
+                <Icon name="file" size={14} />
+                Open in a New Tab
+              </button>
+              <div className="context-menu-separator" />
+              <button
                 className="danger"
                 role="menuitem"
                 onClick={() => {
@@ -5117,7 +5301,7 @@ function App() {
             <p className="eyebrow">Time tracking sync conflicts</p>
             <h2 id="tracking-conflict-title">Choose each result explicitly</h2>
             <p>Sync remains blocked until every preserved variant is resolved.</p>
-            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{conflict.localEntry.startedAtUtc} – {conflict.localEntry.endedAtUtc || "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{conflict.remoteEntry.startedAtUtc} – {conflict.remoteEntry.endedAtUtc || "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
+            <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{formatLocalDateTime(new Date(conflict.localEntry.startedAtUtc))} – {conflict.localEntry.endedAtUtc ? formatLocalDateTime(new Date(conflict.localEntry.endedAtUtc)) : "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{formatLocalDateTime(new Date(conflict.remoteEntry.startedAtUtc))} – {conflict.remoteEntry.endedAtUtc ? formatLocalDateTime(new Date(conflict.remoteEntry.endedAtUtc)) : "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
           </section>
         </div>
       )}

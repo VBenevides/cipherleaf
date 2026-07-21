@@ -19,12 +19,13 @@ import {
   placeholder,
   type DecorationSet,
 } from "@codemirror/view";
-import { LanguageDescription, highlightingFor } from "@codemirror/language";
+import { HighlightStyle, LanguageDescription, highlightingFor, syntaxHighlighting } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { highlightTree } from "@lezer/highlight";
+import { highlightTree, tags } from "@lezer/highlight";
 import { minimalSetup } from "codemirror";
 import { history, redo, undo } from "@codemirror/commands";
+import { Browser, Clipboard } from "@wailsio/runtime";
 import {
   acceptCompletion,
   autocompletion,
@@ -37,6 +38,8 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  markdownCitation,
+  markdownCitations,
   normalizeArrowText,
   parseAttachmentMarkdown,
   tableCells,
@@ -99,6 +102,15 @@ type ObjectDocumentContext = {
 };
 
 const setDeepCodeHighlights = StateEffect.define<DecorationSet>();
+
+const codeHighlightStyle = HighlightStyle.define([
+  { tag: tags.keyword, color: "var(--syntax-keyword)" },
+  { tag: tags.function(tags.variableName), color: "var(--syntax-function)" },
+  { tag: [tags.typeName, tags.className], color: "var(--syntax-type)" },
+  { tag: tags.string, color: "var(--syntax-string)" },
+  { tag: [tags.number, tags.bool], color: "var(--syntax-number)" },
+  { tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
+]);
 
 const deepCodeHighlightField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -738,13 +750,6 @@ function cachedAttachmentData(noteID: string, attachmentID: string) {
   return request;
 }
 
-function forgetAttachmentData(noteID: string, attachmentID: string) {
-  const key = attachmentCacheKey(noteID, attachmentID);
-  attachmentCacheBytes -= (attachmentDataCache.get(key)?.length ?? 0) * 2;
-  attachmentDataCache.delete(key);
-  attachmentDataRequests.delete(key);
-}
-
 class AttachmentWidget extends WidgetType {
   constructor(
     readonly noteID: string,
@@ -872,9 +877,6 @@ class AttachmentWidget extends WidgetType {
           },
         });
         view.focus();
-        forgetAttachmentData(this.noteID, this.attachmentID);
-        void VaultService.DeleteAttachment(this.noteID, this.attachmentID)
-          .catch(this.onError);
       });
       queueMicrotask(() => document.addEventListener("pointerdown", close));
     });
@@ -909,6 +911,119 @@ class WikilinkWidget extends WidgetType {
       event.preventDefault();
       event.stopPropagation();
       this.open(this.title);
+    });
+    return link;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+class CitationWidget extends WidgetType {
+  constructor(
+    readonly label: string,
+    readonly url: string,
+    readonly from: number,
+    readonly to: number,
+    readonly onError: (reason: unknown) => void,
+  ) {
+    super();
+  }
+
+  eq(other: CitationWidget) {
+    return other.label === this.label && other.url === this.url &&
+      other.from === this.from && other.to === this.to;
+  }
+
+  toDOM(view: EditorView) {
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "cm-live-citation";
+    link.textContent = this.label;
+    link.title = this.url;
+    link.setAttribute("aria-haspopup", "menu");
+    link.addEventListener("mousedown", (event) => event.preventDefault());
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelector(".cm-live-attachment-menu")?.remove();
+      const menu = document.body.appendChild(document.createElement("div"));
+      menu.className = "cm-live-attachment-menu cm-live-link-menu";
+      menu.setAttribute("role", "menu");
+      menu.style.left = `${event.clientX}px`;
+      menu.style.top = `${event.clientY}px`;
+      const close = (closeEvent?: PointerEvent) => {
+        if (closeEvent && menu.contains(closeEvent.target as Node)) return;
+        menu.remove();
+        document.removeEventListener("pointerdown", close);
+      };
+      for (const [label, action] of [
+        ["Open link", () => Browser.OpenURL(this.url)],
+        ["Copy link", () => Clipboard.SetText(this.url)],
+      ] as const) {
+        const button = menu.appendChild(document.createElement("button"));
+        button.type = "button";
+        button.role = "menuitem";
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          close();
+          void action().catch(this.onError);
+        });
+      }
+      const edit = menu.appendChild(document.createElement("button"));
+      edit.type = "button";
+      edit.role = "menuitem";
+      edit.textContent = "Edit link";
+      edit.addEventListener("click", () => {
+        close();
+        document.querySelector(".cm-live-link-dialog")?.remove();
+        const dialog = document.body.appendChild(document.createElement("dialog"));
+        dialog.className = "vault-modal cm-live-link-dialog";
+        dialog.setAttribute("aria-labelledby", "edit-link-title");
+        const form = dialog.appendChild(document.createElement("form"));
+        const title = form.appendChild(document.createElement("h2"));
+        title.id = "edit-link-title";
+        title.textContent = "Edit link";
+        const nameLabel = form.appendChild(document.createElement("label"));
+        nameLabel.append("Name");
+        const name = nameLabel.appendChild(document.createElement("input"));
+        name.value = this.label;
+        const urlLabel = form.appendChild(document.createElement("label"));
+        urlLabel.append("Link");
+        const url = urlLabel.appendChild(document.createElement("input"));
+        url.inputMode = "url";
+        url.value = this.url;
+        const error = form.appendChild(document.createElement("p"));
+        error.className = "cm-live-link-dialog-error";
+        error.setAttribute("aria-live", "polite");
+        const actions = form.appendChild(document.createElement("div"));
+        actions.className = "app-dialog-actions";
+        const cancel = actions.appendChild(document.createElement("button"));
+        cancel.type = "button";
+        cancel.className = "secondary-button";
+        cancel.textContent = "Cancel";
+        cancel.addEventListener("click", () => dialog.close());
+        const save = actions.appendChild(document.createElement("button"));
+        save.type = "submit";
+        save.className = "primary-button";
+        save.textContent = "Save";
+        form.addEventListener("submit", (submitEvent) => {
+          submitEvent.preventDefault();
+          const markdown = markdownCitation(name.value, url.value);
+          if (!markdown) {
+            error.textContent = "Enter a name and a valid HTTP(S) link.";
+            return;
+          }
+          view.dispatch({ changes: { from: this.from, to: this.to, insert: markdown } });
+          dialog.close();
+          view.focus();
+        });
+        dialog.addEventListener("close", () => dialog.remove());
+        dialog.showModal();
+        name.select();
+      });
+      queueMicrotask(() => document.addEventListener("pointerdown", close));
     });
     return link;
   }
@@ -970,6 +1085,7 @@ function decorateInlineMarkdown(
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
   openWikilink: (title: string) => void,
+  onError: (reason: unknown) => void,
 ) {
   const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
   for (const match of text.matchAll(bold)) {
@@ -1017,6 +1133,17 @@ function decorateInlineMarkdown(
       new WikilinkWidget(match[1], start, openWikilink),
     );
   }
+
+  for (const citation of markdownCitations(text)) {
+    const start = offset + citation.index;
+    addHiddenRange(
+      start,
+      start + citation.length,
+      decorations,
+      atomicRanges,
+      new CitationWidget(citation.label, citation.url, start, start + citation.length, onError),
+    );
+  }
 }
 
 function decorateUnorderedListMarker(
@@ -1044,14 +1171,21 @@ function decorateObjectTask(
   if (object.checked === undefined) return false;
   const bracketOffset = object.sourcePrefix.lastIndexOf("[");
   if (bracketOffset < 0) return false;
+  const bracketFrom = object.from + bracketOffset;
+  if (object.listMarker) {
+    decorateObjectListMarker(object, syntaxFrom, decorations, atomicRanges, bracketFrom);
+  } else if (object.barePrefixSize > 0) {
+    addHiddenRange(syntaxFrom, bracketFrom, decorations, atomicRanges);
+  }
+  const taskFrom = object.listMarker || object.barePrefixSize > 0 ? bracketFrom : syntaxFrom;
   addHiddenRange(
-    syntaxFrom,
+    taskFrom,
     object.textFrom,
     decorations,
     atomicRanges,
     new TaskWidget(
       object.checked,
-      object.from + bracketOffset + 1,
+      bracketFrom + 1,
     ),
   );
   return true;
@@ -1062,16 +1196,17 @@ function decorateObjectListMarker(
   syntaxFrom: number,
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
+  to = object.textFrom,
 ): "unordered" | "ordered" | null {
   const marker = object.listMarker;
   if (!marker) return null;
   if (marker === "-" || marker === "*") {
-    decorateUnorderedListMarker(syntaxFrom, marker, decorations, atomicRanges, object.textFrom);
+    decorateUnorderedListMarker(syntaxFrom, marker, decorations, atomicRanges, to);
     return "unordered";
   }
   addHiddenRange(
     syntaxFrom,
-    object.textFrom,
+    to,
     decorations,
     atomicRanges,
     new TextWidget(marker, "cm-live-list-marker"),
@@ -1307,6 +1442,10 @@ function buildLivePreviewState(
       decorations.push(Decoration.line({
         attributes: lineAttributes(lineNumber, `cm-live-code-block ${edge}`),
       }).range(line.from));
+      if (edge !== "cm-live-code-content") {
+        const indentation = line.text.length - line.text.trimStart().length;
+        hideSyntaxRange(line.from, line.from + indentation, decorations, atomicRanges);
+      }
       if (lineNumber === codeObject.lineNumber) {
         const languageFrom = line.text.indexOf(codeObject.language ?? "");
         if (languageFrom >= 0 && codeObject.language) {
@@ -1358,7 +1497,7 @@ function buildLivePreviewState(
     }
 
     const attachment = parseAttachmentMarkdown(line.text);
-    if (attachment && !lineIsActive(state, lineNumber)) {
+    if (attachment) {
       decorations.push(
         Decoration.line({
           attributes: lineAttributes(lineNumber, "cm-live-attachment-line"),
@@ -1433,7 +1572,7 @@ function buildLivePreviewState(
         new QuoteToggleWidget(line.from, collapsed, !hasChildren),
       );
 
-      if (toggleAttachment && !lineIsActive(state, lineNumber)) {
+      if (toggleAttachment) {
         addHiddenRange(
           contentOffset,
           line.to,
@@ -1457,6 +1596,7 @@ function buildLivePreviewState(
           decorations,
           atomicRanges,
           openWikilink,
+          onError,
         );
       }
 
@@ -1543,6 +1683,7 @@ function buildLivePreviewState(
         decorations,
         atomicRanges,
         openWikilink,
+        onError,
       );
 
       if (collapsed) {
@@ -1587,8 +1728,9 @@ function buildLivePreviewState(
         line.text.slice(prefixSize),
         line.from + prefixSize,
         decorations,
-        atomicRanges,
-        openWikilink,
+          atomicRanges,
+          openWikilink,
+          onError,
       );
       lineNumber++;
       continue;
@@ -1654,6 +1796,7 @@ function buildLivePreviewState(
       decorations,
       atomicRanges,
       openWikilink,
+      onError,
     );
 
     lineNumber++;
@@ -1865,6 +2008,21 @@ function prefixSelectedLines(view: EditorView, prefix: string) {
 
   view.dispatch({ changes });
   view.focus();
+}
+
+function removeBareTaskPrefix(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const line = view.state.doc.lineAt(range.head);
+  const prefix = view.state.sliceDoc(line.from, range.head);
+  const match = prefix.match(/^([ \t]*)<[ \t]?$/);
+  if (!match) return false;
+  const from = line.from + match[1].length;
+  view.dispatch({
+    changes: { from, to: range.head, insert: "" },
+    selection: EditorSelection.cursor(from),
+  });
+  return true;
 }
 
 function snippetCompletion(context: CompletionContext): CompletionResult | null {
@@ -2410,6 +2568,10 @@ export default function LiveMarkdownEditor({
               run: (editor) => insertSoftObjectBreak(editor),
             },
             {
+              key: "Backspace",
+              run: removeBareTaskPrefix,
+            },
+            {
               key: "Enter",
               run: (editor) =>
                 acceptCompletion(editor) ||
@@ -2477,6 +2639,7 @@ export default function LiveMarkdownEditor({
           EditorState.readOnly.of(readOnly),
           EditorView.editable.of(!readOnly),
           markdown({ codeLanguages: languages }),
+          syntaxHighlighting(codeHighlightStyle),
           deepCodeHighlightField,
           deepCodeHighlightLoader,
           liveMarkdownTheme,

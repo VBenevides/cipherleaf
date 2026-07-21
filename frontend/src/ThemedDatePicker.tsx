@@ -4,7 +4,6 @@ type ThemedDatePickerProps = {
   ariaLabel: string;
   value: string;
   onChange: (value: string) => void;
-  withTime?: boolean;
 };
 
 function dateValue(date: Date): string {
@@ -18,24 +17,18 @@ function parseDate(value: string): Date | null {
   return dateValue(date) === value.slice(0, 10) ? date : null;
 }
 
-function displayDate(value: string, withTime: boolean): string {
+function displayDate(value: string): string {
   const date = parseDate(value);
-  if (!date) return withTime ? "Select date and time" : "Select date";
-  if (!withTime) return date.toLocaleDateString();
-  const [hours = "00", minutes = "00"] = value.slice(11, 16).split(":");
-  date.setHours(Number(hours), Number(minutes));
-  return date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  return date ? date.toLocaleDateString() : "Select date";
 }
 
-export function ThemedDatePicker({ ariaLabel, value, onChange, withTime = false }: ThemedDatePickerProps) {
+export function ThemedDatePicker({ ariaLabel, value, onChange }: ThemedDatePickerProps) {
   const picker = useRef<HTMLDivElement>(null);
   const selected = parseDate(value);
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => selected ?? new Date());
-  const [time, setTime] = useState(() => value.slice(11, 16) || "00:00");
 
   useEffect(() => { if (selected) setMonth(selected); }, [value]);
-  useEffect(() => { if (withTime) setTime(value.slice(11, 16) || "00:00"); }, [value, withTime]);
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => { if (!picker.current?.contains(event.target as Node)) setOpen(false); };
@@ -49,13 +42,12 @@ export function ThemedDatePicker({ ariaLabel, value, onChange, withTime = false 
   const gridStart = new Date(first.getFullYear(), first.getMonth(), first.getDate() - first.getDay());
   const days = Array.from({ length: 42 }, (_, index) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
   const selectDate = (date: Date) => {
-    const selectedTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : "00:00";
-    onChange(withTime ? `${dateValue(date)}T${selectedTime}` : dateValue(date));
-    if (!withTime) setOpen(false);
+    onChange(dateValue(date));
+    setOpen(false);
   };
 
   return <div ref={picker} className="themed-date-picker">
-    <button type="button" className="themed-date-picker-trigger" aria-label={ariaLabel} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((current) => !current)}>{displayDate(value, withTime)}</button>
+    <button type="button" className="themed-date-picker-trigger" aria-label={ariaLabel} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((current) => !current)}>{displayDate(value)}</button>
     {open && <div className="themed-date-picker-popover" role="dialog" aria-label={ariaLabel}>
       <div className="themed-date-picker-header">
         <button type="button" aria-label="Previous month" onClick={() => setMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}>‹</button>
@@ -64,7 +56,6 @@ export function ThemedDatePicker({ ariaLabel, value, onChange, withTime = false 
       </div>
       <div className="themed-date-picker-weekdays" aria-hidden="true">{Array.from({ length: 7 }, (_, day) => <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString(undefined, { weekday: "narrow" })}</span>)}</div>
       <div className="themed-date-picker-days">{days.map((date) => <button type="button" key={dateValue(date)} className={`${date.getMonth() === month.getMonth() ? "" : "outside"} ${selected && dateValue(date) === dateValue(selected) ? "selected" : ""}`} aria-label={date.toLocaleDateString(undefined, { dateStyle: "full" })} onClick={() => selectDate(date)}>{date.getDate()}</button>)}</div>
-      {withTime && <label className="themed-date-picker-time">Time<input type="text" inputMode="numeric" maxLength={5} placeholder="HH:MM" value={time} onChange={(event) => { const next = event.target.value; setTime(next); if (/^([01]\d|2[0-3]):[0-5]\d$/.test(next)) onChange(`${dateValue(selected ?? month)}T${next}`); }} /></label>}
     </div>}
   </div>;
 }

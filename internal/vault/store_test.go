@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"cipherleaf/internal/secure"
 )
 
 func TestVaultLifecycleStoresNoPlaintext(t *testing.T) {
@@ -171,6 +175,34 @@ func TestLockedFolderRequiresBackendAuthorization(t *testing.T) {
 	}
 }
 
+func TestFolderPasswordValidationAndLegacyMigration(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF = secure.KDFParams{Time: 1, Memory: 8 * 1024, Threads: 2}
+	t.Cleanup(func() { defaultKDF = previous })
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "folder-migration-secret"); err != nil {
+		t.Fatal(err)
+	}
+	folder, _ := store.CreateFolder("Private")
+	if _, err := store.LockFolder(folder.ID, "short"); err == nil {
+		t.Fatal("short folder password accepted")
+	}
+	salt := []byte("0123456789abcdef")
+	legacy := legacyFolderVerifierPrefix + base64.RawURLEncoding.EncodeToString(salt) + ":" + hex.EncodeToString(saltedFolderPasswordHash("old", salt))
+	index, _ := store.findFolderLocked(folder.ID)
+	store.manifest.Folders[index].Locked = true
+	store.manifest.Folders[index].LockPasswordHash = legacy
+	if err := store.saveManifestLocked(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckFolderPassword(folder.ID, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(store.manifest.Folders[index].LockPasswordHash, folderPasswordVerifierPrefix) {
+		t.Fatal("legacy folder verifier was not migrated")
+	}
+}
+
 func TestParentFolderLocksNestedFolders(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "correct horse battery staple"); err != nil {
@@ -255,6 +287,10 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	duplicateID, err := store.SaveAttachment(note.ID, slices.Clone(webp))
+	if err != nil || duplicateID != id {
+		t.Fatalf("duplicate attachment ID = %q, %v; want %q", duplicateID, err, id)
+	}
 	path := filepath.Join(session.Path, "attachments", sharedAttachmentFolder, id+".enc")
 	encrypted, err := os.ReadFile(path)
 	if err != nil {
@@ -281,7 +317,7 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if !bytes.Equal(loadedFromOtherNote, webp) {
 		t.Fatal("shared attachment differs when read from another note")
 	}
-	staleID, err := store.SaveAttachment(note.ID, webp)
+	staleID, err := store.SaveAttachment(note.ID, append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("stale pixels")...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +331,7 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if _, err := store.GetAttachment(note.ID, staleID); err == nil {
 		t.Fatal("unreferenced attachment remains after saving")
 	}
-	syncStaleID, err := store.SaveAttachment(note.ID, webp)
+	syncStaleID, err := store.SaveAttachment(note.ID, append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("sync stale pixels")...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,6 +724,40 @@ func TestTamperedNoteFailsAuthentication(t *testing.T) {
 	}
 	if _, err := store.GetNote(note.ID); err == nil {
 		t.Fatal("expected tampered note and backup to fail")
+	}
+}
+
+func TestSaveNoteRollsBackWhenManifestWriteFails(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	if _, err := store.Create(root, "manifest-rollback-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "original content"); err != nil {
+		t.Fatal(err)
+	}
+	store.manifestWriteHook = func() error {
+		store.manifestWriteHook = nil
+		return errors.New("injected manifest failure")
+	}
+	if _, err := store.SaveNote(note.ID, "Changed", "changed content"); err == nil {
+		t.Fatal("SaveNote succeeded despite manifest failure")
+	}
+	loaded, err := store.GetNote(note.ID)
+	if err != nil || loaded.Title != "Original" || derivedMarkdownContent(loaded.Content) != "original content" {
+		t.Fatalf("rolled-back note = %#v, %v", loaded, err)
+	}
+	store.Lock()
+	if _, err := store.Open(root, "manifest-rollback-secret"); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = store.GetNote(note.ID)
+	if err != nil || loaded.Title != "Original" || derivedMarkdownContent(loaded.Content) != "original content" {
+		t.Fatalf("reopened note = %#v, %v", loaded, err)
 	}
 }
 
@@ -2087,28 +2157,6 @@ func TestReadVaultIDFromConfiguration(t *testing.T) {
 	}
 	if id == "" {
 		t.Fatal("ReadVaultID returned an empty id")
-	}
-}
-
-func TestUnlockedSecretAvailability(t *testing.T) {
-	store := NewStore()
-	if _, ok := store.UnlockedSecret(); ok {
-		t.Fatal("UnlockedSecret should be false while the vault is locked")
-	}
-	root := t.TempDir()
-	if _, err := store.Create(root, "secret-secret-secret"); err != nil {
-		t.Fatal(err)
-	}
-	secret, ok := store.UnlockedSecret()
-	if !ok {
-		t.Fatal("UnlockedSecret should be true after Create")
-	}
-	if string(secret) != "secret-secret-secret" {
-		t.Fatalf("UnlockedSecret = %q, want the original secret", string(secret))
-	}
-	store.Lock()
-	if _, ok := store.UnlockedSecret(); ok {
-		t.Fatal("UnlockedSecret should be false after Lock")
 	}
 }
 

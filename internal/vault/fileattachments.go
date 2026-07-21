@@ -62,6 +62,10 @@ func (s *Store) ImportFileAttachment(noteID, source string) (AttachmentInfo, err
 	if _, found := s.findNoteLocked(noteID); !found {
 		return AttachmentInfo{}, errors.New("note not found")
 	}
+	noteIndex, _ := s.findNoteLocked(noteID)
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[noteIndex]); err != nil {
+		return AttachmentInfo{}, err
+	}
 	id, err := randomID(16)
 	if err != nil {
 		return AttachmentInfo{}, err
@@ -98,6 +102,9 @@ func (s *Store) FileAttachment(noteID, id string) (AttachmentInfo, []byte, error
 	if !found {
 		return AttachmentInfo{}, nil, errors.New("note not found")
 	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return AttachmentInfo{}, nil, err
+	}
 	allowed := false
 	for _, attachmentID := range s.manifest.Notes[index].AttachmentIDs {
 		if attachmentID == id {
@@ -124,6 +131,9 @@ func (s *Store) ListFileAttachments(noteID string) ([]AttachmentInfo, error) {
 	index, found := s.findNoteLocked(noteID)
 	if !found {
 		return nil, errors.New("note not found")
+	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return nil, err
 	}
 	result := make([]AttachmentInfo, 0)
 	for _, id := range s.manifest.Notes[index].AttachmentIDs {
@@ -152,9 +162,31 @@ func (s *Store) ExportFileAttachment(noteID, id, destination string) (string, er
 	if stat, err := os.Stat(directory); err != nil || !stat.IsDir() {
 		return "", errors.New("attachment destination is not a directory")
 	}
-	path := filepath.Join(directory, portableName(info.Filename, "attachment"))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", err
+	name := portableName(info.Filename, "attachment")
+	extension := filepath.Ext(name)
+	base := strings.TrimSuffix(name, extension)
+	for suffix := 1; ; suffix++ {
+		candidate := name
+		if suffix > 1 {
+			candidate = fmt.Sprintf("%s (%d)%s", base, suffix, extension)
+		}
+		path := filepath.Join(directory, candidate)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if _, err := file.Write(data); err != nil {
+			file.Close()
+			_ = os.Remove(path)
+			return "", err
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(path)
+			return "", err
+		}
+		return path, nil
 	}
-	return path, nil
 }

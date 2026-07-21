@@ -110,6 +110,13 @@ test("keeps fenced code as one typed object", () => {
   assert.equal(tree[1].text, "after");
 });
 
+test("keeps image attachments rendered when selected", () => {
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(editor, /attachment && !lineIsActive/);
+  assert.doesNotMatch(editor, /toggleAttachment && !lineIsActive/);
+  assert.doesNotMatch(editor, /VaultService\.DeleteAttachment\(this\.noteID/);
+});
+
 test("moves a complete code block without changing its contents", () => {
   const markdown = [
     "> Parent",
@@ -258,6 +265,17 @@ test("preserves bare text depth in portable markdown", () => {
     "      Third level",
     "  First level again",
   ].join("\n"));
+});
+
+test("does not indent fenced code contents", () => {
+  assert.equal(portableMarkdown("  ```ts\nconst answer = 42;\n  ```"), "  ```ts\nconst answer = 42;\n  ```");
+  const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(style, /\.cm-line\.cm-live-object-line:not\(\.cm-live-code-block\)/);
+  assert.doesNotMatch(style, /\.cm-live-code-content span/);
+  assert.match(editor, /syntaxHighlighting\(codeHighlightStyle\)/);
+  assert.match(editor, /hideSyntaxRange\(line\.from, line\.from \+ indentation, decorations, atomicRanges\)/);
+  assert.match(style, /:root\[data-theme="dark"\][\s\S]*--syntax-keyword: #c792ea/);
 });
 
 test("keeps every section after the first as an indented quote", () => {
@@ -466,6 +484,17 @@ test("allows empty text and bullet objects", () => {
   assert.equal(tree[1].text, "");
   assert.equal(tree[2].tag, "bulletpoint");
   assert.equal(tree[2].text, "");
+});
+
+test("keeps bullet and numbered markers on checkbox objects", () => {
+  const objects = parseObjectDocument("- [ ] Bullet\n2. [x] Numbered").objects;
+
+  assert.deepEqual(objects.map(({ listMarker, checked }) => ({ listMarker, checked })), [
+    { listMarker: "-", checked: false },
+    { listMarker: "2.", checked: true },
+  ]);
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /decorateObjectListMarker\(object, syntaxFrom, decorations, atomicRanges, bracketFrom\);[\s\S]*const taskFrom = object\.listMarker \|\| object\.barePrefixSize > 0 \? bracketFrom : syntaxFrom;[\s\S]*addHiddenRange\(\s*taskFrom,\s*object\.textFrom/);
 });
 
 test("keeps trailing list whitespace out of the hidden prefix", () => {

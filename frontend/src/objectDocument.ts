@@ -162,6 +162,10 @@ export function replaceExclusiveObjectPrefix(
 }
 
 export function normalizeStackedExclusiveObjectPrefix(line: string, previousLine?: string): string {
+  line = line.replace(
+    /^([ \t]*(?:(?:>+|<)[ \t]?|(?:[-*]|\d+[.)])[ \t]+)?)([-*]|\d+[.)])(?=\[[ xX]\])/,
+    "$1$2 ",
+  );
   const current = exclusiveObjectPrefix(line);
   if (!current) return line;
   const next = exclusiveObjectPrefix(current.rest);
@@ -741,9 +745,8 @@ export function portableMarkdown(markdown: string): string {
   return document.objects.map((object) => {
     const indent = " ".repeat(Math.max(0, object.indent));
     if (object.tag === "code") {
-      return ["```" + (object.language ?? "text"), object.text, object.closed === false ? "" : "```"]
+      return [`${indent}\`\`\`${object.language ?? "text"}`, object.text, object.closed === false ? "" : `${indent}\`\`\``]
         .filter((line, index) => line !== "" || index === 1)
-        .map((line) => line ? `${indent}${line}` : "")
         .join("\n");
     }
     if (object.tag === "section") {

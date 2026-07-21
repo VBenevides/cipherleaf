@@ -9,5 +9,5 @@ test("daily note titles use configured date tokens", () => {
 });
 
 test("daily templates expand title and date variables", () => {
-  assert.match(renderNoteTemplate("# {{title}}\n{{date}} {{time}}", "Journal", date), /^# Journal\n2026-07-13 /);
+  assert.equal(renderNoteTemplate("# {{title}}\n{{date}} {{time}}", "Journal", date), "# Journal\n2026-07-13 09:05");
 });

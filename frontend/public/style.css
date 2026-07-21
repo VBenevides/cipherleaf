@@ -35,6 +35,12 @@
   --code-control-surface: #f7f7f5;
   --code-ink: #252a34;
   --code-muted: #5f6773;
+  --syntax-keyword: #7c3aed;
+  --syntax-function: #2563eb;
+  --syntax-type: #0f766e;
+  --syntax-string: #15803d;
+  --syntax-number: #b45309;
+  --syntax-comment: #6b7280;
   --editor-bg: #f7f7f5;
   --sidebar-bg: #eef0f2;
   --toolbar-bg: #f7f7f5;
@@ -72,6 +78,12 @@
   --code-control-surface: #2a2a30;
   --code-ink: #e5e9f0;
   --code-muted: #a5adba;
+  --syntax-keyword: #c792ea;
+  --syntax-function: #82aaff;
+  --syntax-type: #89ddff;
+  --syntax-string: #c3e88d;
+  --syntax-number: #f78c6c;
+  --syntax-comment: #8994a5;
   --editor-bg: #2e3440;
   --sidebar-bg: #292f3a;
   --toolbar-bg: #2e3440;
@@ -127,6 +139,12 @@
   --code-control-surface: #f0e3d4;
   --code-ink: #38332c;
   --code-muted: #746b64;
+  --syntax-keyword: #7a3e65;
+  --syntax-function: #3f5f87;
+  --syntax-type: #3f6b63;
+  --syntax-string: #4f6b3a;
+  --syntax-number: #9a5b24;
+  --syntax-comment: #746b64;
   --editor-bg: #f6efe5;
   --sidebar-bg: #e8d9c9;
   --toolbar-bg: #ecdece;
@@ -160,7 +178,6 @@
 }
 
 :root[data-theme="archivist"] .sidebar {
-  border-color: var(--line);
   background: var(--sidebar-bg);
 }
 
@@ -209,13 +226,6 @@
 :root[data-theme="archivist"] .live-markdown-editor .cm-content {
   padding: 34px var(--notebook-gutter) 76px;
   font-style: normal;
-  background-image: linear-gradient(
-    to right,
-    transparent var(--notebook-margin),
-    color-mix(in srgb, var(--red) 38%, transparent) var(--notebook-margin),
-    color-mix(in srgb, var(--red) 38%, transparent) calc(var(--notebook-margin) + 1px),
-    transparent calc(var(--notebook-margin) + 1px)
-  );
 }
 
 :root[data-theme="archivist"] .live-markdown-editor .cm-live-object-handle {
@@ -380,14 +390,12 @@ a:focus-visible {
   border-radius: 16px 16px 16px 5px;
   color: var(--on-accent);
   background: var(--green-dark);
-  box-shadow: 0 12px 30px color-mix(in srgb, var(--green-dark) 18%, transparent);
 }
 
 .brand-glyph.small {
   width: 36px;
   height: 36px;
   border-radius: 11px 11px 11px 4px;
-  box-shadow: none;
 }
 
 .brand-glyph img {
@@ -499,7 +507,6 @@ a:focus-visible {
   gap: 8px;
   color: var(--on-accent);
   background: var(--green-dark);
-  box-shadow: 0 9px 22px color-mix(in srgb, var(--green-dark) 15%, transparent);
 }
 
 .primary-button:hover {
@@ -524,7 +531,6 @@ a:focus-visible {
   gap: 8px;
   color: var(--on-danger);
   background: var(--red);
-  box-shadow: 0 9px 22px color-mix(in srgb, var(--red) 14%, transparent);
 }
 
 .danger-button:hover {
@@ -594,7 +600,6 @@ a:focus-visible {
 .paper-back {
   background: var(--modal-control-surface);
   transform: translate(-44%, -50%) rotate(8deg);
-  box-shadow: 0 35px 70px color-mix(in srgb, var(--green-dark) 32%, transparent);
 }
 
 .paper-front {
@@ -604,7 +609,6 @@ a:focus-visible {
     linear-gradient(color-mix(in srgb, var(--modal-control-surface) 93%, transparent), color-mix(in srgb, var(--modal-control-surface) 96%, transparent)),
     var(--paper);
   transform: translate(-56%, -50%) rotate(-3deg);
-  box-shadow: 0 34px 75px color-mix(in srgb, var(--green-dark) 34%, transparent);
 }
 
 .paper-front > span {
@@ -648,7 +652,7 @@ a:focus-visible {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--green-dark) 5%, transparent);
+  background: color-mix(in srgb, var(--green-dark) 10%, transparent);
   backdrop-filter: blur(7px);
 }
 
@@ -677,7 +681,6 @@ a:focus-visible {
   border: 1px solid color-mix(in srgb, var(--modal-control-surface) 70%, transparent);
   border-radius: 17px;
   background: var(--modal-surface);
-  box-shadow: 0 32px 90px color-mix(in srgb, var(--green-dark) 30%, transparent);
 }
 
 .vault-modal h2 {
@@ -863,7 +866,6 @@ a:focus-visible {
   flex: 0 0 auto;
   margin: 0;
   accent-color: var(--green-dark);
-  box-shadow: none;
 }
 
 .vault-modal label,
@@ -890,7 +892,8 @@ a:focus-visible {
 
 .vault-modal input:focus {
   border-color: var(--green-dark);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-dark) 11%, transparent);
+  outline: 2px solid var(--green-dark);
+  outline-offset: 1px;
 }
 
 .password-field {
@@ -923,7 +926,6 @@ a:focus-visible {
   padding: 10px 14px 12px;
   border-top: 1px solid var(--line-soft);
   background: var(--modal-control-surface);
-  box-shadow: 0 -14px 34px color-mix(in srgb, var(--ink) 14%, transparent);
   z-index: 50;
 }
 
@@ -1299,7 +1301,6 @@ a:focus-visible {
   height: auto;
   padding: 0;
   border: 0;
-  box-shadow: none;
   accent-color: var(--green-dark);
 }
 
@@ -1358,7 +1359,6 @@ a:focus-visible {
 .sync-link-state.linked > span,
 .sync-status.linked > span {
   background: var(--green-dark);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-dark) 10%, transparent);
 }
 
 .settings-path-field {
@@ -1387,7 +1387,6 @@ a:focus-visible {
   flex: 0 0 auto;
   margin: 0;
   accent-color: var(--green-dark);
-  box-shadow: none;
 }
 
 .sync-privacy-warning {
@@ -1570,13 +1569,11 @@ a:focus-visible {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--line);
   background: var(--sidebar-bg);
 }
 
 .workspace.sidebar-collapsed .sidebar {
   overflow: hidden;
-  border-right: 0;
   opacity: 0;
   pointer-events: none;
 }
@@ -1763,13 +1760,12 @@ a:focus-visible {
 }
 
 .calendar-day.today {
-  box-shadow: inset 0 0 0 1px var(--green);
+  border-color: var(--green);
 }
 
 .calendar-day.selected {
   color: var(--on-accent);
   background: var(--green-dark);
-  box-shadow: none;
 }
 
 .calendar-footer {
@@ -1796,7 +1792,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 15px 14px 13px;
+  margin: 0;
   padding: 0 9px;
   color: var(--muted);
   border: 1px solid var(--modal-control-surface);
@@ -1809,6 +1805,13 @@ a:focus-visible {
   text-align: left;
 }
 
+.sidebar-view-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 15px 14px 13px;
+}
+
 .graph-view-button:hover,
 .graph-view-button.active {
   color: var(--green-dark);
@@ -1818,10 +1821,6 @@ a:focus-visible {
 
 .graph-view-button span {
   flex: 1;
-}
-
-.time-tracking-view-button {
-  margin-top: -7px;
 }
 
 .notes-heading {
@@ -1867,7 +1866,7 @@ a:focus-visible {
 
 .notes-sort-select summary::-webkit-details-marker { display: none; }
 .notes-sort-select summary::after { position: absolute; right: 8px; content: "▾"; }
-.notes-sort-select summary:focus-visible { outline: none; border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 24%, transparent); }
+.notes-sort-select summary:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; border-color: var(--green); }
 
 .notes-sort-options {
   position: absolute;
@@ -1881,7 +1880,6 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--modal-surface);
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
 .notes-sort-options button {
@@ -2039,7 +2037,7 @@ a:focus-visible {
 .note-list-item.active {
   color: var(--green-dark);
   background: color-mix(in srgb, var(--modal-control-surface) 80%, transparent);
-  box-shadow: inset 3px 0 var(--green);
+  border-left: 3px solid var(--green);
 }
 
 .note-list-item {
@@ -2051,11 +2049,11 @@ a:focus-visible {
 }
 
 .note-list-item.drag-over-before {
-  box-shadow: inset 0 2px var(--green);
+  border-top: 2px solid var(--green);
 }
 
 .note-list-item.drag-over-after {
-  box-shadow: inset 0 -2px var(--green);
+  border-bottom: 2px solid var(--green);
 }
 
 .note-list-item > span {
@@ -2094,6 +2092,12 @@ a:focus-visible {
   border-top: 1px solid var(--modal-control-surface);
 }
 
+.sidebar-vault-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
 .encrypted-status {
   display: flex;
   align-items: center;
@@ -2109,7 +2113,6 @@ a:focus-visible {
   height: 6px;
   border-radius: 50%;
   background: var(--green-dark);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-dark) 10%, transparent);
 }
 
 .lock-button {
@@ -2135,7 +2138,7 @@ a:focus-visible {
 
 .vault-selector {
   position: relative;
-  margin-top: 7px;
+  min-width: 0;
 }
 
 .vault-selector-button,
@@ -2189,7 +2192,6 @@ a:focus-visible {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--green-dark) 16%, transparent);
 }
 
 .vault-selector-menu button {
@@ -2214,6 +2216,7 @@ a:focus-visible {
 }
 
 .editor-topbar {
+  position: relative;
   min-height: 50px;
   display: flex;
   align-items: center;
@@ -2263,7 +2266,6 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--modal-surface);
-  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink) 22%, transparent);
   backdrop-filter: blur(14px);
 }
 
@@ -2374,9 +2376,16 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-left: auto;
   color: var(--muted);
   font-size: 10px;
+}
+
+.save-indicators {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .sync-status {
@@ -2520,6 +2529,61 @@ a:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
+.note-tabs {
+  min-height: 35px;
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
+}
+
+.note-tab {
+  min-width: 90px;
+  max-width: 180px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+}
+
+.note-tab.active {
+  border-color: var(--line);
+  background: var(--canvas);
+}
+
+.note-tab button,
+.new-note-tab {
+  min-width: 0;
+  padding: 6px;
+  color: var(--muted);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.note-tab button:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+}
+
+.note-tab span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-tab.active button:first-child,
+.note-tab button:hover,
+.new-note-tab:hover {
+  color: var(--green-dark);
+}
+
 .view-tabs button {
   padding: 7px 11px;
   color: var(--muted);
@@ -2656,7 +2720,7 @@ a:focus-visible {
 .time-week-grid > section { min-height: 150px; display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: 8px; background: color-mix(in srgb, var(--modal-control-surface) 28%, transparent); }
 .time-week-grid > section.today { border-color: var(--green); }
 .time-week-grid > section { cursor: pointer; outline: none; }
-.time-week-grid > section:hover, .time-week-grid > section:focus-visible, .time-week-grid > section.selected { border-color: var(--green-dark); box-shadow: inset 0 0 0 1px var(--green-dark); }
+.time-week-grid > section:hover, .time-week-grid > section:focus-visible, .time-week-grid > section.selected { border-color: var(--green-dark); }
 .time-week-grid header, .time-week-grid footer { display: flex; justify-content: space-between; padding: 8px; color: var(--muted); font-size: 10px; }
 .time-week-grid > section > div { flex: 1; display: grid; align-content: start; gap: 5px; padding: 3px 8px; }
 .time-week-grid > section > div > div { display: grid; gap: 2px; padding: 6px; border-radius: 5px; background: var(--green-pale); font-size: 9px; }
@@ -2669,7 +2733,7 @@ a:focus-visible {
 .time-month-grid > div.today { border-color: var(--green); }
 .time-month-grid > div > span { color: var(--muted); font-size: 9px; }
 .time-month-grid > div > strong { color: var(--ink); font-size: 11px; }
-.time-month-details { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; min-width: 170px; display: none; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent); }
+.time-month-details { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; min-width: 170px; display: none; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
 .time-month-grid > div:hover .time-month-details, .time-month-grid > div:focus .time-month-details { display: grid; }
 .time-month-details span { color: var(--ink); font-size: 9px; }
 .time-label-manager { display: grid; gap: 20px; }
@@ -2723,9 +2787,9 @@ a:focus-visible {
 .time-entry-list article > div:first-child { min-width: 0; flex-direction: column; }
 .time-entry-list article span { color: var(--muted); font-size: 10px; }
 
-.time-tracking-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--green-dark) 46%, transparent); }
+.time-tracking-dialog { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--green-dark) 10%, transparent); }
 .time-tracking-dialog > form,
-.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--modal-surface); box-shadow: 0 18px 60px color-mix(in srgb, var(--ink) 2%, transparent); }
+.time-tracking-dialog > div { width: min(480px, 100%); display: grid; gap: 13px; padding: 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--modal-surface); }
 .vault-modal,
 .time-tracking-dialog > form,
 .time-tracking-dialog > div,
@@ -2744,6 +2808,9 @@ a:focus-visible {
 .timer-modal fieldset label { display: inline-flex; align-items: center; gap: 5px; margin: 4px 10px 4px 0; }
 .timer-modal-warning, .timer-modal-error { color: var(--red); }
 .time-tracking-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.time-tracking-date-time { display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 10px; }
+.time-tracking-date-time > label { min-width: 0; }
+.time-tracking-date-time input { width: 100%; min-width: 0; }
 
 .themed-date-picker { position: relative; min-width: 0; }
 .themed-date-picker-trigger {
@@ -2758,7 +2825,7 @@ a:focus-visible {
   font: inherit;
   text-align: left;
 }
-.themed-date-picker-trigger:focus-visible { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.themed-date-picker-trigger:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; border-color: var(--green); }
 .themed-date-picker-popover {
   position: absolute;
   z-index: 200;
@@ -2772,7 +2839,6 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--modal-surface);
-  box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 22%, transparent);
 }
 .themed-date-picker-header { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; text-align: center; }
 .themed-date-picker-header button { height: 25px; color: var(--muted); border: 0; border-radius: 5px; background: transparent; cursor: pointer; font-size: 19px; line-height: 1; }
@@ -2785,9 +2851,6 @@ a:focus-visible {
 .themed-date-picker-days button:hover { color: var(--green-dark); background: var(--green-pale); }
 .themed-date-picker-days button.selected { color: var(--modal-surface); background: var(--green-dark); }
 .themed-date-picker-days button.outside { color: var(--muted); opacity: .5; }
-.themed-date-picker-time { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; padding-top: 3px; color: var(--muted); font-size: 10px; }
-.themed-date-picker-time input { min-height: 30px; padding: 0 8px; color: var(--ink); border: 1px solid var(--line); border-radius: 5px; background: var(--modal-control-surface); font: inherit; }
-
 .tag-multi-select {
   position: relative;
   min-width: 160px;
@@ -2812,7 +2875,7 @@ a:focus-visible {
 
 .tag-multi-select summary::-webkit-details-marker { display: none; }
 .tag-multi-select summary::after { position: absolute; right: 11px; content: "▾"; }
-.tag-multi-select summary:focus-visible { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.tag-multi-select summary:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; border-color: var(--green); }
 .tag-multi-select.disabled { opacity: .55; pointer-events: none; }
 
 .tag-multi-select-options {
@@ -2829,7 +2892,6 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--modal-surface);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--ink) 2%, transparent);
 }
 
 .tag-multi-select-options label,
@@ -2862,7 +2924,7 @@ a:focus-visible {
 .tag-multi-select-options button[aria-selected="true"] { color: var(--green-dark); background: var(--green-pale); }
 .tag-multi-select-options input,
 .vault-modal .tag-multi-select-options input,
-.time-tracking-dialog .tag-multi-select-options input { width: 15px !important; height: 15px !important; min-height: 15px; flex: 0 0 15px; margin: 0; padding: 0; accent-color: var(--green-dark); box-shadow: none; }
+.time-tracking-dialog .tag-multi-select-options input { width: 15px !important; height: 15px !important; min-height: 15px; flex: 0 0 15px; margin: 0; padding: 0; accent-color: var(--green-dark); }
 .tag-multi-select-empty { padding: 7px; color: var(--muted); }
 
 @media (max-width: 1050px) {
@@ -3012,14 +3074,14 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-conflict-diff {
+  border-left: 3px solid var(--warning);
   background: color-mix(in srgb, var(--warning) 45%, transparent);
-  box-shadow: inset 3px 0 0 var(--warning);
 }
 
 .live-markdown-editor .cm-live-search-highlight {
+  border-bottom: 1px solid var(--warning);
   background: color-mix(in srgb, var(--warning) 58%, transparent);
   border-radius: 2px;
-  box-shadow: inset 0 -1px 0 var(--warning);
 }
 
 .editor-view-pane {
@@ -3112,16 +3174,16 @@ a:focus-visible {
 }
 
 .object-tree-row.is-drop-before {
-  box-shadow: inset 0 3px 0 var(--green-dark);
+  border-top: 3px solid var(--green-dark);
 }
 
 .object-tree-row.is-drop-after {
-  box-shadow: inset 0 -3px 0 var(--green-dark);
+  border-bottom: 3px solid var(--green-dark);
 }
 
 .object-tree-row.is-drop-child {
+  border-left: 4px solid var(--green-dark);
   transform: translateX(18px);
-  box-shadow: inset 4px 0 0 var(--green-dark);
 }
 
 .object-tree-handle {
@@ -3217,7 +3279,7 @@ a:focus-visible {
   background: var(--editor-bg);
 }
 
-.live-markdown-editor .cm-line.cm-live-object-line {
+.live-markdown-editor .cm-line.cm-live-object-line:not(.cm-live-code-block) {
   position: relative;
   padding-left: calc(var(--live-object-depth, 0) * 24px + 0.4em);
   cursor: text;
@@ -3264,16 +3326,16 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-object-line.is-drop-before {
-  box-shadow: inset 0 3px 0 var(--green-dark);
+  border-top: 3px solid var(--green-dark);
 }
 
 .live-markdown-editor .cm-live-object-line.is-drop-after {
-  box-shadow: inset 0 -3px 0 var(--green-dark);
+  border-bottom: 3px solid var(--green-dark);
 }
 
 .live-markdown-editor .cm-live-object-line.is-drop-child {
+  border-left: 4px solid var(--green-dark);
   transform: translateX(18px);
-  box-shadow: inset 4px 0 0 var(--green-dark);
 }
 
 .live-markdown-editor .cm-live-object-handle {
@@ -3324,7 +3386,6 @@ a:focus-visible {
   border-radius: 7px;
   color: var(--ink);
   background: color-mix(in srgb, var(--modal-control-surface) 96%, transparent);
-  box-shadow: 0 10px 30px color-mix(in srgb, var(--ink) 20%, transparent);
   font-size: 12px;
   line-height: 1.35;
   pointer-events: none;
@@ -3427,13 +3488,6 @@ a:focus-visible {
   padding: 34px var(--notebook-gutter) 76px;
   caret-color: var(--green-dark);
   font-style: normal;
-  background-image: linear-gradient(
-    to right,
-    transparent var(--notebook-margin),
-    color-mix(in srgb, var(--red) 38%, transparent) var(--notebook-margin),
-    color-mix(in srgb, var(--red) 38%, transparent) calc(var(--notebook-margin) + 1px),
-    transparent calc(var(--notebook-margin) + 1px)
-  );
 }
 
 .live-markdown-editor .cm-line {
@@ -3454,8 +3508,8 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-caret-locator {
+  border-left: 3px solid var(--warning);
   background: color-mix(in srgb, var(--warning) 30%, transparent);
-  box-shadow: inset 3px 0 var(--warning);
 }
 
 .live-markdown-editor .cm-selectionBackground,
@@ -3615,7 +3669,6 @@ a:focus-visible {
   border-radius: 7px;
   color: var(--ink);
   background: var(--paper);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 30%, transparent);
 }
 
 .cm-live-attachment-menu button {
@@ -3637,6 +3690,23 @@ a:focus-visible {
   opacity: 0.55;
 }
 
+.cm-live-link-dialog {
+  width: min(420px, calc(100% - 32px));
+  color: var(--ink);
+}
+
+.cm-live-link-dialog::backdrop {
+  background: color-mix(in srgb, var(--green-dark) 10%, transparent);
+  backdrop-filter: blur(7px);
+}
+
+.cm-live-link-dialog-error {
+  min-height: 16px;
+  margin: 0;
+  color: var(--red);
+  font-size: 10px;
+}
+
 .live-markdown-editor .cm-live-code {
   padding: 2px 5px;
   color: var(--code-ink);
@@ -3655,10 +3725,6 @@ a:focus-visible {
   color: var(--code-ink);
   background: var(--code-surface);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.live-markdown-editor .cm-live-code-content span {
-  color: var(--code-ink) !important;
 }
 
 .live-markdown-editor .cm-live-code-copy {
@@ -3787,18 +3853,22 @@ a:focus-visible {
   text-decoration-color: var(--line);
 }
 
-.live-markdown-editor .cm-live-wikilink {
+.live-markdown-editor .cm-live-wikilink,
+.live-markdown-editor .cm-live-citation {
   padding: 1px 4px;
   color: var(--green-dark);
+  border: 0;
   border-radius: 4px;
   background: var(--modal-control-surface);
   cursor: pointer;
+  font: inherit;
   text-decoration: underline;
   text-decoration-color: var(--green-dark);
   text-underline-offset: 3px;
 }
 
-.live-markdown-editor .cm-live-wikilink:hover {
+.live-markdown-editor .cm-live-wikilink:hover,
+.live-markdown-editor .cm-live-citation:hover {
   background: var(--modal-control-surface);
 }
 
@@ -3936,7 +4006,6 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--modal-surface);
-  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink) 22%, transparent);
   backdrop-filter: blur(14px);
 }
 
@@ -4062,7 +4131,6 @@ a:focus-visible {
     width: min(300px, 88vw);
     transform: translateX(-102%);
     transition: transform 180ms ease;
-    box-shadow: 18px 0 50px color-mix(in srgb, var(--ink) 20%, transparent);
   }
 
   .sidebar.sidebar-open {
@@ -4182,7 +4250,6 @@ a:focus-visible {
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-search-highlight {
   background: color-mix(in srgb, var(--warning) 42%, transparent);
-  box-shadow: inset 0 -1px 0 var(--warning);
 }
 
 :root[data-theme="dark"] .welcome-card h1,
@@ -4210,7 +4277,6 @@ a:focus-visible {
 }
 
 :root[data-theme="dark"] .sidebar {
-  border-color: var(--line);
   background: var(--sidebar-bg);
 }
 
@@ -4298,7 +4364,6 @@ a:focus-visible {
 
 :root[data-theme="dark"] .live-markdown-editor .cm-caret-locator {
   background: color-mix(in srgb, var(--warning) 22%, transparent);
-  box-shadow: inset 3px 0 var(--warning);
 }
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-list-marker {
@@ -4380,7 +4445,7 @@ a:focus-visible {
   position: fixed;
   inset: 0;
   z-index: 150;
-  background: color-mix(in srgb, var(--green-dark) 45%, transparent);
+  background: color-mix(in srgb, var(--green-dark) 10%, transparent);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -4396,7 +4461,6 @@ a:focus-visible {
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 10px;
-  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink) 40%, transparent);
   overflow: hidden;
 }
 
@@ -4583,7 +4647,6 @@ a:focus-visible {
   border: 1px solid var(--line) !important;
   border-radius: 8px !important;
   background: var(--panel-bg, var(--modal-surface)) !important;
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 40%, transparent) !important;
   color: var(--ink) !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
   font-size: 12px !important;

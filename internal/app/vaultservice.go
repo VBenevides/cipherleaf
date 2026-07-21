@@ -410,20 +410,17 @@ func (s *VaultService) LockVault() vault.Session {
 	return s.store.Lock()
 }
 
-// RememberVaultSecret stores the open vault's secret in the OS keychain so
-// the user does not have to paste it again for the configured TTL. It must
-// be called only after a successful Open so the secret is known to be valid.
-func (s *VaultService) RememberVaultSecret() error {
+// RememberVaultSecret stores the just-validated secret without retaining it
+// in the unlocked vault store.
+func (s *VaultService) RememberVaultSecret(secret string) error {
 	session := s.store.Session()
 	if session.Locked || session.VaultID == "" {
 		return errors.New("no open vault to remember")
 	}
-	secret, ok := s.store.UnlockedSecret()
-	if !ok {
-		return errors.New("the unlocked secret is no longer available")
+	if strings.TrimSpace(secret) == "" {
+		return errors.New("vault secret is required")
 	}
-	defer secure.Zero(secret)
-	if err := s.secrets.Save(session.VaultID, string(secret), RememberTTL); err != nil {
+	if err := s.secrets.Save(session.VaultID, secret, RememberTTL); err != nil {
 		return err
 	}
 	return nil
@@ -465,7 +462,6 @@ func (s *VaultService) OpenVaultRemembered(path string) (vault.Session, error) {
 		return vault.Session{}, err
 	}
 	session, err := s.store.Open(path, secret)
-	secure.ZeroString(secret)
 	if err != nil {
 		// A wrong remembered secret should not poison the keychain entry.
 		_ = s.secrets.Forget(vaultID)

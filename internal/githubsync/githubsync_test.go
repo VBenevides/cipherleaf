@@ -365,6 +365,20 @@ func TestManagerUsesValidatedSettingsForConnection(t *testing.T) {
 	}
 }
 
+func TestWorkingTreeLayoutAcceptsSharedAttachment(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "attachments", "shared", strings.Repeat("a", 32)+".enc")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWorkingTreeLayout(root); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type successfulDownloadProvider struct{}
 
 func (successfulDownloadProvider) Link(
@@ -468,6 +482,14 @@ func (p *countingPushProvider) Push(
 	return PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("c", 40)}, nil
 }
 
+func (p *countingPushProvider) ForcePush(
+	_ context.Context,
+	settings SyncSettings,
+	_ RemoteSnapshotStore,
+) (PushResult, error) {
+	return PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("d", 40)}, nil
+}
+
 func TestRetryableSyncErrors(t *testing.T) {
 	for _, err := range []error{
 		context.DeadlineExceeded,
@@ -515,6 +537,28 @@ func TestManagerSkipsPushForUnchangedSnapshotRevision(t *testing.T) {
 	}
 	if provider.pushes != 1 {
 		t.Fatalf("changed snapshot pushes = %d, want 1", provider.pushes)
+	}
+}
+
+func TestManagerPersistsForcePushRevision(t *testing.T) {
+	vaultID := strings.Repeat("a", 32)
+	settingsStore := NewFileSettingsStore(t.TempDir())
+	settings := DefaultSettings(vaultID)
+	settings.Linked = true
+	settings.RepositorySSH = "git@github.com:acme/notes.git"
+	settings.PrivateKeyPath = "/key"
+	settings.RepositoryPrivate = true
+	if err := settingsStore.Save(settings); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(settingsStore, &successfulConnectionTester{})
+	manager.provider = &countingPushProvider{}
+	if _, err := manager.ForcePushVault(context.Background(), vaultID, &revisionSnapshot{revision: "forced"}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := settingsStore.Load(vaultID)
+	if err != nil || saved.LastSnapshotRev != "forced" || saved.LastCommit != strings.Repeat("d", 40) {
+		t.Fatalf("saved settings = %#v, %v", saved, err)
 	}
 }
 

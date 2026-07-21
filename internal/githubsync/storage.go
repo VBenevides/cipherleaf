@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"cipherleaf/internal/atomicfile"
 )
 
 const settingsFilename = "settings.json"
@@ -101,28 +103,7 @@ func (s *FileSettingsStore) Save(settings SyncSettings) error {
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return fmt.Errorf("protect GitHub sync settings directory: %w", err)
 	}
-	temp, err := os.CreateTemp(directory, ".settings-*")
-	if err != nil {
-		return fmt.Errorf("create GitHub sync settings temporary file: %w", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return fmt.Errorf("protect GitHub sync settings: %w", err)
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return fmt.Errorf("write GitHub sync settings: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return fmt.Errorf("flush GitHub sync settings: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("close GitHub sync settings: %w", err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := atomicfile.Write(path, data, true); err != nil {
 		return fmt.Errorf("replace GitHub sync settings: %w", err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
@@ -150,33 +131,9 @@ func (s *FileSettingsStore) path(vaultID string) (string, error) {
 }
 
 func toDiskSettings(value SyncSettings) diskSettings {
-	return diskSettings{
-		FormatVersion:     value.FormatVersion,
-		VaultID:           value.VaultID,
-		Provider:          value.Provider,
-		RepositorySSH:     value.RepositorySSH,
-		PrivateKeyPath:    value.PrivateKeyPath,
-		Branch:            value.Branch,
-		RepositoryPrivate: value.RepositoryPrivate,
-		Linked:            value.Linked,
-		LastSyncedAt:      value.LastSyncedAt,
-		LastSnapshotRev:   value.LastSnapshotRev,
-		LastCommit:        value.LastCommit,
-	}
+	return diskSettings(value)
 }
 
 func fromDiskSettings(value diskSettings) SyncSettings {
-	return SyncSettings{
-		FormatVersion:     value.FormatVersion,
-		VaultID:           value.VaultID,
-		Provider:          value.Provider,
-		RepositorySSH:     value.RepositorySSH,
-		PrivateKeyPath:    value.PrivateKeyPath,
-		Branch:            value.Branch,
-		RepositoryPrivate: value.RepositoryPrivate,
-		Linked:            value.Linked,
-		LastSyncedAt:      value.LastSyncedAt,
-		LastSnapshotRev:   value.LastSnapshotRev,
-		LastCommit:        value.LastCommit,
-	}
+	return SyncSettings(value)
 }

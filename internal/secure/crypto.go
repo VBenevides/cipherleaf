@@ -104,10 +104,3 @@ func Zero(value []byte) {
 		value[index] = 0
 	}
 }
-
-// ZeroString overwrites the backing memory of a string with zeros. It is
-// best-effort because Go strings are immutable in practice, but it limits
-// the window during which the secret lingers in the heap.
-func ZeroString(value string) {
-	Zero([]byte(value))
-}

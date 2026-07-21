@@ -157,6 +157,9 @@ func (s *Store) ListTrash() ([]TrashItem, error) {
 		return nil, err
 	}
 	for _, item := range notes {
+		if s.folderExistsLocked(item.Note.FolderID) && s.requireFolderAccessibleLocked(item.Note.FolderID) != nil {
+			continue
+		}
 		items = append(items, TrashItem{ID: item.Note.ID, Kind: "note", Title: item.Note.Title, DeletedAt: item.DeletedAt})
 	}
 	folders, err := s.listTrashedFoldersLocked()
@@ -177,11 +180,17 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 		return err
 	}
 	path := s.trashPathLocked(kind, id)
+	originalManifest := cloneManifest(s.manifest)
 	switch kind {
 	case "note":
 		var item trashedNote
 		if err := s.readRecoveryRecordLocked(path, "trash-note", id, &item); err != nil {
 			return err
+		}
+		if s.folderExistsLocked(item.Note.FolderID) {
+			if err := s.requireFolderAccessibleLocked(item.Note.FolderID); err != nil {
+				return err
+			}
 		}
 		if _, found := s.findNoteLocked(id); found {
 			return errors.New("note already exists")
@@ -203,6 +212,9 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 		s.manifest.DeletedNotes = removeTombstone(s.manifest.DeletedNotes, id)
 		s.noteIndexes = nil
 		if err := s.saveManifestLocked(); err != nil {
+			s.manifest = originalManifest
+			s.noteIndexes = nil
+			removeFileAndBackup(s.notePathLocked(id))
 			return err
 		}
 		s.updateSearchIndexLocked(id, derivedMarkdownContent(item.Note.Content))
@@ -224,6 +236,8 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 		s.manifest.DeletedFolders = removeTombstone(s.manifest.DeletedFolders, id)
 		s.folderIndexes = nil
 		if err := s.saveManifestLocked(); err != nil {
+			s.manifest = originalManifest
+			s.folderIndexes = nil
 			return err
 		}
 	default:
@@ -269,6 +283,13 @@ func (s *Store) ListNoteVersions(id string) ([]NoteVersion, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return nil, err
 	}
+	index, found := s.findNoteLocked(id)
+	if !found {
+		return nil, errors.New("note not found")
+	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(filepath.Join(s.root, historyDirectory, id))
 	if errors.Is(err, os.ErrNotExist) {
 		return []NoteVersion{}, nil
@@ -309,6 +330,9 @@ func (s *Store) RestoreNoteVersion(id string, revision uint64) (Note, error) {
 	if !found {
 		return Note{}, errors.New("note not found")
 	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return Note{}, err
+	}
 	current, err := s.readNoteLocked(id)
 	if err != nil {
 		return Note{}, err
@@ -331,6 +355,7 @@ func (s *Store) RestoreNoteVersion(id string, revision uint64) (Note, error) {
 	historical.Revision = current.Revision + 1
 	historical.ModifiedAt = nextModifiedAt(current.ModifiedAt)
 	historical.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	originalManifest := cloneManifest(s.manifest)
 	hash, err := s.writeNoteLocked(historical)
 	if err != nil {
 		return Note{}, err
@@ -338,7 +363,7 @@ func (s *Store) RestoreNoteVersion(id string, revision uint64) (Note, error) {
 	s.manifest.Notes[index] = summaryFromNote(historical)
 	s.manifest.Notes[index].CiphertextHash = hash
 	if err := s.saveManifestLocked(); err != nil {
-		return Note{}, err
+		return Note{}, s.rollbackNoteWritesLocked(originalManifest, map[string]Note{id: current}, err)
 	}
 	s.updateSearchIndexLocked(id, derivedMarkdownContent(historical.Content))
 	return noteForClient(historical), nil
