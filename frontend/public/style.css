@@ -1792,7 +1792,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 15px 14px 13px;
+  margin: 0;
   padding: 0 9px;
   color: var(--muted);
   border: 1px solid var(--modal-control-surface);
@@ -1805,6 +1805,13 @@ a:focus-visible {
   text-align: left;
 }
 
+.sidebar-view-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 15px 14px 13px;
+}
+
 .graph-view-button:hover,
 .graph-view-button.active {
   color: var(--green-dark);
@@ -1814,10 +1821,6 @@ a:focus-visible {
 
 .graph-view-button span {
   flex: 1;
-}
-
-.time-tracking-view-button {
-  margin-top: -7px;
 }
 
 .notes-heading {
@@ -2089,6 +2092,12 @@ a:focus-visible {
   border-top: 1px solid var(--modal-control-surface);
 }
 
+.sidebar-vault-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
 .encrypted-status {
   display: flex;
   align-items: center;
@@ -2129,7 +2138,7 @@ a:focus-visible {
 
 .vault-selector {
   position: relative;
-  margin-top: 7px;
+  min-width: 0;
 }
 
 .vault-selector-button,
@@ -2367,9 +2376,16 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-left: auto;
   color: var(--muted);
   font-size: 10px;
+}
+
+.save-indicators {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .sync-status {
@@ -2511,6 +2527,61 @@ a:focus-visible {
   gap: 4px;
   padding: 0 var(--notebook-gutter) 7px;
   border-bottom: 1px solid var(--line);
+}
+
+.note-tabs {
+  min-height: 35px;
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
+}
+
+.note-tab {
+  min-width: 90px;
+  max-width: 180px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+}
+
+.note-tab.active {
+  border-color: var(--line);
+  background: var(--canvas);
+}
+
+.note-tab button,
+.new-note-tab {
+  min-width: 0;
+  padding: 6px;
+  color: var(--muted);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.note-tab button:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+}
+
+.note-tab span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-tab.active button:first-child,
+.note-tab button:hover,
+.new-note-tab:hover {
+  color: var(--green-dark);
 }
 
 .view-tabs button {
@@ -2674,7 +2745,7 @@ a:focus-visible {
 .time-label-manager article > span small { color: var(--muted); font-size: 8px; }
 .time-label-manager article > div { display: flex; gap: 6px; }
 .time-dashboard { display: grid; gap: 20px; }
-.global-timer-indicator { position: absolute; left: 50%; transform: translateX(-50%); min-width: 0; max-width: 190px; display: flex; gap: 7px; align-items: center; padding: 5px 8px; color: var(--green-dark); border: 1px solid var(--green); border-radius: 6px; font-size: 9px; }
+.global-timer-indicator { min-width: 0; max-width: 190px; display: flex; gap: 7px; align-items: center; padding: 5px 8px; color: var(--green-dark); border: 1px solid var(--green); border-radius: 6px; font-size: 9px; }
 .global-timer-indicator span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .global-timer-indicator strong { flex: 0 0 auto; }
 .tracking-conflict-backdrop { z-index: 40; }
@@ -3619,6 +3690,23 @@ a:focus-visible {
   opacity: 0.55;
 }
 
+.cm-live-link-dialog {
+  width: min(420px, calc(100% - 32px));
+  color: var(--ink);
+}
+
+.cm-live-link-dialog::backdrop {
+  background: color-mix(in srgb, var(--green-dark) 10%, transparent);
+  backdrop-filter: blur(7px);
+}
+
+.cm-live-link-dialog-error {
+  min-height: 16px;
+  margin: 0;
+  color: var(--red);
+  font-size: 10px;
+}
+
 .live-markdown-editor .cm-live-code {
   padding: 2px 5px;
   color: var(--code-ink);
@@ -3765,18 +3853,22 @@ a:focus-visible {
   text-decoration-color: var(--line);
 }
 
-.live-markdown-editor .cm-live-wikilink {
+.live-markdown-editor .cm-live-wikilink,
+.live-markdown-editor .cm-live-citation {
   padding: 1px 4px;
   color: var(--green-dark);
+  border: 0;
   border-radius: 4px;
   background: var(--modal-control-surface);
   cursor: pointer;
+  font: inherit;
   text-decoration: underline;
   text-decoration-color: var(--green-dark);
   text-underline-offset: 3px;
 }
 
-.live-markdown-editor .cm-live-wikilink:hover {
+.live-markdown-editor .cm-live-wikilink:hover,
+.live-markdown-editor .cm-live-citation:hover {
   background: var(--modal-control-surface);
 }
 

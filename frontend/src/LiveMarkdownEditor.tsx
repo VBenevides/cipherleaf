@@ -25,6 +25,7 @@ import { languages } from "@codemirror/language-data";
 import { highlightTree, tags } from "@lezer/highlight";
 import { minimalSetup } from "codemirror";
 import { history, redo, undo } from "@codemirror/commands";
+import { Browser, Clipboard } from "@wailsio/runtime";
 import {
   acceptCompletion,
   autocompletion,
@@ -37,6 +38,8 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  markdownCitation,
+  markdownCitations,
   normalizeArrowText,
   parseAttachmentMarkdown,
   tableCells,
@@ -917,6 +920,119 @@ class WikilinkWidget extends WidgetType {
   }
 }
 
+class CitationWidget extends WidgetType {
+  constructor(
+    readonly label: string,
+    readonly url: string,
+    readonly from: number,
+    readonly to: number,
+    readonly onError: (reason: unknown) => void,
+  ) {
+    super();
+  }
+
+  eq(other: CitationWidget) {
+    return other.label === this.label && other.url === this.url &&
+      other.from === this.from && other.to === this.to;
+  }
+
+  toDOM(view: EditorView) {
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "cm-live-citation";
+    link.textContent = this.label;
+    link.title = this.url;
+    link.setAttribute("aria-haspopup", "menu");
+    link.addEventListener("mousedown", (event) => event.preventDefault());
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelector(".cm-live-attachment-menu")?.remove();
+      const menu = document.body.appendChild(document.createElement("div"));
+      menu.className = "cm-live-attachment-menu cm-live-link-menu";
+      menu.setAttribute("role", "menu");
+      menu.style.left = `${event.clientX}px`;
+      menu.style.top = `${event.clientY}px`;
+      const close = (closeEvent?: PointerEvent) => {
+        if (closeEvent && menu.contains(closeEvent.target as Node)) return;
+        menu.remove();
+        document.removeEventListener("pointerdown", close);
+      };
+      for (const [label, action] of [
+        ["Open link", () => Browser.OpenURL(this.url)],
+        ["Copy link", () => Clipboard.SetText(this.url)],
+      ] as const) {
+        const button = menu.appendChild(document.createElement("button"));
+        button.type = "button";
+        button.role = "menuitem";
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          close();
+          void action().catch(this.onError);
+        });
+      }
+      const edit = menu.appendChild(document.createElement("button"));
+      edit.type = "button";
+      edit.role = "menuitem";
+      edit.textContent = "Edit link";
+      edit.addEventListener("click", () => {
+        close();
+        document.querySelector(".cm-live-link-dialog")?.remove();
+        const dialog = document.body.appendChild(document.createElement("dialog"));
+        dialog.className = "vault-modal cm-live-link-dialog";
+        dialog.setAttribute("aria-labelledby", "edit-link-title");
+        const form = dialog.appendChild(document.createElement("form"));
+        const title = form.appendChild(document.createElement("h2"));
+        title.id = "edit-link-title";
+        title.textContent = "Edit link";
+        const nameLabel = form.appendChild(document.createElement("label"));
+        nameLabel.append("Name");
+        const name = nameLabel.appendChild(document.createElement("input"));
+        name.value = this.label;
+        const urlLabel = form.appendChild(document.createElement("label"));
+        urlLabel.append("Link");
+        const url = urlLabel.appendChild(document.createElement("input"));
+        url.inputMode = "url";
+        url.value = this.url;
+        const error = form.appendChild(document.createElement("p"));
+        error.className = "cm-live-link-dialog-error";
+        error.setAttribute("aria-live", "polite");
+        const actions = form.appendChild(document.createElement("div"));
+        actions.className = "app-dialog-actions";
+        const cancel = actions.appendChild(document.createElement("button"));
+        cancel.type = "button";
+        cancel.className = "secondary-button";
+        cancel.textContent = "Cancel";
+        cancel.addEventListener("click", () => dialog.close());
+        const save = actions.appendChild(document.createElement("button"));
+        save.type = "submit";
+        save.className = "primary-button";
+        save.textContent = "Save";
+        form.addEventListener("submit", (submitEvent) => {
+          submitEvent.preventDefault();
+          const markdown = markdownCitation(name.value, url.value);
+          if (!markdown) {
+            error.textContent = "Enter a name and a valid HTTP(S) link.";
+            return;
+          }
+          view.dispatch({ changes: { from: this.from, to: this.to, insert: markdown } });
+          dialog.close();
+          view.focus();
+        });
+        dialog.addEventListener("close", () => dialog.remove());
+        dialog.showModal();
+        name.select();
+      });
+      queueMicrotask(() => document.addEventListener("pointerdown", close));
+    });
+    return link;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
 function lineIsActive(state: EditorState, lineNumber: number): boolean {
   return state.selection.ranges.some((range) => {
     const startLine = state.doc.lineAt(range.from).number;
@@ -969,6 +1085,7 @@ function decorateInlineMarkdown(
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
   openWikilink: (title: string) => void,
+  onError: (reason: unknown) => void,
 ) {
   const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
   for (const match of text.matchAll(bold)) {
@@ -1014,6 +1131,17 @@ function decorateInlineMarkdown(
       decorations,
       atomicRanges,
       new WikilinkWidget(match[1], start, openWikilink),
+    );
+  }
+
+  for (const citation of markdownCitations(text)) {
+    const start = offset + citation.index;
+    addHiddenRange(
+      start,
+      start + citation.length,
+      decorations,
+      atomicRanges,
+      new CitationWidget(citation.label, citation.url, start, start + citation.length, onError),
     );
   }
 }
@@ -1460,6 +1588,7 @@ function buildLivePreviewState(
           decorations,
           atomicRanges,
           openWikilink,
+          onError,
         );
       }
 
@@ -1546,6 +1675,7 @@ function buildLivePreviewState(
         decorations,
         atomicRanges,
         openWikilink,
+        onError,
       );
 
       if (collapsed) {
@@ -1590,8 +1720,9 @@ function buildLivePreviewState(
         line.text.slice(prefixSize),
         line.from + prefixSize,
         decorations,
-        atomicRanges,
-        openWikilink,
+          atomicRanges,
+          openWikilink,
+          onError,
       );
       lineNumber++;
       continue;
@@ -1657,6 +1788,7 @@ function buildLivePreviewState(
       decorations,
       atomicRanges,
       openWikilink,
+      onError,
     );
 
     lineNumber++;

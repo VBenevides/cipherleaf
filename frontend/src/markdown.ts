@@ -9,6 +9,26 @@ export function normalizeArrowText(text: string): string {
   return text.replace(/->/g, "→");
 }
 
+export function markdownCitations(text: string) {
+  return [...text.matchAll(/(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/gi)].map((match) => ({
+    label: match[1],
+    url: match[2],
+    index: match.index,
+    length: match[0].length,
+  }));
+}
+
+export function markdownCitation(label: string, url: string): string | null {
+  const name = label.trim();
+  const link = url.trim();
+  try {
+    if (!name || /[\]\n]/.test(name) || /[\s)]/.test(link) || !/^https?:$/.test(new URL(link).protocol)) return null;
+    return `[${name}](${link})`;
+  } catch {
+    return null;
+  }
+}
+
 export function tableCells(line: string): string[] {
   return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 }
