@@ -486,6 +486,17 @@ test("allows empty text and bullet objects", () => {
   assert.equal(tree[2].text, "");
 });
 
+test("keeps bullet and numbered markers on checkbox objects", () => {
+  const objects = parseObjectDocument("- [ ] Bullet\n2. [x] Numbered").objects;
+
+  assert.deepEqual(objects.map(({ listMarker, checked }) => ({ listMarker, checked })), [
+    { listMarker: "-", checked: false },
+    { listMarker: "2.", checked: true },
+  ]);
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /decorateObjectListMarker\(object, syntaxFrom, decorations, atomicRanges, bracketFrom\);[\s\S]*const taskFrom = object\.listMarker \|\| object\.barePrefixSize > 0 \? bracketFrom : syntaxFrom;[\s\S]*addHiddenRange\(\s*taskFrom,\s*object\.textFrom/);
+});
+
 test("keeps trailing list whitespace out of the hidden prefix", () => {
   const document = parseObjectDocument(["- what ", "1. what "].join("\n"));
 

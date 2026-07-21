@@ -162,6 +162,10 @@ export function replaceExclusiveObjectPrefix(
 }
 
 export function normalizeStackedExclusiveObjectPrefix(line: string, previousLine?: string): string {
+  line = line.replace(
+    /^([ \t]*(?:(?:>+|<)[ \t]?|(?:[-*]|\d+[.)])[ \t]+)?)([-*]|\d+[.)])(?=\[[ xX]\])/,
+    "$1$2 ",
+  );
   const current = exclusiveObjectPrefix(line);
   if (!current) return line;
   const next = exclusiveObjectPrefix(current.rest);

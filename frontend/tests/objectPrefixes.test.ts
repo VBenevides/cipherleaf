@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   normalizeStackedExclusiveObjectPrefix,
@@ -14,6 +15,18 @@ test("replaces exclusive object markers without changing indentation", () => {
   assert.equal(normalizeStackedExclusiveObjectPrefix("  > * Item"), "  * Item");
   assert.equal(normalizeStackedExclusiveObjectPrefix("  > <"), "  <");
   assert.equal(replaceExclusiveObjectPrefix("  < Text", "> "), "  > Text");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("-[ ] Task"), "- [ ] Task");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("> 2.[ ] Task"), "2. [ ] Task");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("< *[ ] Task"), "* [ ] Task");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("- *[ ] Task"), "* [ ] Task");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("* 1.[ ] Task"), "1. [ ] Task");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("1. -[ ] Task"), "- [ ] Task");
+});
+
+test("bare checkbox prefixes have a removable caret boundary", () => {
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /object\.barePrefixSize > 0[\s\S]*addHiddenRange\(syntaxFrom, bracketFrom/);
+  assert.match(editor, /key: "Backspace",[\s\S]*run: removeBareTaskPrefix/);
 });
 
 test("continues numbering from the previous numbered object", () => {

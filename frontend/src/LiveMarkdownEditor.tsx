@@ -1171,14 +1171,21 @@ function decorateObjectTask(
   if (object.checked === undefined) return false;
   const bracketOffset = object.sourcePrefix.lastIndexOf("[");
   if (bracketOffset < 0) return false;
+  const bracketFrom = object.from + bracketOffset;
+  if (object.listMarker) {
+    decorateObjectListMarker(object, syntaxFrom, decorations, atomicRanges, bracketFrom);
+  } else if (object.barePrefixSize > 0) {
+    addHiddenRange(syntaxFrom, bracketFrom, decorations, atomicRanges);
+  }
+  const taskFrom = object.listMarker || object.barePrefixSize > 0 ? bracketFrom : syntaxFrom;
   addHiddenRange(
-    syntaxFrom,
+    taskFrom,
     object.textFrom,
     decorations,
     atomicRanges,
     new TaskWidget(
       object.checked,
-      object.from + bracketOffset + 1,
+      bracketFrom + 1,
     ),
   );
   return true;
@@ -1189,16 +1196,17 @@ function decorateObjectListMarker(
   syntaxFrom: number,
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
+  to = object.textFrom,
 ): "unordered" | "ordered" | null {
   const marker = object.listMarker;
   if (!marker) return null;
   if (marker === "-" || marker === "*") {
-    decorateUnorderedListMarker(syntaxFrom, marker, decorations, atomicRanges, object.textFrom);
+    decorateUnorderedListMarker(syntaxFrom, marker, decorations, atomicRanges, to);
     return "unordered";
   }
   addHiddenRange(
     syntaxFrom,
-    object.textFrom,
+    to,
     decorations,
     atomicRanges,
     new TextWidget(marker, "cm-live-list-marker"),
@@ -2002,6 +2010,21 @@ function prefixSelectedLines(view: EditorView, prefix: string) {
   view.focus();
 }
 
+function removeBareTaskPrefix(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const line = view.state.doc.lineAt(range.head);
+  const prefix = view.state.sliceDoc(line.from, range.head);
+  const match = prefix.match(/^([ \t]*)<[ \t]?$/);
+  if (!match) return false;
+  const from = line.from + match[1].length;
+  view.dispatch({
+    changes: { from, to: range.head, insert: "" },
+    selection: EditorSelection.cursor(from),
+  });
+  return true;
+}
+
 function snippetCompletion(context: CompletionContext): CompletionResult | null {
   const before = context.matchBefore(/\/[A-Za-z]*/);
   if (!before || !context.explicit && !/\//.test(before.text)) {
@@ -2543,6 +2566,10 @@ export default function LiveMarkdownEditor({
             {
               key: "Shift-Enter",
               run: (editor) => insertSoftObjectBreak(editor),
+            },
+            {
+              key: "Backspace",
+              run: removeBareTaskPrefix,
             },
             {
               key: "Enter",
