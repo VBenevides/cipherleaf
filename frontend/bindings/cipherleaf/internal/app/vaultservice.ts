@@ -215,6 +215,10 @@ export function ListFolders(): $CancellablePromise<vault$0.Folder[] | null> {
     return $Call.ByID(220507736);
 }
 
+export function ListInstalledFonts(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(3679480759);
+}
+
 export function ListNoteVersions(id: string): $CancellablePromise<vault$0.NoteVersion[] | null> {
     return $Call.ByID(2533964502, id);
 }

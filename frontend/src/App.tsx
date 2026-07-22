@@ -158,6 +158,7 @@ function EditorLoading() {
 const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
 const EDITOR_FONT_STORE = "appearance";
 const EDITOR_FONT_KEY = "editor-font";
+const EDITOR_SYSTEM_FONT_KEY = "cipherleaf-system-font";
 
 type StoredEditorFont = {
   name: string;
@@ -521,6 +522,8 @@ function App() {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
   const [editorFontName, setEditorFontName] = useState("");
+  const [installedFonts, setInstalledFonts] = useState<string[]>([]);
+  const [installedFontsLoading, setInstalledFontsLoading] = useState(false);
   const [editorFontSize, setEditorFontSize] = useState(() => {
     const saved = Number(window.localStorage.getItem("cipherleaf-editor-font-size"));
     return Number.isFinite(saved) && saved >= 10 && saved <= 32 ? saved : 14;
@@ -803,12 +806,21 @@ function App() {
     }
     document.fonts.add(font);
     activeEditorFontRef.current = font;
+    document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(EDITOR_FONT_FAMILY));
     document.documentElement.dataset.editorFont = "custom";
     setEditorFontName(name);
+    window.localStorage.removeItem(EDITOR_SYSTEM_FONT_KEY);
   }, []);
 
   useEffect(() => {
     let active = true;
+    const systemFont = window.localStorage.getItem(EDITOR_SYSTEM_FONT_KEY);
+    if (systemFont) {
+      document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(systemFont));
+      document.documentElement.dataset.editorFont = "custom";
+      setEditorFontName(systemFont);
+      return;
+    }
     void readStoredEditorFont()
       .then((font) => {
         if (active && font) return activateEditorFont(font.name, font.data);
@@ -3080,6 +3092,37 @@ function App() {
     }
   };
 
+  const loadInstalledFonts = async () => {
+    setInstalledFontsLoading(true);
+    try {
+      let families = await VaultService.ListInstalledFonts() ?? [];
+      if (!families.length) {
+        const queryLocalFonts = (window as Window & { queryLocalFonts?: () => Promise<{ family: string }[]> }).queryLocalFonts;
+        if (!queryLocalFonts) throw new Error("Installed font selection is not supported on this platform. You can still select a .ttf file.");
+        families = [...new Set((await queryLocalFonts()).map((font) => font.family))].sort((left, right) => left.localeCompare(right));
+      }
+      setInstalledFonts(families);
+      window.setTimeout(() => setInstalledFonts([]), 10 * 60_000);
+      setError("");
+    } catch (reason) {
+      setError(`Could not list installed fonts: ${errorText(reason)}`);
+    } finally {
+      setInstalledFontsLoading(false);
+    }
+  };
+
+  const chooseInstalledFont = (family: string) => {
+    if (!family) return;
+    if (activeEditorFontRef.current) {
+      document.fonts.delete(activeEditorFontRef.current);
+      activeEditorFontRef.current = null;
+    }
+    document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(family));
+    document.documentElement.dataset.editorFont = "custom";
+    setEditorFontName(family);
+    window.localStorage.setItem(EDITOR_SYSTEM_FONT_KEY, family);
+  };
+
   const resetEditorFont = async () => {
     try {
       if (activeEditorFontRef.current) {
@@ -3087,7 +3130,9 @@ function App() {
         activeEditorFontRef.current = null;
       }
       delete document.documentElement.dataset.editorFont;
+      document.documentElement.style.removeProperty("--selected-editor-font");
       setEditorFontName("");
+      window.localStorage.removeItem(EDITOR_SYSTEM_FONT_KEY);
       await removeStoredEditorFont();
     } catch (reason) {
       setError(`Could not reset font: ${errorText(reason)}`);
@@ -4809,14 +4854,26 @@ function App() {
                     </div>
                     <div id="settings-editor-font" className="appearance-font-field settings-section settings-section-card">
                       <span>Editor font</span>
-                      <div className="appearance-font-row">
-                        <span title={editorFontName}>{editorFontName || "Default (Charter)"}</span>
-                        {editorFontName && <button type="button" className="secondary-button" onClick={() => void resetEditorFont()}>Reset</button>}
+                      <dl className="appearance-font-details">
+                        <div><dt>Name:</dt><dd title={editorFontName}>{editorFontName || "Default (Charter)"}</dd></div>
+                        <div><dt>Sample:</dt><dd className="appearance-font-sample" style={{ fontFamily: "var(--selected-editor-font, var(--editor-font))" }}>The quick brown fox jumps over the lazy dog 1234567890</dd></div>
+                      </dl>
+                      <div className="appearance-font-actions">
+                        {installedFonts.length > 0 ? (
+                          <details className="tag-multi-select appearance-font-select">
+                            <summary aria-label="Installed editor font">Installed fonts…</summary>
+                            <div className="tag-multi-select-options" role="listbox" aria-label="Installed editor font">
+                              {installedFonts.map((font) => <button key={font} type="button" role="option" aria-selected={editorFontName === font} style={{ fontFamily: font }} onClick={(event) => { chooseInstalledFont(font); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{font}</button>)}
+                            </div>
+                          </details>
+                        ) : (
+                          <button type="button" className="secondary-button" disabled={installedFontsLoading} onClick={() => void loadInstalledFonts()}>{installedFontsLoading ? "Loading fonts…" : "Installed fonts…"}</button>
+                        )}
                         <button type="button" className="secondary-button" onClick={() => editorFontInputRef.current?.click()}>Select .ttf…</button>
+                        <button type="button" className="secondary-button" disabled={!editorFontName} onClick={() => void resetEditorFont()}>Reset</button>
                         <input ref={editorFontInputRef} className="appearance-font-input" type="file" accept=".ttf,font/ttf" onChange={(event) => void chooseEditorFont(event)} />
                       </div>
                     </div>
-                    <p className="appearance-help">Select a TrueType font file to customize the editor.</p>
                   </>
                 )}
               </div>

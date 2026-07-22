@@ -142,6 +142,32 @@ func (s *VaultService) GetApplicationStatistics() (ApplicationStatistics, error)
 	return ApplicationStatistics{CPUPercent: cpuPercent, MemoryBytes: memoryBytes, MemoryUsage: memoryUsage}, nil
 }
 
+func (s *VaultService) ListInstalledFonts() ([]string, error) {
+	if runtime.GOOS != "linux" {
+		return nil, nil
+	}
+	output, err := exec.Command("fc-list", "--format=%{family}\n").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list installed fonts: %w", err)
+	}
+	return installedFontFamilies(string(output)), nil
+}
+
+func installedFontFamilies(output string) []string {
+	unique := make(map[string]struct{})
+	for _, family := range strings.FieldsFunc(output, func(character rune) bool { return character == '\n' || character == ',' }) {
+		if family = strings.TrimSpace(family); family != "" {
+			unique[family] = struct{}{}
+		}
+	}
+	families := make([]string, 0, len(unique))
+	for family := range unique {
+		families = append(families, family)
+	}
+	sort.Strings(families)
+	return families
+}
+
 func processMemoryUsage(root *process.Process) ([]ProcessMemoryUsage, error) {
 	processes := []*process.Process{root}
 	for index := 0; index < len(processes); index++ {

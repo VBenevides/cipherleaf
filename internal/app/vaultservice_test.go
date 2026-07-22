@@ -27,6 +27,19 @@ func TestRepositorySizesSeparatesGitMetadata(t *testing.T) {
 	}
 }
 
+func TestInstalledFontFamiliesAreUniqueAndSorted(t *testing.T) {
+	fonts := installedFontFamilies("Roboto Condensed,Roboto Condensed Light\nGeorgia\nRoboto Condensed\n")
+	want := []string{"Georgia", "Roboto Condensed", "Roboto Condensed Light"}
+	if len(fonts) != len(want) {
+		t.Fatalf("fonts = %v, want %v", fonts, want)
+	}
+	for index := range want {
+		if fonts[index] != want[index] {
+			t.Fatalf("fonts = %v, want %v", fonts, want)
+		}
+	}
+}
+
 func TestVaultServiceDelegatesTimeTrackingAPIs(t *testing.T) {
 	service := NewVaultService()
 	if _, err := service.GetTimeTrackingCatalog(); !errors.Is(err, vault.ErrLocked) {

@@ -55,9 +55,9 @@ Cipherleaf includes three built-in themes:
 - **Archivist:** a warm paper-and-ink theme designed for long-form writing
 
 Appearance settings also provide optional full or dotted journal lines, an
-editor font-size range from 10–32 px, and custom TrueType (`.ttf`) editor fonts.
-Theme preferences persist between sessions; imported font data remains local
-to the application.
+editor font-size range from 10–32 px, installed system fonts, and custom TrueType (`.ttf`) editor fonts.
+Theme and installed-font preferences persist between sessions; imported font
+data remains local to the application.
 
 ## Security model
 

@@ -1264,26 +1264,65 @@ a:focus-visible {
   background: var(--green-pale);
 }
 
-.appearance-font-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.appearance-font-details {
+  display: grid;
+  gap: 9px;
+  margin: 3px 0 8px;
 }
 
-.appearance-font-row > span {
+.appearance-font-details > div {
   min-width: 0;
-  flex: 1;
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: 55px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  container-type: inline-size;
+}
+
+.appearance-font-details dt {
   color: var(--muted);
-  font-size: 11px;
+}
+
+.appearance-font-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.appearance-font-row .secondary-button {
+.appearance-font-sample {
+  overflow: visible !important;
+  font-size: clamp(9px, 3cqi, 14px);
+  line-height: 1.4;
+  text-overflow: clip !important;
+  white-space: normal !important;
+}
+
+.appearance-font-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.appearance-font-actions .secondary-button {
+  width: 100%;
   min-height: 38px;
-  flex: 0 0 auto;
+}
+
+.appearance-font-select {
+  min-width: 0;
+}
+
+.appearance-font-select summary {
+  min-height: 38px;
+}
+
+.appearance-font-select .tag-multi-select-options {
+  top: auto;
+  bottom: calc(100% + 4px);
+  max-height: 280px;
 }
 
 .appearance-font-input {
@@ -1308,12 +1347,6 @@ a:focus-visible {
   color: var(--ink);
   font-size: 11px;
   text-align: right;
-}
-
-.appearance-help {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 10px;
 }
 
 @media (max-width: 600px) {
@@ -2156,7 +2189,7 @@ a:focus-visible {
 }
 
 .vault-selector-button {
-  height: 29px;
+  height: 34px;
   justify-content: space-between;
   gap: 8px;
   padding: 0 10px;
@@ -3469,7 +3502,7 @@ a:focus-visible {
 
 :root[data-editor-font="custom"] .live-markdown-editor .cm-editor,
 :root[data-editor-font="custom"] .live-markdown-editor .cm-editor * {
-  font-family: "CipherleafEditorFont", monospace !important;
+  font-family: var(--selected-editor-font), monospace !important;
   font-synthesis: weight;
 }
 
