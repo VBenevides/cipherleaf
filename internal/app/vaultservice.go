@@ -1102,6 +1102,7 @@ func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 		if result.Merge.UpToDate && push.UpToDate {
 			result.Message = "The vault is already in sync with GitHub."
 		}
+		s.sync.MarkSynced(vaultID)
 		return result, nil
 	}
 	return SyncResult{}, errors.New("sync could not converge after the remote branch changed repeatedly")
