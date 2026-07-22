@@ -1311,7 +1311,7 @@ a:focus-visible {
   min-height: 38px;
 }
 
-.appearance-font-select {
+.appearance-font-actions .appearance-font-select {
   min-width: 0;
 }
 
