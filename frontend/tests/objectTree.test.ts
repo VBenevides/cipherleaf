@@ -110,6 +110,13 @@ test("keeps fenced code as one typed object", () => {
   assert.equal(tree[1].text, "after");
 });
 
+test("parses a large fenced code block", () => {
+  const code = Array.from({ length: 10_000 }, (_, index) => `line ${index}`);
+  const object = parseObjectDocument(["```text", ...code, "```"].join("\n")).objects[0];
+
+  assert.equal(object.text, code.join("\n"));
+});
+
 test("keeps image attachments rendered when selected", () => {
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(editor, /attachment && !lineIsActive/);

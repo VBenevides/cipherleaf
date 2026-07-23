@@ -570,23 +570,23 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
     offset += line.length + 1;
   }
 
-  lines.forEach((raw, index) => {
+  for (const [index, raw] of lines.entries()) {
     const lineNumber = index + 1;
     if (activeCode) {
       activeCode.lineEnd = lineNumber;
       activeCode.to = lineStarts[index] + raw.length;
       byLine.set(lineNumber, activeCode);
       if (/^[ \t]*```[ \t]*$/.test(raw)) {
+        activeCode.text = activeCodeLines.join("\n");
         activeCode.closed = true;
         activeCode = null;
         activeCodeLines = [];
       } else {
         activeCodeLines.push(raw);
-        activeCode.text = activeCodeLines.join("\n");
         activeCode.textLineEnd = lineNumber;
         activeCode.textTo = lineStarts[index] + raw.length;
       }
-      return;
+      continue;
     }
 
     if (raw !== "" && raw.trim() === "") {
@@ -612,7 +612,7 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
         usedAsContinuation = true;
       }
 
-      if (raw !== "" || usedAsContinuation) return;
+      if (raw !== "" || usedAsContinuation) continue;
     }
 
     const classified = classifyObjectLine(raw);
@@ -633,7 +633,7 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
       previous.to = lineStarts[index] + raw.length;
       previous.textTo = previous.to;
       byLine.set(lineNumber, previous);
-      return;
+      continue;
     }
 
     while (stack.length && stack[stack.length - 1].indent >= classified.indent) stack.pop();
@@ -695,8 +695,9 @@ export function parseObjectDocument(markdown: string): ObjectDocument {
       activeCode = item;
       activeCodeLines = [];
     }
-  });
+  }
 
+  if (activeCode) activeCode.text = activeCodeLines.join("\n");
   return { objects, roots, byId, byLine };
 }
 
