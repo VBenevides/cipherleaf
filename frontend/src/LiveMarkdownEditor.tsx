@@ -52,7 +52,6 @@ import {
   objectOwnerLineNumber,
   normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
-  precedingObjectPrefix,
   replaceExclusiveObjectPrefix,
   remapObjectKeysByLine,
   repeatedObjectPrefix,
@@ -2228,11 +2227,9 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
   if (!isCodeContent && !object) return false;
 
-  const prefixBeforeObject = range.head === line.from && object?.tag !== "code"
-    ? precedingObjectPrefix(line.text)
-    : null;
-  const inserted = prefixBeforeObject
-    ? `${prefixBeforeObject}\n`
+  const atObjectStart = range.head === line.from && object?.tag !== "code";
+  const inserted = atObjectStart
+    ? "\n"
     : isCodeContent
     ? `\n${indentation}`
     : object?.tag === "code"
@@ -2244,7 +2241,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
       from: range.head,
       insert: inserted,
     },
-    selection: EditorSelection.cursor(range.head + (prefixBeforeObject?.length ?? inserted.length)),
+    selection: EditorSelection.cursor(range.head + (atObjectStart ? 0 : inserted.length)),
   });
 
   view.focus();

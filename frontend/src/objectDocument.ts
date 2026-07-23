@@ -364,12 +364,6 @@ export function repeatedObjectPrefix(raw: string): string | null {
   return raw.match(/^[ \t]+/)?.[0] ?? null;
 }
 
-export function precedingObjectPrefix(raw: string): string | null {
-  const ordered = raw.match(/^([ \t]*)(\d+)([.)])[ \t]+/);
-  if (ordered) return `${ordered[1]}${ordered[2]}${ordered[3]} `;
-  return repeatedObjectPrefix(raw);
-}
-
 export function continuationPrefix(raw: string): string | null {
   const classified = classifyObjectLine(raw);
   return " ".repeat(Math.max(0, classified.contentIndent));

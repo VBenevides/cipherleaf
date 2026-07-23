@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   normalizeStackedExclusiveObjectPrefix,
-  precedingObjectPrefix,
   repeatedObjectPrefix,
   replaceExclusiveObjectPrefix,
 } from "../src/objectDocument.ts";
@@ -39,10 +38,7 @@ test("continues bare text objects at the same indentation", () => {
   assert.equal(repeatedObjectPrefix("  < Text"), "  < ");
 });
 
-test("inserting before an object preserves its existing marker", () => {
-  assert.equal(precedingObjectPrefix("> Section"), "> ");
-  assert.equal(precedingObjectPrefix("  < Text"), "  < ");
-  assert.equal(precedingObjectPrefix("* Item"), "* ");
-  assert.equal(precedingObjectPrefix("[x] Done"), "[ ] ");
-  assert.equal(precedingObjectPrefix("3. Third"), "3. ");
+test("inserting before an object does not duplicate its marker", () => {
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /const inserted = atObjectStart\s*\? "\\n"/);
 });
