@@ -2575,7 +2575,7 @@ a:focus-visible {
 
 .note-tab {
   min-width: 90px;
-  max-width: 180px;
+  flex: 0 0 max-content;
   display: flex;
   align-items: center;
   border: 1px solid transparent;
