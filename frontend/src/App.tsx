@@ -151,6 +151,37 @@ const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
 const GraphView = lazy(() => import("./GraphView").then(({ GraphView }) => ({ default: GraphView })));
 const TimeTrackingView = lazy(() => import("./TimeTrackingView"));
 
+function LastSyncLabel({ timestamp }: { timestamp: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const then = timestamp * 1000;
+  const minutes = Math.floor(Math.max(0, now - then) / 60_000);
+  let label: string;
+  if (minutes < 60) {
+    label = minutes < 1 ? "Last Sync just now" : `Last Sync ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  } else if (minutes < 24 * 60) {
+    const hours = Math.floor(minutes / 60);
+    label = `Last Sync ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  } else {
+    const date = new Date(then);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    label = `Last Sync at ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  return <span className="last-sync-label" title="Time of the last successful sync">{label}</span>;
+}
+
+function RunningTimerText({ startedAtUtc }: { startedAtUtc: string }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <>{formatRunningDuration(startedAtUtc, now)}</>;
+}
+
 function EditorLoading() {
   return <div className="settings-loading">Loading editor...</div>;
 }
@@ -914,12 +945,6 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [portableVaultSettings, session?.locked, session?.vaultId]);
 
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNowTick(Date.now()), 30000);
-    return () => window.clearInterval(id);
-  }, []);
-
   useEffect(() => {
     if (globalSearchOpen) return;
     globalSearchRequestRef.current++;
@@ -1111,29 +1136,6 @@ function App() {
     }
   };
 
-  const lastSyncLabel = useMemo(() => {
-    if (!lastSyncedAt) return "";
-    const then = lastSyncedAt * 1000;
-    const diffMs = Math.max(0, nowTick - then);
-    const minutes = Math.floor(diffMs / 60000);
-    if (minutes < 60) {
-      if (minutes < 1) return "Last Sync just now";
-      return `Last Sync ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-    }
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) {
-      return `Last Sync ${hours} hour${hours === 1 ? "" : "s"} ago`;
-    }
-    const date = new Date(then);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const year = date.getFullYear();
-    const month = pad(date.getMonth() + 1);
-    const day = pad(date.getDate());
-    const hh = pad(date.getHours());
-    const mm = pad(date.getMinutes());
-    return `Last Sync at ${year}-${month}-${day} ${hh}:${mm}`;
-  }, [lastSyncedAt, nowTick]);
-
   useEffect(() => {
     VaultService.GetSession()
       .then(async (current) => {
@@ -1244,25 +1246,10 @@ function App() {
     return true;
   };
 
-  const updateSummary = (saved: Note) => {
-    setNotes((current) =>
-      current
-        .map((item) =>
-          item.id === saved.id
-            ? {
-                ...item,
-                id: saved.id,
-                title: saved.title,
-                folderId: saved.folderId,
-                order: saved.order,
-                createdAt: saved.createdAt,
-                updatedAt: saved.updatedAt,
-                modifiedAt: saved.modifiedAt,
-                revision: saved.revision,
-              }
-            : item,
-        ),
-    );
+  const updateSummary = (saved: NoteSummary) => {
+    setNotes((current) => current.some(({ id }) => id === saved.id)
+      ? current.map((item) => item.id === saved.id ? saved : item)
+      : [...current, saved]);
   };
 
   const applyLoadedNote = (loaded: Note | null, state: SaveState = "idle") => {
@@ -1302,9 +1289,8 @@ function App() {
           snapshot.title,
           markdownForEditing(snapshot.content),
         );
-        updateSummary(saved);
-        setNotes((await VaultService.ListNotes()) ?? []);
-        const prepared = noteForEditing(saved);
+        updateSummary(saved.summary);
+        const prepared = noteForEditing(saved.note);
         if (version === editVersion.current) {
           noteRef.current = prepared.note;
           dirtyRef.current = false;
@@ -1412,7 +1398,7 @@ function App() {
   }, [session?.vaultId, session?.locked]);
 
   useEffect(() => {
-    if (!activeTimeEntry) return;
+    if (!activeTimeEntry || !timeTrackingOpen) return;
     const refresh = () => setTimerNow(new Date());
     refresh();
     let interval: number | undefined;
@@ -1424,7 +1410,7 @@ function App() {
       window.clearTimeout(timeout);
       if (interval !== undefined) window.clearInterval(interval);
     };
-  }, [activeTimeEntry?.id, activeTimeEntry?.startedAtUtc]);
+  }, [activeTimeEntry?.id, activeTimeEntry?.startedAtUtc, timeTrackingOpen]);
 
   const openStartTimerDialog = () => {
     setTimerDialog("start"); setTimerError("");
@@ -1767,7 +1753,8 @@ function App() {
           first.title,
           welcomeContent,
         );
-        await refreshNotes(saved.id, saved);
+        setNotes([saved.summary]);
+        applyLoadedNote(saved.note);
       } else {
         await refreshNotes();
       }
@@ -1883,8 +1870,8 @@ function App() {
       setSyncConflicts((current) =>
         current.filter((item) => item.localNoteId !== conflictResolution.conflict.localNoteId),
       );
-      await refreshNotes(saved.id, saved);
-      applyLoadedNote(saved, "saved");
+      updateSummary(saved.summary);
+      applyLoadedNote(saved.note, "saved");
       if (syncLinked) {
         await syncNow();
       }
@@ -2084,8 +2071,8 @@ function App() {
         content = renderNoteTemplate(markdownForEditing(template.content), title, date);
       }
       const saved = await VaultService.SaveNote(created.id, created.title, content);
-      setNotes((await VaultService.ListNotes()) ?? []);
-      applyLoadedNote(saved);
+      updateSummary(saved.summary);
+      applyLoadedNote(saved.note);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -4249,7 +4236,7 @@ function App() {
             ))}
           </div>
           <div className="save-indicators">
-            {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}, ${formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}`}><span>{activeTimeEntry.name}</span><strong>{formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}</strong></div>}
+            {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
             <div className={`save-status ${saveState}`}>
               <span />
               {saveState === "saving"
@@ -4287,11 +4274,7 @@ function App() {
           >
             {syncing ? "Syncing…" : "Save file and sync"}
           </button>
-          {syncLinked && lastSyncLabel && (
-            <span className="last-sync-label" title="Time of the last successful sync">
-              {lastSyncLabel}
-            </span>
-          )}
+          {syncLinked && lastSyncedAt > 0 && <LastSyncLabel timestamp={lastSyncedAt} />}
           {note && !graphOpen && !timeTrackingOpen && (
             <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
               <Icon name="trash" size={16} />
@@ -5298,7 +5281,7 @@ function App() {
               <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>
             </form> : <div>
               <h2 id="timer-dialog-title">Finish active timer?</h2>
-              <p>{activeTimeEntry ? <>Finish <strong>{activeTimeEntry.name}</strong> at {formatRunningDuration(activeTimeEntry.startedAtUtc, timerNow)}?</> : "There is no active timer."}</p>
+              <p>{activeTimeEntry ? <>Finish <strong>{activeTimeEntry.name}</strong> at <RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} />?</> : "There is no active timer."}</p>
               {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
               <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button autoFocus type="button" className="primary-button" disabled={!activeTimeEntry || timerBusy} onClick={() => void finishTimerFromDialog()}>{timerBusy ? "Finishing…" : "Finish timer"}</button></div>
             </div>}

@@ -49,6 +49,11 @@ type Note struct {
 	Revision   uint64 `json:"revision"`
 }
 
+type SavedNote struct {
+	Note    Note        `json:"note"`
+	Summary NoteSummary `json:"summary"`
+}
+
 type TrashItem struct {
 	ID        string `json:"id"`
 	Kind      string `json:"kind"`

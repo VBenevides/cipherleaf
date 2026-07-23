@@ -713,8 +713,16 @@ func (s *VaultService) GetNote(id string) (vault.Note, error) {
 	return s.store.GetNote(id)
 }
 
-func (s *VaultService) SaveNote(id, title, content string) (vault.Note, error) {
-	return s.store.SaveNote(id, title, content)
+func (s *VaultService) SaveNote(id, title, content string) (vault.SavedNote, error) {
+	note, err := s.store.SaveNote(id, title, content)
+	if err != nil {
+		return vault.SavedNote{}, err
+	}
+	summary, err := s.store.GetNoteSummary(id)
+	if err != nil {
+		return vault.SavedNote{}, err
+	}
+	return vault.SavedNote{Note: note, Summary: summary}, nil
 }
 
 func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string, error) {

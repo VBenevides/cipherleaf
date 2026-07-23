@@ -9,25 +9,27 @@ import (
 
 func (s *Store) GetVaultStatistics() (VaultStatistics, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if err := s.requireUnlocked(); err != nil {
+		s.mu.RUnlock()
 		return VaultStatistics{}, err
 	}
+	root := s.root
+	s.mu.RUnlock()
 
 	statistics := VaultStatistics{}
 	for _, directory := range []string{"objects", historyDirectory, trashDirectory} {
-		size, err := directoryBytes(filepath.Join(s.root, directory))
+		size, err := directoryBytes(filepath.Join(root, directory))
 		if err != nil {
 			return VaultStatistics{}, err
 		}
 		statistics.NotesBytes += size
 	}
 	var err error
-	statistics.AttachmentsBytes, err = directoryBytes(filepath.Join(s.root, "attachments"))
+	statistics.AttachmentsBytes, err = directoryBytes(filepath.Join(root, "attachments"))
 	if err != nil {
 		return VaultStatistics{}, err
 	}
-	statistics.TimeTrackingBytes, err = directoryBytes(filepath.Join(s.root, trackingDirectory))
+	statistics.TimeTrackingBytes, err = directoryBytes(filepath.Join(root, trackingDirectory))
 	return statistics, err
 }
 

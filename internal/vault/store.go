@@ -900,6 +900,22 @@ func (s *Store) GetNote(id string) (Note, error) {
 	return noteForClient(note), nil
 }
 
+func (s *Store) GetNoteSummary(id string) (NoteSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.requireUnlocked(); err != nil {
+		return NoteSummary{}, err
+	}
+	index, found := s.findNoteLocked(id)
+	if !found {
+		return NoteSummary{}, errors.New("note not found")
+	}
+	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
+		return NoteSummary{}, err
+	}
+	return *cloneNoteSummary(s.manifest.Notes[index]), nil
+}
+
 func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -921,6 +937,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if len(storedContent) > maxNoteBytes {
 		return Note{}, errors.New("note exceeds the 10 MiB limit")
 	}
+	derivedContent := derivedMarkdownContent(storedContent)
 	current, err := s.readNoteLocked(id)
 	if err != nil {
 		return Note{}, err
@@ -929,13 +946,13 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	originalManifest := cloneManifest(s.manifest)
 	contentMatches := current.Content == storedContent || derivedMarkdownContent(current.Content) == content
 	if current.Title == title && contentMatches {
-		if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
+		if err := s.pruneNoteAttachmentsByIDLocked(id, extractAttachmentIDs(derivedContent)); err != nil {
 			return Note{}, err
 		}
 		if err := s.prunePendingSharedAttachmentsLocked(); err != nil {
 			return Note{}, err
 		}
-		return noteForClient(current), nil
+		return noteForClientContent(current, derivedContent), nil
 	}
 	original := current
 	if err := s.writeNoteHistoryLocked(current); err != nil {
@@ -957,20 +974,20 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		}
 		originals[id] = original
 	}
-	s.manifest.Notes[index] = summaryFromNote(current)
+	s.manifest.Notes[index] = summaryFromNoteContent(current, derivedContent)
 	s.manifest.Notes[index].CiphertextHash = hash
 	if err := s.saveManifestLocked(); err != nil {
 		return Note{}, s.rollbackNoteWritesLocked(originalManifest, originals, err)
 	}
 	s.updateSharedAttachmentRefsLocked(originalSummary.AttachmentIDs, s.manifest.Notes[index].AttachmentIDs)
-	s.updateSearchIndexLocked(id, derivedMarkdownContent(current.Content))
-	if err := s.pruneNoteAttachmentsLocked(id, storedContent); err != nil {
+	s.updateSearchIndexLocked(id, derivedContent)
+	if err := s.pruneNoteAttachmentsByIDLocked(id, s.manifest.Notes[index].AttachmentIDs); err != nil {
 		return Note{}, err
 	}
 	if err := s.prunePendingSharedAttachmentsLocked(); err != nil {
 		return Note{}, err
 	}
-	return noteForClient(current), nil
+	return noteForClientContent(current, derivedContent), nil
 }
 
 // SaveAttachment encrypts a WebP image in the vault and returns its opaque ID.
@@ -1435,11 +1452,15 @@ func (s *Store) Search(query string) ([]NoteSummary, error) {
 			result = append(result, item)
 			continue
 		}
-		note, err := s.readNoteLocked(item.ID)
-		if err != nil {
-			return nil, err
+		content, indexed := s.searchIndex[item.ID]
+		if !indexed {
+			note, err := s.readNoteLocked(item.ID)
+			if err != nil {
+				return nil, err
+			}
+			content = derivedMarkdownContent(note.Content)
 		}
-		if strings.Contains(strings.ToLower(derivedMarkdownContent(note.Content)), query) {
+		if strings.Contains(strings.ToLower(content), query) {
 			result = append(result, item)
 		}
 	}
@@ -2136,40 +2157,54 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 // reports whether it represents the exact current local encrypted snapshot.
 func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if err := s.requireUnlocked(); err != nil {
+		s.mu.RUnlock()
 		return false, err
 	}
-	remote, err := s.readRemoteSnapshotLocked(source, true, false)
+	local := &Store{
+		root: s.root, vaultID: s.vaultID, key: slices.Clone(s.key), manifest: cloneManifest(s.manifest),
+	}
+	if s.timeTrackingCatalog != nil {
+		tracking := cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+		local.timeTrackingCatalog = &tracking
+	}
+	revisionData, err := snapshotRevisionData(local.manifest, local.timeTrackingCatalog)
+	s.mu.RUnlock()
 	if err != nil {
 		return false, err
 	}
-	localFolders := slices.Clone(s.manifest.Folders)
+	revision := sha256.Sum256(revisionData)
+
+	remote, err := local.readRemoteSnapshotLocked(source, true, false)
+	if err != nil {
+		return false, err
+	}
+	localFolders := slices.Clone(local.manifest.Folders)
 	sortFolders(localFolders)
-	localDeletedFolders := slices.Clone(s.manifest.DeletedFolders)
+	localDeletedFolders := slices.Clone(local.manifest.DeletedFolders)
 	sortTombstones(localDeletedFolders)
-	localDeletedNotes := slices.Clone(s.manifest.DeletedNotes)
+	localDeletedNotes := slices.Clone(local.manifest.DeletedNotes)
 	sortTombstones(localDeletedNotes)
 	matches := slices.Equal(remote.Manifest.Folders, localFolders) &&
 		slices.Equal(remote.Manifest.DeletedFolders, localDeletedFolders) &&
 		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
-		remote.Manifest.Settings == s.manifest.Settings &&
-		len(remote.Objects) == len(s.manifest.Notes)+len(localDeletedNotes)
-	trackingMatches, err := s.timeTrackingSnapshotMatchesLocked(remote.Tracking)
+		remote.Manifest.Settings == local.manifest.Settings &&
+		len(remote.Objects) == len(local.manifest.Notes)+len(localDeletedNotes)
+	trackingMatches, err := local.timeTrackingSnapshotMatchesLocked(remote.Tracking)
 	if err != nil {
 		return false, err
 	}
 	matches = matches && trackingMatches
 	if matches {
-		for _, local := range s.manifest.Notes {
-			remoteObject, exists := remote.Objects[local.ID]
-			if !exists || remoteObject.Revision != local.Revision {
+		for _, note := range local.manifest.Notes {
+			remoteObject, exists := remote.Objects[note.ID]
+			if !exists || remoteObject.Revision != note.Revision {
 				matches = false
 				break
 			}
-			data, err := os.ReadFile(s.notePathLocked(local.ID))
+			data, err := os.ReadFile(local.notePathLocked(note.ID))
 			if err != nil {
-				return false, fmt.Errorf("read local encrypted note %s: %w", local.ID, err)
+				return false, fmt.Errorf("read local encrypted note %s: %w", note.ID, err)
 			}
 			hash := sha256.Sum256(data)
 			if hex.EncodeToString(hash[:]) != remoteObject.CiphertextHash {
@@ -2186,6 +2221,13 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 				break
 			}
 		}
+	}
+	current, err := s.SnapshotRevision()
+	if err != nil {
+		return false, err
+	}
+	if current != hex.EncodeToString(revision[:]) {
+		return false, nil
 	}
 	return matches, nil
 }
@@ -4088,7 +4130,10 @@ func noteReferencesFolder(notes []NoteSummary, folderID string) bool {
 }
 
 func summaryFromNote(note Note) NoteSummary {
-	derivedContent := derivedMarkdownContent(note.Content)
+	return summaryFromNoteContent(note, derivedMarkdownContent(note.Content))
+}
+
+func summaryFromNoteContent(note Note, derivedContent string) NoteSummary {
 	return NoteSummary{
 		ID: note.ID, Title: note.Title, FolderID: note.FolderID, Order: note.Order, CreatedAt: note.CreatedAt,
 		UpdatedAt: note.UpdatedAt, ModifiedAt: note.ModifiedAt, Revision: note.Revision, Tags: extractTags(derivedContent),
@@ -4112,7 +4157,11 @@ func noteFromSummary(summary NoteSummary, content string) Note {
 }
 
 func noteForClient(note Note) Note {
-	note.Content = derivedMarkdownContent(note.Content)
+	return noteForClientContent(note, derivedMarkdownContent(note.Content))
+}
+
+func noteForClientContent(note Note, derivedContent string) Note {
+	note.Content = derivedContent
 	return note
 }
 

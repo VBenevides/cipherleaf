@@ -1786,6 +1786,60 @@ func TestListBacklinksUsesManifestOutgoingLinks(t *testing.T) {
 	}
 }
 
+func TestSearchUsesMemoryIndexWithoutReadingNoteObjects(t *testing.T) {
+	store := NewStore()
+	session, err := store.Create(t.TempDir(), "secret-secret-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Indexed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(note.ID, note.Title, "unique indexed phrase"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(session.Path, "objects", note.ID[:2], note.ID+".enc")
+	if err := os.WriteFile(path, []byte("not an envelope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := store.Search("unique indexed phrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].ID != note.ID {
+		t.Fatalf("search matches = %#v, want indexed note", matches)
+	}
+}
+
+func TestSavedNoteSummaryContainsDerivedMetadata(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(
+		note.ID,
+		note.Title,
+		"---\nstatus: active\n---\n#project\n[report](attachment:abcdefabcdefabcdefabcdefabcdefab)\n[[Target|note:0123456789abcdef0123456789abcdef]]",
+	); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.GetNoteSummary(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(summary.Tags, []string{"project"}) ||
+		!slices.Equal(summary.AttachmentIDs, []string{"abcdefabcdefabcdefabcdefabcdefab"}) ||
+		!slices.Equal(summary.OutgoingLinks, []string{"target|note:0123456789abcdef0123456789abcdef"}) ||
+		summary.Properties["status"] != "active" {
+		t.Fatalf("saved summary metadata = %#v", summary)
+	}
+}
+
 func TestReplaceAcrossNotesRewritesAndUpdatesModifiedAt(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "secret-secret-secret"); err != nil {

@@ -35,7 +35,7 @@ summary="$destination/summary-$timestamp.md"
 
 {
   go test ./internal/vault -run '^$' \
-    -bench '^(BenchmarkRepresentativeVaultWorkloads|BenchmarkOptimizationScaling|BenchmarkSearchCases|BenchmarkSaveListWorkflow|BenchmarkOpenPhases|BenchmarkTimeDashboardCache|BenchmarkSyncLocalWorkloads)$' \
+    -bench '^(BenchmarkRepresentativeVaultWorkloads|BenchmarkOptimizationScaling|BenchmarkSearchCases|BenchmarkAutosaveWorkflow|BenchmarkOpenPhases|BenchmarkTimeDashboardCache|BenchmarkSyncLocalWorkloads)$' \
     -benchmem -count=10
   go test ./internal/githubsync -run '^$' \
     -bench '^BenchmarkGitHubSSHConnection$' -benchmem -count=10

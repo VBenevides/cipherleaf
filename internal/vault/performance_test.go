@@ -141,29 +141,31 @@ func BenchmarkSearchCases(b *testing.B) {
 	}
 }
 
-func BenchmarkSaveListWorkflow(b *testing.B) {
+func BenchmarkAutosaveWorkflow(b *testing.B) {
 	store, target := benchmarkVault(b, 1000)
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
 	b.ReportAllocs()
-	var summaries []NoteSummary
+	var result SavedNote
 	b.ResetTimer()
 	for index := 0; b.Loop(); index++ {
-		if _, err := store.SaveNote(target.ID, target.Title, fmt.Sprintf("workflow revision %d", index)); err != nil {
+		note, err := store.SaveNote(target.ID, target.Title, fmt.Sprintf("workflow revision %d", index))
+		if err != nil {
 			b.Fatal(err)
 		}
-		var err error
-		if summaries, err = store.ListNotes(); err != nil {
+		summary, err := store.GetNoteSummary(target.ID)
+		if err != nil {
 			b.Fatal(err)
 		}
+		result = SavedNote{Note: note, Summary: summary}
 	}
 	b.StopTimer()
-	payload, err := json.Marshal(summaries)
+	payload, err := json.Marshal(result)
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportMetric(float64(len(payload)), "payload-B")
-	b.ReportMetric(float64(len(summaries)), "results/op")
+	b.ReportMetric(1, "results/op")
 	reportRuntimeMetrics(b, memory)
 	reportVaultDiskMetrics(b, store.root)
 }

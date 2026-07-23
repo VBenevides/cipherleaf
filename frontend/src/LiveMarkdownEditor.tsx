@@ -101,6 +101,22 @@ type ObjectDocumentContext = {
   objectDocument: ObjectDocument;
 };
 
+const objectDocumentField = StateField.define<ObjectDocumentContext>({
+  create(state) {
+    const text = state.doc.toString();
+    return { lines: text.split("\n"), objectDocument: parseObjectDocument(text) };
+  },
+  update(value, transaction) {
+    if (!transaction.docChanged) return value;
+    const text = transaction.state.doc.toString();
+    return { lines: text.split("\n"), objectDocument: parseObjectDocument(text) };
+  },
+});
+
+function cachedObjectDocument(state: EditorState): ObjectDocument {
+  return state.field(objectDocumentField).objectDocument;
+}
+
 const setDeepCodeHighlights = StateEffect.define<DecorationSet>();
 
 const codeHighlightStyle = HighlightStyle.define([
@@ -1337,7 +1353,7 @@ function headingHasChildren(
 
 function collapsibleQuotePositions(
   state: EditorState,
-  objectDocument = parseObjectDocument(state.doc.toString()),
+  objectDocument: ObjectDocument,
 ): number[] {
   const positions: number[] = [];
 
@@ -1820,11 +1836,7 @@ function livePreviewExtension(
 ) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
-      const docText = state.doc.toString();
-      const context = {
-        lines: docText.split("\n"),
-        objectDocument: parseObjectDocument(docText),
-      };
+      const context = state.field(objectDocumentField);
       const collapsed = savedCollapsedPositions(state, noteID) ?? (defaultSectionsCollapsed
         ? new Set(collapsibleQuotePositions(state, context.objectDocument).map((position) => collapseKeyForPosition(state, position, context.objectDocument)))
         : new Set<string>());
@@ -1844,11 +1856,7 @@ function livePreviewExtension(
       const collapseContext = () => {
         if (!cachedContext) {
           if (transaction.docChanged) {
-            const docText = transaction.state.doc.toString();
-            cachedContext = {
-              lines: docText.split("\n"),
-              objectDocument: parseObjectDocument(docText),
-            };
+            cachedContext = transaction.state.field(objectDocumentField);
           } else {
             cachedContext = {
               lines: value.lines,
@@ -1935,7 +1943,7 @@ function livePreviewExtension(
     },
   });
 
-  return field;
+  return [objectDocumentField, field];
 }
 
 function wrapSelection(view: EditorView, marker: string) {
@@ -2139,7 +2147,7 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
 }
 
 function changeCodeIndent(view: EditorView, direction: 1 | -1) {
-  const document = parseObjectDocument(view.state.doc.toString());
+  const document = cachedObjectDocument(view.state);
   const lineNumbers = new Set<number>();
 
   for (const range of view.state.selection.ranges) {
@@ -2178,7 +2186,7 @@ function closeCodeAfterBlankLine(view: EditorView) {
   const range = view.state.selection.main;
   if (!range.empty) return false;
   const line = view.state.doc.lineAt(range.head);
-  const owner = parseObjectDocument(view.state.doc.toString()).byLine.get(line.number);
+  const owner = cachedObjectDocument(view.state).byLine.get(line.number);
   if (owner?.tag !== "code" || line.number <= owner.lineNumber || line.text.trim() || range.head !== line.to) {
     return false;
   }
@@ -2214,7 +2222,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
 
   const line = view.state.doc.lineAt(range.head);
   const indentation = line.text.slice(0, line.text.length - line.text.trimStart().length);
-  const document = parseObjectDocument(view.state.doc.toString());
+  const document = cachedObjectDocument(view.state);
   const owner = document.byLine.get(line.number);
   const object = owner?.lineNumber === line.number ? owner : null;
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
@@ -2299,7 +2307,7 @@ function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
 }
 
 function currentToggleSectionPosition(state: EditorState): number | null {
-  const objectDocument = parseObjectDocument(state.doc.toString());
+  const objectDocument = cachedObjectDocument(state);
   const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
   const currentLine = state.doc.line(currentLineNumber);
   const currentHeadingLevel = headingLevel(currentLine.text);
@@ -2381,7 +2389,7 @@ function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElemen
 
     if (line) {
       const lineNumber = Number(line.dataset.objectLine);
-      if (!objectDocument) objectDocument = parseObjectDocument(view.state.doc.toString());
+      if (!objectDocument) objectDocument = cachedObjectDocument(view.state);
       const ownerLineNumber = Number.isFinite(lineNumber)
         ? objectDocument.byLine.get(lineNumber)?.lineNumber ?? lineNumber
         : lineNumber;

@@ -378,7 +378,7 @@ export function SaveImageAttachment(noteID: string, imageDataURL: string): $Canc
     return $Call.ByID(1556359170, noteID, imageDataURL);
 }
 
-export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.Note> {
+export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.SavedNote> {
     return $Call.ByID(2770680190, id, title, content);
 }
 
