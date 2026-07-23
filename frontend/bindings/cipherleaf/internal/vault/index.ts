@@ -16,6 +16,7 @@ export type {
     NoteVersion,
     PortabilityResult,
     ReplaceResult,
+    SavedNote,
     Session,
     TimeClient,
     TimeDashboard,

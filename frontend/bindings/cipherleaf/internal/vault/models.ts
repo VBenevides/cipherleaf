@@ -72,11 +72,6 @@ export interface Note {
     "revision": number;
 }
 
-export interface SavedNote {
-    "note": Note;
-    "summary": NoteSummary;
-}
-
 export interface NoteSummary {
     "id": string;
     "title": string;
@@ -112,6 +107,11 @@ export interface PortabilityResult {
 export interface ReplaceResult {
     "replacedNotes": number;
     "replacements": number;
+}
+
+export interface SavedNote {
+    "note": Note;
+    "summary": NoteSummary;
 }
 
 export interface Session {
