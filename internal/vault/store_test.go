@@ -1147,6 +1147,11 @@ func benchmarkVault(b *testing.B, noteCount int) (*Store, Note) {
 	defaultKDF.Memory = 8 * 1024
 	defaultKDF.Time = 1
 	b.Cleanup(func() { defaultKDF = previous })
+	return benchmarkVaultFixture(b, noteCount)
+}
+
+func benchmarkVaultFixture(b *testing.B, noteCount int) (*Store, Note) {
+	b.Helper()
 	store := NewStore()
 	if _, err := store.Create(b.TempDir(), "benchmark-secret"); err != nil {
 		b.Fatal(err)
@@ -1164,6 +1169,49 @@ func benchmarkVault(b *testing.B, noteCount int) (*Store, Note) {
 		target = note
 	}
 	return store, target
+}
+
+func BenchmarkRepresentativeVaultWorkloads(b *testing.B) {
+	b.Run("open_1000_notes", func(b *testing.B) {
+		store, _ := benchmarkVaultFixture(b, 1000)
+		root := store.root
+		store.Lock()
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			opened := NewStore()
+			if _, err := opened.Open(root, "benchmark-secret"); err != nil {
+				b.Fatal(err)
+			}
+			opened.Lock()
+		}
+	})
+	b.Run("save_1_mib_note", func(b *testing.B) {
+		store, target := benchmarkVault(b, 1)
+		content := strings.Repeat("x", 1<<20)
+		for index := range maxNoteHistory {
+			if _, err := store.SaveNote(target.ID, target.Title, fmt.Sprintf("warmup %d%s", index, content)); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for index := 0; b.Loop(); index++ {
+			if _, err := store.SaveNote(target.ID, target.Title, fmt.Sprintf("%d%s", index, content)); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("search_1000_notes", func(b *testing.B) {
+		store, _ := benchmarkVault(b, 1000)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := store.Search("searchable"); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func BenchmarkStoreHotPaths(b *testing.B) {
