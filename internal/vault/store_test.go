@@ -1691,6 +1691,7 @@ func TestNoteObjectStoresOnlyContentAndManifestMetadata(t *testing.T) {
 	if derivedMarkdownContent(string(plaintext)) != content {
 		t.Fatalf("derived markdown = %q, want %q", derivedMarkdownContent(string(plaintext)), content)
 	}
+	store.searchIndex[note.ID] = "[[Wrong]]"
 	summaries, err := store.ListNotes()
 	if err != nil {
 		t.Fatal(err)

@@ -378,9 +378,6 @@ func (s *Store) ListNotes() ([]NoteSummary, error) {
 	result := make([]NoteSummary, 0, len(s.manifest.Notes))
 	for _, note := range s.manifest.Notes {
 		if s.requireNoteAccessibleLocked(note) == nil {
-			if content, ok := s.searchIndex[note.ID]; ok {
-				note.OutgoingLinks = extractOutgoingLinks(content)
-			}
 			result = append(result, note)
 		}
 	}
