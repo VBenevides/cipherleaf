@@ -3359,11 +3359,11 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-object-line.is-drop-before {
-  border-top: 3px solid var(--green-dark);
+  box-shadow: inset 0 3px var(--green-dark);
 }
 
 .live-markdown-editor .cm-live-object-line.is-drop-after {
-  border-bottom: 3px solid var(--green-dark);
+  box-shadow: inset 0 -3px var(--green-dark);
 }
 
 .live-markdown-editor .cm-live-object-line.is-drop-child {

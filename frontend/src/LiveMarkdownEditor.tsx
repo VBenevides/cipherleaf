@@ -2373,30 +2373,22 @@ function objectHandleElement(target: EventTarget | null): HTMLElement | null {
     : null;
 }
 
-function objectLineElementAt(view: EditorView, x: number, y: number): HTMLElement | null {
-  const elements = document.elementsFromPoint(x, y);
-  let objectDocument: ObjectDocument | null = null;
-  for (const element of elements) {
-    let line: HTMLElement | null = null;
+function objectLineElementAt(x: number, y: number): HTMLElement | null {
+  for (const element of document.elementsFromPoint(x, y)) {
     if (element instanceof HTMLElement && element.matches(".cm-live-object-line[data-object-line]")) {
-      line = element;
-    } else if (element instanceof HTMLElement) {
-      line = element.closest<HTMLElement>(".cm-live-object-line[data-object-line]");
+      return element;
     }
-
-    if (line) {
-      const lineNumber = Number(line.dataset.objectLine);
-      if (!objectDocument) objectDocument = cachedObjectDocument(view.state);
-      const ownerLineNumber = Number.isFinite(lineNumber)
-        ? objectDocument.byLine.get(lineNumber)?.lineNumber ?? lineNumber
-        : lineNumber;
-      const owner = Number.isFinite(ownerLineNumber)
-        ? view.dom.querySelector<HTMLElement>(`.cm-live-object-line[data-object-line="${ownerLineNumber}"]`)
-        : null;
-      return owner ?? line;
+    if (element instanceof HTMLElement) {
+      const line = element.closest<HTMLElement>(".cm-live-object-line[data-object-line]");
+      if (line) return line;
     }
   }
   return null;
+}
+
+function objectTargetLineNumber(view: EditorView, line: HTMLElement): number {
+  const lineNumber = Number(line.dataset.objectLine);
+  return cachedObjectDocument(view.state).byLine.get(lineNumber)?.lineNumber ?? lineNumber;
 }
 
 function dropModeForPoint(
@@ -2406,9 +2398,9 @@ function dropModeForPoint(
 ): ObjectDropMode {
   const rect = targetLine.getBoundingClientRect();
   const ratio = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
-  if (previous === "before" && ratio < 0.4) return "before";
-  if (previous === "after" && ratio > 0.6) return "after";
-  if (previous === "child" && ratio > 0.2 && ratio < 0.8) return "child";
+  if (previous === "before" && ratio < 0.32) return "before";
+  if (previous === "after" && ratio > 0.68) return "after";
+  if (previous === "child" && ratio > 0.24 && ratio < 0.76) return "child";
   if (ratio < 0.28) return "before";
   if (ratio > 0.72) return "after";
   return "child";
@@ -2739,7 +2731,7 @@ export default function LiveMarkdownEditor({
                 lastX = moveEvent.clientX;
                 lastY = moveEvent.clientY;
                 updateGhost();
-                const targetLine = objectLineElementAt(pointerView, lastX, lastY);
+                const targetLine = objectLineElementAt(lastX, lastY);
                 if (targetLine !== previewTarget) {
                   clearObjectDropPreview(previewTarget);
                   previewTarget = targetLine;
@@ -2762,8 +2754,8 @@ export default function LiveMarkdownEditor({
                 document.removeEventListener("pointermove", move);
                 document.removeEventListener("pointerup", finish);
                 document.removeEventListener("pointercancel", finish);
-                const targetLine = objectLineElementAt(pointerView, lastX, lastY);
-                const targetLineNumber = Number(targetLine?.dataset.objectLine);
+                const targetLine = objectLineElementAt(lastX, lastY);
+                const targetLineNumber = targetLine ? objectTargetLineNumber(pointerView, targetLine) : NaN;
                 if (!targetLine || !Number.isFinite(targetLineNumber)) return;
                 moveObjectBlock(pointerView, sourceLine, targetLineNumber, lastY, targetLine, previewMode);
               };

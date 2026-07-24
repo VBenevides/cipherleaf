@@ -383,6 +383,15 @@ test("moves objects by id", () => {
   ].join("\n"));
 });
 
+test("live drag previews do not change hit-test geometry", () => {
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+
+  assert.match(editor, /function objectLineElementAt\(x: number, y: number\)/);
+  assert.match(style, /\.is-drop-before \{\s*box-shadow:/);
+  assert.match(style, /\.is-drop-after \{\s*box-shadow:/);
+});
+
 test("serializes markdown to canonical object json", () => {
   const canonical = canonicalObjectDocumentFromMarkdown([
     "> Project",
