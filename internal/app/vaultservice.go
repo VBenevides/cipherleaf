@@ -869,6 +869,10 @@ func (s *VaultService) ListNoteVersions(id string) ([]vault.NoteVersion, error) 
 	return s.store.ListNoteVersions(id)
 }
 
+func (s *VaultService) CleanHistory() error {
+	return s.store.CleanHistory()
+}
+
 func (s *VaultService) RestoreNoteVersion(id string, revision uint64) (vault.Note, error) {
 	return s.store.RestoreNoteVersion(id, revision)
 }

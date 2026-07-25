@@ -28,6 +28,17 @@ func (s *Store) writeRecoveryRecordLocked(path, objectType, objectID string, val
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	if objectType == "note-history" {
+		envelope, err := s.buildEnvelopeLocked(objectType, objectID, data, "")
+		if err != nil {
+			return err
+		}
+		data, err = json.Marshal(envelope)
+		if err != nil {
+			return err
+		}
+		return writeBytesAtomic(path, data)
+	}
 	return s.writeEnvelopeLocked(path, objectType, objectID, data)
 }
 
@@ -51,6 +62,11 @@ func (s *Store) writeNoteHistoryLocked(note Note) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".enc.bak") {
+			_ = os.Remove(filepath.Join(directory, entry.Name()))
+		}
+	}
 	entries = slices.DeleteFunc(entries, func(entry os.DirEntry) bool {
 		_, ok := historyRevision(entry.Name())
 		return entry.IsDir() || !ok
@@ -70,23 +86,8 @@ func (s *Store) writeNoteHistoryLocked(note Note) error {
 	if err := s.writeRecoveryRecordLocked(path, "note-history", objectID, note); err != nil {
 		return fmt.Errorf("save note history: %w", err)
 	}
-	entries, err = os.ReadDir(directory)
-	if err != nil {
-		return err
-	}
-	entries = slices.DeleteFunc(entries, func(entry os.DirEntry) bool {
-		_, ok := historyRevision(entry.Name())
-		return entry.IsDir() || !ok
-	})
-	if len(entries) <= maxNoteHistory {
-		return nil
-	}
-	slices.SortFunc(entries, func(left, right os.DirEntry) int { return strings.Compare(left.Name(), right.Name()) })
-	for _, entry := range entries[:len(entries)-maxNoteHistory] {
-		_ = os.Remove(filepath.Join(directory, entry.Name()))
-		_ = os.Remove(filepath.Join(directory, entry.Name()+".bak"))
-	}
-	return nil
+	limit := normalizeVaultSettings(s.manifest.Settings).FileHistoryLimit
+	return pruneHistoryDirectory(directory, limit)
 }
 
 func (s *Store) writeTrashedNoteLocked(note Note) error {
@@ -275,6 +276,61 @@ func historyRevision(name string) (uint64, bool) {
 	}
 	revision, err := strconv.ParseUint(strings.TrimSuffix(name, ".enc"), 10, 64)
 	return revision, err == nil
+}
+
+func pruneHistoryDirectory(directory string, limit int) error {
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	versions := entries[:0]
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".bak") {
+			if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+				return err
+			}
+		} else if _, ok := historyRevision(entry.Name()); ok && !entry.IsDir() {
+			versions = append(versions, entry)
+		}
+	}
+	slices.SortFunc(versions, func(left, right os.DirEntry) int { return strings.Compare(left.Name(), right.Name()) })
+	for _, entry := range versions[:max(0, len(versions)-limit)] {
+		if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) CleanHistory() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	root := filepath.Join(s.root, historyDirectory)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	limit := normalizeVaultSettings(s.manifest.Settings).FileHistoryLimit
+	if err := pruneHistoryDirectory(root, limit); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			if err := pruneHistoryDirectory(filepath.Join(root, entry.Name()), limit); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) ListNoteVersions(id string) ([]NoteVersion, error) {

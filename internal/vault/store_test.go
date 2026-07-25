@@ -541,8 +541,15 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 }
 
 func TestVaultSettingsDefaultAutoSyncInterval(t *testing.T) {
-	if got := normalizeVaultSettings(VaultSettings{}).AutoSyncMinutes; got != 15 {
+	settings := normalizeVaultSettings(VaultSettings{})
+	if got := settings.AutoSyncMinutes; got != 15 {
 		t.Fatalf("auto-sync interval = %d, want 15", got)
+	}
+	if got := settings.FileHistoryLimit; got != 10 {
+		t.Fatalf("file history limit = %d, want 10", got)
+	}
+	if got := normalizeVaultSettings(VaultSettings{FileHistoryLimit: 51}).FileHistoryLimit; got != 50 {
+		t.Fatalf("file history limit = %d, want 50", got)
 	}
 }
 
@@ -1189,7 +1196,7 @@ func BenchmarkRepresentativeVaultWorkloads(b *testing.B) {
 	b.Run("save_1_mib_note", func(b *testing.B) {
 		store, target := benchmarkVault(b, 1)
 		content := strings.Repeat("x", 1<<20)
-		for index := range maxNoteHistory {
+		for index := range defaultVaultSettings().FileHistoryLimit {
 			if _, err := store.SaveNote(target.ID, target.Title, fmt.Sprintf("warmup %d%s", index, content)); err != nil {
 				b.Fatal(err)
 			}

@@ -24,6 +24,15 @@ test("window switching does not trigger a caret-moving save", () => {
   assert.match(app, /if \(!event\.relatedTarget && !document\.hasFocus\(\)\) return;/);
 });
 
+test("vault settings reload synced file-history preferences", () => {
+  assert.match(app, /VaultService\.GetVaultSettings\(\)/);
+  assert.match(app, /applyVaultSettings\(vaultSettings\)/);
+  assert.match(app, /\[fileHistoryLimit, setFileHistoryLimit\] = useState\(10\)/);
+  assert.match(app, /setFileHistoryLimitDraft\(settings\.fileHistoryLimit\)/);
+  assert.match(app, /fileHistoryLimit: fileHistoryLimitDraft/);
+  assert.match(app, /VaultService\.CleanHistory\(\)/);
+});
+
 test("editor font selection supports installed fonts and .ttf files", () => {
   assert.match(app, /VaultService\.ListInstalledFonts\(\)/);
   assert.match(app, /queryLocalFonts/);

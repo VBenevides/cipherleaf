@@ -44,7 +44,6 @@ const (
 	folderPasswordSaltBytes      = 16
 	folderPasswordVerifierPrefix = "argon2id-v1:"
 	legacyFolderVerifierPrefix   = "sha256-salt-v1:"
-	maxNoteHistory               = 20
 )
 
 var (
@@ -311,7 +310,7 @@ func defaultVaultSettings() VaultSettings {
 	return VaultSettings{
 		Theme: "light", JournalLines: "none", EditorFontSize: 14,
 		DailyNoteFormat: "YYYY-MM-DD", AutosaveIntervalSeconds: 60, AutoSyncMinutes: 15,
-		AutoLockMinutes: 15, SectionDefault: "collapsed",
+		AutoLockMinutes: 15, FileHistoryLimit: 10, SectionDefault: "collapsed",
 	}
 }
 
@@ -337,6 +336,11 @@ func normalizeVaultSettings(settings VaultSettings) VaultSettings {
 	}
 	if settings.AutoLockMinutes < 1 {
 		settings.AutoLockMinutes = defaults.AutoLockMinutes
+	}
+	if settings.FileHistoryLimit < 1 {
+		settings.FileHistoryLimit = defaults.FileHistoryLimit
+	} else if settings.FileHistoryLimit > 50 {
+		settings.FileHistoryLimit = 50
 	}
 	if settings.SectionDefault != "expanded" && settings.SectionDefault != "collapsed" {
 		settings.SectionDefault = defaults.SectionDefault

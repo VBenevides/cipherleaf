@@ -185,7 +185,7 @@ func TestNoteHistoryDeduplicatesNonAdjacentContent(t *testing.T) {
 	}
 }
 
-func TestNoteHistoryDeduplicatesContentAndKeepsTwentyVersions(t *testing.T) {
+func TestNoteHistoryDeduplicatesContentAndUsesConfiguredLimit(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "history-retention-secret"); err != nil {
 		t.Fatal(err)
@@ -214,6 +214,9 @@ func TestNoteHistoryDeduplicatesContentAndKeepsTwentyVersions(t *testing.T) {
 	if len(after) != len(before) {
 		t.Fatalf("same content created history: before=%d after=%d", len(before), len(after))
 	}
+	if _, err := store.SaveVaultSettings(VaultSettings{FileHistoryLimit: 3}); err != nil {
+		t.Fatal(err)
+	}
 	for index := 0; index < 25; index++ {
 		current, err := store.GetNote(note.ID)
 		if err != nil {
@@ -227,11 +230,67 @@ func TestNoteHistoryDeduplicatesContentAndKeepsTwentyVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if maxNoteHistory != 20 {
-		t.Fatalf("maxNoteHistory = %d, want 20", maxNoteHistory)
+	if len(versions) != 3 {
+		t.Fatalf("history count = %d, want 3", len(versions))
 	}
-	if len(versions) != maxNoteHistory {
-		t.Fatalf("history count = %d, want 20", len(versions))
+	entries, err := os.ReadDir(filepath.Join(store.root, historyDirectory, note.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".bak") {
+			t.Fatalf("history contains redundant backup %q", entry.Name())
+		}
+	}
+}
+
+func TestCleanHistoryPrunesEveryFileAndBackups(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "history-clean-secret"); err != nil {
+		t.Fatal(err)
+	}
+	notes := make([]Note, 2)
+	for index := range notes {
+		note, err := store.CreateNote(fmt.Sprintf("File %d", index))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for revision := range 6 {
+			note, err = store.SaveNote(note.ID, note.Title, fmt.Sprintf("version %d", revision))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		notes[index] = note
+	}
+	if _, err := store.SaveVaultSettings(VaultSettings{FileHistoryLimit: 3}); err != nil {
+		t.Fatal(err)
+	}
+	historyRoot := filepath.Join(store.root, historyDirectory)
+	if err := os.WriteFile(filepath.Join(historyRoot, "orphan.bak"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, note := range notes {
+		if err := os.WriteFile(store.historyPathLocked(note.ID, 1)+".bak", []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.CleanHistory(); err != nil {
+		t.Fatal(err)
+	}
+	for _, note := range notes {
+		versions, err := store.ListNoteVersions(note.ID)
+		if err != nil || len(versions) != 3 {
+			t.Fatalf("history count = %d, %v; want 3", len(versions), err)
+		}
+	}
+	if err := filepath.WalkDir(historyRoot, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && strings.HasSuffix(entry.Name(), ".bak") {
+			t.Fatalf("history contains redundant backup %q", path)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

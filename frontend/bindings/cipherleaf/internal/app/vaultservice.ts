@@ -35,6 +35,10 @@ export function CheckFolderPassword(id: string, password: string): $CancellableP
     return $Call.ByID(883597332, id, password);
 }
 
+export function CleanHistory(): $CancellablePromise<void> {
+    return $Call.ByID(519942476);
+}
+
 export function CloneGitHubVault(parentPath: string, name: string, repositorySSH: string, privateKeyPath: string, branch: string, secret: string, repositoryPrivate: boolean): $CancellablePromise<$models.CloneVaultResult> {
     return $Call.ByID(3036187677, parentPath, name, repositorySSH, privateKeyPath, branch, secret, repositoryPrivate);
 }

@@ -273,6 +273,7 @@ export interface VaultSettings {
     "autosaveIntervalSeconds": number;
     "autoSyncMinutes": number;
     "autoLockMinutes": number;
+    "fileHistoryLimit": number;
     "sectionDefault": string;
     "revision": number;
     "modifiedAt": number;

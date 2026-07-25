@@ -496,6 +496,7 @@ function App() {
   const [appDialogValue, setAppDialogValue] = useState("");
   const [syncSettings, setSyncSettings] = useState<SyncSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [historySaving, setHistorySaving] = useState(false);
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -536,6 +537,8 @@ function App() {
     const saved = Number(window.localStorage.getItem("cipherleaf-auto-lock-minutes"));
     return Number.isFinite(saved) && saved >= 1 ? saved : 15;
   });
+  const [fileHistoryLimit, setFileHistoryLimit] = useState(10);
+  const [fileHistoryLimitDraft, setFileHistoryLimitDraft] = useState(10);
   const [sectionDefault, setSectionDefault] = useState<SectionDefault>(() =>
     window.localStorage.getItem("cipherleaf-section-default") === "expanded" ? "expanded" : "collapsed"
   );
@@ -597,6 +600,7 @@ function App() {
     autosaveIntervalSeconds,
     autoSyncMinutes,
     autoLockMinutes,
+    fileHistoryLimit,
     sectionDefault,
     revision: 0,
     modifiedAt: 0,
@@ -608,6 +612,7 @@ function App() {
     dailyNoteFormat,
     dailyTemplateNoteID,
     editorFontSize,
+    fileHistoryLimit,
     journalLines,
     sectionDefault,
     theme,
@@ -626,6 +631,8 @@ function App() {
     setAutosaveIntervalSeconds(settings.autosaveIntervalSeconds);
     setAutoSyncMinutes(settings.autoSyncMinutes);
     setAutoLockMinutes(settings.autoLockMinutes);
+    setFileHistoryLimit(settings.fileHistoryLimit);
+    setFileHistoryLimitDraft(settings.fileHistoryLimit);
     setSectionDefault(settings.sectionDefault as SectionDefault);
   };
 
@@ -1070,6 +1077,31 @@ function App() {
     return new Promise<boolean>((resolve) => {
       appDialogResolverRef.current = (value) => resolve(value === true);
     });
+  };
+
+  const saveHistorySettings = async () => {
+    if (!(await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "File history",
+      title: "Save file history limit?",
+      message: `Change versions kept per file from ${fileHistoryLimit} to ${fileHistoryLimitDraft}. Any versions older than the newest ${fileHistoryLimitDraft} will be permanently deleted.`,
+      confirmLabel: "Save",
+      danger: true,
+      icon: "file",
+    }))) return;
+    setHistorySaving(true);
+    try {
+      const saved = await VaultService.SaveVaultSettings({
+        ...portableVaultSettings,
+        fileHistoryLimit: fileHistoryLimitDraft,
+      });
+      applyVaultSettings(saved);
+      await VaultService.CleanHistory();
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setHistorySaving(false);
+    }
   };
 
   const runGlobalReplace = async () => {
@@ -2928,14 +2960,16 @@ function App() {
     setConnectionResult(null);
     setError("");
     try {
-      const [settings, statistics] = await Promise.all([
+      const [settings, statistics, vaultSettings] = await Promise.all([
         VaultService.GetSyncSettings(),
         VaultService.GetVaultStatistics(),
+        VaultService.GetVaultSettings(),
       ]);
       setSyncSettings(settings);
       setVaultStatistics(statistics);
       setSyncLinked(settings.linked);
       setLastSyncedAt(settings.lastSyncedAt);
+      applyVaultSettings(vaultSettings);
     } catch (reason) {
       setVaultSettingsOpen(false);
       setError(errorText(reason));
@@ -4924,6 +4958,24 @@ function App() {
               <div><span>Attachments</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.attachmentsBytes) : "—"}</strong></div>
               <div><span>Time Tracking</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.timeTrackingBytes) : "—"}</strong></div>
             </div>
+            <h2>File history</h2>
+            <label>
+              Versions kept per file
+              <div className="settings-path-field">
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  step="1"
+                  value={fileHistoryLimitDraft}
+                  onChange={(event) => setFileHistoryLimitDraft(Math.min(50, Math.max(1, Number(event.target.value) || 1)))}
+                />
+                <button type="button" className="secondary-button" disabled={historySaving || fileHistoryLimitDraft === fileHistoryLimit} onClick={() => void saveHistorySettings()}>
+                  {historySaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <small>Save syncs this limit and permanently deletes older versions.</small>
+            </label>
             <h2>GitHub sync (experimental)</h2>
             <div className={`sync-link-state ${syncSettings?.linked ? "linked" : ""}`}>
               <span />
