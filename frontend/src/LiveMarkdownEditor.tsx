@@ -66,6 +66,7 @@ import {
   type SearchTarget,
 } from "./searchTarget";
 import { SNIPPETS, expandSnippetWithContext } from "./snippets";
+import { expandedSelection } from "./editorSelection";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -2520,6 +2521,17 @@ export default function LiveMarkdownEditor({
         doc: normalizedValue,
         extensions: [
           Prec.highest(keymap.of([
+            {
+              key: "Mod-a",
+              preventDefault: true,
+              run: (view) => {
+                view.dispatch({
+                  selection: expandedSelection(view.state, cachedObjectDocument(view.state)),
+                  scrollIntoView: true,
+                });
+                return true;
+              },
+            },
             {
               key: "Mod-z",
               preventDefault: true,

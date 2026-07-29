@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { EditorState } from "@codemirror/state";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { expandedSelection } from "../src/editorSelection.ts";
 import {
   canonicalObjectDocumentFromMarkdown,
   continuationPrefix,
@@ -18,6 +20,20 @@ import {
 } from "../src/objectDocument.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("expands selection from word to object text to document", () => {
+  const source = "> first word\nsecond element";
+  const document = parseObjectDocument(source);
+  let state = EditorState.create({ doc: source, selection: { anchor: 4 } });
+
+  for (const expected of [{ from: 2, to: 7 }, { from: 2, to: 12 }, { from: 0, to: source.length }]) {
+    state = state.update({ selection: expandedSelection(state, document) }).state;
+    assert.deepEqual(
+      { from: state.selection.main.from, to: state.selection.main.to },
+      expected,
+    );
+  }
+});
 
 test("matches shared object-document conformance fixtures", () => {
   const fixtures = JSON.parse(readFileSync(
