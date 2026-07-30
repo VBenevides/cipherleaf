@@ -47,6 +47,7 @@ import {
 import {
   continuationPrefix,
   moveObjectInMarkdown,
+  objectAncestorsByLine,
   objectContentIndent,
   objectDepthByLine,
   objectOwnerLineNumber,
@@ -2472,6 +2473,7 @@ export default function LiveMarkdownEditor({
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
   const onCaretChangeRef = useRef(onCaretChange);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [hiddenAncestors, setHiddenAncestors] = useState<string[]>([]);
 
   useEffect(() => () => clearAttachmentDataCache(), [noteID]);
 
@@ -2515,6 +2517,24 @@ export default function LiveMarkdownEditor({
 
     const normalizedValue = normalizeArrowText(value);
     let scheduleJournalRules = () => {};
+    const syncHiddenAncestors = (editor: EditorView) => {
+      const visibleFrom = editor.visibleRanges[0]?.from ?? 0;
+      const top = editor.scrollDOM.getBoundingClientRect().top;
+      const labels = objectAncestorsByLine(
+        cachedObjectDocument(editor.state),
+        editor.state.doc.lineAt(editor.state.selection.main.head).number,
+      ).filter((object) => {
+        const line = editor.dom.querySelector<HTMLElement>(
+          `.cm-live-object-line[data-object-line="${object.lineNumber}"]`,
+        );
+        return line ? line.getBoundingClientRect().bottom <= top : object.to < visibleFrom;
+      }).map((object) => object.text.split("\n")[0].trim()).filter(Boolean);
+      setHiddenAncestors((current) =>
+        current.length === labels.length && current.every((label, index) => label === labels[index])
+          ? current
+          : labels
+      );
+    };
     const editor = new EditorView({
       parent: host.current,
       state: EditorState.create({
@@ -2832,12 +2852,18 @@ export default function LiveMarkdownEditor({
             if (update.docChanged || update.viewportChanged || update.geometryChanged) {
               scheduleJournalRules();
             }
+            if (update.selectionSet || update.docChanged || update.viewportChanged || update.geometryChanged) {
+              syncHiddenAncestors(update.view);
+            }
           }),
         ],
       }),
     });
     const journalRules = installJournalRules(editor);
     scheduleJournalRules = journalRules.schedule;
+    const handleScroll = () => syncHiddenAncestors(editor);
+    editor.scrollDOM.addEventListener("scroll", handleScroll, { passive: true });
+    syncHiddenAncestors(editor);
 
     view.current = editor;
     if (typeof caretOffset === "number" && Number.isFinite(caretOffset)) {
@@ -2854,6 +2880,7 @@ export default function LiveMarkdownEditor({
 
     return () => {
       onCaretChangeRef.current?.(editor.state.selection.main.head);
+      editor.scrollDOM.removeEventListener("scroll", handleScroll);
       journalRules.destroy();
       editor.destroy();
       view.current = null;
@@ -3002,6 +3029,19 @@ export default function LiveMarkdownEditor({
           )
         : null}
       <div className="live-editor-frame">
+        {hiddenAncestors.length > 0
+          ? (
+              <nav className="editor-ancestor-path" aria-label="Hidden ancestors">
+                {hiddenAncestors.map((ancestor, index) => (
+                  <span key={`${ancestor}-${index}`}>
+                    {index > 0 ? <b aria-hidden="true">›</b> : null}
+                    {ancestor}
+                  </span>
+                ))}
+                <b aria-hidden="true">› …</b>
+              </nav>
+            )
+          : null}
         <div ref={host} className="live-markdown-editor" />
       </div>
     </>
