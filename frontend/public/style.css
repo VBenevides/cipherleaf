@@ -3626,13 +3626,6 @@ a:focus-visible {
   font-weight: 700;
 }
 
-.live-markdown-editor .cm-live-syntax-hidden {
-  font-size: 0;
-  line-height: 0;
-  overflow: hidden;
-  opacity: 0;
-}
-
 .live-markdown-editor .cm-live-table-wrap {
   display: block;
   max-width: 100%;

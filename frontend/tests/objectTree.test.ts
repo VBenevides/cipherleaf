@@ -309,6 +309,8 @@ test("does not indent fenced code contents", () => {
   assert.doesNotMatch(style, /\.cm-live-code-content span/);
   assert.match(editor, /syntaxHighlighting\(codeHighlightStyle\)/);
   assert.match(editor, /hideSyntaxRange\(line\.from, line\.from \+ indentation, decorations, atomicRanges\)/);
+  assert.match(editor, /function hideSyntaxRange[\s\S]*?addHiddenRange\(from, to, decorations, atomicRanges\)/);
+  assert.doesNotMatch(style, /cm-live-syntax-hidden/);
   assert.match(style, /:root\[data-theme="dark"\][\s\S]*--syntax-keyword: #c792ea/);
 });
 

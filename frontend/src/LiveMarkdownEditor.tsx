@@ -1087,13 +1087,7 @@ function hideSyntaxRange(
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
 ) {
-  if (to <= from) return;
-  const range = Decoration.mark({
-    attributes: { "aria-hidden": "true" },
-    class: "cm-live-syntax-hidden",
-  }).range(from, to);
-  decorations.push(range);
-  atomicRanges.push(range);
+  addHiddenRange(from, to, decorations, atomicRanges);
 }
 
 function decorateInlineMarkdown(
