@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { expandSnippetWithContext, rollLastDatedSection } from "../src/snippets.ts";
+import { completeCodeFenceElement, expandSnippet, expandSnippetWithContext, rollLastDatedSection } from "../src/snippets.ts";
+
+test("creates editable txt fences from every object type", () => {
+  for (const line of ["```", "> ```", "< ```", "* ```", "- ```", "1. ```", "* [ ] ```"]) {
+    assert.equal(completeCodeFenceElement(line), "```txt\n\n```");
+  }
+  assert.equal(completeCodeFenceElement(">> ```existing"), "  ```txt\nexisting\n  ```");
+  assert.equal(expandSnippet("code"), "```txt\n\n```");
+});
 
 test("rolls the last dated outline section with today's date", () => {
   const markdown = [
