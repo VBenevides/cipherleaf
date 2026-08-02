@@ -3312,6 +3312,24 @@ a:focus-visible {
   background: var(--editor-bg);
 }
 
+.editor-ancestor-path {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  overflow: hidden;
+  padding: 7px var(--notebook-gutter);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--toolbar-bg);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.editor-ancestor-path span {
+  display: flex;
+  gap: 7px;
+}
+
 .live-markdown-editor .cm-line.cm-live-object-line:not(.cm-live-code-block) {
   position: relative;
   padding-left: calc(var(--live-object-depth, 0) * 24px + 0.4em);
@@ -3606,13 +3624,6 @@ a:focus-visible {
 .live-markdown-editor .cm-live-strong {
   color: inherit;
   font-weight: 700;
-}
-
-.live-markdown-editor .cm-live-syntax-hidden {
-  font-size: 0;
-  line-height: 0;
-  overflow: hidden;
-  opacity: 0;
 }
 
 .live-markdown-editor .cm-live-table-wrap {

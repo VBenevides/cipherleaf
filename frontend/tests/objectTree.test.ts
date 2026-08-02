@@ -10,6 +10,7 @@ import {
   markdownObjectTree,
   moveObject,
   moveObjectInMarkdown,
+  objectAncestorsByLine,
   objectDepthByLine,
   portableMarkdown,
   parseCanonicalObjectDocument,
@@ -74,6 +75,16 @@ test("builds typed objects with indentation and parents", () => {
   assert.equal(tree[0].children[0].children[0].tag, "bulletpoint");
   assert.equal(tree[0].children[0].children[1].text, "star");
   assert.equal(tree[1].tag, "text");
+});
+
+test("finds object ancestors from root to parent", () => {
+  const document = parseObjectDocument("> 2026/07/30\n  > TKE\n    > Sharepoint\n      - Task");
+
+  assert.deepEqual(
+    objectAncestorsByLine(document, 4).map((object) => object.text),
+    ["2026/07/30", "TKE", "Sharepoint"],
+  );
+  assert.deepEqual(objectAncestorsByLine(document, 1), []);
 });
 
 test("recognizes image objects", () => {
@@ -298,6 +309,8 @@ test("does not indent fenced code contents", () => {
   assert.doesNotMatch(style, /\.cm-live-code-content span/);
   assert.match(editor, /syntaxHighlighting\(codeHighlightStyle\)/);
   assert.match(editor, /hideSyntaxRange\(line\.from, line\.from \+ indentation, decorations, atomicRanges\)/);
+  assert.match(editor, /function hideSyntaxRange[\s\S]*?addHiddenRange\(from, to, decorations, atomicRanges\)/);
+  assert.doesNotMatch(style, /cm-live-syntax-hidden/);
   assert.match(style, /:root\[data-theme="dark"\][\s\S]*--syntax-keyword: #c792ea/);
 });
 

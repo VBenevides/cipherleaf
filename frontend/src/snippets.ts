@@ -1,4 +1,4 @@
-import { type ObjectLine, parseObjectDocument } from "./objectDocument.ts";
+import { classifyObjectLine, type ObjectLine, parseObjectDocument } from "./objectDocument.ts";
 
 export type Snippet = {
   trigger: string;
@@ -67,7 +67,15 @@ const todoTemplate = `- [ ]
 - [ ] 
 `;
 
-const codeBlockTemplate = "```\n\n```";
+const codeBlockTemplate = "```txt\n\n```";
+
+export function completeCodeFenceElement(raw: string): string | null {
+  const object = classifyObjectLine(raw);
+  const content = raw.slice(object.tag === "code" ? raw.indexOf("```") : object.sourcePrefix.length);
+  if (!content.startsWith("```")) return null;
+  const indent = " ".repeat(object.indent);
+  return `${indent}` + "```txt\n" + `${content.slice(3)}\n${indent}` + "```";
+}
 
 const tableTemplate = `| Column 1 | Column 2 | Column 3 |
 | --- | --- | --- |

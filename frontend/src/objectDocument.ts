@@ -804,6 +804,16 @@ export function objectDepthByLine(document: ObjectDocument): Map<number, number>
   return depths;
 }
 
+export function objectAncestorsByLine(document: ObjectDocument, lineNumber: number): ObjectLine[] {
+  const ancestors: ObjectLine[] = [];
+  let object = document.byLine.get(lineNumber);
+  while (object?.parentId) {
+    object = document.byId.get(object.parentId);
+    if (object) ancestors.unshift(object);
+  }
+  return ancestors;
+}
+
 export function canonicalObjectDocumentFromMarkdown(markdown: string): CanonicalObjectDocument {
   const document = parseObjectDocument(markdown);
   return {

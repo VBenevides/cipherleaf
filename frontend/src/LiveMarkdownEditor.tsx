@@ -47,6 +47,7 @@ import {
 import {
   continuationPrefix,
   moveObjectInMarkdown,
+  objectAncestorsByLine,
   objectContentIndent,
   objectDepthByLine,
   objectOwnerLineNumber,
@@ -65,7 +66,7 @@ import {
   searchTargetTransaction,
   type SearchTarget,
 } from "./searchTarget";
-import { SNIPPETS, expandSnippetWithContext } from "./snippets";
+import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
@@ -1086,13 +1087,7 @@ function hideSyntaxRange(
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
 ) {
-  if (to <= from) return;
-  const range = Decoration.mark({
-    attributes: { "aria-hidden": "true" },
-    class: "cm-live-syntax-hidden",
-  }).range(from, to);
-  decorations.push(range);
-  atomicRanges.push(range);
+  addHiddenRange(from, to, decorations, atomicRanges);
 }
 
 function decorateInlineMarkdown(
@@ -2182,40 +2177,6 @@ function changeCodeIndent(view: EditorView, direction: 1 | -1) {
   return true;
 }
 
-function closeCodeAfterBlankLine(view: EditorView) {
-  const range = view.state.selection.main;
-  if (!range.empty) return false;
-  const line = view.state.doc.lineAt(range.head);
-  const owner = cachedObjectDocument(view.state).byLine.get(line.number);
-  if (owner?.tag !== "code" || line.number <= owner.lineNumber || line.text.trim() || range.head !== line.to) {
-    return false;
-  }
-
-  const indent = view.state.doc.line(owner.lineNumber).text.match(/^[ \t]*/)?.[0] ?? "";
-  if (owner.lineEnd > owner.textLineEnd) {
-    const closing = view.state.doc.line(owner.lineEnd);
-    if (closing.number === line.number + 1) {
-      view.dispatch({ selection: EditorSelection.cursor(closing.to) });
-    } else {
-      const inserted = `\n${indent}` + "```";
-      view.dispatch({
-        changes: [
-          { from: range.head, insert: inserted },
-          { from: closing.from, to: closing.to, insert: "" },
-        ],
-        selection: EditorSelection.cursor(range.head + inserted.length),
-      });
-    }
-  } else {
-    const inserted = `\n${indent}` + "```";
-    view.dispatch({
-      changes: { from: range.head, insert: inserted },
-      selection: EditorSelection.cursor(range.head + inserted.length),
-    });
-  }
-  return true;
-}
-
 function insertNewlineAtOutlineDepth(view: EditorView) {
   const range = view.state.selection.main;
   if (!range.empty) return false;
@@ -2472,6 +2433,7 @@ export default function LiveMarkdownEditor({
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
   const onCaretChangeRef = useRef(onCaretChange);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [hiddenAncestors, setHiddenAncestors] = useState<string[]>([]);
 
   useEffect(() => () => clearAttachmentDataCache(), [noteID]);
 
@@ -2515,6 +2477,24 @@ export default function LiveMarkdownEditor({
 
     const normalizedValue = normalizeArrowText(value);
     let scheduleJournalRules = () => {};
+    const syncHiddenAncestors = (editor: EditorView) => {
+      const visibleFrom = editor.visibleRanges[0]?.from ?? 0;
+      const top = editor.scrollDOM.getBoundingClientRect().top;
+      const labels = objectAncestorsByLine(
+        cachedObjectDocument(editor.state),
+        editor.state.doc.lineAt(editor.state.selection.main.head).number,
+      ).filter((object) => {
+        const line = editor.dom.querySelector<HTMLElement>(
+          `.cm-live-object-line[data-object-line="${object.lineNumber}"]`,
+        );
+        return line ? line.getBoundingClientRect().bottom <= top : object.to < visibleFrom;
+      }).map((object) => object.text.split("\n")[0].trim()).filter(Boolean);
+      setHiddenAncestors((current) =>
+        current.length === labels.length && current.every((label, index) => label === labels[index])
+          ? current
+          : labels
+      );
+    };
     const editor = new EditorView({
       parent: host.current,
       state: EditorState.create({
@@ -2585,7 +2565,6 @@ export default function LiveMarkdownEditor({
               run: (editor) =>
                 acceptCompletion(editor) ||
                 expandSnippetBeforeCursor(editor) ||
-                closeCodeAfterBlankLine(editor) ||
                 insertNewlineAtOutlineDepth(editor),
             },
             {
@@ -2668,6 +2647,15 @@ export default function LiveMarkdownEditor({
                 const previousLine = line.number > 1
                   ? inputView.state.doc.line(line.number - 1).text
                   : undefined;
+                const fence = completeCodeFenceElement(prospective);
+                const owner = cachedObjectDocument(inputView.state).byLine.get(line.number);
+                if (fence && owner?.lineNumber === line.number && owner.tag !== "code") {
+                  inputView.dispatch({
+                    changes: { from: line.from, to: line.to, insert: fence },
+                    selection: EditorSelection.cursor(line.from + fence.indexOf("\n") + 1),
+                  });
+                  return true;
+                }
                 const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
                 if (normalizedPrefix !== prospective) {
                   const prefixLength = normalizedPrefix.match(/^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/)?.[0].length ?? 0;
@@ -2832,12 +2820,18 @@ export default function LiveMarkdownEditor({
             if (update.docChanged || update.viewportChanged || update.geometryChanged) {
               scheduleJournalRules();
             }
+            if (update.selectionSet || update.docChanged || update.viewportChanged || update.geometryChanged) {
+              syncHiddenAncestors(update.view);
+            }
           }),
         ],
       }),
     });
     const journalRules = installJournalRules(editor);
     scheduleJournalRules = journalRules.schedule;
+    const handleScroll = () => syncHiddenAncestors(editor);
+    editor.scrollDOM.addEventListener("scroll", handleScroll, { passive: true });
+    syncHiddenAncestors(editor);
 
     view.current = editor;
     if (typeof caretOffset === "number" && Number.isFinite(caretOffset)) {
@@ -2854,6 +2848,7 @@ export default function LiveMarkdownEditor({
 
     return () => {
       onCaretChangeRef.current?.(editor.state.selection.main.head);
+      editor.scrollDOM.removeEventListener("scroll", handleScroll);
       journalRules.destroy();
       editor.destroy();
       view.current = null;
@@ -3002,6 +2997,19 @@ export default function LiveMarkdownEditor({
           )
         : null}
       <div className="live-editor-frame">
+        {hiddenAncestors.length > 0
+          ? (
+              <nav className="editor-ancestor-path" aria-label="Hidden ancestors">
+                {hiddenAncestors.map((ancestor, index) => (
+                  <span key={`${ancestor}-${index}`}>
+                    {index > 0 ? <b aria-hidden="true">›</b> : null}
+                    {ancestor}
+                  </span>
+                ))}
+                <b aria-hidden="true">› …</b>
+              </nav>
+            )
+          : null}
         <div ref={host} className="live-markdown-editor" />
       </div>
     </>
