@@ -36,6 +36,26 @@ test("expands selection from word to object text to document", () => {
   }
 });
 
+test("keeps object type markers out of selection text", () => {
+  const source = "> *asdasd\n<asdasd\n-asdasd";
+  const document = parseObjectDocument(source);
+
+  assert.deepEqual(
+    document.objects.map(({ tag, text, textFrom }) => ({ tag, text, textFrom })),
+    [
+      { tag: "bulletpoint", text: "asdasd", textFrom: 3 },
+      { tag: "text", text: "asdasd", textFrom: 12 },
+      { tag: "bulletpoint", text: "asdasd", textFrom: 19 },
+    ],
+  );
+});
+
+test("keeps horizontal rules out of bullet parsing", () => {
+  const object = parseObjectDocument("---").objects[0];
+  assert.equal(object.tag, "text");
+  assert.equal(object.text, "---");
+});
+
 test("matches shared object-document conformance fixtures", () => {
   const fixtures = JSON.parse(readFileSync(
     new URL("../../testdata/object_document_conformance.json", import.meta.url),

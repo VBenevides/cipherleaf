@@ -126,13 +126,13 @@ function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
     };
   }
 
-  const list = text.match(/^([ \t]*)(?:(\d+)([.)])|([-*]))[ \t]+(.*)$/);
+  const list = text.match(/^([ \t]*)(?:(\d+)([.)])[ \t]+(.*)|([-*])(?:[ \t]+(.*)|([^-*].*))?)$/);
   if (!list) return null;
   return {
     indent: visualIndent(list[1]),
     kind: list[2] ? "numbering" : "bulletpoint",
-    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[4]} `,
-    rest: list[5],
+    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[5]} `,
+    rest: list[2] ? list[4] : list[6] ?? list[7] ?? "",
   };
 }
 
@@ -254,10 +254,11 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const bullet = source.match(/^([-*])(?:\s+(.*)|\s*)$/);
+  const bullet = source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
   if (bullet) {
-    const checked = bullet[2]?.match(/^\[([ xX])\]\s*(.*)$/);
-    const text = checked ? checked[2].trim() : bullet[2]?.trim() ?? "";
+    const bulletText = bullet[2] ?? bullet[3] ?? "";
+    const checked = bulletText.match(/^\[([ xX])\]\s*(.*)$/);
+    const text = checked ? checked[2].trim() : bulletText.trim();
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
     return {
@@ -334,7 +335,7 @@ function lineStartsExplicitObject(raw: string): boolean {
       parseAttachmentReferenceMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
       /^\[([ xX])\]\s*(.*)$/.test(source) ||
-      /^[-*](?:\s+.*|\s*)$/.test(source) ||
+      /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
       /^#{1,6}\s+/.test(source) ||
       /^```[^\s`]*[ \t]*$/.test(source),
@@ -355,7 +356,7 @@ export function repeatedObjectPrefix(raw: string): string | null {
   const task = raw.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
   if (task) return `${task[1]}${task[2] ?? ""}[ ] `;
 
-  const unordered = raw.match(/^([ \t]*)([-+*])[ \t]+/);
+  const unordered = raw.match(/^([ \t]*)([-+*])(?:[ \t]+|(?=[^-*\s])|$)/);
   if (unordered) return `${unordered[1]}${unordered[2]} `;
 
   const ordered = raw.match(/^([ \t]*)(\d+)([.)])[ \t]+/);
