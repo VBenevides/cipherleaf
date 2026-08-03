@@ -283,4 +283,5 @@ export interface VaultStatistics {
     "notesBytes": number;
     "attachmentsBytes": number;
     "timeTrackingBytes": number;
+    "gitBytes": number;
 }

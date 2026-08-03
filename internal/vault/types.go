@@ -19,6 +19,7 @@ type VaultStatistics struct {
 	NotesBytes        int64 `json:"notesBytes"`
 	AttachmentsBytes  int64 `json:"attachmentsBytes"`
 	TimeTrackingBytes int64 `json:"timeTrackingBytes"`
+	GitBytes          int64 `json:"gitBytes"`
 }
 
 type NoteSummary struct {

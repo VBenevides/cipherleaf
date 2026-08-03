@@ -4957,6 +4957,7 @@ function App() {
               <div><span>Notes</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.notesBytes) : "—"}</strong></div>
               <div><span>Attachments</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.attachmentsBytes) : "—"}</strong></div>
               <div><span>Time Tracking</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.timeTrackingBytes) : "—"}</strong></div>
+              <div><span>Git metadata (.git)</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.gitBytes) : "—"}</strong></div>
             </div>
             <h2>File history</h2>
             <label>

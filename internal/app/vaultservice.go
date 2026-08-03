@@ -518,7 +518,14 @@ func (s *VaultService) GetSession() vault.Session {
 }
 
 func (s *VaultService) GetVaultStatistics() (vault.VaultStatistics, error) {
-	return s.store.GetVaultStatistics()
+	statistics, err := s.store.GetVaultStatistics()
+	if err != nil {
+		return statistics, err
+	}
+	if directory, err := s.sync.GitWorkingDirectory(s.store.Session().VaultID); err == nil {
+		statistics.GitBytes, _ = repositorySizes(directory)
+	}
+	return statistics, nil
 }
 
 func (s *VaultService) GetTimeTrackingCatalog() (vault.TimeTrackingCatalog, error) {
