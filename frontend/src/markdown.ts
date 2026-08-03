@@ -68,6 +68,23 @@ export function attachmentMarkdown(
   return `![${alt}](attachment:${id}#width=${width}${alignment})`;
 }
 
+export function insertAttachmentMarkdown(
+  markdown: string,
+  offset: number,
+  attachment: string,
+): { from: number; to: number; insert: string } {
+  const position = Math.max(0, Math.min(offset, markdown.length));
+  let from = position;
+  let to = position;
+  while (from > 0 && markdown[from - 1] === "\n") from--;
+  while (to < markdown.length && markdown[to] === "\n") to++;
+  return {
+    from,
+    to,
+    insert: `${from > 0 ? "\n" : ""}${attachment}${to < markdown.length ? "\n" : ""}`,
+  };
+}
+
 export function embeddedClipboardImage(value: string): string | null {
   return value.match(/data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+/)?.[0]
     .replace(/\s/g, "") ?? null;

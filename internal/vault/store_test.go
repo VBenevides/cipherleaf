@@ -440,7 +440,6 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	want, err := first.SaveVaultSettings(VaultSettings{
-		Theme: "dark", JournalLines: "dotted", EditorFontSize: 18,
 		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90, AutoSyncMinutes: 20,
 		AutoLockMinutes: 30, SectionDefault: "expanded",
 	})
@@ -465,7 +464,6 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	}
 
 	newer, err := first.SaveVaultSettings(VaultSettings{
-		Theme: "archivist", JournalLines: "full", EditorFontSize: 20,
 		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120, AutoSyncMinutes: 25,
 		AutoLockMinutes: 45, SectionDefault: "collapsed",
 	})
@@ -499,7 +497,7 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 	if _, err := remoteStore.Create(t.TempDir(), secret); err != nil {
 		t.Fatal(err)
 	}
-	archivist, err := remoteStore.SaveVaultSettings(VaultSettings{Theme: "archivist"})
+	remoteSettings, err := remoteStore.SaveVaultSettings(VaultSettings{DailyNoteFormat: "DD-MM-YYYY"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,13 +517,13 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 	if _, err := localStore.RestoreRemoteSnapshot(remote, t.TempDir(), "restored", secret); err != nil {
 		t.Fatal(err)
 	}
-	archivist.Theme = "dark"
-	dark, err := localStore.SaveVaultSettings(archivist)
+	remoteSettings.DailyNoteFormat = "YYYY/MM/DD"
+	dark, err := localStore.SaveVaultSettings(remoteSettings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dark.Revision <= archivist.Revision {
-		t.Fatalf("local settings revision = %d, want greater than %d", dark.Revision, archivist.Revision)
+	if dark.Revision <= remoteSettings.Revision {
+		t.Fatalf("local settings revision = %d, want greater than %d", dark.Revision, remoteSettings.Revision)
 	}
 	merge, err := localStore.MergeRemoteSnapshot(remote)
 	if err != nil {
@@ -535,8 +533,8 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 		t.Fatal("older remote settings replaced newer local settings")
 	}
 	got, err := localStore.GetVaultSettings()
-	if err != nil || got.Theme != "dark" {
-		t.Fatalf("merged settings = %#v, %v; want dark theme", got, err)
+	if err != nil || got.DailyNoteFormat != "YYYY/MM/DD" {
+		t.Fatalf("merged settings = %#v, %v; want local general settings", got, err)
 	}
 }
 

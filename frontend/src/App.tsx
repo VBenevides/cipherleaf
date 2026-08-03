@@ -591,9 +591,6 @@ function App() {
   const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
 
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
-    theme,
-    journalLines,
-    editorFontSize,
     dailyNoteFormat,
     dailyNoteFolderId: dailyNoteFolderID,
     dailyTemplateNoteId: dailyTemplateNoteID,
@@ -611,20 +608,14 @@ function App() {
     dailyNoteFolderID,
     dailyNoteFormat,
     dailyTemplateNoteID,
-    editorFontSize,
     fileHistoryLimit,
-    journalLines,
     sectionDefault,
-    theme,
   ]);
 
   const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, revision: 0, modifiedAt: 0 });
 
   const applyVaultSettings = (settings: VaultSettings) => {
     vaultSettingsSnapshotRef.current = settingsSnapshot(settings);
-    setTheme(settings.theme as Theme);
-    setJournalLines(settings.journalLines as JournalLines);
-    setEditorFontSize(settings.editorFontSize);
     setDailyNoteFormat(settings.dailyNoteFormat);
     setDailyNoteFolderID(settings.dailyNoteFolderId);
     setDailyTemplateNoteID(settings.dailyTemplateNoteId);

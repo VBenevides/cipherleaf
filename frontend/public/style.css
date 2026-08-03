@@ -3654,10 +3654,10 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-attachment {
   position: relative;
-  display: flex;
+  display: inline-flex;
   width: fit-content;
   max-width: 100%;
-  margin: 0.1em 0;
+  margin: 0;
   line-height: 1;
   vertical-align: top;
 }
@@ -3671,6 +3671,14 @@ a:focus-visible {
   margin-left: auto;
 }
 
+.live-markdown-editor .cm-live-attachment-line:has(.cm-live-attachment.align-center) {
+  text-align: center;
+}
+
+.live-markdown-editor .cm-live-attachment-line:has(.cm-live-attachment.align-right) {
+  text-align: right;
+}
+
 .live-markdown-editor .cm-live-attachment img {
   display: block;
   min-height: 32px;
@@ -3679,6 +3687,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-attachment-line {
   min-height: 0;
+  line-height: 0;
   padding-top: 0;
   padding-bottom: 0;
 }

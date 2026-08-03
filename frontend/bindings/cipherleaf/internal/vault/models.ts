@@ -261,12 +261,9 @@ export interface TrashItem {
 }
 
 /**
- * VaultSettings contains portable preferences encrypted and synced with a vault.
+ * VaultSettings contains general preferences encrypted and synced with a vault.
  */
 export interface VaultSettings {
-    "theme": string;
-    "journalLines": string;
-    "editorFontSize": number;
     "dailyNoteFormat": string;
     "dailyNoteFolderId": string;
     "dailyTemplateNoteId": string;

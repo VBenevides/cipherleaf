@@ -6,6 +6,7 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  insertAttachmentMarkdown,
   markdownCitation,
   markdownCitations,
   normalizeArrowText,
@@ -87,4 +88,18 @@ test("writes pasted images as Markdown image references", () => {
     attachmentMarkdown(id),
     `![Pasted image](attachment:${id}#width=640)`,
   );
+});
+
+test("inserts pasted images without blank lines", () => {
+  const image = attachmentMarkdown("b".repeat(32));
+  assert.deepEqual(insertAttachmentMarkdown("before", 6, image), {
+    from: 6,
+    to: 6,
+    insert: `\n${image}`,
+  });
+  assert.deepEqual(insertAttachmentMarkdown("before\n\nafter", 8, image), {
+    from: 6,
+    to: 8,
+    insert: `\n${image}\n`,
+  });
 });

@@ -307,7 +307,6 @@ func (s *Store) Session() Session {
 
 func defaultVaultSettings() VaultSettings {
 	return VaultSettings{
-		Theme: "light", JournalLines: "none", EditorFontSize: 14,
 		DailyNoteFormat: "YYYY-MM-DD", AutosaveIntervalSeconds: 60, AutoSyncMinutes: 15,
 		AutoLockMinutes: 15, FileHistoryLimit: 10, SectionDefault: "collapsed",
 	}
@@ -315,15 +314,6 @@ func defaultVaultSettings() VaultSettings {
 
 func normalizeVaultSettings(settings VaultSettings) VaultSettings {
 	defaults := defaultVaultSettings()
-	if settings.Theme != "light" && settings.Theme != "dark" && settings.Theme != "archivist" {
-		settings.Theme = defaults.Theme
-	}
-	if settings.JournalLines != "none" && settings.JournalLines != "full" && settings.JournalLines != "dotted" {
-		settings.JournalLines = defaults.JournalLines
-	}
-	if settings.EditorFontSize < 10 || settings.EditorFontSize > 32 {
-		settings.EditorFontSize = defaults.EditorFontSize
-	}
 	if strings.TrimSpace(settings.DailyNoteFormat) == "" {
 		settings.DailyNoteFormat = defaults.DailyNoteFormat
 	}

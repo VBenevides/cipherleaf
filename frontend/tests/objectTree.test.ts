@@ -166,9 +166,12 @@ test("parses a large fenced code block", () => {
 
 test("keeps image attachments rendered when selected", () => {
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
   assert.doesNotMatch(editor, /attachment && !lineIsActive/);
   assert.doesNotMatch(editor, /toggleAttachment && !lineIsActive/);
   assert.doesNotMatch(editor, /VaultService\.DeleteAttachment\(this\.noteID/);
+  assert.match(style, /\.cm-live-attachment \{[\s\S]*?display: inline-flex;[\s\S]*?margin: 0;/);
+  assert.match(style, /\.cm-live-attachment-line \{[\s\S]*?line-height: 0;/);
 });
 
 test("moves a complete code block without changing its contents", () => {

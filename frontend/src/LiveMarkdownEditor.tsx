@@ -38,6 +38,7 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  insertAttachmentMarkdown,
   markdownCitation,
   markdownCitations,
   normalizeArrowText,
@@ -2783,13 +2784,14 @@ export default function LiveMarkdownEditor({
                 .then((data) => VaultService.SaveImageAttachment(noteID, data))
                 .then((id) => {
                   const markdown = attachmentMarkdown(id);
-                  const actualInsertion = Math.min(insertion, pastedView.state.doc.length);
-                  const line = pastedView.state.doc.lineAt(actualInsertion);
-                  const prefix = actualInsertion > line.from ? "\n" : "";
-                  const inserted = `${prefix}${markdown}\n`;
+                  const change = insertAttachmentMarkdown(
+                    pastedView.state.doc.toString(),
+                    insertion,
+                    markdown,
+                  );
                   pastedView.dispatch({
-                    changes: { from: actualInsertion, insert: inserted },
-                    selection: EditorSelection.cursor(actualInsertion + inserted.length),
+                    changes: change,
+                    selection: EditorSelection.cursor(change.from + change.insert.length),
                   });
                 })
                 .catch((reason) => onErrorRef.current(reason));
