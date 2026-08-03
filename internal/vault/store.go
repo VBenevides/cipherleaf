@@ -69,7 +69,6 @@ var (
 	canonicalCheckbox      = regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`)
 	canonicalTask          = regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`)
 	canonicalHeading       = regexp.MustCompile(`^#{1,6}\s+`)
-	canonicalLeadingSpace  = regexp.MustCompile(`^[ \t]*`)
 	canonicalCheckboxEnd   = regexp.MustCompile(`\[[ xX]\]\s*$`)
 )
 
@@ -4568,7 +4567,7 @@ func derivedMarkdownContent(content string) string {
 
 func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	if object.Tag == "code" {
-		indent := canonicalLeadingSpace.FindString(object.SourcePrefix)
+		indent := strings.Repeat(" ", max(0, object.Indent))
 		lines := []string{indent + "```" + object.Language}
 		if object.Text != "" {
 			lines = append(lines, strings.Split(object.Text, "\n")...)
@@ -4592,18 +4591,25 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 			firstText = strings.TrimRight("[ ] "+firstText, " ")
 		}
 	}
-	hasSection := slices.Contains(object.Tags, "section")
-	marker := ""
-	switch object.Tag {
-	case "bulletpoint":
-		marker = "- "
-	}
-	prefix := object.SourcePrefix
-	if prefix == "" {
-		prefix = strings.Repeat(" ", max(0, object.Indent)) + marker
-	}
-	if hasSection && object.SourcePrefix == "" {
-		prefix = strings.Repeat(">", max(1, object.Indent/2+1)) + " " + marker
+	hasSection := object.Tag == "section" || slices.Contains(object.Tags, "section")
+	indent := strings.Repeat(" ", max(0, object.Indent))
+	sourcePrefix := strings.TrimLeft(object.SourcePrefix, " \t")
+	prefix := ""
+	switch {
+	case hasSection:
+		marker := "* "
+		if len(object.ChildrenIDs) > 0 {
+			marker = "> "
+		}
+		prefix = indent + marker + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
+	case strings.HasPrefix(sourcePrefix, "<"):
+		prefix = indent
+	case sourcePrefix != "":
+		prefix = indent + sourcePrefix
+	case object.Tag == "bulletpoint":
+		prefix = indent + "- "
+	default:
+		prefix = indent
 	}
 	lines := []string{prefix + firstText}
 	continuationPrefix := strings.Repeat(" ", max(0, object.ContentIndent))

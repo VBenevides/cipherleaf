@@ -1937,7 +1937,7 @@ func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Content != "> visible words" {
+	if updated.Content != "* visible words" {
 		t.Fatalf("visible content = %q, want replaced Markdown", updated.Content)
 	}
 
@@ -2307,8 +2307,8 @@ func TestObjectDocumentConformance(t *testing.T) {
 		Checked, Closed                   *bool
 	}
 	type fixture struct {
-		Name, Markdown string
-		Objects        []expectedObject
+		Name, Markdown, CanonicalMarkdown string
+		Objects                           []expectedObject
 	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "object_document_conformance.json"))
 	if err != nil {
@@ -2338,8 +2338,12 @@ func TestObjectDocumentConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := derivedMarkdownContent(string(content)); got != item.Markdown {
-				t.Fatalf("round trip = %q, want %q", got, item.Markdown)
+			want := item.CanonicalMarkdown
+			if want == "" {
+				want = item.Markdown
+			}
+			if got := derivedMarkdownContent(string(content)); got != want {
+				t.Fatalf("round trip = %q, want %q", got, want)
 			}
 		})
 	}

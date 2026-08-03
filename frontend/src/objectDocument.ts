@@ -945,7 +945,7 @@ export function parseCanonicalObjectDocument(content: string): ObjectDocument {
 
 function markdownLineForObject(object: CanonicalObjectNode): string {
   if (object.tag === "code") {
-    const indent = object.sourcePrefix?.match(/^[ \t]*/)?.[0] ?? " ".repeat(Math.max(0, object.indent));
+    const indent = " ".repeat(Math.max(0, object.indent));
     const lines = [
       `${indent}` + "```" + (object.language ?? ""),
       ...(object.text ? object.text.split("\n") : []),
@@ -955,9 +955,13 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
   }
 
   const textLines = object.text.split("\n");
-  const prefix = object.sourcePrefix || (object.tags.includes("section")
-    ? `${">".repeat(Math.max(1, Math.floor(object.indent / 2) + 1))} `
-    : `${" ".repeat(Math.max(0, object.indent))}${object.tag === "bulletpoint" ? "- " : ""}`);
+  const indent = " ".repeat(Math.max(0, object.indent));
+  const sourcePrefix = object.sourcePrefix?.trimStart() ?? "";
+  const prefix = object.tag === "section"
+    ? `${indent}${object.childrenIds.length > 0 ? "> " : "* "}${sourcePrefix.replace(/^>+[ \t]*/, "")}`
+    : sourcePrefix.startsWith("<")
+      ? indent
+      : `${indent}${sourcePrefix || (object.tag === "bulletpoint" ? "- " : "")}`;
   const prefixHasCheckbox = /\[[ xX]\]\s*$/.test(prefix);
   const firstText = object.checked !== undefined && !prefixHasCheckbox
     ? `[${object.checked ? "x" : " "}] ${textLines[0] ?? ""}`.trimEnd()

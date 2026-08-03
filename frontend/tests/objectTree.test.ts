@@ -40,7 +40,7 @@ test("matches shared object-document conformance fixtures", () => {
   const fixtures = JSON.parse(readFileSync(
     new URL("../../testdata/object_document_conformance.json", import.meta.url),
     "utf8",
-  )) as Array<{ name: string; markdown: string; objects: Array<Record<string, unknown>> }>;
+  )) as Array<{ name: string; markdown: string; canonicalMarkdown?: string; objects: Array<Record<string, unknown>> }>;
 
   for (const fixture of fixtures) {
     const document = canonicalObjectDocumentFromMarkdown(fixture.markdown);
@@ -50,7 +50,7 @@ test("matches shared object-document conformance fixtures", () => {
         assert.deepEqual(document.objects[index][field as keyof typeof document.objects[number]], value, `${fixture.name}: object ${index} ${field}`);
       }
     });
-    assert.equal(markdownFromCanonicalObjectDocument(document), fixture.markdown, fixture.name);
+    assert.equal(markdownFromCanonicalObjectDocument(document), fixture.canonicalMarkdown ?? fixture.markdown, fixture.name);
   }
 });
 
@@ -266,7 +266,7 @@ test("keeps marked bare text as an independent object", () => {
   assert.equal(tree[0].text, "Parent\ncontinuation");
   assert.equal(tree[0].children[0].tag, "text");
   assert.equal(tree[0].children[0].text, "Bare child");
-  assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), markdown);
+  assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), "- Parent\n  continuation\n  Bare child");
 });
 
 test("exports Cipherleaf objects as portable markdown", () => {
@@ -448,7 +448,12 @@ test("renders canonical objects back to editable markdown", () => {
   ].join("\n");
   const canonical = canonicalObjectDocumentFromMarkdown(markdown);
 
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), [
+    "> Project",
+    "  > [ ] Task",
+    "    detail",
+    "- Loose",
+  ].join("\n"));
 });
 
 test("renders nested section markers as structure and checkbox token as text", () => {
@@ -457,8 +462,8 @@ test("renders nested section markers as structure and checkbox token as text", (
   assert.equal(canonical.objects[0].tag, "section");
   assert.deepEqual(canonical.objects[0].tags, ["section", "text"]);
   assert.equal(canonical.objects[0].checked, true);
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), ">> [x] VM: Cobrar acesso");
-  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, ">> [x] VM: Cobrar acesso");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "  * [x] VM: Cobrar acesso");
+  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, "  * [x] VM: Cobrar acesso");
 });
 
 test("uses canonical defaults when a source prefix is omitted", () => {
@@ -479,7 +484,7 @@ test("uses canonical defaults when a source prefix is omitted", () => {
     }],
   };
 
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), "> Stored heading");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "* Stored heading");
 });
 
 test("soft object breaks use object content indentation", () => {
@@ -500,7 +505,7 @@ test("prepares canonical json notes without migration", () => {
   const canonical = canonicalObjectDocumentFromMarkdown("> Stored");
   const prepared = prepareNoteContent(JSON.stringify(canonical));
 
-  assert.equal(prepared.markdown, "> Stored");
+  assert.equal(prepared.markdown, "* Stored");
   assert.equal(prepared.migrated, false);
 });
 
