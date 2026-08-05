@@ -4325,21 +4325,25 @@ function App() {
           <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
         </nav>
 
-        {error && (
-          <div className="error-banner" role="alert">
-            <span>{error}</span>
-            <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">
-              <Icon name="x" size={16} />
-            </button>
-          </div>
-        )}
+        {(error || syncNotification) && (
+          <div className="notification-stack">
+            {error && (
+              <div className="error-banner" role="alert">
+                <span>{error}</span>
+                <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
+            )}
 
-        {syncNotification && (
-          <div className="sync-notification" role="status" aria-live="polite">
-            <span>{syncNotification}</span>
-            <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
-              <Icon name="x" size={16} />
-            </button>
+            {syncNotification && (
+              <div className="sync-notification" role="status" aria-live="polite">
+                <span>{syncNotification}</span>
+                <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
+            )}
           </div>
         )}
 

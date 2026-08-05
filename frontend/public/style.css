@@ -2239,6 +2239,7 @@ a:focus-visible {
 }
 
 .editor-shell {
+  position: relative;
   grid-column: 2;
   grid-row: 2;
   min-width: 0;
@@ -2501,6 +2502,17 @@ a:focus-visible {
   display: none;
 }
 
+.notification-stack {
+  position: absolute;
+  z-index: 50;
+  top: 85px;
+  right: 18px;
+  width: min(380px, calc(100% - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .error-banner {
   display: flex;
   align-items: center;
@@ -2525,6 +2537,15 @@ a:focus-visible {
   border-bottom: 1px solid var(--green-dark);
   background: var(--modal-control-surface);
   font-size: 10px;
+}
+
+.error-banner,
+.sync-notification {
+  min-height: 0;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
 .document-heading {
