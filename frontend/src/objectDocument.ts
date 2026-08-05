@@ -961,7 +961,7 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
   const prefix = object.tag === "section"
     ? `${indent}${object.childrenIds.length > 0 ? "> " : "* "}${sourcePrefix.replace(/^>+[ \t]*/, "")}`
     : sourcePrefix.startsWith("<")
-      ? indent
+      ? `${indent}${sourcePrefix}`
       : `${indent}${sourcePrefix || (object.tag === "bulletpoint" ? "- " : "")}`;
   const prefixHasCheckbox = /\[[ xX]\]\s*$/.test(prefix);
   const firstText = object.checked !== undefined && !prefixHasCheckbox

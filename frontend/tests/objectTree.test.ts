@@ -289,7 +289,7 @@ test("keeps marked bare text as an independent object", () => {
   assert.equal(tree[0].text, "Parent\ncontinuation");
   assert.equal(tree[0].children[0].tag, "text");
   assert.equal(tree[0].children[0].text, "Bare child");
-  assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), "- Parent\n  continuation\n  Bare child");
+  assert.equal(markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdown)), markdown);
 });
 
 test("exports Cipherleaf objects as portable markdown", () => {

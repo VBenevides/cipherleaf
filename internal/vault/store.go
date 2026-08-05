@@ -4593,7 +4593,7 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 		}
 		prefix = indent + marker + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
 	case strings.HasPrefix(sourcePrefix, "<"):
-		prefix = indent
+		prefix = indent + sourcePrefix
 	case sourcePrefix != "":
 		prefix = indent + sourcePrefix
 	case object.Tag == "bulletpoint":
