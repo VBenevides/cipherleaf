@@ -6,6 +6,7 @@ import { expandedSelection } from "../src/editorSelection.ts";
 import {
   canonicalObjectDocumentFromMarkdown,
   continuationPrefix,
+  deleteObjectInMarkdown,
   markdownFromCanonicalObjectDocument,
   markdownObjectTree,
   moveObject,
@@ -19,6 +20,11 @@ import {
   remapObjectKeysByLine,
   removeAttachmentReferences,
 } from "../src/objectDocument.ts";
+
+test("deletes an object block from its starting line", () => {
+  assert.equal(deleteObjectInMarkdown("Before\n  child\nAfter", 1), "After");
+  assert.equal(deleteObjectInMarkdown("Before\n```txt\ncode\n```\nAfter", 2), "Before\nAfter");
+});
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 

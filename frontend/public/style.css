@@ -3647,6 +3647,11 @@ a:focus-visible {
   font-weight: 700;
 }
 
+.live-markdown-editor .cm-live-em {
+  color: inherit;
+  font-style: italic;
+}
+
 .live-markdown-editor .cm-live-table-wrap {
   display: block;
   max-width: 100%;

@@ -25,7 +25,17 @@ test("renders safe Markdown citations without treating images as links", () => {
   }]);
   assert.deepEqual(markdownCitations("[bad](javascript:alert(1)) ![image](https://example.com/a.png)"), []);
   assert.equal(markdownCitation(" Updated name ", " https://example.com/new "), "[Updated name](https://example.com/new)");
+  assert.deepEqual(
+    markdownCitations("[HTTP](http://example.com) [relative](./docs/readme.md) [absolute](/tmp/readme.md)"),
+    [
+      { label: "HTTP", url: "http://example.com", index: 0, length: 26 },
+      { label: "relative", url: "./docs/readme.md", index: 27, length: 28 },
+      { label: "absolute", url: "/tmp/readme.md", index: 56, length: 26 },
+    ],
+  );
+  assert.equal(markdownCitation("Local", "docs\\readme.md"), "[Local](docs\\readme.md)");
   assert.equal(markdownCitation("Bad]name", "javascript:alert(1)"), null);
+  assert.equal(markdownCitation("Bad", "data:text/plain,hello"), null);
 });
 
 test("edits a citation in one themed dialog", () => {

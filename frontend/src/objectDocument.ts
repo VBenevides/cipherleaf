@@ -532,6 +532,14 @@ export function moveObjectInMarkdown(
   return remaining.join("\n");
 }
 
+export function deleteObjectInMarkdown(markdown: string, lineNumber: number): string {
+  const lines = markdown.split("\n");
+  if (lineNumber < 1 || lineNumber > lines.length) return markdown;
+  const endLineNumber = objectBlockEnd(lines, lineNumber);
+  lines.splice(lineNumber - 1, endLineNumber - lineNumber + 1);
+  return lines.join("\n");
+}
+
 export function moveObject(
   markdown: string,
   sourceId: string,
