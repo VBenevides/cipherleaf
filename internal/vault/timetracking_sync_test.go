@@ -2,6 +2,7 @@ package vault
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -223,7 +224,13 @@ func TestTrackingMergeWriteFailureRollsBackBuckets(t *testing.T) {
 	first, root := newTrackingTestStore(t)
 	second := cloneTrackingTestStore(t, root)
 	local := createCompletedTrackingEntry(t, first, "Local", "", nil, "2026-07-10T10:00:00Z", "2026-07-10T11:00:00Z")
-	remoteEntry := createCompletedTrackingEntry(t, second, "Remote", "", nil, "2026-07-10T12:00:00Z", "2026-07-10T13:00:00Z")
+	remoteEntry := createCompletedTrackingEntry(t, second, "Remote", "", nil, "2026-08-10T12:00:00Z", "2026-08-10T13:00:00Z")
+	second.mu.Lock()
+	remoteBucket, _, err := second.findTimeTrackingEntryLocked(remoteEntry.ID)
+	second.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
 	remote := t.TempDir()
 	if err := second.ExportRemoteSnapshot(remote); err != nil {
 		t.Fatal(err)
@@ -238,6 +245,13 @@ func TestTrackingMergeWriteFailureRollsBackBuckets(t *testing.T) {
 	first.mu.Unlock()
 	if _, err := first.MergeRemoteSnapshot(remote); err == nil {
 		t.Fatal("merge unexpectedly survived catalog write failure")
+	}
+	remoteBucketPath, err := first.timeTrackingBucketPathLocked(remoteBucket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(remoteBucketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed merge left remote bucket at %s", remoteBucketPath)
 	}
 	first.mu.Lock()
 	first.timeTrackingWriteHook = nil

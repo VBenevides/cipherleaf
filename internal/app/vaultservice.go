@@ -34,6 +34,7 @@ type VaultService struct {
 	syncWorkerOnce sync.Once
 	syncJobs       chan syncJob
 	statisticsMu   sync.Mutex
+	backupMu       sync.Mutex
 	process        *process.Process
 }
 
@@ -746,10 +747,6 @@ func (s *VaultService) GetAttachment(noteID, id string) (string, error) {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
-}
-
-func (s *VaultService) DeleteAttachment(noteID, id string) error {
-	return s.store.DeleteAttachment(noteID, id)
 }
 
 func (s *VaultService) ImportFileAttachment(noteID, path string) (vault.AttachmentInfo, error) {

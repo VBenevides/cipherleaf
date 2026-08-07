@@ -33,6 +33,19 @@ test("vault settings reload synced file-history preferences", () => {
   assert.match(app, /VaultService\.CleanHistory\(\)/);
 });
 
+test("failed inactivity and system locks retry without discarding the draft", () => {
+  assert.match(app, /if \(!await autoLock\(\)\) timer = window\.setTimeout/);
+  assert.match(app, /Math\.min\(delay, 60_000\)/);
+  assert.match(app, /cipherleaf:system-lock-requested/);
+  assert.match(app, /if \(!await autoLockRef\.current\(\)\) retry = window\.setTimeout/);
+});
+
+test("vault settings configure scheduled encrypted backups", () => {
+  assert.match(app, /VaultService\.CreateScheduledBackup\(backupDirectory, backupRetention\)/);
+  assert.match(app, /cipherleaf-backup-\$\{field\}:\$\{vaultID\}/);
+  assert.match(app, /Creates one encrypted snapshot per day/);
+});
+
 test("editor font selection supports installed fonts and .ttf files", () => {
   assert.match(app, /VaultService\.ListInstalledFonts\(\)/);
   assert.match(app, /queryLocalFonts/);

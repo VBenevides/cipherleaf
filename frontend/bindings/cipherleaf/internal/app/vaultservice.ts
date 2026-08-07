@@ -75,16 +75,19 @@ export function CreateProjectForClient(name: string, clientID: string): $Cancell
     return $Call.ByID(1966438356, name, clientID);
 }
 
+/**
+ * CreateScheduledBackup creates at most one encrypted snapshot per day.
+ */
+export function CreateScheduledBackup(parent: string, retention: number): $CancellablePromise<string> {
+    return $Call.ByID(3669256728, parent, retention);
+}
+
 export function CreateTag(name: string): $CancellablePromise<vault$0.TimeTag> {
     return $Call.ByID(1532899813, name);
 }
 
 export function CreateVault(parentPath: string, name: string, secret: string): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(814546393, parentPath, name, secret);
-}
-
-export function DeleteAttachment(noteID: string, id: string): $CancellablePromise<void> {
-    return $Call.ByID(3811592289, noteID, id);
 }
 
 export function DeleteClient(id: string): $CancellablePromise<void> {

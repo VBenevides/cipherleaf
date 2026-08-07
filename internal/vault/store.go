@@ -92,7 +92,7 @@ type Store struct {
 	noteIndexes              map[string]int
 	folderIndexes            map[string]int
 	sharedAttachmentRefs     map[string]int
-	pendingSharedAttachments map[string]struct{}
+	pendingSharedAttachments map[string]map[string]struct{}
 	savedManifestHash        [sha256.Size]byte
 	hasSavedManifestHash     bool
 	timeTrackingCatalog      *timeTrackingCatalog
@@ -355,8 +355,10 @@ func (s *Store) SaveVaultSettings(settings VaultSettings) (VaultSettings, error)
 	settings = normalizeVaultSettings(settings)
 	settings.Revision = max(settings.Revision, s.manifest.Settings.Revision) + 1
 	settings.ModifiedAt = time.Now().UnixMilli()
+	previous := s.manifest.Settings
 	s.manifest.Settings = settings
 	if err := s.saveManifestLocked(); err != nil {
+		s.manifest.Settings = previous
 		return VaultSettings{}, err
 	}
 	return settings, nil
@@ -942,7 +944,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		if err := s.pruneNoteAttachmentsByIDLocked(id, extractAttachmentIDs(derivedContent)); err != nil {
 			return Note{}, err
 		}
-		if err := s.prunePendingSharedAttachmentsLocked(); err != nil {
+		if err := s.prunePendingSharedAttachmentsLocked(id); err != nil {
 			return Note{}, err
 		}
 		return noteForClientContent(current, derivedContent), nil
@@ -977,7 +979,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err := s.pruneNoteAttachmentsByIDLocked(id, s.manifest.Notes[index].AttachmentIDs); err != nil {
 		return Note{}, err
 	}
-	if err := s.prunePendingSharedAttachmentsLocked(); err != nil {
+	if err := s.prunePendingSharedAttachmentsLocked(id); err != nil {
 		return Note{}, err
 	}
 	return noteForClientContent(current, derivedContent), nil
@@ -1015,6 +1017,7 @@ func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
 			sharedAttachmentAAD(existingID),
 		)
 		if err == nil && bytes.Equal(existing, data) {
+			s.trackPendingAttachmentLocked(noteID, existingID)
 			return existingID, nil
 		}
 	}
@@ -1029,10 +1032,7 @@ func (s *Store) SaveAttachment(noteID string, data []byte) (string, error) {
 	if err := s.writeEnvelopeLocked(path, "attachment", sharedAttachmentAAD(id), data); err != nil {
 		return "", fmt.Errorf("encrypt attachment: %w", err)
 	}
-	if s.pendingSharedAttachments == nil {
-		s.pendingSharedAttachments = make(map[string]struct{})
-	}
-	s.pendingSharedAttachments[id] = struct{}{}
+	s.trackPendingAttachmentLocked(noteID, id)
 	return id, nil
 }
 
@@ -1053,6 +1053,13 @@ func (s *Store) GetAttachment(noteID, id string) ([]byte, error) {
 	if !validID(id) {
 		return nil, errors.New("invalid attachment ID")
 	}
+	attachmentIDs, err := s.attachmentIDsForSummaryLocked(s.manifest.Notes[noteIndex])
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(attachmentIDs, id) && !s.pendingAttachmentBelongsToNoteLocked(noteID, id) {
+		return nil, errors.New("attachment does not belong to this note")
+	}
 	sharedPath := s.sharedAttachmentPathLocked(id)
 	data, err := s.readEnvelopeLocked(sharedPath, "attachment", sharedAttachmentAAD(id))
 	if _, statErr := os.Stat(sharedPath); errors.Is(statErr, os.ErrNotExist) {
@@ -1072,40 +1079,6 @@ func (s *Store) GetAttachment(noteID, id string) ([]byte, error) {
 		return nil, errors.New("encrypted attachment is damaged")
 	}
 	return data, nil
-}
-
-// DeleteAttachment removes an image belonging to a note.
-func (s *Store) DeleteAttachment(noteID, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.requireUnlocked(); err != nil {
-		return err
-	}
-	if _, found := s.findNoteLocked(noteID); !found {
-		return errors.New("note not found")
-	}
-	noteIndex, _ := s.findNoteLocked(noteID)
-	if err := s.requireNoteAccessibleLocked(s.manifest.Notes[noteIndex]); err != nil {
-		return err
-	}
-	if !validID(id) {
-		return errors.New("invalid attachment ID")
-	}
-	sharedPath := s.sharedAttachmentPathLocked(id)
-	if err := os.Remove(sharedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove encrypted shared attachment: %w", err)
-	}
-	if err := os.Remove(sharedPath + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove encrypted shared attachment backup: %w", err)
-	}
-	path := s.attachmentPathLocked(noteID, id)
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove encrypted attachment: %w", err)
-	}
-	if err := os.Remove(path + ".bak"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove encrypted attachment backup: %w", err)
-	}
-	return nil
 }
 
 // PruneStaleAttachments removes encrypted images not referenced by their note.
@@ -1242,12 +1215,31 @@ func (s *Store) updateSharedAttachmentRefsLocked(before, after []string) {
 	}
 }
 
-func (s *Store) prunePendingSharedAttachmentsLocked() error {
+func (s *Store) trackPendingAttachmentLocked(noteID, id string) {
+	if s.pendingSharedAttachments == nil {
+		s.pendingSharedAttachments = make(map[string]map[string]struct{})
+	}
+	if s.pendingSharedAttachments[id] == nil {
+		s.pendingSharedAttachments[id] = make(map[string]struct{})
+	}
+	s.pendingSharedAttachments[id][noteID] = struct{}{}
+}
+
+func (s *Store) pendingAttachmentBelongsToNoteLocked(noteID, id string) bool {
+	_, found := s.pendingSharedAttachments[id][noteID]
+	return found
+}
+
+func (s *Store) prunePendingSharedAttachmentsLocked(noteID string) error {
 	if len(s.pendingSharedAttachments) == 0 {
 		return nil
 	}
 	s.ensureSharedAttachmentRefsLocked()
-	for id := range s.pendingSharedAttachments {
+	for id, owners := range s.pendingSharedAttachments {
+		delete(owners, noteID)
+		if len(owners) > 0 {
+			continue
+		}
 		if s.sharedAttachmentRefs[id] == 0 {
 			path := s.sharedAttachmentPathLocked(id)
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
