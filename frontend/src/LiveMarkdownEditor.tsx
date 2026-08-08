@@ -487,12 +487,15 @@ class TaskWidget extends WidgetType {
   constructor(
     readonly checked: boolean,
     readonly checkPosition: number,
+    readonly empty: boolean,
   ) {
     super();
   }
 
   eq(other: TaskWidget) {
-    return other.checked === this.checked && other.checkPosition === this.checkPosition;
+    return other.checked === this.checked &&
+      other.checkPosition === this.checkPosition &&
+      other.empty === this.empty;
   }
 
   toDOM(view: EditorView) {
@@ -509,7 +512,7 @@ class TaskWidget extends WidgetType {
         changes: {
           from: this.checkPosition,
           to: this.checkPosition + 1,
-          insert: this.checked ? " " : "x",
+          insert: this.checked ? " " : this.empty ? "x]" : "x",
         },
       });
       view.focus();
@@ -1209,6 +1212,7 @@ function decorateObjectTask(
     new TaskWidget(
       object.checked,
       bracketFrom + 1,
+      object.sourcePrefix.slice(bracketOffset, bracketOffset + 2) === "[]",
     ),
   );
   return true;

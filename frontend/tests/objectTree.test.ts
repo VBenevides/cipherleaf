@@ -576,6 +576,18 @@ test("keeps bullet and numbered markers on checkbox objects", () => {
   assert.match(editor, /decorateObjectListMarker\(object, syntaxFrom, decorations, atomicRanges, bracketFrom\);[\s\S]*const taskFrom = object\.listMarker \|\| object\.barePrefixSize > 0 \? bracketFrom : syntaxFrom;[\s\S]*addHiddenRange\(\s*taskFrom,\s*object\.textFrom/);
 });
 
+test("recognizes spaced and empty bare checkboxes", () => {
+  const objects = parseObjectDocument("[ ] Open\n[] Plain\n< [ ] Bare").objects;
+
+  assert.deepEqual(objects.map(({ checked, text, textFrom }) => ({ checked, text, textFrom })), [
+    { checked: false, text: "Open", textFrom: 4 },
+    { checked: false, text: "Plain", textFrom: 12 },
+    { checked: false, text: "Bare", textFrom: 24 },
+  ]);
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /this\.checked \? " " : this\.empty \? "x\]" : "x"/);
+});
+
 test("keeps trailing list whitespace out of the hidden prefix", () => {
   const document = parseObjectDocument(["- what ", "1. what "].join("\n"));
 

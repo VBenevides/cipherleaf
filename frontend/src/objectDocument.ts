@@ -257,7 +257,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   const bullet = source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
   if (bullet) {
     const bulletText = bullet[2] ?? bullet[3] ?? "";
-    const checked = bulletText.match(/^\[([ xX])\]\s*(.*)$/);
+    const checked = bulletText.match(/^\[([ xX]?)\]\s*(.*)$/);
     const text = checked ? checked[2].trim() : bulletText.trim();
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
@@ -276,7 +276,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
 
   const ordered = source.match(/^(\d+[.)])(?:\s+(.*)|\s*)$/);
   if (ordered) {
-    const checked = ordered[2]?.match(/^\[([ xX])\]\s*(.*)$/);
+    const checked = ordered[2]?.match(/^\[([ xX]?)\]\s*(.*)$/);
     const text = checked ? checked[2].trim() : ordered[2]?.trim() ?? "";
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
@@ -307,9 +307,11 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   tags.push("text");
-  const checkbox = source.match(/^\[([ xX])\]\s*(.*)$/);
+  const checkbox = source.match(/^\[([ xX]?)\]\s*(.*)$/);
   const text = checkbox ? checkbox[2].trim() : source.trim();
-  const checkboxContentIndent = checkbox ? contentIndent + source.length - checkbox[2].length : null;
+  const checkboxContentIndent = checkbox
+    ? raw.indexOf(source) + source.length - checkbox[2].length
+    : null;
   if (!outline && !checkbox) contentIndent = indent + 2;
   return {
     tag: outline ? "section" : "text",
