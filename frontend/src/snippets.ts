@@ -102,12 +102,16 @@ function isDatedSection(section: ObjectLine): boolean {
   return section.tag === "section" && /^\s*\d{4}-\d{2}-\d{2}\b/.test(section.text);
 }
 
-function copyRolledObject(markdown: string, object: ObjectLine): string[] {
-  if (object.checked) return [];
-  return [
-    markdown.slice(object.from, object.to),
-    ...object.children.flatMap((child) => copyRolledObject(markdown, child)),
-  ];
+function copyRolledObject(markdown: string, object: ObjectLine, hasUncheckedAncestor = false): string[] {
+  if (object.checked === true) return [];
+
+  const unchecked = object.checked === false;
+  const children = object.children.flatMap((child) =>
+    copyRolledObject(markdown, child, hasUncheckedAncestor || unchecked),
+  );
+  if (!hasUncheckedAncestor && !unchecked && children.length === 0) return [];
+
+  return [markdown.slice(object.from, object.to), ...children];
 }
 
 function rollDatedSection(markdown: string, now: Date, backward: boolean): string | null {
