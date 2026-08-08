@@ -20,6 +20,12 @@ test("compact sidebar controls share rows", () => {
   assert.match(style, /\.vault-selector-button \{[\s\S]*height: 34px/);
 });
 
+test("recent vault entries can be removed", () => {
+  assert.match(app, /RemoveRecentVaultPath/);
+  assert.match(app, /className="vault-selector-remove"/);
+  assert.match(style, /\.vault-selector-remove \{/);
+});
+
 test("window switching does not trigger a caret-moving save", () => {
   assert.match(app, /if \(!event\.relatedTarget && !document\.hasFocus\(\)\) return;/);
 });

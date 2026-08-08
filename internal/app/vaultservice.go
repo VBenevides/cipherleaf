@@ -394,6 +394,10 @@ func (s *VaultService) ListRecentVaultPaths() ([]string, error) {
 	return s.recent.Paths()
 }
 
+func (s *VaultService) RemoveRecentVaultPath(path string) error {
+	return s.recent.Remove(path)
+}
+
 type LastSession struct {
 	Path  string `json:"path"`
 	Theme string `json:"theme"`

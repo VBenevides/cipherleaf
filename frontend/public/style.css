@@ -2188,6 +2188,10 @@ a:focus-visible {
   text-align: left;
 }
 
+.vault-selector-item {
+  display: flex;
+}
+
 .vault-selector-button {
   height: 34px;
   justify-content: space-between;
@@ -2201,6 +2205,28 @@ a:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.vault-selector-menu-item {
+  flex: 1 1 auto;
+  width: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.vault-selector-menu-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-selector-remove {
+  flex: 0 0 29px;
+  width: 29px !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font-size: 15px !important;
 }
 
 .vault-selector-button small {
@@ -2234,7 +2260,7 @@ a:focus-visible {
   border-radius: 0;
 }
 
-.vault-selector-menu button + button {
+.vault-selector-item + .vault-selector-item {
   border-top: 1px solid var(--line);
 }
 
@@ -4428,7 +4454,7 @@ a:focus-visible {
   background: var(--surface-hover);
 }
 
-:root[data-theme="dark"] .vault-selector-menu button + button {
+:root[data-theme="dark"] .vault-selector-item + .vault-selector-item {
   border-color: var(--line);
 }
 

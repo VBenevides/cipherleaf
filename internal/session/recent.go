@@ -7,17 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"cipherleaf/internal/atomicfile"
 )
 
 const recentFilename = "last-vault.json"
 const maxRecentVaults = 5
+const maxRecentAge = 7 * 24 * time.Hour
 
 type recentVault struct {
-	Path  string   `json:"path"`
-	Paths []string `json:"paths,omitempty"`
-	Theme string   `json:"theme,omitempty"`
+	Path       string           `json:"path"`
+	Paths      []string         `json:"paths,omitempty"`
+	LastOpened map[string]int64 `json:"lastOpened,omitempty"`
+	Theme      string           `json:"theme,omitempty"`
 }
 
 // ErrNoLastVault is returned when an operation expects a previously opened
@@ -83,21 +86,17 @@ func (s *RecentVaultStore) RememberWithTheme(path, theme string) error {
 	if len(paths) > maxRecentVaults {
 		paths = paths[len(paths)-maxRecentVaults:]
 	}
-	data, err := json.Marshal(recentVault{Path: cleaned, Paths: paths, Theme: NormalizeTheme(theme)})
-	if err != nil {
-		return fmt.Errorf("encode recent vault file: %w", err)
+	lastOpened := current.LastOpened
+	if lastOpened == nil {
+		lastOpened = make(map[string]int64)
 	}
-	directory := filepath.Dir(s.path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create recent vault directory: %w", err)
-	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return fmt.Errorf("protect recent vault directory: %w", err)
-	}
-	if err := atomicfile.Write(s.path, data, true); err != nil {
-		return fmt.Errorf("replace recent vault file: %w", err)
-	}
-	return nil
+	lastOpened[cleaned] = time.Now().Unix()
+	return s.write(recentVault{
+		Path:       cleaned,
+		Paths:      paths,
+		LastOpened: lastOpened,
+		Theme:      NormalizeTheme(theme),
+	})
 }
 
 func (s *RecentVaultStore) LastPath() (string, error) {
@@ -122,6 +121,41 @@ func (s *RecentVaultStore) Paths() ([]string, error) {
 	return append([]string(nil), recent.Paths...), nil
 }
 
+func (s *RecentVaultStore) Remove(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve recent vault path: %w", err)
+	}
+	cleaned := filepath.Clean(absolute)
+	recent, err := s.read()
+	if err != nil {
+		return err
+	}
+	paths := make([]string, 0, len(recent.Paths))
+	found := false
+	for _, existing := range recent.Paths {
+		if existing == cleaned {
+			found = true
+			continue
+		}
+		paths = append(paths, existing)
+	}
+	if !found {
+		return nil
+	}
+	delete(recent.LastOpened, cleaned)
+	recent.Paths = paths
+	recent.Path = ""
+	if len(paths) > 0 {
+		recent.Path = paths[len(paths)-1]
+	}
+	return s.write(recent)
+}
+
 func (s *RecentVaultStore) read() (recentVault, error) {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -134,13 +168,33 @@ func (s *RecentVaultStore) read() (recentVault, error) {
 	if err := json.Unmarshal(data, &recent); err != nil {
 		return recentVault{}, fmt.Errorf("decode recent vault file: %w", err)
 	}
+	opened := recent.LastOpened
+	if opened == nil {
+		opened = make(map[string]int64)
+	}
+	now := time.Now().Unix()
 	paths := make([]string, 0, maxRecentVaults)
-	for _, path := range recent.Paths {
+	lastOpened := make(map[string]int64)
+	candidates := append([]string(nil), recent.Paths...)
+	if len(candidates) == 0 && strings.TrimSpace(recent.Path) != "" {
+		candidates = append(candidates, recent.Path)
+	}
+	for _, path := range candidates {
 		path = strings.TrimSpace(path)
 		if path == "" {
 			continue
 		}
 		cleaned := filepath.Clean(path)
+		if _, err := os.Stat(cleaned); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		openedAt, ok := opened[cleaned]
+		if !ok {
+			openedAt = now
+		}
+		if now-openedAt > int64(maxRecentAge/time.Second) {
+			continue
+		}
 		duplicate := false
 		for _, existing := range paths {
 			if existing == cleaned {
@@ -150,21 +204,38 @@ func (s *RecentVaultStore) read() (recentVault, error) {
 		}
 		if !duplicate {
 			paths = append(paths, cleaned)
+			lastOpened[cleaned] = openedAt
 		}
-	}
-	if len(paths) == 0 && strings.TrimSpace(recent.Path) != "" {
-		paths = append(paths, filepath.Clean(recent.Path))
 	}
 	if len(paths) > maxRecentVaults {
 		paths = paths[len(paths)-maxRecentVaults:]
 	}
 	recent.Paths = paths
+	recent.LastOpened = lastOpened
 	recent.Path = ""
 	if len(paths) > 0 {
 		recent.Path = paths[len(paths)-1]
 	}
 	recent.Theme = NormalizeTheme(recent.Theme)
 	return recent, nil
+}
+
+func (s *RecentVaultStore) write(recent recentVault) error {
+	data, err := json.Marshal(recent)
+	if err != nil {
+		return fmt.Errorf("encode recent vault file: %w", err)
+	}
+	directory := filepath.Dir(s.path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create recent vault directory: %w", err)
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return fmt.Errorf("protect recent vault directory: %w", err)
+	}
+	if err := atomicfile.Write(s.path, data, true); err != nil {
+		return fmt.Errorf("replace recent vault file: %w", err)
+	}
+	return nil
 }
 
 func (s *RecentVaultStore) Forget() error {

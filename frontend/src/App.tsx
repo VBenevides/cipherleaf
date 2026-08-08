@@ -1750,6 +1750,16 @@ function App() {
     }
   };
 
+  const removeRecentVault = async (path: string) => {
+    setError("");
+    try {
+      await VaultService.RemoveRecentVaultPath(path);
+      setRecentVaultPaths((current) => current.filter((existing) => existing !== path));
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
   const copyVaultSecret = async () => {
     setError("");
     try {
@@ -4301,20 +4311,30 @@ function App() {
               </button>
               {vaultMenuOpen && (
                 <div className="vault-selector-menu" role="menu" aria-label="Recent vaults">
-                  {(recentVaultPaths.includes(session.path)
-                    ? recentVaultPaths
-                    : [...recentVaultPaths, session.path]
-                  ).slice(-5).map((path) => (
-                    <button
-                      key={path}
-                      type="button"
-                      role="menuitem"
-                      className={path === session.path ? "active" : ""}
-                      title={path}
-                      onClick={() => void openRecentVault(path)}
-                    >
-                      {folderName(path)}
-                    </button>
+                  {recentVaultPaths.slice(-5).map((path) => (
+                    <div className="vault-selector-item" key={path}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={`vault-selector-menu-item ${path === session.path ? "active" : ""}`}
+                        title={path}
+                        onClick={() => void openRecentVault(path)}
+                      >
+                        <span>{folderName(path)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="vault-selector-remove"
+                        aria-label={`Remove ${folderName(path)} from recent vaults`}
+                        title="Remove from recent vaults"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeRecentVault(path);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}

@@ -321,6 +321,10 @@ export function RememberVaultSecret(secret: string): $CancellablePromise<void> {
     return $Call.ByID(4089226512, secret);
 }
 
+export function RemoveRecentVaultPath(path: string): $CancellablePromise<void> {
+    return $Call.ByID(1046537083, path);
+}
+
 export function RenameClient(id: string, name: string): $CancellablePromise<vault$0.TimeClient> {
     return $Call.ByID(975015718, id, name);
 }
