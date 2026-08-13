@@ -348,7 +348,8 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	}
 	localCatalog := newTimeTrackingCatalog(s.vaultID)
 	localBuckets := make(map[string]timeTrackingBucket)
-	if s.timeTrackingCatalog != nil {
+	hadLocalCatalog := s.timeTrackingCatalog != nil
+	if hadLocalCatalog {
 		localCatalog = cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
 		for _, summary := range localCatalog.Buckets {
 			bucket, err := s.readTimeTrackingBucketLocked(summary.ID)
@@ -435,20 +436,46 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	if s.timeTrackingCatalog != nil && trackingCatalogLogicalEqual(localCatalog, merged) {
 		return conflicts, false, nil
 	}
-	rollbackBuckets := func() {
-		for _, bucket := range localBuckets {
-			_ = s.writeTimeTrackingBucketLocked(bucket)
+	rollbackBuckets := func() error {
+		var rollbackErr error
+		for id := range mergedBuckets {
+			if _, existed := localBuckets[id]; existed {
+				continue
+			}
+			path, err := s.timeTrackingBucketPathLocked(id)
+			if err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+				continue
+			}
+			for _, candidate := range []string{path, path + ".bak"} {
+				if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+					rollbackErr = errors.Join(rollbackErr, err)
+				}
+			}
 		}
+		for _, bucket := range localBuckets {
+			rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingBucketLocked(bucket))
+		}
+		if hadLocalCatalog {
+			rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingCatalogLocked(localCatalog))
+		} else {
+			path := filepath.Join(s.root, trackingDirectory, trackingCatalogFilename)
+			for _, candidate := range []string{path, path + ".bak"} {
+				if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+					rollbackErr = errors.Join(rollbackErr, err)
+				}
+			}
+		}
+		s.clearTimeTrackingBucketCacheLocked()
+		return rollbackErr
 	}
 	for _, bucket := range mergedBuckets {
 		if err := s.writeTimeTrackingBucketLocked(bucket); err != nil {
-			rollbackBuckets()
-			return nil, false, err
+			return nil, false, errors.Join(err, rollbackBuckets())
 		}
 	}
 	if err := s.writeTimeTrackingCatalogLocked(merged); err != nil {
-		rollbackBuckets()
-		return nil, false, err
+		return nil, false, errors.Join(err, rollbackBuckets())
 	}
 	s.timeTrackingCatalog = &merged
 	if err := enableTimeTrackingCapability(&s.manifest); err != nil {

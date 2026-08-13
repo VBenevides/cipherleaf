@@ -6,6 +6,7 @@ import { expandedSelection } from "../src/editorSelection.ts";
 import {
   canonicalObjectDocumentFromMarkdown,
   continuationPrefix,
+  deleteObjectInMarkdown,
   markdownFromCanonicalObjectDocument,
   markdownObjectTree,
   moveObject,
@@ -19,6 +20,11 @@ import {
   remapObjectKeysByLine,
   removeAttachmentReferences,
 } from "../src/objectDocument.ts";
+
+test("deletes an object block from its starting line", () => {
+  assert.equal(deleteObjectInMarkdown("Before\n  child\nAfter", 1), "After");
+  assert.equal(deleteObjectInMarkdown("Before\n```txt\ncode\n```\nAfter", 2), "Before\nAfter");
+});
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -36,11 +42,31 @@ test("expands selection from word to object text to document", () => {
   }
 });
 
+test("keeps object type markers out of selection text", () => {
+  const source = "> *asdasd\n<asdasd\n-asdasd";
+  const document = parseObjectDocument(source);
+
+  assert.deepEqual(
+    document.objects.map(({ tag, text, textFrom }) => ({ tag, text, textFrom })),
+    [
+      { tag: "bulletpoint", text: "asdasd", textFrom: 3 },
+      { tag: "text", text: "asdasd", textFrom: 12 },
+      { tag: "bulletpoint", text: "asdasd", textFrom: 19 },
+    ],
+  );
+});
+
+test("keeps horizontal rules out of bullet parsing", () => {
+  const object = parseObjectDocument("---").objects[0];
+  assert.equal(object.tag, "text");
+  assert.equal(object.text, "---");
+});
+
 test("matches shared object-document conformance fixtures", () => {
   const fixtures = JSON.parse(readFileSync(
     new URL("../../testdata/object_document_conformance.json", import.meta.url),
     "utf8",
-  )) as Array<{ name: string; markdown: string; objects: Array<Record<string, unknown>> }>;
+  )) as Array<{ name: string; markdown: string; canonicalMarkdown?: string; objects: Array<Record<string, unknown>> }>;
 
   for (const fixture of fixtures) {
     const document = canonicalObjectDocumentFromMarkdown(fixture.markdown);
@@ -50,7 +76,7 @@ test("matches shared object-document conformance fixtures", () => {
         assert.deepEqual(document.objects[index][field as keyof typeof document.objects[number]], value, `${fixture.name}: object ${index} ${field}`);
       }
     });
-    assert.equal(markdownFromCanonicalObjectDocument(document), fixture.markdown, fixture.name);
+    assert.equal(markdownFromCanonicalObjectDocument(document), fixture.canonicalMarkdown ?? fixture.markdown, fixture.name);
   }
 });
 
@@ -146,9 +172,12 @@ test("parses a large fenced code block", () => {
 
 test("keeps image attachments rendered when selected", () => {
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
   assert.doesNotMatch(editor, /attachment && !lineIsActive/);
   assert.doesNotMatch(editor, /toggleAttachment && !lineIsActive/);
   assert.doesNotMatch(editor, /VaultService\.DeleteAttachment\(this\.noteID/);
+  assert.match(style, /\.cm-live-attachment \{[\s\S]*?display: inline-flex;[\s\S]*?margin: 0;/);
+  assert.match(style, /\.cm-live-attachment-line \{[\s\S]*?line-height: 0;/);
 });
 
 test("moves a complete code block without changing its contents", () => {
@@ -448,7 +477,12 @@ test("renders canonical objects back to editable markdown", () => {
   ].join("\n");
   const canonical = canonicalObjectDocumentFromMarkdown(markdown);
 
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), [
+    "> Project",
+    "  > [ ] Task",
+    "    detail",
+    "- Loose",
+  ].join("\n"));
 });
 
 test("renders nested section markers as structure and checkbox token as text", () => {
@@ -457,8 +491,8 @@ test("renders nested section markers as structure and checkbox token as text", (
   assert.equal(canonical.objects[0].tag, "section");
   assert.deepEqual(canonical.objects[0].tags, ["section", "text"]);
   assert.equal(canonical.objects[0].checked, true);
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), ">> [x] VM: Cobrar acesso");
-  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, ">> [x] VM: Cobrar acesso");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "  * [x] VM: Cobrar acesso");
+  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, "  * [x] VM: Cobrar acesso");
 });
 
 test("uses canonical defaults when a source prefix is omitted", () => {
@@ -479,7 +513,7 @@ test("uses canonical defaults when a source prefix is omitted", () => {
     }],
   };
 
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), "> Stored heading");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "* Stored heading");
 });
 
 test("soft object breaks use object content indentation", () => {
@@ -500,7 +534,7 @@ test("prepares canonical json notes without migration", () => {
   const canonical = canonicalObjectDocumentFromMarkdown("> Stored");
   const prepared = prepareNoteContent(JSON.stringify(canonical));
 
-  assert.equal(prepared.markdown, "> Stored");
+  assert.equal(prepared.markdown, "* Stored");
   assert.equal(prepared.migrated, false);
 });
 
@@ -540,6 +574,18 @@ test("keeps bullet and numbered markers on checkbox objects", () => {
   ]);
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.match(editor, /decorateObjectListMarker\(object, syntaxFrom, decorations, atomicRanges, bracketFrom\);[\s\S]*const taskFrom = object\.listMarker \|\| object\.barePrefixSize > 0 \? bracketFrom : syntaxFrom;[\s\S]*addHiddenRange\(\s*taskFrom,\s*object\.textFrom/);
+});
+
+test("recognizes spaced and empty bare checkboxes", () => {
+  const objects = parseObjectDocument("[ ] Open\n[] Plain\n< [ ] Bare").objects;
+
+  assert.deepEqual(objects.map(({ checked, text, textFrom }) => ({ checked, text, textFrom })), [
+    { checked: false, text: "Open", textFrom: 4 },
+    { checked: false, text: "Plain", textFrom: 12 },
+    { checked: false, text: "Bare", textFrom: 24 },
+  ]);
+  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(editor, /this\.checked \? " " : this\.empty \? "x\]" : "x"/);
 });
 
 test("keeps trailing list whitespace out of the hidden prefix", () => {

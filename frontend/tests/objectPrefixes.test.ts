@@ -12,6 +12,8 @@ test("replaces exclusive object markers without changing indentation", () => {
   assert.equal(replaceExclusiveObjectPrefix(">> Section", "* "), "  * Section");
   assert.equal(replaceExclusiveObjectPrefix("  Text", "> "), "  > Text");
   assert.equal(normalizeStackedExclusiveObjectPrefix("  > * Item"), "  * Item");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("> *asdasd"), "* asdasd");
+  assert.equal(normalizeStackedExclusiveObjectPrefix("> -asdasd"), "- asdasd");
   assert.equal(normalizeStackedExclusiveObjectPrefix("  > <"), "  <");
   assert.equal(replaceExclusiveObjectPrefix("  < Text", "> "), "  > Text");
   assert.equal(normalizeStackedExclusiveObjectPrefix("-[ ] Task"), "- [ ] Task");

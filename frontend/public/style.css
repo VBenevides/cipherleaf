@@ -1084,7 +1084,7 @@ a:focus-visible {
 
 .vault-statistics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   margin-bottom: 24px;
 }
@@ -2188,6 +2188,10 @@ a:focus-visible {
   text-align: left;
 }
 
+.vault-selector-item {
+  display: flex;
+}
+
 .vault-selector-button {
   height: 34px;
   justify-content: space-between;
@@ -2201,6 +2205,28 @@ a:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.vault-selector-menu-item {
+  flex: 1 1 auto;
+  width: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.vault-selector-menu-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-selector-remove {
+  flex: 0 0 29px;
+  width: 29px !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font-size: 15px !important;
 }
 
 .vault-selector-button small {
@@ -2234,11 +2260,12 @@ a:focus-visible {
   border-radius: 0;
 }
 
-.vault-selector-menu button + button {
+.vault-selector-item + .vault-selector-item {
   border-top: 1px solid var(--line);
 }
 
 .editor-shell {
+  position: relative;
   grid-column: 2;
   grid-row: 2;
   min-width: 0;
@@ -2501,6 +2528,17 @@ a:focus-visible {
   display: none;
 }
 
+.notification-stack {
+  position: absolute;
+  z-index: 50;
+  top: 85px;
+  right: 18px;
+  width: min(380px, calc(100% - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .error-banner {
   display: flex;
   align-items: center;
@@ -2525,6 +2563,15 @@ a:focus-visible {
   border-bottom: 1px solid var(--green-dark);
   background: var(--modal-control-surface);
   font-size: 10px;
+}
+
+.error-banner,
+.sync-notification {
+  min-height: 0;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
 .document-heading {
@@ -3626,6 +3673,11 @@ a:focus-visible {
   font-weight: 700;
 }
 
+.live-markdown-editor .cm-live-em {
+  color: inherit;
+  font-style: italic;
+}
+
 .live-markdown-editor .cm-live-table-wrap {
   display: block;
   max-width: 100%;
@@ -3654,10 +3706,10 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-attachment {
   position: relative;
-  display: flex;
+  display: inline-flex;
   width: fit-content;
   max-width: 100%;
-  margin: 0.1em 0;
+  margin: 0;
   line-height: 1;
   vertical-align: top;
 }
@@ -3671,6 +3723,14 @@ a:focus-visible {
   margin-left: auto;
 }
 
+.live-markdown-editor .cm-live-attachment-line:has(.cm-live-attachment.align-center) {
+  text-align: center;
+}
+
+.live-markdown-editor .cm-live-attachment-line:has(.cm-live-attachment.align-right) {
+  text-align: right;
+}
+
 .live-markdown-editor .cm-live-attachment img {
   display: block;
   min-height: 32px;
@@ -3679,6 +3739,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-live-attachment-line {
   min-height: 0;
+  line-height: 0;
   padding-top: 0;
   padding-bottom: 0;
 }
@@ -4393,7 +4454,7 @@ a:focus-visible {
   background: var(--surface-hover);
 }
 
-:root[data-theme="dark"] .vault-selector-menu button + button {
+:root[data-theme="dark"] .vault-selector-item + .vault-selector-item {
   border-color: var(--line);
 }
 

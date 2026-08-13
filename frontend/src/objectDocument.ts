@@ -126,13 +126,13 @@ function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
     };
   }
 
-  const list = text.match(/^([ \t]*)(?:(\d+)([.)])|([-*]))[ \t]+(.*)$/);
+  const list = text.match(/^([ \t]*)(?:(\d+)([.)])[ \t]+(.*)|([-*])(?:[ \t]+(.*)|([^-*].*))?)$/);
   if (!list) return null;
   return {
     indent: visualIndent(list[1]),
     kind: list[2] ? "numbering" : "bulletpoint",
-    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[4]} `,
-    rest: list[5],
+    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[5]} `,
+    rest: list[2] ? list[4] : list[6] ?? list[7] ?? "",
   };
 }
 
@@ -254,10 +254,11 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const bullet = source.match(/^([-*])(?:\s+(.*)|\s*)$/);
+  const bullet = source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
   if (bullet) {
-    const checked = bullet[2]?.match(/^\[([ xX])\]\s*(.*)$/);
-    const text = checked ? checked[2].trim() : bullet[2]?.trim() ?? "";
+    const bulletText = bullet[2] ?? bullet[3] ?? "";
+    const checked = bulletText.match(/^\[([ xX]?)\]\s*(.*)$/);
+    const text = checked ? checked[2].trim() : bulletText.trim();
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
     return {
@@ -275,7 +276,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
 
   const ordered = source.match(/^(\d+[.)])(?:\s+(.*)|\s*)$/);
   if (ordered) {
-    const checked = ordered[2]?.match(/^\[([ xX])\]\s*(.*)$/);
+    const checked = ordered[2]?.match(/^\[([ xX]?)\]\s*(.*)$/);
     const text = checked ? checked[2].trim() : ordered[2]?.trim() ?? "";
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
@@ -306,9 +307,11 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   tags.push("text");
-  const checkbox = source.match(/^\[([ xX])\]\s*(.*)$/);
+  const checkbox = source.match(/^\[([ xX]?)\]\s*(.*)$/);
   const text = checkbox ? checkbox[2].trim() : source.trim();
-  const checkboxContentIndent = checkbox ? contentIndent + source.length - checkbox[2].length : null;
+  const checkboxContentIndent = checkbox
+    ? raw.indexOf(source) + source.length - checkbox[2].length
+    : null;
   if (!outline && !checkbox) contentIndent = indent + 2;
   return {
     tag: outline ? "section" : "text",
@@ -334,7 +337,7 @@ function lineStartsExplicitObject(raw: string): boolean {
       parseAttachmentReferenceMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
       /^\[([ xX])\]\s*(.*)$/.test(source) ||
-      /^[-*](?:\s+.*|\s*)$/.test(source) ||
+      /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
       /^#{1,6}\s+/.test(source) ||
       /^```[^\s`]*[ \t]*$/.test(source),
@@ -355,7 +358,7 @@ export function repeatedObjectPrefix(raw: string): string | null {
   const task = raw.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
   if (task) return `${task[1]}${task[2] ?? ""}[ ] `;
 
-  const unordered = raw.match(/^([ \t]*)([-+*])[ \t]+/);
+  const unordered = raw.match(/^([ \t]*)([-+*])(?:[ \t]+|(?=[^-*\s])|$)/);
   if (unordered) return `${unordered[1]}${unordered[2]} `;
 
   const ordered = raw.match(/^([ \t]*)(\d+)([.)])[ \t]+/);
@@ -529,6 +532,14 @@ export function moveObjectInMarkdown(
 
   remaining.splice(Math.max(0, insertionIndex), 0, ...reindented);
   return remaining.join("\n");
+}
+
+export function deleteObjectInMarkdown(markdown: string, lineNumber: number): string {
+  const lines = markdown.split("\n");
+  if (lineNumber < 1 || lineNumber > lines.length) return markdown;
+  const endLineNumber = objectBlockEnd(lines, lineNumber);
+  lines.splice(lineNumber - 1, endLineNumber - lineNumber + 1);
+  return lines.join("\n");
 }
 
 export function moveObject(
@@ -945,7 +956,7 @@ export function parseCanonicalObjectDocument(content: string): ObjectDocument {
 
 function markdownLineForObject(object: CanonicalObjectNode): string {
   if (object.tag === "code") {
-    const indent = object.sourcePrefix?.match(/^[ \t]*/)?.[0] ?? " ".repeat(Math.max(0, object.indent));
+    const indent = " ".repeat(Math.max(0, object.indent));
     const lines = [
       `${indent}` + "```" + (object.language ?? ""),
       ...(object.text ? object.text.split("\n") : []),
@@ -955,9 +966,13 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
   }
 
   const textLines = object.text.split("\n");
-  const prefix = object.sourcePrefix || (object.tags.includes("section")
-    ? `${">".repeat(Math.max(1, Math.floor(object.indent / 2) + 1))} `
-    : `${" ".repeat(Math.max(0, object.indent))}${object.tag === "bulletpoint" ? "- " : ""}`);
+  const indent = " ".repeat(Math.max(0, object.indent));
+  const sourcePrefix = object.sourcePrefix?.trimStart() ?? "";
+  const prefix = object.tag === "section"
+    ? `${indent}${object.childrenIds.length > 0 ? "> " : "* "}${sourcePrefix.replace(/^>+[ \t]*/, "")}`
+    : sourcePrefix.startsWith("<")
+      ? `${indent}${sourcePrefix}`
+      : `${indent}${sourcePrefix || (object.tag === "bulletpoint" ? "- " : "")}`;
   const prefixHasCheckbox = /\[[ xX]\]\s*$/.test(prefix);
   const firstText = object.checked !== undefined && !prefixHasCheckbox
     ? `[${object.checked ? "x" : " "}] ${textLines[0] ?? ""}`.trimEnd()

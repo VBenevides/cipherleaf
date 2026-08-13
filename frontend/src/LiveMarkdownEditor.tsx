@@ -38,6 +38,7 @@ import {
   isHorizontalRule,
   isTableDivider,
   embeddedClipboardImage,
+  insertAttachmentMarkdown,
   markdownCitation,
   markdownCitations,
   normalizeArrowText,
@@ -46,6 +47,7 @@ import {
 } from "./markdown";
 import {
   continuationPrefix,
+  deleteObjectInMarkdown,
   moveObjectInMarkdown,
   objectAncestorsByLine,
   objectContentIndent,
@@ -485,12 +487,15 @@ class TaskWidget extends WidgetType {
   constructor(
     readonly checked: boolean,
     readonly checkPosition: number,
+    readonly empty: boolean,
   ) {
     super();
   }
 
   eq(other: TaskWidget) {
-    return other.checked === this.checked && other.checkPosition === this.checkPosition;
+    return other.checked === this.checked &&
+      other.checkPosition === this.checkPosition &&
+      other.empty === this.empty;
   }
 
   toDOM(view: EditorView) {
@@ -507,7 +512,7 @@ class TaskWidget extends WidgetType {
         changes: {
           from: this.checkPosition,
           to: this.checkPosition + 1,
-          insert: this.checked ? " " : "x",
+          insert: this.checked ? " " : this.empty ? "x]" : "x",
         },
       });
       view.focus();
@@ -1029,7 +1034,7 @@ class CitationWidget extends WidgetType {
           submitEvent.preventDefault();
           const markdown = markdownCitation(name.value, url.value);
           if (!markdown) {
-            error.textContent = "Enter a name and a valid HTTP(S) link.";
+            error.textContent = "Enter a name and a valid HTTP(S) link or local path.";
             return;
           }
           view.dispatch({ changes: { from: this.from, to: this.to, insert: markdown } });
@@ -1109,6 +1114,16 @@ function decorateInlineMarkdown(
     );
     hideSyntaxRange(start, start + markerSize, decorations, atomicRanges);
     hideSyntaxRange(end - markerSize, end, decorations, atomicRanges);
+  }
+
+  const italic = /(?<!_)_(?=\S)(.+?\S)_(?!_)/g;
+  for (const match of text.matchAll(italic)) {
+    if (match.index === undefined) continue;
+    const start = offset + match.index;
+    const end = start + match[0].length;
+    decorations.push(Decoration.mark({ class: "cm-live-em" }).range(start + 1, end - 1));
+    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
+    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
   }
 
   const inlineCode = /`([^`\n]+)`/g;
@@ -1197,6 +1212,7 @@ function decorateObjectTask(
     new TaskWidget(
       object.checked,
       bracketFrom + 1,
+      object.sourcePrefix.slice(bracketOffset, bracketOffset + 2) === "[]",
     ),
   );
   return true;
@@ -1986,6 +2002,40 @@ function wrapSelection(view: EditorView, marker: string) {
   view.focus();
 }
 
+function insertMarkdownLink(view: EditorView) {
+  const url = "https://";
+  view.dispatch(
+    view.state.changeByRange((range) => {
+      const label = view.state.sliceDoc(range.from, range.to) || "link text";
+      const insert = `[${label}](${url})`;
+      const urlFrom = range.from + label.length + 3;
+      return {
+        changes: { from: range.from, to: range.to, insert },
+        range: EditorSelection.range(urlFrom, urlFrom + url.length),
+      };
+    }),
+  );
+  view.focus();
+}
+
+function insertFencedCodeBlock(view: EditorView) {
+  const language = "txt";
+  view.dispatch(
+    view.state.changeByRange((range) => {
+      const selected = view.state.sliceDoc(range.from, range.to);
+      const insert = `\`\`\`${language}\n${selected}\n\`\`\``;
+      const contentFrom = range.from + language.length + 4;
+      return {
+        changes: { from: range.from, to: range.to, insert },
+        range: selected
+          ? EditorSelection.range(contentFrom, contentFrom + selected.length)
+          : EditorSelection.cursor(contentFrom),
+      };
+    }),
+  );
+  view.focus();
+}
+
 function prefixSelectedLines(view: EditorView, prefix: string) {
   const lineNumbers = new Set<number>();
 
@@ -2009,7 +2059,11 @@ function prefixSelectedLines(view: EditorView, prefix: string) {
       };
     });
 
-  view.dispatch({ changes });
+  const changeSet = view.state.changes(changes);
+  view.dispatch({
+    changes: changeSet,
+    selection: view.state.selection.map(changeSet, 1),
+  });
   view.focus();
 }
 
@@ -2203,7 +2257,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
       from: range.head,
       insert: inserted,
     },
-    selection: EditorSelection.cursor(range.head + (atObjectStart ? 0 : inserted.length)),
+    selection: EditorSelection.cursor(range.head + inserted.length),
   });
 
   view.focus();
@@ -2333,6 +2387,39 @@ function objectHandleElement(target: EventTarget | null): HTMLElement | null {
   return target instanceof HTMLElement
     ? target.closest<HTMLElement>(".cm-live-object-handle[data-object-line]")
     : null;
+}
+
+function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: number) {
+  document.querySelector(".cm-live-object-menu")?.remove();
+  const menu = document.body.appendChild(document.createElement("div"));
+  menu.className = "cm-live-attachment-menu cm-live-object-menu";
+  menu.setAttribute("role", "menu");
+  menu.style.left = `${event.clientX}px`;
+  menu.style.top = `${event.clientY}px`;
+  const close = (closeEvent?: PointerEvent) => {
+    if (closeEvent && menu.contains(closeEvent.target as Node)) return;
+    menu.remove();
+    document.removeEventListener("pointerdown", close);
+  };
+  const remove = menu.appendChild(document.createElement("button"));
+  remove.type = "button";
+  remove.role = "menuitem";
+  remove.textContent = "Delete";
+  remove.addEventListener("click", () => {
+    close();
+    const state = view.state;
+    const doc = state.doc.toString();
+    if (lineNumber < 1 || lineNumber > state.doc.lines) return;
+    const line = state.doc.line(lineNumber);
+    const next = deleteObjectInMarkdown(doc, lineNumber);
+    if (next === doc) return;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: next },
+      selection: EditorSelection.cursor(Math.min(line.from, next.length)),
+    });
+    view.focus();
+  });
+  queueMicrotask(() => document.addEventListener("pointerdown", close));
 }
 
 function objectLineElementAt(x: number, y: number): HTMLElement | null {
@@ -2703,8 +2790,18 @@ export default function LiveMarkdownEditor({
             spellcheck: "true",
           }),
           EditorView.domEventHandlers({
-            pointerdown(event, pointerView) {
+            contextmenu(event, contextView) {
               if (readOnly) return false;
+              const handle = objectHandleElement(event.target);
+              const sourceLine = Number(handle?.dataset.objectLine);
+              if (!handle || !Number.isFinite(sourceLine)) return false;
+              event.preventDefault();
+              event.stopPropagation();
+              showObjectHandleMenu(event, contextView, sourceLine);
+              return true;
+            },
+            pointerdown(event, pointerView) {
+              if (readOnly || event.button !== 0) return false;
               const handle = objectHandleElement(event.target);
               const sourceLine = Number(handle?.dataset.objectLine);
               if (!handle || !Number.isFinite(sourceLine)) return false;
@@ -2783,13 +2880,14 @@ export default function LiveMarkdownEditor({
                 .then((data) => VaultService.SaveImageAttachment(noteID, data))
                 .then((id) => {
                   const markdown = attachmentMarkdown(id);
-                  const actualInsertion = Math.min(insertion, pastedView.state.doc.length);
-                  const line = pastedView.state.doc.lineAt(actualInsertion);
-                  const prefix = actualInsertion > line.from ? "\n" : "";
-                  const inserted = `${prefix}${markdown}\n`;
+                  const change = insertAttachmentMarkdown(
+                    pastedView.state.doc.toString(),
+                    insertion,
+                    markdown,
+                  );
                   pastedView.dispatch({
-                    changes: { from: actualInsertion, insert: inserted },
-                    selection: EditorSelection.cursor(actualInsertion + inserted.length),
+                    changes: change,
+                    selection: EditorSelection.cursor(change.from + change.insert.length),
                   });
                 })
                 .catch((reason) => onErrorRef.current(reason));
@@ -2909,7 +3007,73 @@ export default function LiveMarkdownEditor({
               >
                 <strong>B</strong>
               </button>
+              <button
+                type="button"
+                title="Italic"
+                aria-label="Make text italic"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => wrapSelection(editor, "_"));
+                }}
+              >
+                <em>I</em>
+              </button>
+              <button
+                type="button"
+                title="Strikethrough"
+                aria-label="Strikethrough text"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => wrapSelection(editor, "~~"));
+                }}
+              >
+                <s>S</s>
+              </button>
+              <button
+                type="button"
+                title="Inline code"
+                aria-label="Format inline code"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => wrapSelection(editor, "`"));
+                }}
+              >
+                <code>&lt;&gt;</code>
+              </button>
+              <button
+                type="button"
+                title="Fenced code block (txt)"
+                aria-label="Insert fenced code block"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor(insertFencedCodeBlock);
+                }}
+              >
+                <code>```</code>
+              </button>
+              <button
+                type="button"
+                title="Link"
+                aria-label="Insert Markdown link"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor(insertMarkdownLink);
+                }}
+              >
+                <span aria-hidden="true">↗</span>
+              </button>
               <span className="markdown-toolbar-separator" />
+              <button
+                type="button"
+                title="Heading"
+                aria-label="Insert heading"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "# "));
+                }}
+              >
+                H
+              </button>
               <button
                 type="button"
                 title="Checklist"
@@ -2933,6 +3097,17 @@ export default function LiveMarkdownEditor({
                 <span className="toolbar-bullet" aria-hidden="true">
                   •
                 </span>
+              </button>
+              <button
+                type="button"
+                title="Numbered list"
+                aria-label="Insert numbered list item"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  runWithEditor((editor) => prefixSelectedLines(editor, "1. "));
+                }}
+              >
+                1.
               </button>
               <span className="markdown-toolbar-separator" />
               <button

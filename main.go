@@ -63,6 +63,11 @@ func main() {
 		event.Cancel()
 		window.EmitEvent("cipherleaf:close-requested")
 	})
+	requestVaultLock := func(*application.ApplicationEvent) {
+		window.EmitEvent("cipherleaf:system-lock-requested")
+	}
+	app.Event.OnApplicationEvent(events.Common.SystemWillSleep, requestVaultLock)
+	app.Event.OnApplicationEvent(events.Common.ScreenLocked, requestVaultLock)
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)

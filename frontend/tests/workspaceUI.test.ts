@@ -20,6 +20,12 @@ test("compact sidebar controls share rows", () => {
   assert.match(style, /\.vault-selector-button \{[\s\S]*height: 34px/);
 });
 
+test("recent vault entries can be removed", () => {
+  assert.match(app, /RemoveRecentVaultPath/);
+  assert.match(app, /className="vault-selector-remove"/);
+  assert.match(style, /\.vault-selector-remove \{/);
+});
+
 test("window switching does not trigger a caret-moving save", () => {
   assert.match(app, /if \(!event\.relatedTarget && !document\.hasFocus\(\)\) return;/);
 });
@@ -31,6 +37,19 @@ test("vault settings reload synced file-history preferences", () => {
   assert.match(app, /setFileHistoryLimitDraft\(settings\.fileHistoryLimit\)/);
   assert.match(app, /fileHistoryLimit: fileHistoryLimitDraft/);
   assert.match(app, /VaultService\.CleanHistory\(\)/);
+});
+
+test("failed inactivity and system locks retry without discarding the draft", () => {
+  assert.match(app, /if \(!await autoLock\(\)\) timer = window\.setTimeout/);
+  assert.match(app, /Math\.min\(delay, 60_000\)/);
+  assert.match(app, /cipherleaf:system-lock-requested/);
+  assert.match(app, /if \(!await autoLockRef\.current\(\)\) retry = window\.setTimeout/);
+});
+
+test("vault settings configure scheduled encrypted backups", () => {
+  assert.match(app, /VaultService\.CreateScheduledBackup\(backupDirectory, backupRetention\)/);
+  assert.match(app, /cipherleaf-backup-\$\{field\}:\$\{vaultID\}/);
+  assert.match(app, /Creates one encrypted snapshot per day/);
 });
 
 test("editor font selection supports installed fonts and .ttf files", () => {

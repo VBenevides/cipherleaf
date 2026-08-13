@@ -85,10 +85,7 @@ func (s *Store) ImportFileAttachment(noteID, source string) (AttachmentInfo, err
 	if err := s.writeEnvelopeLocked(path, "file-attachment", sharedAttachmentAAD(id), payload); err != nil {
 		return AttachmentInfo{}, err
 	}
-	if s.pendingSharedAttachments == nil {
-		s.pendingSharedAttachments = make(map[string]struct{})
-	}
-	s.pendingSharedAttachments[id] = struct{}{}
+	s.trackPendingAttachmentLocked(noteID, id)
 	return attachment, nil
 }
 

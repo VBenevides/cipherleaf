@@ -310,12 +310,15 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loadedFromOtherNote, err := store.GetAttachment(other.ID, id)
-	if err != nil {
+	if _, err := store.GetAttachment(other.ID, id); err == nil {
+		t.Fatal("attachment was readable through a note that does not reference it")
+	}
+	if _, err := store.SaveNote(other.ID, other.Title, fmt.Sprintf("![shared](attachment:%s)", id)); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(loadedFromOtherNote, webp) {
-		t.Fatal("shared attachment differs when read from another note")
+	loadedFromOtherNote, err := store.GetAttachment(other.ID, id)
+	if err != nil || !bytes.Equal(loadedFromOtherNote, webp) {
+		t.Fatal("shared attachment was not readable through a note that references it")
 	}
 	staleID, err := store.SaveAttachment(note.ID, append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("stale pixels")...))
 	if err != nil {
@@ -358,11 +361,14 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	if !bytes.Equal(restoredAttachment, webp) {
 		t.Fatal("restored attachment differs from its source")
 	}
-	if err := restored.DeleteAttachment(note.ID, id); err != nil {
+	if _, err := restored.SaveNote(note.ID, note.Title, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := restored.GetAttachment(note.ID, id); err == nil {
-		t.Fatal("deleted attachment remains readable")
+		t.Fatal("attachment remains readable through a note that removed its reference")
+	}
+	if _, err := restored.GetAttachment(other.ID, id); err != nil {
+		t.Fatal("removing one reference deleted an attachment used by another note")
 	}
 	if err := store.DeleteNote(note.ID); err != nil {
 		t.Fatal(err)
@@ -373,6 +379,50 @@ func TestWebPAttachmentsAreEncryptedAndRestoredWithTheirNote(t *testing.T) {
 	restoredAfterDelete, err := store.GetAttachment(note.ID, id)
 	if err != nil || !bytes.Equal(restoredAfterDelete, webp) {
 		t.Fatalf("restored attachment = %q, %v", restoredAfterDelete, err)
+	}
+}
+
+func TestLockedFolderAttachmentCannotBeReadThroughAnotherNote(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := store.CreateFolder("Private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateNote, err := store.CreateNoteInFolder("Private note", folder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicNote, err := store.CreateNote("Public note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	webp := append([]byte("RIFF\x04\x00\x00\x00WEBP"), []byte("private pixels")...)
+	id, err := store.SaveAttachment(privateNote.ID, webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNote(privateNote.ID, privateNote.Title, fmt.Sprintf("![private](attachment:%s)", id)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LockFolder(folder.ID, "folder password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LockFolderSession(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetAttachment(publicNote.ID, id); err == nil {
+		t.Fatal("locked folder attachment was readable through another note")
+	}
+	if _, err := store.GetAttachment(privateNote.ID, id); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("GetAttachment() = %v, want ErrFolderLocked", err)
 	}
 }
 
@@ -413,9 +463,11 @@ func TestMergeRestoresMissingAttachmentForEqualNoteVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := second.DeleteAttachment(note.ID, id); err != nil {
+	path := second.sharedAttachmentPathLocked(id)
+	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
+	_ = os.Remove(path + ".bak")
 	if _, err := second.MergeRemoteSnapshot(remote); err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +492,6 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	want, err := first.SaveVaultSettings(VaultSettings{
-		Theme: "dark", JournalLines: "dotted", EditorFontSize: 18,
 		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90, AutoSyncMinutes: 20,
 		AutoLockMinutes: 30, SectionDefault: "expanded",
 	})
@@ -465,7 +516,6 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	}
 
 	newer, err := first.SaveVaultSettings(VaultSettings{
-		Theme: "archivist", JournalLines: "full", EditorFontSize: 20,
 		DailyNoteFormat: "YYYY/MM/DD", AutosaveIntervalSeconds: 120, AutoSyncMinutes: 25,
 		AutoLockMinutes: 45, SectionDefault: "collapsed",
 	})
@@ -499,7 +549,7 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 	if _, err := remoteStore.Create(t.TempDir(), secret); err != nil {
 		t.Fatal(err)
 	}
-	archivist, err := remoteStore.SaveVaultSettings(VaultSettings{Theme: "archivist"})
+	remoteSettings, err := remoteStore.SaveVaultSettings(VaultSettings{DailyNoteFormat: "DD-MM-YYYY"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,13 +569,13 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 	if _, err := localStore.RestoreRemoteSnapshot(remote, t.TempDir(), "restored", secret); err != nil {
 		t.Fatal(err)
 	}
-	archivist.Theme = "dark"
-	dark, err := localStore.SaveVaultSettings(archivist)
+	remoteSettings.DailyNoteFormat = "YYYY/MM/DD"
+	dark, err := localStore.SaveVaultSettings(remoteSettings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dark.Revision <= archivist.Revision {
-		t.Fatalf("local settings revision = %d, want greater than %d", dark.Revision, archivist.Revision)
+	if dark.Revision <= remoteSettings.Revision {
+		t.Fatalf("local settings revision = %d, want greater than %d", dark.Revision, remoteSettings.Revision)
 	}
 	merge, err := localStore.MergeRemoteSnapshot(remote)
 	if err != nil {
@@ -535,8 +585,8 @@ func TestVaultSettingsMergePrefersNewerLocalRevision(t *testing.T) {
 		t.Fatal("older remote settings replaced newer local settings")
 	}
 	got, err := localStore.GetVaultSettings()
-	if err != nil || got.Theme != "dark" {
-		t.Fatalf("merged settings = %#v, %v; want dark theme", got, err)
+	if err != nil || got.DailyNoteFormat != "YYYY/MM/DD" {
+		t.Fatalf("merged settings = %#v, %v; want local general settings", got, err)
 	}
 }
 
@@ -765,6 +815,25 @@ func TestSaveNoteRollsBackWhenManifestWriteFails(t *testing.T) {
 	loaded, err = store.GetNote(note.ID)
 	if err != nil || loaded.Title != "Original" || derivedMarkdownContent(loaded.Content) != "original content" {
 		t.Fatalf("reopened note = %#v, %v", loaded, err)
+	}
+}
+
+func TestSaveVaultSettingsRollsBackWhenManifestWriteFails(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "manifest-rollback-secret"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.GetVaultSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.manifestWriteHook = func() error { return errors.New("injected manifest failure") }
+	if _, err := store.SaveVaultSettings(VaultSettings{DailyNoteFormat: "DD-MM-YYYY"}); err == nil {
+		t.Fatal("SaveVaultSettings succeeded despite manifest failure")
+	}
+	after, err := store.GetVaultSettings()
+	if err != nil || after != before {
+		t.Fatalf("settings after failed save = %#v, %v; want %#v", after, err, before)
 	}
 }
 
@@ -1937,7 +2006,7 @@ func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Content != "> visible words" {
+	if updated.Content != "* visible words" {
 		t.Fatalf("visible content = %q, want replaced Markdown", updated.Content)
 	}
 
@@ -2307,8 +2376,8 @@ func TestObjectDocumentConformance(t *testing.T) {
 		Checked, Closed                   *bool
 	}
 	type fixture struct {
-		Name, Markdown string
-		Objects        []expectedObject
+		Name, Markdown, CanonicalMarkdown string
+		Objects                           []expectedObject
 	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "object_document_conformance.json"))
 	if err != nil {
@@ -2338,8 +2407,12 @@ func TestObjectDocumentConformance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := derivedMarkdownContent(string(content)); got != item.Markdown {
-				t.Fatalf("round trip = %q, want %q", got, item.Markdown)
+			want := item.CanonicalMarkdown
+			if want == "" {
+				want = item.Markdown
+			}
+			if got := derivedMarkdownContent(string(content)); got != want {
+				t.Fatalf("round trip = %q, want %q", got, want)
 			}
 		})
 	}

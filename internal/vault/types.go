@@ -19,6 +19,7 @@ type VaultStatistics struct {
 	NotesBytes        int64 `json:"notesBytes"`
 	AttachmentsBytes  int64 `json:"attachmentsBytes"`
 	TimeTrackingBytes int64 `json:"timeTrackingBytes"`
+	GitBytes          int64 `json:"gitBytes"`
 }
 
 type NoteSummary struct {
@@ -121,11 +122,8 @@ type manifest struct {
 	Settings       VaultSettings `json:"settings,omitempty"`
 }
 
-// VaultSettings contains portable preferences encrypted and synced with a vault.
+// VaultSettings contains general preferences encrypted and synced with a vault.
 type VaultSettings struct {
-	Theme                   string `json:"theme"`
-	JournalLines            string `json:"journalLines"`
-	EditorFontSize          int    `json:"editorFontSize"`
 	DailyNoteFormat         string `json:"dailyNoteFormat"`
 	DailyNoteFolderID       string `json:"dailyNoteFolderId"`
 	DailyTemplateNoteID     string `json:"dailyTemplateNoteId"`

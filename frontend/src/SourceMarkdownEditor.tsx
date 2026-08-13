@@ -7,7 +7,7 @@ import { history, redo, undo } from "@codemirror/commands";
 import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { minimalSetup } from "codemirror";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
-import { attachmentMarkdown } from "./markdown";
+import { attachmentMarkdown, insertAttachmentMarkdown } from "./markdown";
 import {
   clipboardImage,
   clipboardMayContainImage,
@@ -113,13 +113,14 @@ export default function SourceMarkdownEditor({
                 })
                 .then((data) => VaultService.SaveImageAttachment(noteID, data))
                 .then((id) => {
-                  const actualInsertion = Math.min(insertion, pastedView.state.doc.length);
-                  const line = pastedView.state.doc.lineAt(actualInsertion);
-                  const prefix = actualInsertion > line.from ? "\n" : "";
-                  const inserted = `${prefix}${attachmentMarkdown(id)}\n`;
+                  const change = insertAttachmentMarkdown(
+                    pastedView.state.doc.toString(),
+                    insertion,
+                    attachmentMarkdown(id),
+                  );
                   pastedView.dispatch({
-                    changes: { from: actualInsertion, insert: inserted },
-                    selection: EditorSelection.cursor(actualInsertion + inserted.length),
+                    changes: change,
+                    selection: EditorSelection.cursor(change.from + change.insert.length),
                   });
                 })
                 .catch((reason) => onErrorRef.current(reason));

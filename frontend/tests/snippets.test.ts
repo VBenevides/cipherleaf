@@ -24,7 +24,6 @@ test("rolls the last dated outline section with today's date", () => {
     [
       "> 2026-07-08",
       "  > [ ] open",
-      "  > plain",
     ].join("\n"),
   );
 });
@@ -45,7 +44,28 @@ test("roll omits completed checkbox lines and completed child sections", () => {
     [
       "> 2026-07-08",
       "  > [ ] open task",
-      "  > keep this",
+    ].join("\n"),
+  );
+});
+
+test("roll keeps the family path around unchecked checkboxes", () => {
+  const markdown = [
+    "> 2026-07-07",
+    "  > context",
+    "    > [ ] open",
+    "      > detail",
+    "    > unrelated",
+    "  > [x] done",
+    "    > [ ] nested open",
+  ].join("\n");
+
+  assert.equal(
+    rollLastDatedSection(markdown, new Date(2026, 6, 8)),
+    [
+      "> 2026-07-08",
+      "  > context",
+      "    > [ ] open",
+      "      > detail",
     ].join("\n"),
   );
 });
@@ -176,7 +196,7 @@ test("rollf uses the next dated root section", () => {
   );
 });
 
-test("roll preserves a fenced code child and every child after it", () => {
+test("roll keeps the ancestor path to a nested open task", () => {
   assert.equal(
     rollLastDatedSection(
       [
@@ -194,19 +214,13 @@ test("roll preserves a fenced code child and every child after it", () => {
     ),
     [
       "> 2026-07-08",
-      "  > before",
-      "  ```typescript",
-      "const nested = {",
-      "  kept: true,",
-      "};",
-      "  ```",
       "  > after",
       "    > [ ] nested after",
     ].join("\n"),
   );
 });
 
-test("roll preserves fenced code without a language", () => {
+test("roll drops unrelated fenced code", () => {
   assert.equal(
     rollLastDatedSection(
       [
@@ -218,12 +232,6 @@ test("roll preserves fenced code without a language", () => {
       ].join("\n"),
       new Date(2026, 6, 8),
     ),
-    [
-      "> 2026-07-08",
-      "  ```",
-      "unindented code",
-      "  ```",
-      "  > after",
-    ].join("\n"),
+    "> 2026-07-08",
   );
 });

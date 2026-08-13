@@ -190,6 +190,7 @@ const EDITOR_FONT_FAMILY = "CipherleafEditorFont";
 const EDITOR_FONT_STORE = "appearance";
 const EDITOR_FONT_KEY = "editor-font";
 const EDITOR_SYSTEM_FONT_KEY = "cipherleaf-system-font";
+const backupStorageKey = (vaultID: string, field: "directory" | "retention") => `cipherleaf-backup-${field}:${vaultID}`;
 
 type StoredEditorFont = {
   name: string;
@@ -497,6 +498,13 @@ function App() {
   const [syncSettings, setSyncSettings] = useState<SyncSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [historySaving, setHistorySaving] = useState(false);
+  const [backupDirectory, setBackupDirectory] = useState("");
+  const [backupVaultID, setBackupVaultID] = useState("");
+  const [backupDirectoryDraft, setBackupDirectoryDraft] = useState("");
+  const [backupRetention, setBackupRetention] = useState(5);
+  const [backupRetentionDraft, setBackupRetentionDraft] = useState(5);
+  const [backupSaving, setBackupSaving] = useState(false);
+  const [backupStatus, setBackupStatus] = useState("");
   const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -591,9 +599,6 @@ function App() {
   const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
 
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
-    theme,
-    journalLines,
-    editorFontSize,
     dailyNoteFormat,
     dailyNoteFolderId: dailyNoteFolderID,
     dailyTemplateNoteId: dailyTemplateNoteID,
@@ -611,20 +616,14 @@ function App() {
     dailyNoteFolderID,
     dailyNoteFormat,
     dailyTemplateNoteID,
-    editorFontSize,
     fileHistoryLimit,
-    journalLines,
     sectionDefault,
-    theme,
   ]);
 
   const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, revision: 0, modifiedAt: 0 });
 
   const applyVaultSettings = (settings: VaultSettings) => {
     vaultSettingsSnapshotRef.current = settingsSnapshot(settings);
-    setTheme(settings.theme as Theme);
-    setJournalLines(settings.journalLines as JournalLines);
-    setEditorFontSize(settings.editorFontSize);
     setDailyNoteFormat(settings.dailyNoteFormat);
     setDailyNoteFolderID(settings.dailyNoteFolderId);
     setDailyTemplateNoteID(settings.dailyTemplateNoteId);
@@ -1104,6 +1103,37 @@ function App() {
     }
   };
 
+  const saveBackupSettings = () => {
+    if (!session || session.locked) return;
+    setBackupSaving(true);
+    try {
+      if (backupDirectoryDraft) {
+        window.localStorage.setItem(backupStorageKey(session.vaultId, "directory"), backupDirectoryDraft);
+        window.localStorage.setItem(backupStorageKey(session.vaultId, "retention"), String(backupRetentionDraft));
+      } else {
+        window.localStorage.removeItem(backupStorageKey(session.vaultId, "directory"));
+        window.localStorage.removeItem(backupStorageKey(session.vaultId, "retention"));
+      }
+      setBackupDirectory(backupDirectoryDraft);
+      setBackupVaultID(session.vaultId);
+      setBackupRetention(backupRetentionDraft);
+      setBackupStatus(backupDirectoryDraft ? "Scheduled encrypted backups enabled." : "Scheduled encrypted backups disabled.");
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBackupSaving(false);
+    }
+  };
+
+  const chooseBackupDestination = async () => {
+    try {
+      const path = await VaultService.SelectMarkdownFolder("Select encrypted backup destination");
+      if (path) setBackupDirectoryDraft(path);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
   const runGlobalReplace = async () => {
     if (!canReplaceSearch(
       globalSearchQuery,
@@ -1400,11 +1430,13 @@ function App() {
   useEffect(() => {
     if (!session || session.locked) return;
     const delay = autoLockMinutes * 60 * 1000;
+    const retryDelay = Math.min(delay, 60_000);
+    let timer: number;
     const lock = async () => {
       if (autoSyncMinutes === autoLockMinutes) await autoSyncVaultRef.current();
-      await autoLock();
+      if (!await autoLock()) timer = window.setTimeout(() => void lock(), retryDelay);
     };
-    let timer = window.setTimeout(() => void lock(), delay);
+    timer = window.setTimeout(() => void lock(), delay);
     const reset = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => void lock(), delay);
@@ -1421,6 +1453,42 @@ function App() {
       events.forEach((event) => window.removeEventListener(event, reset));
     };
   }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked]);
+
+  useEffect(() => {
+    if (!session || session.locked) return;
+    try {
+      const directory = window.localStorage.getItem(backupStorageKey(session.vaultId, "directory")) ?? "";
+      const storedRetention = Number(window.localStorage.getItem(backupStorageKey(session.vaultId, "retention")));
+      const retention = Number.isInteger(storedRetention) && storedRetention >= 1 && storedRetention <= 30 ? storedRetention : 5;
+      setBackupVaultID(session.vaultId);
+      setBackupDirectory(directory);
+      setBackupDirectoryDraft(directory);
+      setBackupRetention(retention);
+      setBackupRetentionDraft(retention);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  }, [session?.vaultId, session?.locked]);
+
+  useEffect(() => {
+    if (!session || session.locked || backupVaultID !== session.vaultId || !backupDirectory) return;
+    let active = true;
+    const run = async () => {
+      try {
+        await persistCurrent();
+        const path = await VaultService.CreateScheduledBackup(backupDirectory, backupRetention);
+        if (active && path) setBackupStatus(`Encrypted backup created at ${path}`);
+      } catch (reason) {
+        if (active) setError(`Scheduled backup failed: ${errorText(reason)}`);
+      }
+    };
+    void run();
+    const timer = window.setInterval(() => void run(), 60 * 60 * 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [backupDirectory, backupRetention, backupVaultID, session?.vaultId, session?.locked]);
 
   useEffect(() => {
     if (!session || session.locked) { setActiveTimeEntry(null); return; }
@@ -1549,12 +1617,30 @@ function App() {
     try {
       await persistCurrent();
     } catch {
-      return;
+      return false;
     }
     const locked = await VaultService.LockVault();
     resetToLocked(locked);
     console.info("Vault auto-lock completed");
+    return true;
   };
+
+  const autoLockRef = useRef(autoLock);
+  autoLockRef.current = autoLock;
+  useEffect(() => {
+    let retry: number | undefined;
+    const lock = async () => {
+      if (!await autoLockRef.current()) retry = window.setTimeout(() => void lock(), 60_000);
+    };
+    const off = Events.On("cipherleaf:system-lock-requested", () => {
+      if (retry) window.clearTimeout(retry);
+      void lock();
+    });
+    return () => {
+      off();
+      if (retry) window.clearTimeout(retry);
+    };
+  }, []);
 
   const resetToLocked = (locked: Session) => {
     unlockedRef.current = false;
@@ -1661,6 +1747,16 @@ function App() {
       await prepareVaultPrompt("open", path);
     } catch {
       // persistCurrent already presents the actionable error.
+    }
+  };
+
+  const removeRecentVault = async (path: string) => {
+    setError("");
+    try {
+      await VaultService.RemoveRecentVaultPath(path);
+      setRecentVaultPaths((current) => current.filter((existing) => existing !== path));
+    } catch (reason) {
+      setError(errorText(reason));
     }
   };
 
@@ -4215,20 +4311,30 @@ function App() {
               </button>
               {vaultMenuOpen && (
                 <div className="vault-selector-menu" role="menu" aria-label="Recent vaults">
-                  {(recentVaultPaths.includes(session.path)
-                    ? recentVaultPaths
-                    : [...recentVaultPaths, session.path]
-                  ).slice(-5).map((path) => (
-                    <button
-                      key={path}
-                      type="button"
-                      role="menuitem"
-                      className={path === session.path ? "active" : ""}
-                      title={path}
-                      onClick={() => void openRecentVault(path)}
-                    >
-                      {folderName(path)}
-                    </button>
+                  {recentVaultPaths.slice(-5).map((path) => (
+                    <div className="vault-selector-item" key={path}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={`vault-selector-menu-item ${path === session.path ? "active" : ""}`}
+                        title={path}
+                        onClick={() => void openRecentVault(path)}
+                      >
+                        <span>{folderName(path)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="vault-selector-remove"
+                        aria-label={`Remove ${folderName(path)} from recent vaults`}
+                        title="Remove from recent vaults"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeRecentVault(path);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -4334,21 +4440,25 @@ function App() {
           <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
         </nav>
 
-        {error && (
-          <div className="error-banner" role="alert">
-            <span>{error}</span>
-            <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">
-              <Icon name="x" size={16} />
-            </button>
-          </div>
-        )}
+        {(error || syncNotification) && (
+          <div className="notification-stack">
+            {error && (
+              <div className="error-banner" role="alert">
+                <span>{error}</span>
+                <button className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
+            )}
 
-        {syncNotification && (
-          <div className="sync-notification" role="status" aria-live="polite">
-            <span>{syncNotification}</span>
-            <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
-              <Icon name="x" size={16} />
-            </button>
+            {syncNotification && (
+              <div className="sync-notification" role="status" aria-live="polite">
+                <span>{syncNotification}</span>
+                <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -4957,6 +5067,7 @@ function App() {
               <div><span>Notes</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.notesBytes) : "—"}</strong></div>
               <div><span>Attachments</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.attachmentsBytes) : "—"}</strong></div>
               <div><span>Time Tracking</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.timeTrackingBytes) : "—"}</strong></div>
+              <div><span>Git metadata (.git)</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.gitBytes) : "—"}</strong></div>
             </div>
             <h2>File history</h2>
             <label>
@@ -4976,6 +5087,25 @@ function App() {
               </div>
               <small>Save syncs this limit and permanently deletes older versions.</small>
             </label>
+            <h2>Encrypted backups</h2>
+            <label>
+              Backup destination
+              <div className="settings-path-field">
+                <input value={backupDirectoryDraft} onChange={(event) => setBackupDirectoryDraft(event.target.value)} placeholder="Disabled" spellCheck={false} />
+                <button type="button" className="secondary-button" onClick={() => void chooseBackupDestination()}>Browse…</button>
+              </div>
+            </label>
+            <label>
+              Backups kept
+              <div className="settings-path-field">
+                <input type="number" min="1" max="30" value={backupRetentionDraft} onChange={(event) => setBackupRetentionDraft(Math.min(30, Math.max(1, Number(event.target.value) || 1)))} />
+                <button type="button" className="secondary-button" disabled={backupSaving || (backupDirectoryDraft === backupDirectory && backupRetentionDraft === backupRetention)} onClick={saveBackupSettings}>
+                  {backupSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <small>Creates one encrypted snapshot per day while Cipherleaf is open. Clear the destination to disable backups.</small>
+            </label>
+            {backupStatus && <div className="connection-result success" role="status">{backupStatus}</div>}
             <h2>GitHub sync (experimental)</h2>
             <div className={`sync-link-state ${syncSettings?.linked ? "linked" : ""}`}>
               <span />

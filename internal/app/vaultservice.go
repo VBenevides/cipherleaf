@@ -34,6 +34,7 @@ type VaultService struct {
 	syncWorkerOnce sync.Once
 	syncJobs       chan syncJob
 	statisticsMu   sync.Mutex
+	backupMu       sync.Mutex
 	process        *process.Process
 }
 
@@ -393,6 +394,10 @@ func (s *VaultService) ListRecentVaultPaths() ([]string, error) {
 	return s.recent.Paths()
 }
 
+func (s *VaultService) RemoveRecentVaultPath(path string) error {
+	return s.recent.Remove(path)
+}
+
 type LastSession struct {
 	Path  string `json:"path"`
 	Theme string `json:"theme"`
@@ -518,7 +523,14 @@ func (s *VaultService) GetSession() vault.Session {
 }
 
 func (s *VaultService) GetVaultStatistics() (vault.VaultStatistics, error) {
-	return s.store.GetVaultStatistics()
+	statistics, err := s.store.GetVaultStatistics()
+	if err != nil {
+		return statistics, err
+	}
+	if directory, err := s.sync.GitWorkingDirectory(s.store.Session().VaultID); err == nil {
+		statistics.GitBytes, _ = repositorySizes(directory)
+	}
+	return statistics, nil
 }
 
 func (s *VaultService) GetTimeTrackingCatalog() (vault.TimeTrackingCatalog, error) {
@@ -739,10 +751,6 @@ func (s *VaultService) GetAttachment(noteID, id string) (string, error) {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
-}
-
-func (s *VaultService) DeleteAttachment(noteID, id string) error {
-	return s.store.DeleteAttachment(noteID, id)
 }
 
 func (s *VaultService) ImportFileAttachment(noteID, path string) (vault.AttachmentInfo, error) {
