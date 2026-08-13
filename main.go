@@ -45,7 +45,7 @@ func main() {
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     appTitle,
 		Width:     1280,
-		Height:    800,
+		Height:    720,
 		MinWidth:  620,
 		MinHeight: 620,
 		Mac: application.MacWindow{
