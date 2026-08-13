@@ -2257,7 +2257,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
       from: range.head,
       insert: inserted,
     },
-    selection: EditorSelection.cursor(range.head + (atObjectStart ? 0 : inserted.length)),
+    selection: EditorSelection.cursor(range.head + inserted.length),
   });
 
   view.focus();
