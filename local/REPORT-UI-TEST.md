@@ -3,6 +3,7 @@
 Date: 2026-08-19
 Commit: `cfabbe4 bump version`
 Implementation TODO: `local/TODO-UI-TEST.md`
+Implementation tip: `5feefe9`
 
 ## Implementation status
 
@@ -10,6 +11,8 @@ Implementation TODO: `local/TODO-UI-TEST.md`
 - Added a visible note-level encrypted-file attachment action.
 - Added Object Tree editing, type changes, child creation, checkbox updates, deletion, responsive text-first layout, and collapsible metadata.
 - Browser smoke testing remains blocked because no supported browser runner is available; see `TODO-UI-TEST.md`.
+
+Final verification: `go test ./...`, `go vet ./...`, frontend `npm test` (16/16), frontend `npm run build`, and `GOCACHE=/tmp/cipherleaf-gocache wails3 build` all passed. Wails emitted existing GTK/X11 deprecation warnings.
 
 ## Build and test result
 
