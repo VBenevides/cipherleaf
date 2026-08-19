@@ -145,20 +145,56 @@ function numberedMarker(previousLine: string | undefined, indent: number, fallba
   return `${number + 1}${punctuation} `;
 }
 
+type StrippedObjectPrefix = {
+  indent: number;
+  rawIndent: string;
+  rest: string;
+  quoteDepth: number;
+};
+
+function stripObjectPrefixes(text: string): StrippedObjectPrefix {
+  const rawIndent = text.match(/^[ \t]*/)?.[0] ?? "";
+  let rest = text.slice(rawIndent.length);
+  let quoteDepth = 0;
+
+  while (rest) {
+    const quote = rest.match(/^>+[ \t]?/);
+    if (quote) {
+      quoteDepth += (quote[0].match(/>/g) ?? []).length;
+      rest = rest.slice(quote[0].length);
+      continue;
+    }
+
+    const prefix = rest.match(
+      /^(?:#{1,6}[ \t]+|<[ \t]?|\d+[.)][ \t]+|[-*+](?:[ \t]+|(?=[^-*+\s])|$)|\[[ xX]?\][ \t]*)/,
+    );
+    if (!prefix) break;
+    rest = rest.slice(prefix[0].length);
+  }
+
+  return {
+    indent: visualIndent(rawIndent) + Math.max(0, quoteDepth - 1) * 2,
+    rawIndent,
+    rest,
+    quoteDepth,
+  };
+}
+
 export function replaceExclusiveObjectPrefix(
   line: string,
   marker: string,
   previousLine?: string,
 ): string {
   const current = exclusiveObjectPrefix(line);
-  if (!current) {
-    const indentation = line.match(/^[ \t]*/)?.[0] ?? "";
-    return `${indentation}${marker}${line.slice(indentation.length)}`;
-  }
+  const stripped = stripObjectPrefixes(line);
+  const indent = current?.indent ?? stripped.indent;
   const nextMarker = /^\d+[.)] $/.test(marker)
-    ? numberedMarker(previousLine, current.indent, marker)
+    ? numberedMarker(previousLine, indent, marker)
     : marker;
-  return `${" ".repeat(current.indent)}${nextMarker}${current.rest}`;
+  const indentation = current || stripped.quoteDepth > 0
+    ? " ".repeat(indent)
+    : stripped.rawIndent;
+  return `${indentation}${nextMarker}${stripped.rest}`;
 }
 
 export function normalizeStackedExclusiveObjectPrefix(line: string, previousLine?: string): string {
