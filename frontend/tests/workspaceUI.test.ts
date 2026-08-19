@@ -71,3 +71,10 @@ test("editor font selection supports installed fonts and .ttf files", () => {
   assert.match(style, /font-size: clamp\(9px, 3cqi, 14px\)/);
   assert.match(style, /white-space: normal !important/);
 });
+
+test("note titles can be collapsed and restored", () => {
+  assert.match(app, /cipherleaf-title-collapsed/);
+  assert.match(app, /aria-label=\{titleCollapsed \? "Expand title" : "Collapse title"\}/);
+  assert.match(app, /titleCollapsed \? "▸" : "▾"/);
+  assert.match(style, /\.document-heading\.is-collapsed/);
+});

@@ -77,6 +77,7 @@ export function insertAttachmentMarkdown(
   markdown: string,
   offset: number,
   attachment: string,
+  prefix = "",
 ): { from: number; to: number; insert: string } {
   const position = Math.max(0, Math.min(offset, markdown.length));
   let from = position;
@@ -86,7 +87,7 @@ export function insertAttachmentMarkdown(
   return {
     from,
     to,
-    insert: `${from > 0 ? "\n" : ""}${attachment}${to < markdown.length ? "\n" : ""}`,
+    insert: `${from > 0 ? "\n" : ""}${prefix}${attachment}${to < markdown.length ? "\n" : ""}`,
   };
 }
 

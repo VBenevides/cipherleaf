@@ -113,3 +113,11 @@ test("inserts pasted images without blank lines", () => {
     insert: `\n${image}\n`,
   });
 });
+
+test("keeps pasted images at the supplied object indentation", () => {
+  const image = attachmentMarkdown("b".repeat(32));
+  assert.equal(
+    insertAttachmentMarkdown("* parent", 8, image, "  ").insert,
+    `\n  ${image}`,
+  );
+});

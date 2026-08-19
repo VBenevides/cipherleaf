@@ -2575,7 +2575,31 @@ a:focus-visible {
 }
 
 .document-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 26px var(--notebook-gutter) 13px;
+}
+
+.document-heading-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.document-heading.is-collapsed {
+  align-items: center;
+  min-height: 35px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.document-title-toggle {
+  margin-top: 8px;
+  font-size: 18px;
+}
+
+.document-heading.is-collapsed .document-title-toggle {
+  margin-top: 0;
 }
 
 .title-input {

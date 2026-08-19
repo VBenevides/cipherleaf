@@ -837,6 +837,7 @@ class AttachmentWidget extends WidgetType {
               to: this.to,
               insert: attachmentMarkdown(this.attachmentID, width, this.alt, this.align),
             },
+            scrollIntoView: false,
           });
         }
       };
@@ -882,6 +883,7 @@ class AttachmentWidget extends WidgetType {
               to: this.to,
               insert: attachmentMarkdown(this.attachmentID, this.width, this.alt, align),
             },
+            scrollIntoView: false,
           });
           view.focus();
         });
@@ -897,6 +899,7 @@ class AttachmentWidget extends WidgetType {
             to: this.to,
             insert: "",
           },
+          scrollIntoView: false,
         });
         view.focus();
       });
@@ -2485,7 +2488,7 @@ function moveObjectBlock(
 
   view.dispatch({
     changes: { from: 0, to: state.doc.length, insert: next },
-    selection: EditorSelection.cursor(Math.min(state.doc.line(sourceLineNumber).from, next.length)),
+    scrollIntoView: false,
   });
   view.focus();
   return true;
@@ -2880,14 +2883,25 @@ export default function LiveMarkdownEditor({
                 .then((data) => VaultService.SaveImageAttachment(noteID, data))
                 .then((id) => {
                   const markdown = attachmentMarkdown(id);
+                  const line = pastedView.state.doc.lineAt(insertion);
+                  const object = cachedObjectDocument(pastedView.state).byLine.get(line.number);
+                  const prefix = object && (
+                    object.indent > 0 ||
+                    object.tags.includes("section") ||
+                    object.tags.includes("bulletpoint") ||
+                    object.checked !== undefined ||
+                    object.barePrefixSize > 0
+                  ) ? continuationPrefix(line.text) ?? "" : "";
                   const change = insertAttachmentMarkdown(
                     pastedView.state.doc.toString(),
                     insertion,
                     markdown,
+                    prefix,
                   );
                   pastedView.dispatch({
                     changes: change,
                     selection: EditorSelection.cursor(change.from + change.insert.length),
+                    scrollIntoView: false,
                   });
                 })
                 .catch((reason) => onErrorRef.current(reason));

@@ -462,6 +462,9 @@ function App() {
   const [syncNotification, setSyncNotification] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [titleCollapsed, setTitleCollapsed] = useState(() =>
+    window.localStorage.getItem("cipherleaf-title-collapsed") === "true"
+  );
   const [graphOpen, setGraphOpen] = useState(false);
   const [timeTrackingOpen, setTimeTrackingOpen] = useState(false);
   const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
@@ -794,7 +797,8 @@ function App() {
     window.localStorage.setItem("cipherleaf-auto-sync-minutes", String(autoSyncMinutes));
     window.localStorage.setItem("cipherleaf-auto-lock-minutes", String(autoLockMinutes));
     window.localStorage.setItem("cipherleaf-section-default", sectionDefault);
-  }, [autoLockMinutes, autoSyncMinutes, autosaveIntervalSeconds, sectionDefault]);
+    window.localStorage.setItem("cipherleaf-title-collapsed", String(titleCollapsed));
+  }, [autoLockMinutes, autoSyncMinutes, autosaveIntervalSeconds, sectionDefault, titleCollapsed]);
 
   useEffect(() => {
     if (!note || session?.locked) {
@@ -4561,23 +4565,37 @@ function App() {
           </>
         ) : note ? (
           <>
-            <div className="document-heading">
-              <input
-                className="title-input"
-                value={note.title}
-                onChange={(event) => editNote({ title: event.target.value })}
-                placeholder="Untitled"
-                aria-label="Note title"
-              />
-              <p>
-                Edited {new Date(note.updatedAt).toLocaleString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  hourCycle: "h23",
-                })}
-              </p>
+            <div className={`document-heading ${titleCollapsed ? "is-collapsed" : ""}`}>
+              <button
+                type="button"
+                className="icon-button document-title-toggle"
+                onClick={() => setTitleCollapsed((current) => !current)}
+                aria-label={titleCollapsed ? "Expand title" : "Collapse title"}
+                aria-expanded={!titleCollapsed}
+                title={titleCollapsed ? "Expand title" : "Collapse title"}
+              >
+                {titleCollapsed ? "▸" : "▾"}
+              </button>
+              {!titleCollapsed && (
+                <div className="document-heading-content">
+                  <input
+                    className="title-input"
+                    value={note.title}
+                    onChange={(event) => editNote({ title: event.target.value })}
+                    placeholder="Untitled"
+                    aria-label="Note title"
+                  />
+                  <p>
+                    Edited {new Date(note.updatedAt).toLocaleString("en-US", {
+                      month: "long",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hourCycle: "h23",
+                    })}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="view-tabs" role="tablist" aria-label="Editor view">
               {(["live", "object", "markdown"] as EditorView[]).map((item) => (
