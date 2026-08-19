@@ -43,12 +43,12 @@ No security patch was identified by this UI-focused audit.
   - Test Result: Existing focused probe reproduced three failures: `# Heading` became `* # Heading`, a checklist duplicated `[ ]`, and `> * Task` became `* * Task`. Regression test not run.
   - Commit Hash: Not committed
 
-- [ ] Do not normalize arrows inside fenced code
+- [x] Do not normalize arrows inside fenced code
   - Importance Level: High
   - Description: Limit arrow normalization to prose. Preserve code fences, code content, and link targets exactly as entered.
-  - Test Description: Open Live Preview for Markdown containing `const next = value -> other;` inside a fenced code block, prose containing `->`, and a link target containing `->`. Assert only prose changes.
-  - Test Result: Existing source audit and probe confirmed that full-document normalization changes fenced code. Regression test not run.
-  - Commit Hash: Not committed
+  - Test Description: `npm test`; `npm run build`; regression tests for fenced code, prose, and link destinations.
+  - Test Result: PASS — 16 frontend tests passed; production frontend build passed. Fenced code and link destinations remain unchanged while prose arrows normalize.
+  - Commit Hash: `445056dfe59f898fae2e0cbd8737896f6ab94c73`
 
 - [x] Handle rejected background saves
   - Importance Level: Medium
