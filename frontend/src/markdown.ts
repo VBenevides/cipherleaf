@@ -6,7 +6,35 @@ export function isHorizontalRule(line: string): boolean {
 }
 
 export function normalizeArrowText(text: string): string {
-  return text.replace(/->/g, "→");
+  let activeFence: string | null = null;
+  let activeFenceLength = 0;
+
+  return text.split(/(\r\n|\n|\r)/).map((part) => {
+    if (part === "\n" || part === "\r" || part === "\r\n") return part;
+
+    const fence = part.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (activeFence) {
+      if (fence && fence[1][0] === activeFence && fence[1].length >= activeFenceLength) {
+        activeFence = null;
+      }
+      return part;
+    }
+    if (fence) {
+      activeFence = fence[1][0];
+      activeFenceLength = fence[1].length;
+      return part;
+    }
+
+    let result = "";
+    let cursor = 0;
+    for (const link of part.matchAll(/\]\((<[^>\r\n]*>|[^)\r\n]*)\)/g)) {
+      const start = link.index ?? 0;
+      result += part.slice(cursor, start).replace(/->/g, "→");
+      result += link[0];
+      cursor = start + link[0].length;
+    }
+    return result + part.slice(cursor).replace(/->/g, "→");
+  }).join("");
 }
 
 export function markdownCitations(text: string) {

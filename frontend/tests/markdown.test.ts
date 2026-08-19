@@ -44,9 +44,24 @@ test("edits a citation in one themed dialog", () => {
   assert.doesNotMatch(editor, /window\.prompt/);
 });
 
-test("stores ASCII arrows as Unicode arrows", () => {
+test("normalizes ASCII arrows in prose", () => {
   assert.equal(normalizeArrowText("first -> second -> third"), "first → second → third");
   assert.equal(normalizeArrowText("already → converted"), "already → converted");
+});
+
+test("leaves arrows inside fenced code unchanged", () => {
+  const markdown = "```ts\nconst result = first -> second;\n```\n\nafter -> code";
+  assert.equal(
+    normalizeArrowText(markdown),
+    "```ts\nconst result = first -> second;\n```\n\nafter → code",
+  );
+});
+
+test("normalizes link labels without changing destinations", () => {
+  assert.equal(
+    normalizeArrowText("[first -> second](https://example.test/a->b)"),
+    "[first → second](https://example.test/a->b)",
+  );
 });
 
 test("recognizes a three-dash horizontal rule line", () => {
