@@ -6,15 +6,16 @@
   - Importance Level: Medium
   - Description: Mount the real application and cover vault/note creation, note writing, view switching, toolbar placement, attachment insertion, element inclusion, and narrow-window layout. Verify that the writing area remains usable and controls remain reachable.
   - Test Description: Run the browser suite at normal and narrow viewport sizes. Create a note, enter long text, switch Live Preview/Object Tree/split Markdown, include an element, attach a file, and confirm that the note content and controls remain visible and usable.
-  - Test Result: Existing unit/source tests passed; browser UI smoke testing was not run because no usable browser display was available.
+  - Test Result: Existing and current frontend tests passed: 16/16; production frontend build passed. Browser execution was not completed because the repository has no Playwright, Puppeteer, jsdom, Selenium, or geckodriver, and Firefox headless hangs before opening a debugging port.
   - Commit Hash: Not committed
+  - Blocked: Requires a supported browser runner and a Wails/in-memory backend seam for mounting the real App. Native file-picker flows also need a test injection seam.
 
-- [ ] Make Object Tree element actions discoverable
+- [x] Make Object Tree element actions discoverable
   - Importance Level: Medium
-  - Description: Add the smallest direct workflow for editing element text, changing element type, adding a child, including an element, and deleting an element; or clearly label the panel as read-only if editing is intentionally out of scope.
-  - Test Description: Select an element in Object Tree, edit its text, change its type, add a child, include it, and delete it. Confirm the Markdown and Live Preview views stay synchronized.
-  - Test Result: Manual UI testing was blocked by the unavailable desktop display; implementation not started.
-  - Commit Hash: Not committed
+  - Description: Add direct Object Tree actions for editing text, changing type, adding a child, checking items, and deleting an element. Keep unsupported include syntax explicitly disabled until the document model defines its behavior.
+  - Test Description: `npm test`; `npm run build`; source-contract coverage for accessible edit/type/add/delete controls, checkbox updates, and the explicit include limitation.
+  - Test Result: PASS — 16 frontend tests passed; production frontend build passed. Object Tree now exposes accessible edit, type, add-child, checkbox, delete, and metadata controls. Include is visible but disabled with an explanation because no include operation exists in the document model.
+  - Commit Hash: `08e4258`
 
 - [x] Make encrypted file attachment insertion visible
   - Importance Level: Low
@@ -23,12 +24,12 @@
   - Test Result: PASS — 16 frontend tests passed; production frontend build passed; the control is rendered beside the view tabs and remains disabled while busy. End-to-end file selection was not available without the desktop display.
   - Commit Hash: `fcc19daeb53f862f555d9f8af26873cf5053b009`
 
-- [ ] Give Object Tree text the available width
+- [x] Give Object Tree text the available width
   - Importance Level: Low
   - Description: Reduce or hide UUID, depth, line, and hierarchy metadata in the default view so element text does not require horizontal scrolling in a narrow editor.
-  - Test Description: Open Object Tree at narrow, normal, and wide widths. Confirm text remains readable, the panel does not force unwanted horizontal scrolling, and metadata remains available on hover or in details.
-  - Test Result: Manual UI testing was blocked by the unavailable desktop display; implementation not started.
-  - Commit Hash: Not committed
+  - Test Description: `npm test`; `npm run build`; source-contract coverage for text-first grid columns, collapsible metadata, and the narrow viewport media rule.
+  - Test Result: PASS — Object Tree uses the available text column, moves UUID/depth/line metadata into Details, and switches to a one-column layout below 600px. Browser screenshots were not available in this environment.
+  - Commit Hash: `08e4258`
 
 ## Security Patches
 
