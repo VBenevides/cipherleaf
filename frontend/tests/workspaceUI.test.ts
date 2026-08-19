@@ -40,9 +40,10 @@ test("background saves consume rejected promises and preserve retry state", () =
 });
 
 test("note-level attachment insertion is visible beside the view tabs", () => {
-  assert.match(app, /className="document-heading-actions"[\s\S]*Attach encrypted file…/);
+  assert.match(app, /className="document-heading-toolbar"[\s\S]*className="view-tabs"[\s\S]*className="document-heading-actions"[\s\S]*Attach encrypted file…/);
   assert.match(app, /onClick=\{\(\) => void attachFile\(\)\}/);
-  assert.match(style, /\.document-heading-actions \{[\s\S]*justify-content: flex-end/);
+  assert.match(style, /\.document-heading-toolbar \{[\s\S]*display: flex/);
+  assert.match(style, /\.document-heading-actions \{[\s\S]*padding: 0 0 7px 8px/);
 });
 
 test("vault settings reload synced file-history preferences", () => {
@@ -95,9 +96,9 @@ test("note titles can be collapsed and restored", () => {
   assert.match(app, /!titleCollapsed && \([\s\S]*?className="view-tabs"/);
   assert.match(style, /\.document-heading\.is-collapsed/);
   assert.match(style, /\.document-heading:not\(\.is-collapsed\)/);
-  assert.match(style, /\.document-heading > \.view-tabs/);
-  assert.match(style, /\.document-heading:not\(\.is-collapsed\) > \.view-tabs[\s\S]*margin-top: 8px/);
-  assert.match(style, /:root\[data-theme="archivist"\] \.document-heading > \.view-tabs/);
+  assert.match(style, /\.document-heading-toolbar > \.view-tabs/);
+  assert.match(style, /\.document-heading-toolbar \{[\s\S]*margin-top: 8px/);
+  assert.match(style, /:root\[data-theme="archivist"\] \.document-heading-toolbar > \.view-tabs/);
 });
 
 test("editor chrome stays compact", () => {

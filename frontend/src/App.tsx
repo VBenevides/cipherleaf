@@ -4609,34 +4609,34 @@ function App() {
                 )}
               </div>
               {!titleCollapsed && (
-                <div className="view-tabs" role="tablist" aria-label="Editor view">
-                  {(["live", "object", "markdown"] as EditorView[]).map((item) => (
+                <div className="document-heading-toolbar">
+                  <div className="view-tabs" role="tablist" aria-label="Editor view">
+                    {(["live", "object", "markdown"] as EditorView[]).map((item) => (
+                      <button
+                        key={item}
+                        role="tab"
+                        aria-selected={view === item}
+                        className={view === item ? "active" : ""}
+                        onClick={() => setEditorView(item)}
+                      >
+                        {item === "live"
+                          ? "Live Preview"
+                          : item === "object"
+                            ? "Object Tree"
+                            : "Markdown"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="document-heading-actions">
                     <button
-                      key={item}
-                      role="tab"
-                      aria-selected={view === item}
-                      className={view === item ? "active" : ""}
-                      onClick={() => setEditorView(item)}
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => void attachFile()}
                     >
-                      {item === "live"
-                        ? "Live Preview"
-                        : item === "object"
-                          ? "Object Tree"
-                          : "Markdown"}
+                      Attach encrypted file…
                     </button>
-                  ))}
-                </div>
-              )}
-              {!titleCollapsed && (
-                <div className="document-heading-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={busy}
-                    onClick={() => void attachFile()}
-                  >
-                    Attach encrypted file…
-                  </button>
+                  </div>
                 </div>
               )}
             </div>
