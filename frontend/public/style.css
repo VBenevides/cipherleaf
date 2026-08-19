@@ -2621,6 +2621,19 @@ a:focus-visible {
   margin-top: 8px;
 }
 
+.document-heading-actions {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.document-heading-actions .secondary-button {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 10px;
+}
+
 :root[data-theme="archivist"] .document-heading > .view-tabs {
   padding-right: 0;
   padding-left: 0;

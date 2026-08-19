@@ -39,6 +39,12 @@ test("background saves consume rejected promises and preserve retry state", () =
   assert.doesNotMatch(app, /void persistCurrent\(\);/);
 });
 
+test("note-level attachment insertion is visible beside the view tabs", () => {
+  assert.match(app, /className="document-heading-actions"[\s\S]*Attach encrypted file…/);
+  assert.match(app, /onClick=\{\(\) => void attachFile\(\)\}/);
+  assert.match(style, /\.document-heading-actions \{[\s\S]*justify-content: flex-end/);
+});
+
 test("vault settings reload synced file-history preferences", () => {
   assert.match(app, /VaultService\.GetVaultSettings\(\)/);
   assert.match(app, /applyVaultSettings\(vaultSettings\)/);

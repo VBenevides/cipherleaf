@@ -4627,6 +4627,18 @@ function App() {
                   ))}
                 </div>
               )}
+              {!titleCollapsed && (
+                <div className="document-heading-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => void attachFile()}
+                  >
+                    Attach encrypted file…
+                  </button>
+                </div>
+              )}
             </div>
             <Suspense fallback={<EditorLoading />}>
               <div className="document-body">
