@@ -12,6 +12,8 @@ test("note tabs expose navigation, close, new-tab, and idle unloading", () => {
   assert.match(app, /event\.ctrlKey && event\.key\.toLowerCase\(\) === "w"/);
   assert.match(app, /Date\.now\(\) - 60_000/);
   assert.match(app, /tabNoteCacheRef\.current\.delete\(tab\.id\)/);
+  assert.match(style, /\.note-tabs \{[\s\S]*min-height: 28px[\s\S]*padding: 2px 8px 0/);
+  assert.match(style, /\.note-tab span \{[\s\S]*font-size: 0\.66em/);
 });
 
 test("compact sidebar controls share rows", () => {
@@ -76,5 +78,17 @@ test("note titles can be collapsed and restored", () => {
   assert.match(app, /cipherleaf-title-collapsed/);
   assert.match(app, /aria-label=\{titleCollapsed \? "Expand title" : "Collapse title"\}/);
   assert.match(app, /titleCollapsed \? "▸" : "▾"/);
+  assert.match(app, /document-heading-main[\s\S]*?view-tabs/);
+  assert.match(app, /!titleCollapsed && \([\s\S]*?className="view-tabs"/);
   assert.match(style, /\.document-heading\.is-collapsed/);
+  assert.match(style, /\.document-heading:not\(\.is-collapsed\)/);
+  assert.match(style, /\.document-heading > \.view-tabs/);
+  assert.match(style, /\.document-heading:not\(\.is-collapsed\) > \.view-tabs[\s\S]*margin-top: 8px/);
+  assert.match(style, /:root\[data-theme="archivist"\] \.document-heading > \.view-tabs/);
+});
+
+test("editor chrome stays compact", () => {
+  assert.match(style, /\.workspace \{[\s\S]*grid-template-rows: 28px minmax\(0, 1fr\)/);
+  assert.match(style, /\.editor-topbar \{[\s\S]*min-height: 33px/);
+  assert.match(style, /\.sidebar \{[\s\S]*inset: 28px auto 0 0/);
 });

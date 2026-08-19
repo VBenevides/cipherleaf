@@ -185,7 +185,7 @@
   background: var(--editor-bg);
 }
 
-:root[data-theme="archivist"] .document-heading {
+:root[data-theme="archivist"] .document-heading:not(.is-collapsed) {
   padding-top: 26px;
   padding-bottom: 13px;
 }
@@ -1517,12 +1517,12 @@ a:focus-visible {
   height: 100%;
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr);
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: 28px minmax(0, 1fr);
   background: var(--paper);
 }
 
 .workspace.log-open {
-  grid-template-rows: 42px minmax(0, 1fr) minmax(180px, 28vh);
+  grid-template-rows: 28px minmax(0, 1fr) minmax(180px, 28vh);
 }
 
 .workspace.sidebar-collapsed {
@@ -1537,8 +1537,8 @@ a:focus-visible {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 0 8px;
+  gap: 2px;
+  padding: 0 5px;
   border-bottom: 1px solid var(--line);
   background: var(--toolbar-bg);
   --wails-draggable: drag;
@@ -2277,11 +2277,11 @@ a:focus-visible {
 
 .editor-topbar {
   position: relative;
-  min-height: 50px;
+  min-height: 33px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 20px;
+  gap: 9px;
+  padding: 0 13px;
   border-bottom: 1px solid var(--line);
   background: var(--toolbar-bg);
 }
@@ -2576,9 +2576,18 @@ a:focus-visible {
 
 .document-heading {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: 26px var(--notebook-gutter) 0;
+}
+
+.document-heading-main {
+  width: 100%;
+  min-width: 0;
+  display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 26px var(--notebook-gutter) 13px;
 }
 
 .document-heading-content {
@@ -2590,7 +2599,7 @@ a:focus-visible {
   align-items: center;
   min-height: 35px;
   padding-top: 2px;
-  padding-bottom: 2px;
+  padding-bottom: 0;
 }
 
 .document-title-toggle {
@@ -2600,6 +2609,21 @@ a:focus-visible {
 
 .document-heading.is-collapsed .document-title-toggle {
   margin-top: 0;
+}
+
+.document-heading > .view-tabs {
+  width: 100%;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.document-heading:not(.is-collapsed) > .view-tabs {
+  margin-top: 8px;
+}
+
+:root[data-theme="archivist"] .document-heading > .view-tabs {
+  padding-right: 0;
+  padding-left: 0;
 }
 
 .title-input {
@@ -2634,11 +2658,11 @@ a:focus-visible {
 }
 
 .note-tabs {
-  min-height: 35px;
+  min-height: 28px;
   display: flex;
   align-items: stretch;
   gap: 3px;
-  padding: 4px 8px 0;
+  padding: 2px 8px 0;
   overflow-x: auto;
   border-bottom: 1px solid var(--line);
   background: var(--toolbar-bg);
@@ -2662,7 +2686,7 @@ a:focus-visible {
 .note-tab button,
 .new-note-tab {
   min-width: 0;
-  padding: 6px;
+  padding: 3px 6px;
   color: var(--muted);
   border: 0;
   background: transparent;
@@ -2679,6 +2703,7 @@ a:focus-visible {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 0.66em;
   white-space: nowrap;
 }
 
@@ -4243,7 +4268,7 @@ a:focus-visible {
 
   .workspace {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 42px minmax(0, 1fr);
+    grid-template-rows: 28px minmax(0, 1fr);
   }
 
   .workspace.sidebar-collapsed {
@@ -4256,7 +4281,7 @@ a:focus-visible {
 
   .sidebar {
     position: fixed;
-    inset: 42px auto 0 0;
+    inset: 28px auto 0 0;
     width: min(300px, 88vw);
     transform: translateX(-102%);
     transition: transform 180ms ease;
