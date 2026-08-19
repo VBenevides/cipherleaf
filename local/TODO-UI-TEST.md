@@ -36,12 +36,12 @@ No security patch was identified by this UI-focused audit.
 
 ## Bug Fixes
 
-- [ ] Rewrite all existing element markers when changing type
+- [x] Rewrite all existing element markers when changing type
   - Importance Level: High
   - Description: Replace the complete leading marker set, including headings, blockquotes, bullets, numbered items, and checklist tokens. Do not retain or duplicate markers when the toolbar changes an element type.
-  - Test Description: Convert every supported source type to every supported toolbar type. Include `# Heading`, `* [ ] Task`, and `> * Task`; assert that exactly one valid marker remains and the text is preserved.
-  - Test Result: Existing focused probe reproduced three failures: `# Heading` became `* # Heading`, a checklist duplicated `[ ]`, and `> * Task` became `* * Task`. Regression test not run.
-  - Commit Hash: Not committed
+  - Test Description: `node --test --experimental-strip-types tests/objectPrefixes.test.ts`; `npm test`; regression matrix covering all supported source and toolbar marker types.
+  - Test Result: PASS — focused marker tests and all 16 frontend tests passed. The matrix covers headings, checklists, bullets, numbered items, blockquotes, nested markers, and indentation preservation.
+  - Commit Hash: `2efc704`
 
 - [x] Do not normalize arrows inside fenced code
   - Importance Level: High
