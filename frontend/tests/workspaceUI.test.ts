@@ -32,6 +32,13 @@ test("window switching does not trigger a caret-moving save", () => {
   assert.match(app, /if \(!event\.relatedTarget && !document\.hasFocus\(\)\) return;/);
 });
 
+test("background saves consume rejected promises and preserve retry state", () => {
+  assert.match(app, /const persistCurrentInBackground = \(snapshot = noteRef\.current\) => \{[\s\S]*persistCurrent\(snapshot\)\.catch/);
+  assert.match(app, /const removeFileAttachment = async[\s\S]*try \{[\s\S]*await persistCurrent\(\);[\s\S]*\} catch/);
+  assert.match(app, /run: \(\) => persistCurrentInBackground\(\)/);
+  assert.doesNotMatch(app, /void persistCurrent\(\);/);
+});
+
 test("vault settings reload synced file-history preferences", () => {
   assert.match(app, /VaultService\.GetVaultSettings\(\)/);
   assert.match(app, /applyVaultSettings\(vaultSettings\)/);

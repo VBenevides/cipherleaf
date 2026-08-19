@@ -1373,11 +1373,17 @@ function App() {
     });
   };
 
+  const persistCurrentInBackground = (snapshot = noteRef.current) => {
+    void persistCurrent(snapshot).catch(() => {
+      // persistCurrent already presents the actionable error.
+    });
+  };
+
   const saveCurrentDraft = () => {
     const snapshot = noteRef.current;
     if (!snapshot || !dirtyRef.current) return;
     setNote(snapshot);
-    void persistCurrent(snapshot);
+    persistCurrentInBackground(snapshot);
   };
 
   const persistWhenEditorLosesFocus = (event: ReactFocusEvent<HTMLElement>) => {
@@ -1405,7 +1411,7 @@ function App() {
   useEffect(() => {
     if (!dirty || !note) return;
     const timer = window.setTimeout(() => {
-      void persistCurrent();
+      persistCurrentInBackground();
     }, autosaveIntervalSeconds * 1000);
     return () => window.clearTimeout(timer);
   }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
@@ -1565,7 +1571,7 @@ function App() {
       if (target?.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
-        void persistCurrent();
+        persistCurrentInBackground();
       } else if (event.key.toLowerCase() === "s" && event.shiftKey) {
         event.preventDefault();
         void saveAndSync();
@@ -2838,8 +2844,12 @@ function App() {
     if (!current) return;
     const markdown = markdownForEditing(current.content);
     editNote({ content: removeAttachmentReferences(markdown, attachment.id) });
-    await persistCurrent();
-    setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
+    try {
+      await persistCurrent();
+      setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
+    } catch {
+      // persistCurrent already presents the actionable error and preserves the draft.
+    }
   };
 
   const syncDraftNote = () => {
@@ -3488,7 +3498,7 @@ function App() {
       shortcut: "Ctrl + S",
       name: "Save note",
       description: "Save the current note",
-      run: () => void persistCurrent(),
+      run: () => persistCurrentInBackground(),
     },
     {
       id: "quick-switcher",
@@ -3945,7 +3955,7 @@ function App() {
                 </button>
                 <button role="menuitem" disabled={!note || !dirty} onClick={() => {
                   setTitlebarMenu(null);
-                  void persistCurrent();
+                  persistCurrentInBackground();
                 }}>
                   Save file <kbd>Ctrl + S</kbd>
                 </button>
@@ -4396,7 +4406,7 @@ function App() {
             className="save-file-button"
             disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
             title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
-            onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
+            onClick={() => conflictResolution ? void saveResolvedConflict() : persistCurrentInBackground()}
           >
             {saveState === "saving" ? "Encrypting…" : conflictResolution ? "Save merged file" : "Save file"}
           </button>
@@ -4627,7 +4637,7 @@ function App() {
                       noteID={note.id}
                       value={noteMarkdown}
                       onChange={(content) => editNote({ content })}
-                      onSave={() => void persistCurrent()}
+                      onSave={() => persistCurrentInBackground()}
                       onError={(reason) => setError(errorText(reason))}
                       onOpenWikilink={(title) => void openWikilinkTitle(title)}
                       onDecreaseFontSize={decreaseEditorFontSize}
