@@ -16,12 +16,12 @@
   - Test Result: Manual UI testing was blocked by the unavailable desktop display; implementation not started.
   - Commit Hash: Not committed
 
-- [ ] Make encrypted file attachment insertion visible
+- [x] Make encrypted file attachment insertion visible
   - Importance Level: Low
   - Description: Add a note-level or editor-toolbar affordance for encrypted file attachments instead of exposing the workflow only through the File menu.
-  - Test Description: Start attachment insertion from the visible note/editor control, select a file, cancel once, then attach successfully and verify the rendered link and persisted file.
-  - Test Result: Manual UI testing was blocked by the unavailable desktop display; implementation not started.
-  - Commit Hash: Not committed
+  - Test Description: `npm test`; `npm run build`; source-contract coverage for the visible note-level attachment control and responsive placement.
+  - Test Result: PASS — 16 frontend tests passed; production frontend build passed; the control is rendered beside the view tabs and remains disabled while busy. End-to-end file selection was not available without the desktop display.
+  - Commit Hash: `fcc19daeb53f862f555d9f8af26873cf5053b009`
 
 - [ ] Give Object Tree text the available width
   - Importance Level: Low
