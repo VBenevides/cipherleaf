@@ -2,12 +2,12 @@
 
 ## Features
 
-- [ ] Gate release artifacts on automated validation
+- [x] Gate release artifacts on automated validation
   - Importance Level: High
   - Description: Update the release workflow to run Go tests, frontend tests, vet, and a release-build smoke test before artifact jobs.
   - Test Description: Run the tagged release workflow and verify artifact jobs wait for every validation check to pass.
-  - Test Result: Not run
-  - Commit Hash: Not committed
+  - Test Result: PASS — YAML parse passed; with `GOCACHE=/tmp/cipherleaf-go-cache`, `go test ./...`, `npm test --prefix frontend` (16 tests), `npm run build --prefix frontend`, `go vet ./...`, `go build -tags production ./...`, and `git diff --check` passed. The default Go cache was read-only, so the writable cache was used.
+  - Commit Hash: `694521789c3a15c50eecf1f46eee9ac6b7eb9179`
 
 - [x] Add the intended license file
   - Importance Level: Medium
