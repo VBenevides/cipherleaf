@@ -17,7 +17,7 @@
         PackageDisplayName="Cipherleaf"
         PublisherName="CN=vbenevides"
         PublisherDisplayName="vbenevides"
-        Version="0.4.0.0"
+        Version="1.0.0.0"
         PackageDescription="Note taking app with encryption">
         <Capabilities>
             <Capability Name="runFullTrust" />
