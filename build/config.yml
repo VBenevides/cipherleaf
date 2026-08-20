@@ -11,7 +11,7 @@ info:
   description: "Note taking app with encryption"
   copyright: "© 2026 Vinicius Benevides"
   comments: "Built with Go and Wails v3"
-  version: "0.4.0"
+  version: "1.0.0"
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension
   #                               # If not set and Assets.car exists, defaults to "appicon"

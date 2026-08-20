@@ -462,6 +462,9 @@ function App() {
   const [syncNotification, setSyncNotification] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [titleCollapsed, setTitleCollapsed] = useState(() =>
+    window.localStorage.getItem("cipherleaf-title-collapsed") === "true"
+  );
   const [graphOpen, setGraphOpen] = useState(false);
   const [timeTrackingOpen, setTimeTrackingOpen] = useState(false);
   const [activeTimeEntry, setActiveTimeEntry] = useState<TimeEntry | null>(null);
@@ -794,7 +797,8 @@ function App() {
     window.localStorage.setItem("cipherleaf-auto-sync-minutes", String(autoSyncMinutes));
     window.localStorage.setItem("cipherleaf-auto-lock-minutes", String(autoLockMinutes));
     window.localStorage.setItem("cipherleaf-section-default", sectionDefault);
-  }, [autoLockMinutes, autoSyncMinutes, autosaveIntervalSeconds, sectionDefault]);
+    window.localStorage.setItem("cipherleaf-title-collapsed", String(titleCollapsed));
+  }, [autoLockMinutes, autoSyncMinutes, autosaveIntervalSeconds, sectionDefault, titleCollapsed]);
 
   useEffect(() => {
     if (!note || session?.locked) {
@@ -1369,11 +1373,17 @@ function App() {
     });
   };
 
+  const persistCurrentInBackground = (snapshot = noteRef.current) => {
+    void persistCurrent(snapshot).catch(() => {
+      // persistCurrent already presents the actionable error.
+    });
+  };
+
   const saveCurrentDraft = () => {
     const snapshot = noteRef.current;
     if (!snapshot || !dirtyRef.current) return;
     setNote(snapshot);
-    void persistCurrent(snapshot);
+    persistCurrentInBackground(snapshot);
   };
 
   const persistWhenEditorLosesFocus = (event: ReactFocusEvent<HTMLElement>) => {
@@ -1401,7 +1411,7 @@ function App() {
   useEffect(() => {
     if (!dirty || !note) return;
     const timer = window.setTimeout(() => {
-      void persistCurrent();
+      persistCurrentInBackground();
     }, autosaveIntervalSeconds * 1000);
     return () => window.clearTimeout(timer);
   }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
@@ -1561,7 +1571,7 @@ function App() {
       if (target?.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
-        void persistCurrent();
+        persistCurrentInBackground();
       } else if (event.key.toLowerCase() === "s" && event.shiftKey) {
         event.preventDefault();
         void saveAndSync();
@@ -2834,8 +2844,12 @@ function App() {
     if (!current) return;
     const markdown = markdownForEditing(current.content);
     editNote({ content: removeAttachmentReferences(markdown, attachment.id) });
-    await persistCurrent();
-    setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
+    try {
+      await persistCurrent();
+      setFileAttachments((items) => items.filter((item) => item.id !== attachment.id));
+    } catch {
+      // persistCurrent already presents the actionable error and preserves the draft.
+    }
   };
 
   const syncDraftNote = () => {
@@ -3484,7 +3498,7 @@ function App() {
       shortcut: "Ctrl + S",
       name: "Save note",
       description: "Save the current note",
-      run: () => void persistCurrent(),
+      run: () => persistCurrentInBackground(),
     },
     {
       id: "quick-switcher",
@@ -3941,7 +3955,7 @@ function App() {
                 </button>
                 <button role="menuitem" disabled={!note || !dirty} onClick={() => {
                   setTitlebarMenu(null);
-                  void persistCurrent();
+                  persistCurrentInBackground();
                 }}>
                   Save file <kbd>Ctrl + S</kbd>
                 </button>
@@ -4392,7 +4406,7 @@ function App() {
             className="save-file-button"
             disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
             title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
-            onClick={() => conflictResolution ? void saveResolvedConflict() : void persistCurrent()}
+            onClick={() => conflictResolution ? void saveResolvedConflict() : persistCurrentInBackground()}
           >
             {saveState === "saving" ? "Encrypting…" : conflictResolution ? "Save merged file" : "Save file"}
           </button>
@@ -4561,40 +4575,70 @@ function App() {
           </>
         ) : note ? (
           <>
-            <div className="document-heading">
-              <input
-                className="title-input"
-                value={note.title}
-                onChange={(event) => editNote({ title: event.target.value })}
-                placeholder="Untitled"
-                aria-label="Note title"
-              />
-              <p>
-                Edited {new Date(note.updatedAt).toLocaleString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  hourCycle: "h23",
-                })}
-              </p>
-            </div>
-            <div className="view-tabs" role="tablist" aria-label="Editor view">
-              {(["live", "object", "markdown"] as EditorView[]).map((item) => (
+            <div className={`document-heading ${titleCollapsed ? "is-collapsed" : ""}`}>
+              <div className="document-heading-main">
                 <button
-                  key={item}
-                  role="tab"
-                  aria-selected={view === item}
-                  className={view === item ? "active" : ""}
-                  onClick={() => setEditorView(item)}
+                  type="button"
+                  className="icon-button document-title-toggle disclosure-chevron"
+                  onClick={() => setTitleCollapsed((current) => !current)}
+                  aria-label={titleCollapsed ? "Expand title" : "Collapse title"}
+                  aria-expanded={!titleCollapsed}
+                  title={titleCollapsed ? "Expand title" : "Collapse title"}
                 >
-                  {item === "live"
-                    ? "Live Preview"
-                    : item === "object"
-                      ? "Object Tree"
-                      : "Markdown"}
                 </button>
-              ))}
+                {titleCollapsed && <span className="collapsed-note-title">{note.title || "Untitled"}</span>}
+                {!titleCollapsed && (
+                  <div className="document-heading-content">
+                    <input
+                      className="title-input"
+                      value={note.title}
+                      onChange={(event) => editNote({ title: event.target.value })}
+                      placeholder="Untitled"
+                      aria-label="Note title"
+                    />
+                    <p>
+                      Edited {new Date(note.updatedAt).toLocaleString("en-US", {
+                        month: "long",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hourCycle: "h23",
+                      })}
+                    </p>
+                  </div>
+                )}
+              </div>
+              {!titleCollapsed && (
+                <div className="document-heading-toolbar">
+                  <div className="view-tabs" role="tablist" aria-label="Editor view">
+                    {(["live", "object", "markdown"] as EditorView[]).map((item) => (
+                      <button
+                        key={item}
+                        role="tab"
+                        aria-selected={view === item}
+                        className={view === item ? "active" : ""}
+                        onClick={() => setEditorView(item)}
+                      >
+                        {item === "live"
+                          ? "Live Preview"
+                          : item === "object"
+                            ? "Object Tree"
+                            : "Markdown"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="document-heading-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => void attachFile()}
+                    >
+                      Attach encrypted file…
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <Suspense fallback={<EditorLoading />}>
               <div className="document-body">
@@ -4605,7 +4649,7 @@ function App() {
                       noteID={note.id}
                       value={noteMarkdown}
                       onChange={(content) => editNote({ content })}
-                      onSave={() => void persistCurrent()}
+                      onSave={() => persistCurrentInBackground()}
                       onError={(reason) => setError(errorText(reason))}
                       onOpenWikilink={(title) => void openWikilinkTitle(title)}
                       onDecreaseFontSize={decreaseEditorFontSize}

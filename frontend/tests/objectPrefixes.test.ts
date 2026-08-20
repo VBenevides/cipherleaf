@@ -24,6 +24,39 @@ test("replaces exclusive object markers without changing indentation", () => {
   assert.equal(normalizeStackedExclusiveObjectPrefix("1. -[ ] Task"), "- [ ] Task");
 });
 
+test("rewrites every supported object type without retaining old markers", () => {
+  const sources = [
+    ["plain", "  Task", "  ", "Task"],
+    ["heading", "# Heading", "", "Heading"],
+    ["blockquote", "> Quote", "", "Quote"],
+    ["bullet", "* Bullet", "", "Bullet"],
+    ["numbered", "3. Numbered", "", "Numbered"],
+    ["checklist", "* [ ] Task", "", "Task"],
+    ["nested blockquote and bullet", "> * Task", "", "Task"],
+  ] as const;
+  const targets = [
+    ["heading", "# "],
+    ["checklist", "* [ ] "],
+    ["bullet", "* "],
+    ["numbered", "1. "],
+    ["blockquote", "> "],
+  ] as const;
+
+  for (const [sourceName, source, indentation, text] of sources) {
+    for (const [targetName, target] of targets) {
+      const expected = `${indentation}${target}${text}`;
+      assert.equal(
+        replaceExclusiveObjectPrefix(source, target),
+        expected,
+        `${sourceName} to ${targetName}`,
+      );
+    }
+  }
+
+  assert.equal(replaceExclusiveObjectPrefix(">> Task", "* "), "  * Task");
+  assert.equal(replaceExclusiveObjectPrefix("  # Heading", "* "), "  * Heading");
+});
+
 test("bare checkbox prefixes have a removable caret boundary", () => {
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.match(editor, /object\.barePrefixSize > 0[\s\S]*addHiddenRange\(syntaxFrom, bracketFrom/);

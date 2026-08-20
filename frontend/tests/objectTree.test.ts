@@ -612,3 +612,18 @@ test("tracks blank object lines by line number", () => {
   assert.equal(document.byLine.get(2)?.text, "");
   assert.equal(document.byLine.get(2)?.lineNumber, 2);
 });
+
+test("keeps Object Tree actions accessible and text-first on narrow panels", () => {
+  const component = readFileSync(new URL("../src/ObjectTreeView.tsx", import.meta.url), "utf8");
+  const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+
+  assert.match(component, /aria-label=\{`Actions for/);
+  assert.match(component, /aria-label=\{`Edit text for/);
+  assert.match(component, /Change type for/);
+  assert.match(component, /Add child/);
+  assert.match(component, /Include is unavailable because the document model has no include operation/);
+  assert.match(component, /Delete/);
+  assert.match(style, /grid-template-columns: 22px max-content minmax\(0, 1fr\)/);
+  assert.match(style, /\.object-tree-metadata/);
+  assert.match(style, /@media \(max-width: 600px\)[\s\S]*?\.object-tree-view/);
+});

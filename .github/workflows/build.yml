@@ -50,9 +50,53 @@ jobs:
 
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
 
+  test:
+    name: Release checks
+    needs: validate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Run frontend tests
+        run: npm test --prefix frontend
+
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Build production Go packages
+        run: go build -tags production ./...
+
   linux:
     name: Linux amd64
-    needs: validate
+    needs:
+      - validate
+      - test
     runs-on: ubuntu-24.04
 
     env:
@@ -96,7 +140,9 @@ jobs:
 
   windows:
     name: Windows amd64
-    needs: validate
+    needs:
+      - validate
+      - test
     runs-on: windows-latest
 
     env:
@@ -153,6 +199,10 @@ jobs:
         with:
           path: release
           merge-multiple: true
+
+      - name: Create SHA-256 checksums
+        working-directory: release
+        run: sha256sum cipherleaf-* > SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

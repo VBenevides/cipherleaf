@@ -16,6 +16,12 @@ import {
 
 const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 
+test("section disclosures use shared chevrons", () => {
+  assert.match(editor, /cm-live-toggle-button[\s\S]*disclosure-chevron/);
+  assert.match(editor, /toolbar-toggle disclosure-chevron is-expanded/);
+  assert.doesNotMatch(editor, /[▸▾]/);
+});
+
 test("renders safe Markdown citations without treating images as links", () => {
   assert.deepEqual(markdownCitations("See [Cipherleaf](https://cipherleaf.test/docs)."), [{
     label: "Cipherleaf",
@@ -44,9 +50,24 @@ test("edits a citation in one themed dialog", () => {
   assert.doesNotMatch(editor, /window\.prompt/);
 });
 
-test("stores ASCII arrows as Unicode arrows", () => {
+test("normalizes ASCII arrows in prose", () => {
   assert.equal(normalizeArrowText("first -> second -> third"), "first → second → third");
   assert.equal(normalizeArrowText("already → converted"), "already → converted");
+});
+
+test("leaves arrows inside fenced code unchanged", () => {
+  const markdown = "```ts\nconst result = first -> second;\n```\n\nafter -> code";
+  assert.equal(
+    normalizeArrowText(markdown),
+    "```ts\nconst result = first -> second;\n```\n\nafter → code",
+  );
+});
+
+test("normalizes link labels without changing destinations", () => {
+  assert.equal(
+    normalizeArrowText("[first -> second](https://example.test/a->b)"),
+    "[first → second](https://example.test/a->b)",
+  );
 });
 
 test("recognizes a three-dash horizontal rule line", () => {
@@ -112,4 +133,12 @@ test("inserts pasted images without blank lines", () => {
     to: 8,
     insert: `\n${image}\n`,
   });
+});
+
+test("keeps pasted images at the supplied object indentation", () => {
+  const image = attachmentMarkdown("b".repeat(32));
+  assert.equal(
+    insertAttachmentMarkdown("* parent", 8, image, "  ").insert,
+    `\n  ${image}`,
+  );
 });
