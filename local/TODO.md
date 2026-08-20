@@ -34,9 +34,9 @@
   - Test Result: PASS — `[ "$(tr -d '[:space:]' < VERSION)" = 1.0.0 ]`; `git diff --check` passed.
   - Commit Hash: `b9e80d751c9aa88b08a35996de5727858fe434fc`
 
-- [ ] Normalize platform metadata versions
+- [x] Normalize platform metadata versions
   - Importance Level: High
   - Description: Use one release version source and regenerate or update all installer and application metadata; current metadata contains `0.4.0`, `0.5.0`, and `0.1.0`.
   - Test Description: Inspect generated Linux, macOS, Windows, MSIX, and frontend metadata and verify every version matches the release source.
-  - Test Result: Not run
-  - Commit Hash: Not committed
+  - Test Result: PASS — metadata assertion script passed; `npm test --prefix frontend` passed (16 tests); `git diff --check` passed.
+  - Commit Hash: `5d201c329fd7f2d9d827bf9b72d438c611c053f7`
