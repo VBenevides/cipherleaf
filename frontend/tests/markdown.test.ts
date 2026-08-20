@@ -16,6 +16,12 @@ import {
 
 const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 
+test("section disclosures use shared chevrons", () => {
+  assert.match(editor, /cm-live-toggle-button[\s\S]*disclosure-chevron/);
+  assert.match(editor, /toolbar-toggle disclosure-chevron is-expanded/);
+  assert.doesNotMatch(editor, /[▸▾]/);
+});
+
 test("renders safe Markdown citations without treating images as links", () => {
   assert.deepEqual(markdownCitations("See [Cipherleaf](https://cipherleaf.test/docs)."), [{
     label: "Cipherleaf",

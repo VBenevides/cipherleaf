@@ -4579,14 +4579,14 @@ function App() {
               <div className="document-heading-main">
                 <button
                   type="button"
-                  className="icon-button document-title-toggle"
+                  className="icon-button document-title-toggle disclosure-chevron"
                   onClick={() => setTitleCollapsed((current) => !current)}
                   aria-label={titleCollapsed ? "Expand title" : "Collapse title"}
                   aria-expanded={!titleCollapsed}
                   title={titleCollapsed ? "Expand title" : "Collapse title"}
                 >
-                  {titleCollapsed ? "▸" : "▾"}
                 </button>
+                {titleCollapsed && <span className="collapsed-note-title">{note.title || "Untitled"}</span>}
                 {!titleCollapsed && (
                   <div className="document-heading-content">
                     <input

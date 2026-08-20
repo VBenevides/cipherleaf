@@ -623,6 +623,7 @@ class QuoteToggleWidget extends WidgetType {
     button.type = "button";
     button.className = [
       "cm-live-toggle-button",
+      this.empty ? "" : "disclosure-chevron",
       this.collapsed ? "is-collapsed" : "is-expanded",
       this.empty ? "is-empty" : "",
     ].filter(Boolean).join(" ");
@@ -645,7 +646,7 @@ class QuoteToggleWidget extends WidgetType {
         ? "Expand section"
         : "Collapse section";
 
-    button.textContent = this.empty ? "•" : this.collapsed ? "▸" : "▾";
+    button.textContent = this.empty ? "•" : "";
 
     if (this.empty) {
       button.disabled = true;
@@ -3133,9 +3134,7 @@ export default function LiveMarkdownEditor({
                   runWithEditor((editor) => prefixSelectedLines(editor, "> "));
                 }}
               >
-                <span className="toolbar-toggle" aria-hidden="true">
-                  ▾
-                </span>
+                <span className="toolbar-toggle disclosure-chevron is-expanded" aria-hidden="true" />
               </button>
               <button
                 type="button"

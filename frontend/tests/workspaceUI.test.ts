@@ -91,10 +91,15 @@ test("editor font selection supports installed fonts and .ttf files", () => {
 test("note titles can be collapsed and restored", () => {
   assert.match(app, /cipherleaf-title-collapsed/);
   assert.match(app, /aria-label=\{titleCollapsed \? "Expand title" : "Collapse title"\}/);
-  assert.match(app, /titleCollapsed \? "▸" : "▾"/);
+  assert.match(app, /titleCollapsed && <span className="collapsed-note-title">\{note\.title \|\| "Untitled"\}<\/span>/);
   assert.match(app, /document-heading-main[\s\S]*?view-tabs/);
   assert.match(app, /!titleCollapsed && \([\s\S]*?className="view-tabs"/);
   assert.match(style, /\.document-heading\.is-collapsed/);
+  assert.match(app, /document-title-toggle disclosure-chevron/);
+  assert.match(style, /\.disclosure-chevron::before,[\s\S]*transform: rotate\(-45deg\)/);
+  assert.match(style, /\.disclosure-chevron\[aria-expanded="true"\]::before,[\s\S]*transform: rotate\(45deg\)/);
+  assert.match(style, /\.document-heading\.is-collapsed \.document-heading-main \{[\s\S]*align-items: center/);
+  assert.match(style, /\.collapsed-note-title \{[\s\S]*font-size: 14px[\s\S]*line-height: 32px/);
   assert.match(style, /\.document-heading:not\(\.is-collapsed\)/);
   assert.match(style, /\.document-heading-toolbar > \.view-tabs/);
   assert.match(style, /\.document-heading-toolbar \{[\s\S]*margin-top: 8px/);
