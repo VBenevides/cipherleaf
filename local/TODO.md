@@ -22,8 +22,9 @@
   - Importance Level: Medium
   - Description: Publish SHA-256 checksums and signed or platform-signed artifacts with releases.
   - Test Description: Verify published checksums and validate each available artifact signature.
-  - Test Result: Not run
-  - Commit Hash: Not committed
+  - Test Result: PARTIAL — YAML parse and a local `sha256sum --check` simulation passed; signature validation was not run.
+  - Commit Hash: `73c6a892388ce09828310577defc75d99cdcc793`
+  - Blocked: Signing requires configured certificate/key credentials and a platform-signing decision; none are available in this environment.
 
 ## Bug Fixes
 
