@@ -1,7 +1,7 @@
 # Cipherleaf
 
 <p align="center">
-  <img src="frontend/public/cipherleaf-logo.png" alt="Cipherleaf app icon" width="160">
+  <img src="assets/logo_alpha_background.png" alt="Cipherleaf app icon" width="160">
 </p>
 
 <p align="center">

@@ -11,6 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Events } from "@wailsio/runtime";
+import logo from "../../assets/logo_alpha_background.png";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type {
   AttachmentInfo,
@@ -3634,7 +3635,7 @@ function App() {
   if (session === null) {
     return (
       <main className="loading-screen">
-        <div className="brand-glyph"><img src="/cipherleaf-logo.png" alt="" /></div>
+        <div className="brand-glyph"><img src={logo} alt="" /></div>
         <p>Preparing your vault…</p>
       </main>
     );
@@ -3645,7 +3646,7 @@ function App() {
       <main className="welcome-screen">
         <section className="welcome-card">
           <div className="brand-row">
-            <div className="brand-glyph"><img src="/cipherleaf-logo.png" alt="" /></div>
+            <div className="brand-glyph"><img src={logo} alt="" /></div>
             <span>Cipherleaf</span>
           </div>
           <p className="eyebrow">Local-first · end-to-end encrypted</p>
@@ -4079,7 +4080,7 @@ function App() {
       </header>
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
-          <div className="brand-glyph small"><img src="/cipherleaf-logo.png" alt="" /></div>
+          <div className="brand-glyph small"><img src={logo} alt="" /></div>
           <div>
             <strong>Cipherleaf</strong>
             <span>{folderName(session.path)}</span>
