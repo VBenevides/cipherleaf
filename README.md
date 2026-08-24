@@ -4,12 +4,11 @@
   <img src="frontend/public/cipherleaf-logo.png" alt="Cipherleaf app icon" width="160">
 </p>
 
-Cipherleaf is a local-first, encrypted Markdown notebook for desktop. It pairs
-a Go backend with a React/CodeMirror interface through Wails v3 and can sync an
-encrypted vault through a private GitHub repository over SSH.
-
-> Cipherleaf is under active development. GitHub synchronization is
-> experimental and should not replace an independent backup.
+Cipherleaf is open-source software licensed under the [MIT License](LICENSE).
+It is a local-first, encrypted Markdown notebook for desktop. It pairs a Go
+backend with a React/CodeMirror interface through Wails v3 and supports Git
+synchronization of an encrypted vault through a private GitHub repository over
+SSH.
 
 ## Main features
 
