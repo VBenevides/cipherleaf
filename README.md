@@ -7,7 +7,8 @@
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/VBenevides/cipherleaf"></a>
   <a href="https://github.com/VBenevides/cipherleaf/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/VBenevides/cipherleaf?sort=semver"></a>
-  <a href="https://github.com/VBenevides/cipherleaf/actions/workflows/security.yml"><img alt="Security analysis" src="https://github.com/VBenevides/cipherleaf/actions/workflows/security.yml/badge.svg"></a>
+  <a href="https://github.com/VBenevides/cipherleaf/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/VBenevides/cipherleaf/actions/workflows/codeql.yml/badge.svg"></a>
+  <a href="https://github.com/VBenevides/cipherleaf/actions/workflows/security.yml"><img alt="Security Analysis" src="https://github.com/VBenevides/cipherleaf/actions/workflows/security.yml/badge.svg"></a>
 </p>
 
 Cipherleaf is open-source software licensed under the [MIT License](LICENSE).
