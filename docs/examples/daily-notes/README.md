@@ -7,14 +7,21 @@ existing vault for a documentation capture.
 
 ## Screenshots
 
-- [01 — Daily-note settings](screenshots/01-daily-settings.png) — configure
-  the title format, folder, and template note.
-- [02 — Template configured](screenshots/02-template-configured.png) — select
-  the fake `Field Notes` template.
-- [03 — Calendar](screenshots/03-calendar.png) — choose a date and open its
-  daily note.
-- [04 — Generated daily note](screenshots/04-daily-note.png) — the selected
-  date and rendered template content are visible.
+![Daily-note settings](screenshots/01-daily-settings.png)
+
+Configure the title format, folder, and template note.
+
+![Configured template](screenshots/02-template-configured.png)
+
+Select the fake `Field Notes` template.
+
+![Calendar](screenshots/03-calendar.png)
+
+Choose a date and open its daily note.
+
+![Generated daily note](screenshots/04-daily-note.png)
+
+The selected date and rendered template content are visible.
 
 ## Steps
 

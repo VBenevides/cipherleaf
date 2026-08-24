@@ -7,16 +7,25 @@ existing vault for a documentation capture.
 
 ## Screenshots
 
-- [01 — Folder prompt](screenshots/01-folder-prompt.png) — enter a new folder
-  name.
-- [02 — Folder created](screenshots/02-folder-created.png) — the selected
-  folder is ready for notes.
-- [03 — Note created](screenshots/03-note-created.png) — the new note opens in
-  the live editor.
-- [04 — Note editor](screenshots/04-note-editor.png) — fake Markdown is saved
-  locally in the encrypted vault.
-- [05 — Markdown view](screenshots/05-markdown-view.png) — compare raw and
-  portable Markdown.
+![New folder prompt](screenshots/01-folder-prompt.png)
+
+Enter a new folder name.
+
+![Folder created](screenshots/02-folder-created.png)
+
+The selected folder is ready for notes.
+
+![New note](screenshots/03-note-created.png)
+
+The new note opens in the live editor.
+
+![Saved note editor](screenshots/04-note-editor.png)
+
+Fake Markdown is saved locally in the encrypted vault.
+
+![Markdown view](screenshots/05-markdown-view.png)
+
+Compare raw and portable Markdown.
 
 ## Steps
 

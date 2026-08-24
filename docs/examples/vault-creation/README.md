@@ -6,14 +6,25 @@ existing vault.
 
 ## Screenshots
 
-- [01 — Welcome](screenshots/01-welcome.png) — choose **Create a new vault**.
-- [02 — Generated secret](screenshots/02-generated-secret.png) — the app
-  displays a one-time 256-bit vault secret.
-- [03 — New demo vault](screenshots/03-new-demo-vault.png) — the fresh vault is
-  available from the locked welcome window.
-- [04 — Unlock vault](screenshots/04-unlock-vault.png) — enter the vault secret.
-- [05 — Empty encrypted vault](screenshots/05-empty-encrypted-vault.png) — the
-  unlocked workspace is ready for the first note.
+![Welcome window](screenshots/01-welcome.png)
+
+Choose **Create a new vault**.
+
+![Generated secret window](screenshots/02-generated-secret.png)
+
+The app displays a one-time 256-bit vault secret.
+
+![New demo vault](screenshots/03-new-demo-vault.png)
+
+The fresh vault is available from the locked welcome window.
+
+![Unlock vault](screenshots/04-unlock-vault.png)
+
+Enter the vault secret.
+
+![Empty encrypted vault](screenshots/05-empty-encrypted-vault.png)
+
+The unlocked workspace is ready for the first note.
 
 The generated secret in screenshot 02 belongs to an unused disposable capture
 and must never be reused. Do not capture or publish a real user's vault
