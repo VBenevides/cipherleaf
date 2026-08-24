@@ -20,3 +20,10 @@ Never use or modify an existing vault, and never include real user secrets,
 credentials, repository URLs, or personal data. The vault-creation example may
 show the generated secret from its unused disposable capture to explain the
 creation step; never reuse that secret.
+
+## Scope
+
+The six flows above cover the primary onboarding and daily-use tasks. Keep
+attachments, import/export, trash/history, and themes in `USER-GUIDE.md` for
+now. Add a dedicated screenshot flow only when user feedback shows that a
+secondary feature needs visual help.
