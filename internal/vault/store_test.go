@@ -198,6 +198,17 @@ func TestFolderPasswordValidationAndLegacyVerifierRejection(t *testing.T) {
 	if store.manifest.Folders[index].LockPasswordHash != legacy {
 		t.Fatal("rejected folder verifier was changed")
 	}
+	legacy = strings.Repeat("a", 64)
+	store.manifest.Folders[index].LockPasswordHash = legacy
+	if err := store.saveManifestLocked(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckFolderPassword(folder.ID, "old"); err == nil {
+		t.Fatal("unsalted legacy folder verifier was accepted")
+	}
+	if store.manifest.Folders[index].LockPasswordHash != legacy {
+		t.Fatal("rejected folder verifier was changed")
+	}
 }
 
 func TestParentFolderLocksNestedFolders(t *testing.T) {

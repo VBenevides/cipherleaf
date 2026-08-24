@@ -657,18 +657,6 @@ func (s *Store) CheckFolderPassword(id, password string) error {
 	if !verifyFolderPassword(s.manifest.Folders[index].LockPasswordHash, password) {
 		return errors.New("folder password is incorrect")
 	}
-	if !strings.HasPrefix(s.manifest.Folders[index].LockPasswordHash, folderPasswordVerifierPrefix) {
-		verifier, err := deriveFolderPasswordVerifier(password)
-		if err != nil {
-			return err
-		}
-		original := s.manifest.Folders[index].LockPasswordHash
-		s.manifest.Folders[index].LockPasswordHash = verifier
-		if err := s.saveManifestLocked(); err != nil {
-			s.manifest.Folders[index].LockPasswordHash = original
-			return err
-		}
-	}
 	if s.authorizedFolders == nil {
 		s.authorizedFolders = make(map[string]struct{})
 	}
@@ -4748,13 +4736,7 @@ func verifyFolderPassword(verifier, password string) bool {
 		defer secure.Zero(actual)
 		return subtle.ConstantTimeCompare(actual, expected) == 1
 	}
-	// Backward compatibility for folders locked before salted verifiers existed.
-	expected, err := hex.DecodeString(verifier)
-	if err != nil || len(expected) != sha256.Size {
-		return false
-	}
-	legacyHash := sha256.Sum256([]byte(password))
-	return subtle.ConstantTimeCompare(legacyHash[:], expected) == 1
+	return false
 }
 
 func extractTags(content string) []string {
