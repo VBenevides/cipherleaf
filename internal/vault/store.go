@@ -43,7 +43,6 @@ const (
 	maxFolderRunes               = 120
 	folderPasswordSaltBytes      = 16
 	folderPasswordVerifierPrefix = "argon2id-v1:"
-	legacyFolderVerifierPrefix   = "sha256-salt-v1:"
 )
 
 var (
@@ -657,18 +656,6 @@ func (s *Store) CheckFolderPassword(id, password string) error {
 	}
 	if !verifyFolderPassword(s.manifest.Folders[index].LockPasswordHash, password) {
 		return errors.New("folder password is incorrect")
-	}
-	if !strings.HasPrefix(s.manifest.Folders[index].LockPasswordHash, folderPasswordVerifierPrefix) {
-		verifier, err := deriveFolderPasswordVerifier(password)
-		if err != nil {
-			return err
-		}
-		original := s.manifest.Folders[index].LockPasswordHash
-		s.manifest.Folders[index].LockPasswordHash = verifier
-		if err := s.saveManifestLocked(); err != nil {
-			s.manifest.Folders[index].LockPasswordHash = original
-			return err
-		}
 	}
 	if s.authorizedFolders == nil {
 		s.authorizedFolders = make(map[string]struct{})
@@ -4749,37 +4736,7 @@ func verifyFolderPassword(verifier, password string) bool {
 		defer secure.Zero(actual)
 		return subtle.ConstantTimeCompare(actual, expected) == 1
 	}
-	if strings.HasPrefix(verifier, legacyFolderVerifierPrefix) {
-		payload := strings.TrimPrefix(verifier, legacyFolderVerifierPrefix)
-		parts := strings.Split(payload, ":")
-		if len(parts) != 2 {
-			return false
-		}
-		salt, err := base64.RawURLEncoding.DecodeString(parts[0])
-		if err != nil || len(salt) != folderPasswordSaltBytes {
-			return false
-		}
-		expected, err := hex.DecodeString(parts[1])
-		if err != nil || len(expected) != sha256.Size {
-			return false
-		}
-		return subtle.ConstantTimeCompare(saltedFolderPasswordHash(password, salt), expected) == 1
-	}
-
-	// Backward compatibility for folders locked before salted verifiers existed.
-	expected, err := hex.DecodeString(verifier)
-	if err != nil || len(expected) != sha256.Size {
-		return false
-	}
-	legacyHash := sha256.Sum256([]byte(password))
-	return subtle.ConstantTimeCompare(legacyHash[:], expected) == 1
-}
-
-func saltedFolderPasswordHash(password string, salt []byte) []byte {
-	hasher := sha256.New()
-	_, _ = hasher.Write(salt)
-	_, _ = hasher.Write([]byte(password))
-	return hasher.Sum(nil)
+	return false
 }
 
 func extractTags(content string) []string {

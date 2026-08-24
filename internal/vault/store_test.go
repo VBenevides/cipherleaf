@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -175,7 +173,7 @@ func TestLockedFolderRequiresBackendAuthorization(t *testing.T) {
 	}
 }
 
-func TestFolderPasswordValidationAndLegacyMigration(t *testing.T) {
+func TestFolderPasswordValidationAndLegacyVerifierRejection(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF = secure.KDFParams{Time: 1, Memory: 8 * 1024, Threads: 2}
 	t.Cleanup(func() { defaultKDF = previous })
@@ -187,19 +185,29 @@ func TestFolderPasswordValidationAndLegacyMigration(t *testing.T) {
 	if _, err := store.LockFolder(folder.ID, "short"); err == nil {
 		t.Fatal("short folder password accepted")
 	}
-	salt := []byte("0123456789abcdef")
-	legacy := legacyFolderVerifierPrefix + base64.RawURLEncoding.EncodeToString(salt) + ":" + hex.EncodeToString(saltedFolderPasswordHash("old", salt))
+	legacy := "sha256-salt-v1:0123456789abcdef:" + strings.Repeat("a", 64)
 	index, _ := store.findFolderLocked(folder.ID)
 	store.manifest.Folders[index].Locked = true
 	store.manifest.Folders[index].LockPasswordHash = legacy
 	if err := store.saveManifestLocked(); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CheckFolderPassword(folder.ID, "old"); err != nil {
+	if err := store.CheckFolderPassword(folder.ID, "old"); err == nil {
+		t.Fatal("salted legacy folder verifier was accepted")
+	}
+	if store.manifest.Folders[index].LockPasswordHash != legacy {
+		t.Fatal("rejected folder verifier was changed")
+	}
+	legacy = strings.Repeat("a", 64)
+	store.manifest.Folders[index].LockPasswordHash = legacy
+	if err := store.saveManifestLocked(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(store.manifest.Folders[index].LockPasswordHash, folderPasswordVerifierPrefix) {
-		t.Fatal("legacy folder verifier was not migrated")
+	if err := store.CheckFolderPassword(folder.ID, "old"); err == nil {
+		t.Fatal("unsalted legacy folder verifier was accepted")
+	}
+	if store.manifest.Folders[index].LockPasswordHash != legacy {
+		t.Fatal("rejected folder verifier was changed")
 	}
 }
 

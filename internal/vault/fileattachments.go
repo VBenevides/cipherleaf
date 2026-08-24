@@ -16,6 +16,10 @@ func encodeFileAttachment(info AttachmentInfo, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxInt := int(^uint(0) >> 1)
+	if uint64(len(metadata)) > uint64(^uint32(0)) || len(metadata) > maxInt-4 || len(data) > maxInt-4-len(metadata) {
+		return nil, errors.New("file attachment payload is too large")
+	}
 	payload := make([]byte, 4+len(metadata)+len(data))
 	binary.BigEndian.PutUint32(payload, uint32(len(metadata)))
 	copy(payload[4:], metadata)
