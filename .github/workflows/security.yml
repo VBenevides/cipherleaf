@@ -1,62 +1,60 @@
-name: Security analysis
+name: Dependency security
 
 on:
   push:
-    branches: [main]
+    branches: [**]
   pull_request:
     branches: [main]
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: "10 0 * * 1"
 
 permissions:
-  actions: read
   contents: read
-  security-events: write
 
 jobs:
-  codeql:
-    name: CodeQL (${{ matrix.language }})
+  security:
+    name: Dependencies and SBOM
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - language: go
-            build-mode: manual
-          - language: javascript-typescript
-            build-mode: none
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install Go build dependencies
-        if: matrix.language == 'go'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: matrix.language == 'go'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend dependencies
-        if: matrix.language == 'go'
-        run: npm ci --prefix frontend
+      - name: Install govulncheck
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
-      - name: Build frontend
-        if: matrix.language == 'go'
-        run: npm run build --prefix frontend
+      - name: Run govulncheck
+        run: ${{ runner.temp }}/bin/govulncheck ./...
 
-      - uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      - name: Generate SBOM
+        id: sbom
+        uses: anchore/sbom-action@43a17d6e7add2b5535efe4dcae9952337c479a93 # v0.20.11
         with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
+          path: .
+          format: spdx-json
+          output-file: ${{ runner.temp }}/SBOM.spdx.json
+          artifact-name: cipherleaf-sbom
+          upload-release-assets: false
 
-      - name: Build Go packages
-        if: matrix.language == 'go'
-        run: go build -tags production ./...
-
-      - uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
-        with:
-          category: /language:${{ matrix.language }}
+      - name: Validate SBOM
+        env:
+          SBOM_FILE: ${{ runner.temp }}/SBOM.spdx.json
+        run: |
+          test -s "$SBOM_FILE"
+          jq -e '(.spdxVersion | strings) and (.packages | type == "array" and length > 0)' "$SBOM_FILE" >/dev/null
