@@ -6,23 +6,33 @@ existing vault.
 
 ## Screenshots
 
-![Welcome window](screenshots/01-welcome.png)
+### 1. Choose **Create a new vault**
+
+<img src="screenshots/01-welcome.png" alt="Welcome window" width="640">
 
 Choose **Create a new vault**.
 
-![Generated secret window](screenshots/02-generated-secret.png)
+### 2. Save the generated secret
+
+<img src="screenshots/02-generated-secret.png" alt="Generated secret window" width="640">
 
 The app displays a one-time 256-bit vault secret.
 
-![New demo vault](screenshots/03-new-demo-vault.png)
+### 3. Open the new demo vault
+
+<img src="screenshots/03-new-demo-vault.png" alt="New demo vault" width="640">
 
 The fresh vault is available from the locked welcome window.
 
-![Unlock vault](screenshots/04-unlock-vault.png)
+### 4. Unlock the vault
+
+<img src="screenshots/04-unlock-vault.png" alt="Unlock vault" width="640">
 
 Enter the vault secret.
 
-![Empty encrypted vault](screenshots/05-empty-encrypted-vault.png)
+### 5. Start with an empty encrypted vault
+
+<img src="screenshots/05-empty-encrypted-vault.png" alt="Empty encrypted vault" width="640">
 
 The unlocked workspace is ready for the first note.
 

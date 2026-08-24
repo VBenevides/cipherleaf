@@ -9,12 +9,16 @@ vault during documentation work.
 
 ## Screenshots
 
-![GitHub settings](screenshots/01-github-settings.png)
+### 1. Configure GitHub sync
+
+<img src="screenshots/01-github-settings.png" alt="GitHub settings" width="640">
 
 The real Vault Settings window is filled with fake repository and key paths.
 The status remains **Not linked**.
 
-![GitHub privacy warning](screenshots/02-github-privacy-warning.png)
+### 2. Review the privacy warning
+
+<img src="screenshots/02-github-privacy-warning.png" alt="GitHub privacy warning" width="640">
 
 The form requires a private-repository confirmation and warns that Git
 history still reveals commit timing, object count, and ciphertext size.

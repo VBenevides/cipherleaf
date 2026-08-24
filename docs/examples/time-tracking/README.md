@@ -7,23 +7,33 @@ vault for a documentation capture.
 
 ## Screenshots
 
-![Time tracking view](screenshots/01-time-tracking.png)
+### 1. Open time tracking
+
+<img src="screenshots/01-time-tracking.png" alt="Time tracking view" width="640">
 
 Open **Time tracking** to see the week view and the empty entry form.
 
-![Running timer](screenshots/02-timer-running.png)
+### 2. Start a timer
+
+<img src="screenshots/02-timer-running.png" alt="Running timer" width="640">
 
 Enter the fake task `Documentation review` and choose **Start timer**.
 
-![Finish confirmation](screenshots/03-finish-confirmation.png)
+### 3. Finish the timer
+
+<img src="screenshots/03-finish-confirmation.png" alt="Finish confirmation" width="640">
 
 Choose **Finish “Documentation review”**, then confirm **Finish timer**.
 
-![Corrected entry](screenshots/04-corrected-entry.png)
+### 4. Correct the entry
+
+<img src="screenshots/04-corrected-entry.png" alt="Corrected entry" width="640">
 
 Edit the completed entry and save the fake name `Documentation review (corrected)`.
 
-![Time dashboard](screenshots/05-dashboard.png)
+### 5. Review the dashboard
+
+<img src="screenshots/05-dashboard.png" alt="Time dashboard" width="640">
 
 Open **Dashboard** to review the tracked total and daily chart.
 

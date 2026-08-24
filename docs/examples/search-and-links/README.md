@@ -7,23 +7,33 @@ existing vault for a documentation capture.
 
 ## Screenshots
 
-![Markdown links](screenshots/01-markdown-links.png)
+### 1. Add a wikilink and tag
+
+<img src="screenshots/01-markdown-links.png" alt="Markdown links" width="640">
 
 The raw note contains a wikilink and tag.
 
-![Live links and tags](screenshots/02-live-links-tags.png)
+### 2. Open the link in Live Preview
+
+<img src="screenshots/02-live-links-tags.png" alt="Live links and tags" width="640">
 
 The link is clickable and the tag is visible in the workspace.
 
-![Tag search](screenshots/03-tag-search.png)
+### 3. Search by tag
+
+<img src="screenshots/03-tag-search.png" alt="Tag search" width="640">
 
 Search `tag:research`.
 
-![Text search](screenshots/04-text-search.png)
+### 4. Search note text
+
+<img src="screenshots/04-text-search.png" alt="Text search" width="640">
 
 Search `research` and review the matching note snippet.
 
-![Link target](screenshots/05-link-target.png)
+### 5. Review the link target
+
+<img src="screenshots/05-link-target.png" alt="Link target" width="640">
 
 The linked note opens with a backlink to `Project Atlas`.
 
