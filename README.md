@@ -17,6 +17,9 @@ backend with a React/CodeMirror interface through Wails v3 and supports Git
 synchronization of an encrypted vault through a private GitHub repository over
 SSH.
 
+For the product value, security guarantees, and user workflows, see the
+[Cipherleaf documentation](docs/README.md).
+
 ## Main features
 
 - Local-first encrypted vaults with manual locking, 15-minute automatic
