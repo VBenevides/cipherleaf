@@ -1,4 +1,4 @@
-# First vault
+# Vault creation
 
 Create and protect a new Cipherleaf vault, then lock and unlock it. Use a new
 disposable vault for this walkthrough. Do not open, edit, or overwrite an
@@ -7,14 +7,17 @@ existing vault.
 ## Screenshots
 
 - [01 — Welcome](screenshots/01-welcome.png) — choose **Create a new vault**.
-- [02 — New demo vault](screenshots/02-new-demo-vault.png) — the fresh vault is
+- [02 — Generated secret](screenshots/02-generated-secret.png) — the app
+  displays a one-time 256-bit vault secret.
+- [03 — New demo vault](screenshots/03-new-demo-vault.png) — the fresh vault is
   available from the locked welcome window.
-- [03 — Unlock vault](screenshots/03-unlock-vault.png) — enter the vault secret.
-- [04 — Empty encrypted vault](screenshots/04-empty-encrypted-vault.png) — the
+- [04 — Unlock vault](screenshots/04-unlock-vault.png) — enter the vault secret.
+- [05 — Empty encrypted vault](screenshots/05-empty-encrypted-vault.png) — the
   unlocked workspace is ready for the first note.
 
-The secret value and the native folder-picker contents are intentionally not
-captured. Never publish a vault secret in documentation or screenshots.
+The generated secret in screenshot 02 belongs to an unused disposable capture
+and must never be reused. Do not capture or publish a real user's vault
+secret. The native folder-picker contents are not captured.
 
 ## Steps
 
