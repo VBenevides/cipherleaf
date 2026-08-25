@@ -2086,6 +2086,23 @@ function removeBareTaskPrefix(view: EditorView): boolean {
   return true;
 }
 
+function restoreArrowSubstitution(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty || range.head === 0) return false;
+  const glyph = view.state.sliceDoc(range.head - 1, range.head);
+  const source = glyph === "→" ? "->" : glyph === "←" ? "<-" : null;
+  if (!source) return false;
+  view.dispatch({
+    changes: { from: range.head - 1, to: range.head, insert: source },
+    selection: EditorSelection.cursor(range.head - 1 + source.length),
+  });
+  return true;
+}
+
+function handleBackspace(view: EditorView): boolean {
+  return restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
+}
+
 function snippetCompletion(context: CompletionContext): CompletionResult | null {
   const before = context.matchBefore(/\/[A-Za-z][A-Za-z_]*/);
   if (!before || !context.explicit && !/\//.test(before.text)) {
@@ -2649,7 +2666,7 @@ export default function LiveMarkdownEditor({
             },
             {
               key: "Backspace",
-              run: removeBareTaskPrefix,
+              run: handleBackspace,
             },
             {
               key: "Enter",

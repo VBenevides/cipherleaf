@@ -60,7 +60,12 @@ test("rewrites every supported object type without retaining old markers", () =>
 test("bare checkbox prefixes have a removable caret boundary", () => {
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.match(editor, /object\.barePrefixSize > 0[\s\S]*addHiddenRange\(syntaxFrom, bracketFrom/);
-  assert.match(editor, /key: "Backspace",[\s\S]*run: removeBareTaskPrefix/);
+  assert.match(editor, /function restoreArrowSubstitution\(view: EditorView\)/);
+  assert.match(editor, /const source = glyph === "→" \? "->" : glyph === "←" \? "<-" : null/);
+  assert.match(editor, /if \(!range\.empty \|\| range\.head === 0\) return false/);
+  assert.match(editor, /selection: EditorSelection\.cursor\(range\.head - 1 \+ source\.length\)/);
+  assert.match(editor, /function handleBackspace\(view: EditorView\)/);
+  assert.match(editor, /key: "Backspace",[\s\S]*run: handleBackspace/);
 });
 
 test("continues numbering from the previous numbered object", () => {
