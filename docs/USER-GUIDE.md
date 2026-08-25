@@ -52,6 +52,9 @@ compromised operating system, or OS swap.
 - Use the folder list to organize notes and drag notes or folders to reorder
   them.
 - Use `Ctrl+]` and `Ctrl+[` to expand or collapse the current outline section.
+- Type `/arrow_left`, `/arrow_right`, `/arrow_up`, or `/arrow_down` and press
+  Enter to insert an arrow. Typing `->` or `<-` also inserts an arrow; press
+  Backspace immediately after the replacement to restore the typed characters.
 
 Markdown supports GFM tables, task lists, fenced code, headings, links,
 dividers, and collapsible nested sections. Consecutive `>` lines form a
@@ -67,6 +70,8 @@ note-relationship and folder graphs.
 - `Ctrl/Cmd+K` opens quick title and content search.
 - `Ctrl/Cmd+Shift+F` searches across notes.
 - `Ctrl/Cmd+Shift+H` replaces text across notes.
+- After opening a global-search result, use **Back to previous location** in
+  the editor bar to return to the prior note and caret position.
 
 Advanced search can filter by title, content, tag, folder, property, date,
 case, or regular expression.
