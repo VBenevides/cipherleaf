@@ -485,14 +485,25 @@ test("renders canonical objects back to editable markdown", () => {
   ].join("\n"));
 });
 
+test("preserves childless section markers through canonical round trips", () => {
+  const markdown = ["> Root", "  > Child"].join("\n");
+  const canonical = canonicalObjectDocumentFromMarkdown(markdown);
+
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+  assert.equal(
+    markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdownFromCanonicalObjectDocument(canonical))),
+    markdown,
+  );
+});
+
 test("renders nested section markers as structure and checkbox token as text", () => {
   const canonical = canonicalObjectDocumentFromMarkdown(">> [x] VM: Cobrar acesso");
 
   assert.equal(canonical.objects[0].tag, "section");
   assert.deepEqual(canonical.objects[0].tags, ["section", "text"]);
   assert.equal(canonical.objects[0].checked, true);
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), "  * [x] VM: Cobrar acesso");
-  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, "  * [x] VM: Cobrar acesso");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "  > [x] VM: Cobrar acesso");
+  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, "  > [x] VM: Cobrar acesso");
 });
 
 test("uses canonical defaults when a source prefix is omitted", () => {
@@ -513,7 +524,7 @@ test("uses canonical defaults when a source prefix is omitted", () => {
     }],
   };
 
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), "* Stored heading");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "> Stored heading");
 });
 
 test("soft object breaks use object content indentation", () => {
@@ -534,7 +545,7 @@ test("prepares canonical json notes without migration", () => {
   const canonical = canonicalObjectDocumentFromMarkdown("> Stored");
   const prepared = prepareNoteContent(JSON.stringify(canonical));
 
-  assert.equal(prepared.markdown, "* Stored");
+  assert.equal(prepared.markdown, "> Stored");
   assert.equal(prepared.migrated, false);
 });
 

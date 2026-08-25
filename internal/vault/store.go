@@ -4566,11 +4566,7 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	prefix := ""
 	switch {
 	case hasSection:
-		marker := "* "
-		if len(object.ChildrenIDs) > 0 {
-			marker = "> "
-		}
-		prefix = indent + marker + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
+		prefix = indent + "> " + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
 	case strings.HasPrefix(sourcePrefix, "<"):
 		prefix = indent + sourcePrefix
 	case sourcePrefix != "":

@@ -1005,7 +1005,7 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
   const indent = " ".repeat(Math.max(0, object.indent));
   const sourcePrefix = object.sourcePrefix?.trimStart() ?? "";
   const prefix = object.tag === "section"
-    ? `${indent}${object.childrenIds.length > 0 ? "> " : "* "}${sourcePrefix.replace(/^>+[ \t]*/, "")}`
+    ? `${indent}> ${sourcePrefix.replace(/^>+[ \t]*/, "")}`
     : sourcePrefix.startsWith("<")
       ? `${indent}${sourcePrefix}`
       : `${indent}${sourcePrefix || (object.tag === "bulletpoint" ? "- " : "")}`;
