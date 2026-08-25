@@ -55,18 +55,22 @@ test("normalizes ASCII arrows in prose", () => {
   assert.equal(normalizeArrowText("already → converted"), "already → converted");
 });
 
+test("normalizes ASCII left arrows in prose", () => {
+  assert.equal(normalizeArrowText("left <- center -> right"), "left ← center → right");
+});
+
 test("leaves arrows inside fenced code unchanged", () => {
-  const markdown = "```ts\nconst result = first -> second;\n```\n\nafter -> code";
+  const markdown = "```ts\nconst result = first -> second <- third;\n```\n\nafter -> code <- here";
   assert.equal(
     normalizeArrowText(markdown),
-    "```ts\nconst result = first -> second;\n```\n\nafter → code",
+    "```ts\nconst result = first -> second <- third;\n```\n\nafter → code ← here",
   );
 });
 
 test("normalizes link labels without changing destinations", () => {
   assert.equal(
-    normalizeArrowText("[first -> second](https://example.test/a->b)"),
-    "[first → second](https://example.test/a->b)",
+    normalizeArrowText("[first -> second <- third](https://example.test/a->b<-c)"),
+    "[first → second ← third](https://example.test/a->b<-c)",
   );
 });
 

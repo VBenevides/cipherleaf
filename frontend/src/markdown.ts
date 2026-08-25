@@ -29,11 +29,11 @@ export function normalizeArrowText(text: string): string {
     let cursor = 0;
     for (const link of part.matchAll(/\]\((<[^>\r\n]*>|[^)\r\n]*)\)/g)) {
       const start = link.index ?? 0;
-      result += part.slice(cursor, start).replace(/->/g, "→");
+      result += part.slice(cursor, start).replace(/->/g, "→").replace(/<-/g, "←");
       result += link[0];
       cursor = start + link[0].length;
     }
-    return result + part.slice(cursor).replace(/->/g, "→");
+    return result + part.slice(cursor).replace(/->/g, "→").replace(/<-/g, "←");
   }).join("");
 }
 

@@ -2768,12 +2768,28 @@ export default function LiveMarkdownEditor({
               inserted = `-${inserted}`;
             }
             if (
+              changeFrom > 0 &&
+              inputView.state.sliceDoc(changeFrom - 1, changeFrom) === "<" &&
+              inserted.startsWith("-")
+            ) {
+              changeFrom--;
+              inserted = `<${inserted}`;
+            }
+            if (
               changeTo < inputView.state.doc.length &&
               inserted.endsWith("-") &&
               inputView.state.sliceDoc(changeTo, changeTo + 1) === ">"
             ) {
               changeTo++;
               inserted += ">";
+            }
+            if (
+              changeTo < inputView.state.doc.length &&
+              inserted.endsWith("<") &&
+              inputView.state.sliceDoc(changeTo, changeTo + 1) === "-"
+            ) {
+              changeTo++;
+              inserted += "-";
             }
 
             const normalized = normalizeArrowText(inserted);
