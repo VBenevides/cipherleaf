@@ -32,6 +32,16 @@ test("window switching does not trigger a caret-moving save", () => {
   assert.match(app, /if \(!event\.relatedTarget && !document\.hasFocus\(\)\) return;/);
 });
 
+test("global search offers one-shot return navigation", () => {
+  assert.match(app, /type GlobalSearchOrigin = \{/);
+  assert.match(app, /const \[globalSearchOrigin, setGlobalSearchOrigin\]/);
+  assert.match(app, /caretOffset: noteCaretOffsetsRef\.current\.get\(origin\.id\) \?\? 0/);
+  assert.match(app, /const returnToGlobalSearchOrigin = async \(\) =>/);
+  assert.match(app, /setGlobalSearchOrigin\(null\)/);
+  assert.match(app, /setCaretRestoreVersion\(\(current\) => current \+ 1\)/);
+  assert.match(app, /Back to previous location/);
+});
+
 test("background saves consume rejected promises and preserve retry state", () => {
   assert.match(app, /const persistCurrentInBackground = \(snapshot = noteRef\.current\) => \{[\s\S]*persistCurrent\(snapshot\)\.catch/);
   assert.match(app, /const removeFileAttachment = async[\s\S]*try \{[\s\S]*await persistCurrent\(\);[\s\S]*\} catch/);

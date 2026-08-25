@@ -84,6 +84,7 @@ type LiveMarkdownEditorProps = {
   searchTarget?: SearchTarget | null;
   onSearchTargetApplied?: () => void;
   caretOffset?: number | null;
+  caretRestoreVersion?: number;
   onCaretChange?: (offset: number) => void;
   readOnly?: boolean;
   showToolbar?: boolean;
@@ -1120,8 +1121,18 @@ function decorateInlineMarkdown(
     hideSyntaxRange(end - markerSize, end, decorations, atomicRanges);
   }
 
-  const italic = /(?<!_)_(?=\S)(.+?\S)_(?!_)/g;
+  const italic = /(?<![\p{L}\p{N}_])_(?=\S)([^\s_]+)_(?![\p{L}\p{N}_])/gu;
   for (const match of text.matchAll(italic)) {
+    if (match.index === undefined) continue;
+    const start = offset + match.index;
+    const end = start + match[0].length;
+    decorations.push(Decoration.mark({ class: "cm-live-em" }).range(start + 1, end - 1));
+    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
+    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
+  }
+
+  const asteriskItalic = /(?<![\p{L}\p{N}*])\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/gu;
+  for (const match of text.matchAll(asteriskItalic)) {
     if (match.index === undefined) continue;
     const start = offset + match.index;
     const end = start + match[0].length;
@@ -2086,8 +2097,25 @@ function removeBareTaskPrefix(view: EditorView): boolean {
   return true;
 }
 
+function restoreArrowSubstitution(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty || range.head === 0) return false;
+  const glyph = view.state.sliceDoc(range.head - 1, range.head);
+  const source = glyph === "→" ? "->" : glyph === "←" ? "<-" : null;
+  if (!source) return false;
+  view.dispatch({
+    changes: { from: range.head - 1, to: range.head, insert: source },
+    selection: EditorSelection.cursor(range.head - 1 + source.length),
+  });
+  return true;
+}
+
+function handleBackspace(view: EditorView): boolean {
+  return restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
+}
+
 function snippetCompletion(context: CompletionContext): CompletionResult | null {
-  const before = context.matchBefore(/\/[A-Za-z]*/);
+  const before = context.matchBefore(/\/[A-Za-z][A-Za-z_]*/);
   if (!before || !context.explicit && !/\//.test(before.text)) {
     return null;
   }
@@ -2104,7 +2132,7 @@ function snippetCompletion(context: CompletionContext): CompletionResult | null 
         applySnippetExpansion(view, snippet.trigger, from, to);
       },
     })),
-    validFor: /^[A-Za-z]*$/,
+    validFor: /^[A-Za-z][A-Za-z_]*$/,
   };
 }
 
@@ -2150,7 +2178,7 @@ function expandSnippetBeforeCursor(view: EditorView) {
   if (!range.empty) return false;
 
   const before = view.state.sliceDoc(0, range.head);
-  const match = before.match(/\/([A-Za-z]+)$/);
+  const match = before.match(/\/([A-Za-z][A-Za-z_]*)$/);
   if (!match) return false;
 
   const from = range.head - match[0].length;
@@ -2507,6 +2535,7 @@ export default function LiveMarkdownEditor({
   searchTarget = null,
   onSearchTargetApplied,
   caretOffset = null,
+  caretRestoreVersion = 0,
   onCaretChange,
   readOnly = false,
   showToolbar = true,
@@ -2649,7 +2678,7 @@ export default function LiveMarkdownEditor({
             },
             {
               key: "Backspace",
-              run: removeBareTaskPrefix,
+              run: handleBackspace,
             },
             {
               key: "Enter",
@@ -2768,12 +2797,28 @@ export default function LiveMarkdownEditor({
               inserted = `-${inserted}`;
             }
             if (
+              changeFrom > 0 &&
+              inputView.state.sliceDoc(changeFrom - 1, changeFrom) === "<" &&
+              inserted.startsWith("-")
+            ) {
+              changeFrom--;
+              inserted = `<${inserted}`;
+            }
+            if (
               changeTo < inputView.state.doc.length &&
               inserted.endsWith("-") &&
               inputView.state.sliceDoc(changeTo, changeTo + 1) === ">"
             ) {
               changeTo++;
               inserted += ">";
+            }
+            if (
+              changeTo < inputView.state.doc.length &&
+              inserted.endsWith("<") &&
+              inputView.state.sliceDoc(changeTo, changeTo + 1) === "-"
+            ) {
+              changeTo++;
+              inserted += "-";
             }
 
             const normalized = normalizeArrowText(inserted);
@@ -2989,6 +3034,18 @@ export default function LiveMarkdownEditor({
 
   useEffect(() => {
     const editor = view.current;
+    if (!editor || typeof caretOffset !== "number" || !Number.isFinite(caretOffset)) return;
+    const position = Math.max(0, Math.min(Math.floor(caretOffset), editor.state.doc.length));
+    if (editor.state.selection.main.empty && editor.state.selection.main.head === position) return;
+    editor.dispatch({
+      selection: EditorSelection.cursor(position),
+      effects: EditorView.scrollIntoView(position, { y: "center" }),
+    });
+    editor.focus();
+  }, [caretRestoreVersion]);
+
+  useEffect(() => {
+    const editor = view.current;
     if (!editor) return;
     const range = rangeForActiveDocument(
       searchTarget,
@@ -3017,7 +3074,7 @@ export default function LiveMarkdownEditor({
                 aria-label="Make text bold"
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  runWithEditor((editor) => wrapSelection(editor, "**"));
+                  runWithEditor((editor) => wrapSelection(editor, "__"));
                 }}
               >
                 <strong>B</strong>
@@ -3028,7 +3085,7 @@ export default function LiveMarkdownEditor({
                 aria-label="Make text italic"
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  runWithEditor((editor) => wrapSelection(editor, "_"));
+                  runWithEditor((editor) => wrapSelection(editor, "*"));
                 }}
               >
                 <em>I</em>

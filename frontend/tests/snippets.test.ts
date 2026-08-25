@@ -10,6 +10,13 @@ test("creates editable txt fences from every object type", () => {
   assert.equal(expandSnippet("code"), "```txt\n\n```");
 });
 
+test("expands directional arrow snippets", () => {
+  assert.equal(expandSnippet("arrow_left"), "←");
+  assert.equal(expandSnippet("arrow_right"), "→");
+  assert.equal(expandSnippet("arrow_up"), "↑");
+  assert.equal(expandSnippet("arrow_down"), "↓");
+});
+
 test("rolls the last dated outline section with today's date", () => {
   const markdown = [
     "> 2026-07-06",

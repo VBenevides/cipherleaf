@@ -15,7 +15,7 @@
   {
     "name": "language-less fenced code keeps following children",
     "markdown": "> Section\n  ```\nunindented code\n  ```\n  > After",
-    "canonicalMarkdown": "> Section\n  ```\nunindented code\n  ```\n  * After",
+    "canonicalMarkdown": "> Section\n  ```\nunindented code\n  ```\n  > After",
     "objects": [
       { "tag": "section", "text": "Section", "indent": 0, "contentIndent": 2, "sourcePrefix": "> " },
       { "tag": "code", "text": "unindented code", "indent": 2, "contentIndent": 2, "sourcePrefix": "  ```", "closed": true },

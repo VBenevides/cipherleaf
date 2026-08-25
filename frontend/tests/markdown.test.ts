@@ -55,19 +55,37 @@ test("normalizes ASCII arrows in prose", () => {
   assert.equal(normalizeArrowText("already → converted"), "already → converted");
 });
 
+test("normalizes ASCII left arrows in prose", () => {
+  assert.equal(normalizeArrowText("left <- center -> right"), "left ← center → right");
+});
+
 test("leaves arrows inside fenced code unchanged", () => {
-  const markdown = "```ts\nconst result = first -> second;\n```\n\nafter -> code";
+  const markdown = "```ts\nconst result = first -> second <- third;\n```\n\nafter -> code <- here";
   assert.equal(
     normalizeArrowText(markdown),
-    "```ts\nconst result = first -> second;\n```\n\nafter → code",
+    "```ts\nconst result = first -> second <- third;\n```\n\nafter → code ← here",
   );
 });
 
 test("normalizes link labels without changing destinations", () => {
   assert.equal(
-    normalizeArrowText("[first -> second](https://example.test/a->b)"),
-    "[first → second](https://example.test/a->b)",
+    normalizeArrowText("[first -> second <- third](https://example.test/a->b<-c)"),
+    "[first → second ← third](https://example.test/a->b<-c)",
   );
+});
+
+test("limits underscore emphasis to standalone words", () => {
+  assert.match(editor, /const italic = \/\(\?<\!\[\\p\{L\}\\p\{N\}_\]\)_\(\?=\\S\)\(\[\^\\s_\]\+\)_\(\?!\[\\p\{L\}\\p\{N\}_\]\)\/gu/);
+});
+
+test("uses asterisk emphasis for multi-word toolbar italics", () => {
+  assert.match(editor, /aria-label="Make text italic"[\s\S]*wrapSelection\(editor, "\*"\)/);
+  assert.match(editor, /const asteriskItalic = \/[\s\S]*\.\+\?\\S/);
+});
+
+test("keeps toolbar bold and italic markers composable", () => {
+  assert.match(editor, /aria-label="Make text bold"[\s\S]*wrapSelection\(editor, "__"\)/);
+  assert.match(editor, /const bold = \/\(\\\*\\\*\|__\)/);
 });
 
 test("recognizes a three-dash horizontal rule line", () => {

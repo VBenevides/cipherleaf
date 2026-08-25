@@ -56,6 +56,18 @@ test("keeps object type markers out of selection text", () => {
   );
 });
 
+test("does not classify leading multi-word italics as bullets", () => {
+  const document = parseObjectDocument("> Section\n*word1 word2*");
+
+  assert.deepEqual(
+    document.objects.map(({ tag, text }) => ({ tag, text })),
+    [
+      { tag: "section", text: "Section" },
+      { tag: "text", text: "*word1 word2*" },
+    ],
+  );
+});
+
 test("keeps horizontal rules out of bullet parsing", () => {
   const object = parseObjectDocument("---").objects[0];
   assert.equal(object.tag, "text");
@@ -485,14 +497,25 @@ test("renders canonical objects back to editable markdown", () => {
   ].join("\n"));
 });
 
+test("preserves childless section markers through canonical round trips", () => {
+  const markdown = ["> Root", "  > Child"].join("\n");
+  const canonical = canonicalObjectDocumentFromMarkdown(markdown);
+
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), markdown);
+  assert.equal(
+    markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(markdownFromCanonicalObjectDocument(canonical))),
+    markdown,
+  );
+});
+
 test("renders nested section markers as structure and checkbox token as text", () => {
   const canonical = canonicalObjectDocumentFromMarkdown(">> [x] VM: Cobrar acesso");
 
   assert.equal(canonical.objects[0].tag, "section");
   assert.deepEqual(canonical.objects[0].tags, ["section", "text"]);
   assert.equal(canonical.objects[0].checked, true);
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), "  * [x] VM: Cobrar acesso");
-  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, "  * [x] VM: Cobrar acesso");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "  > [x] VM: Cobrar acesso");
+  assert.equal(prepareNoteContent(JSON.stringify(canonical)).markdown, "  > [x] VM: Cobrar acesso");
 });
 
 test("uses canonical defaults when a source prefix is omitted", () => {
@@ -513,7 +536,7 @@ test("uses canonical defaults when a source prefix is omitted", () => {
     }],
   };
 
-  assert.equal(markdownFromCanonicalObjectDocument(canonical), "* Stored heading");
+  assert.equal(markdownFromCanonicalObjectDocument(canonical), "> Stored heading");
 });
 
 test("soft object breaks use object content indentation", () => {
@@ -534,7 +557,7 @@ test("prepares canonical json notes without migration", () => {
   const canonical = canonicalObjectDocumentFromMarkdown("> Stored");
   const prepared = prepareNoteContent(JSON.stringify(canonical));
 
-  assert.equal(prepared.markdown, "* Stored");
+  assert.equal(prepared.markdown, "> Stored");
   assert.equal(prepared.migrated, false);
 });
 
@@ -586,6 +609,24 @@ test("recognizes spaced and empty bare checkboxes", () => {
   ]);
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.match(editor, /this\.checked \? " " : this\.empty \? "x\]" : "x"/);
+});
+
+test("stabilizes empty checkbox shorthand through canonical round trips", () => {
+  const cases = [
+    ["[] Task", "[ ] Task"],
+    ["- [] Task", "- [ ] Task"],
+    ["[]", "[ ]"],
+    ["[x] Done", "[x] Done"],
+    ["> Parent\n  [] Child", "> Parent\n  [ ] Child"],
+    ["> Parent\n  > [] Child", "> Parent\n  > [ ] Child"],
+  ] as const;
+
+  for (const [source, expected] of cases) {
+    const once = markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(source));
+    const twice = markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(once));
+    assert.equal(once, expected, source);
+    assert.equal(twice, expected, source);
+  }
 });
 
 test("keeps trailing list whitespace out of the hidden prefix", () => {

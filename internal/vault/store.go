@@ -65,10 +65,10 @@ var (
 	canonicalAttachment    = regexp.MustCompile(`^(!?)\[[^\]]*]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$`)
 	canonicalBullet        = regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`)
 	canonicalOrdered       = regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`)
-	canonicalCheckbox      = regexp.MustCompile(`^\[([ xX])\]\s*(.*)$`)
-	canonicalTask          = regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX])\]\s*(.*)$`)
+	canonicalCheckbox      = regexp.MustCompile(`^\[([ xX]?)\]\s*(.*)$`)
+	canonicalTask          = regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX]?)\]\s*(.*)$`)
 	canonicalHeading       = regexp.MustCompile(`^#{1,6}\s+`)
-	canonicalCheckboxEnd   = regexp.MustCompile(`\[[ xX]\]\s*$`)
+	canonicalCheckboxEnd   = regexp.MustCompile(`\[[ xX]?\](\s*)$`)
 )
 
 const (
@@ -4563,14 +4563,17 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	hasSection := object.Tag == "section" || slices.Contains(object.Tags, "section")
 	indent := strings.Repeat(" ", max(0, object.Indent))
 	sourcePrefix := strings.TrimLeft(object.SourcePrefix, " \t")
+	if prefixHasCheckbox && object.Checked != nil {
+		marker := "[ ]"
+		if *object.Checked {
+			marker = "[x]"
+		}
+		sourcePrefix = canonicalCheckboxEnd.ReplaceAllString(sourcePrefix, marker+"$1")
+	}
 	prefix := ""
 	switch {
 	case hasSection:
-		marker := "* "
-		if len(object.ChildrenIDs) > 0 {
-			marker = "> "
-		}
-		prefix = indent + marker + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
+		prefix = indent + "> " + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
 	case strings.HasPrefix(sourcePrefix, "<"):
 		prefix = indent + sourcePrefix
 	case sourcePrefix != "":

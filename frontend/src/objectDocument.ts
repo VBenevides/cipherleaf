@@ -98,6 +98,8 @@ export function lineIndent(text: string): number {
   return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
 }
 
+const leadingAsteriskEmphasis = /^\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/u;
+
 type ExclusiveObjectPrefix = {
   indent: number;
   kind: "bare" | "bulletpoint" | "section" | "numbering";
@@ -290,7 +292,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const bullet = source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
+  const bullet = !leadingAsteriskEmphasis.test(source) &&
+    source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
   if (bullet) {
     const bulletText = bullet[2] ?? bullet[3] ?? "";
     const checked = bulletText.match(/^\[([ xX]?)\]\s*(.*)$/);
@@ -372,8 +375,8 @@ function lineStartsExplicitObject(raw: string): boolean {
       parseAttachmentMarkdown(source) ||
       parseAttachmentReferenceMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
-      /^\[([ xX])\]\s*(.*)$/.test(source) ||
-      /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source) ||
+      /^\[([ xX]?)\]\s*(.*)$/.test(source) ||
+      (!leadingAsteriskEmphasis.test(source) && /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source)) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
       /^#{1,6}\s+/.test(source) ||
       /^```[^\s`]*[ \t]*$/.test(source),
@@ -1005,15 +1008,18 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
   const indent = " ".repeat(Math.max(0, object.indent));
   const sourcePrefix = object.sourcePrefix?.trimStart() ?? "";
   const prefix = object.tag === "section"
-    ? `${indent}${object.childrenIds.length > 0 ? "> " : "* "}${sourcePrefix.replace(/^>+[ \t]*/, "")}`
+    ? `${indent}> ${sourcePrefix.replace(/^>+[ \t]*/, "")}`
     : sourcePrefix.startsWith("<")
       ? `${indent}${sourcePrefix}`
       : `${indent}${sourcePrefix || (object.tag === "bulletpoint" ? "- " : "")}`;
-  const prefixHasCheckbox = /\[[ xX]\]\s*$/.test(prefix);
+  const prefixHasCheckbox = /\[[ xX]?\]\s*$/.test(prefix);
+  const normalizedPrefix = object.checked !== undefined
+    ? prefix.replace(/\[[ xX]?\](\s*)$/, `[${object.checked ? "x" : " "}]$1`)
+    : prefix;
   const firstText = object.checked !== undefined && !prefixHasCheckbox
     ? `[${object.checked ? "x" : " "}] ${textLines[0] ?? ""}`.trimEnd()
     : textLines[0] ?? "";
-  const first = `${prefix}${firstText}`;
+  const first = `${normalizedPrefix}${firstText}`;
   const continuationPrefix = " ".repeat(Math.max(0, object.contentIndent));
   const continuation = textLines.slice(1).map((line) => line ? `${continuationPrefix}${line}` : "");
   return [first, ...continuation].join("\n");
