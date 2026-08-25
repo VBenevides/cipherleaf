@@ -84,6 +84,7 @@ type LiveMarkdownEditorProps = {
   searchTarget?: SearchTarget | null;
   onSearchTargetApplied?: () => void;
   caretOffset?: number | null;
+  caretRestoreVersion?: number;
   onCaretChange?: (offset: number) => void;
   readOnly?: boolean;
   showToolbar?: boolean;
@@ -2524,6 +2525,7 @@ export default function LiveMarkdownEditor({
   searchTarget = null,
   onSearchTargetApplied,
   caretOffset = null,
+  caretRestoreVersion = 0,
   onCaretChange,
   readOnly = false,
   showToolbar = true,
@@ -3019,6 +3021,18 @@ export default function LiveMarkdownEditor({
       queueMicrotask(() => onChangeRef.current(normalizedValue));
     }
   }, [value]);
+
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor || typeof caretOffset !== "number" || !Number.isFinite(caretOffset)) return;
+    const position = Math.max(0, Math.min(Math.floor(caretOffset), editor.state.doc.length));
+    if (editor.state.selection.main.empty && editor.state.selection.main.head === position) return;
+    editor.dispatch({
+      selection: EditorSelection.cursor(position),
+      effects: EditorView.scrollIntoView(position, { y: "center" }),
+    });
+    editor.focus();
+  }, [caretRestoreVersion]);
 
   useEffect(() => {
     const editor = view.current;

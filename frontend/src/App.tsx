@@ -132,6 +132,11 @@ type NoteCrumb = {
   title: string;
 };
 
+type GlobalSearchOrigin = {
+  noteID: string;
+  caretOffset: number;
+};
+
 type EditorTab = {
   id: number;
   noteID: string;
@@ -531,6 +536,8 @@ function App() {
   const [globalSearchBusy, setGlobalSearchBusy] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState("");
   const [globalSearchTarget, setGlobalSearchTarget] = useState<SearchTarget | null>(null);
+  const [globalSearchOrigin, setGlobalSearchOrigin] = useState<GlobalSearchOrigin | null>(null);
+  const [caretRestoreVersion, setCaretRestoreVersion] = useState(0);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [calendarSelected, setCalendarSelected] = useState(() => new Date());
@@ -1040,6 +1047,13 @@ function App() {
   }, [globalSearchOpen, globalSearchQuery, runGlobalSearch]);
 
   const openGlobalSearchResult = async (match: FindMatch) => {
+    const origin = noteRef.current;
+    if (origin) {
+      setGlobalSearchOrigin({
+        noteID: origin.id,
+        caretOffset: noteCaretOffsetsRef.current.get(origin.id) ?? 0,
+      });
+    }
     setGlobalSearchOpen(false);
     const sameNote = noteRef.current?.id === match.noteId;
     try {
@@ -1056,6 +1070,16 @@ function App() {
     } catch (reason) {
       setError(errorText(reason));
     }
+  };
+
+  const returnToGlobalSearchOrigin = async () => {
+    const origin = globalSearchOrigin;
+    if (!origin) return;
+    setGlobalSearchOrigin(null);
+    noteCaretOffsetsRef.current.set(origin.noteID, origin.caretOffset);
+    setCaretRestoreVersion((current) => current + 1);
+    setEditorView("live");
+    if (noteRef.current?.id !== origin.noteID) await selectNote(origin.noteID);
   };
 
   const closeAppDialog = (value: string | boolean | null) => {
@@ -4390,6 +4414,15 @@ function App() {
               </span>
             ))}
           </div>
+          {globalSearchOrigin && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void returnToGlobalSearchOrigin()}
+            >
+              Back to previous location
+            </button>
+          )}
           <div className="save-indicators">
             {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
             <div className={`save-status ${saveState}`}>
@@ -4658,6 +4691,7 @@ function App() {
                       searchTarget={globalSearchTarget}
                       onSearchTargetApplied={() => setGlobalSearchTarget(null)}
                       caretOffset={noteCaretOffsetsRef.current.get(note.id) ?? 0}
+                      caretRestoreVersion={caretRestoreVersion}
                       onCaretChange={(offset) => noteCaretOffsetsRef.current.set(note.id, offset)}
                       defaultSectionsCollapsed={sectionDefault === "collapsed"}
                     />
