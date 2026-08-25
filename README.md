@@ -246,5 +246,7 @@ build/                Wails build and platform packaging configuration
 local/                Design notes, plans, and feature-gap audits (gitignored)
 ```
 
-Tagged releases are built for Linux amd64 and Windows amd64 by the GitHub
-Actions release workflow. The application version is read from `VERSION`.
+Record each release under its `VERSION` in `CHANGELOG.md`, commit the changes,
+then run `./create-release.sh`. The script creates the matching `v` tag and
+GitHub release with those notes; GitHub Actions builds and attaches the Linux
+amd64 and Windows amd64 artifacts.

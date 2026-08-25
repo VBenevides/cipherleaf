@@ -209,5 +209,4 @@ jobs:
         with:
           name: Cipherleaf v${{ env.APP_VERSION }}
           tag_name: v${{ env.APP_VERSION }}
-          generate_release_notes: true
           files: release/*
