@@ -599,6 +599,24 @@ test("recognizes spaced and empty bare checkboxes", () => {
   assert.match(editor, /this\.checked \? " " : this\.empty \? "x\]" : "x"/);
 });
 
+test("stabilizes empty checkbox shorthand through canonical round trips", () => {
+  const cases = [
+    ["[] Task", "[ ] Task"],
+    ["- [] Task", "- [ ] Task"],
+    ["[]", "[ ]"],
+    ["[x] Done", "[x] Done"],
+    ["> Parent\n  [] Child", "> Parent\n  [ ] Child"],
+    ["> Parent\n  > [] Child", "> Parent\n  > [ ] Child"],
+  ] as const;
+
+  for (const [source, expected] of cases) {
+    const once = markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(source));
+    const twice = markdownFromCanonicalObjectDocument(canonicalObjectDocumentFromMarkdown(once));
+    assert.equal(once, expected, source);
+    assert.equal(twice, expected, source);
+  }
+});
+
 test("keeps trailing list whitespace out of the hidden prefix", () => {
   const document = parseObjectDocument(["- what ", "1. what "].join("\n"));
 

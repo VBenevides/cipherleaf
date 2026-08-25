@@ -372,7 +372,7 @@ function lineStartsExplicitObject(raw: string): boolean {
       parseAttachmentMarkdown(source) ||
       parseAttachmentReferenceMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
-      /^\[([ xX])\]\s*(.*)$/.test(source) ||
+      /^\[([ xX]?)\]\s*(.*)$/.test(source) ||
       /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
       /^#{1,6}\s+/.test(source) ||
@@ -1009,11 +1009,14 @@ function markdownLineForObject(object: CanonicalObjectNode): string {
     : sourcePrefix.startsWith("<")
       ? `${indent}${sourcePrefix}`
       : `${indent}${sourcePrefix || (object.tag === "bulletpoint" ? "- " : "")}`;
-  const prefixHasCheckbox = /\[[ xX]\]\s*$/.test(prefix);
+  const prefixHasCheckbox = /\[[ xX]?\]\s*$/.test(prefix);
+  const normalizedPrefix = object.checked !== undefined
+    ? prefix.replace(/\[[ xX]?\](\s*)$/, `[${object.checked ? "x" : " "}]$1`)
+    : prefix;
   const firstText = object.checked !== undefined && !prefixHasCheckbox
     ? `[${object.checked ? "x" : " "}] ${textLines[0] ?? ""}`.trimEnd()
     : textLines[0] ?? "";
-  const first = `${prefix}${firstText}`;
+  const first = `${normalizedPrefix}${firstText}`;
   const continuationPrefix = " ".repeat(Math.max(0, object.contentIndent));
   const continuation = textLines.slice(1).map((line) => line ? `${continuationPrefix}${line}` : "");
   return [first, ...continuation].join("\n");

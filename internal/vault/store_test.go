@@ -2426,6 +2426,31 @@ func TestObjectDocumentConformance(t *testing.T) {
 	}
 }
 
+func TestCanonicalObjectDocumentStabilizesEmptyCheckboxes(t *testing.T) {
+	tests := []struct {
+		name, markdown, want string
+	}{
+		{name: "bare", markdown: "[] Task", want: "[ ] Task"},
+		{name: "bullet", markdown: "- [] Task", want: "- [ ] Task"},
+		{name: "empty", markdown: "[]", want: "[ ]"},
+		{name: "checked", markdown: "[x] Done", want: "[x] Done"},
+		{name: "nested text", markdown: "> Parent\n  [] Child", want: "> Parent\n  [ ] Child"},
+		{name: "nested section", markdown: "> Parent\n  > [] Child", want: "> Parent\n  > [ ] Child"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := canonicalObjectDocumentFromMarkdown(test.markdown)
+			content, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := derivedMarkdownContent(string(content)); got != test.want {
+				t.Fatalf("round trip = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func pointerEqual[T comparable](left, right *T) bool {
 	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
