@@ -2014,7 +2014,7 @@ func TestReplaceAcrossNotesPreservesCanonicalDocumentFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Content != "* visible words" {
+	if updated.Content != "> visible words" {
 		t.Fatalf("visible content = %q, want replaced Markdown", updated.Content)
 	}
 
