@@ -56,6 +56,18 @@ test("keeps object type markers out of selection text", () => {
   );
 });
 
+test("does not classify leading multi-word italics as bullets", () => {
+  const document = parseObjectDocument("> Section\n*word1 word2*");
+
+  assert.deepEqual(
+    document.objects.map(({ tag, text }) => ({ tag, text })),
+    [
+      { tag: "section", text: "Section" },
+      { tag: "text", text: "*word1 word2*" },
+    ],
+  );
+});
+
 test("keeps horizontal rules out of bullet parsing", () => {
   const object = parseObjectDocument("---").objects[0];
   assert.equal(object.tag, "text");

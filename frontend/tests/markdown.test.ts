@@ -78,6 +78,16 @@ test("limits underscore emphasis to standalone words", () => {
   assert.match(editor, /const italic = \/\(\?<\!\[\\p\{L\}\\p\{N\}_\]\)_\(\?=\\S\)\(\[\^\\s_\]\+\)_\(\?!\[\\p\{L\}\\p\{N\}_\]\)\/gu/);
 });
 
+test("uses asterisk emphasis for multi-word toolbar italics", () => {
+  assert.match(editor, /aria-label="Make text italic"[\s\S]*wrapSelection\(editor, "\*"\)/);
+  assert.match(editor, /const asteriskItalic = \/[\s\S]*\.\+\?\\S/);
+});
+
+test("keeps toolbar bold and italic markers composable", () => {
+  assert.match(editor, /aria-label="Make text bold"[\s\S]*wrapSelection\(editor, "__"\)/);
+  assert.match(editor, /const bold = \/\(\\\*\\\*\|__\)/);
+});
+
 test("recognizes a three-dash horizontal rule line", () => {
   assert.equal(isHorizontalRule("---"), true);
   assert.equal(isHorizontalRule("  ---  "), true);

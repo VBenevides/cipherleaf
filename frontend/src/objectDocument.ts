@@ -98,6 +98,8 @@ export function lineIndent(text: string): number {
   return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
 }
 
+const leadingAsteriskEmphasis = /^\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/u;
+
 type ExclusiveObjectPrefix = {
   indent: number;
   kind: "bare" | "bulletpoint" | "section" | "numbering";
@@ -290,7 +292,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const bullet = source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
+  const bullet = !leadingAsteriskEmphasis.test(source) &&
+    source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
   if (bullet) {
     const bulletText = bullet[2] ?? bullet[3] ?? "";
     const checked = bulletText.match(/^\[([ xX]?)\]\s*(.*)$/);
@@ -373,7 +376,7 @@ function lineStartsExplicitObject(raw: string): boolean {
       parseAttachmentReferenceMarkdown(source) ||
       /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim()) ||
       /^\[([ xX]?)\]\s*(.*)$/.test(source) ||
-      /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source) ||
+      (!leadingAsteriskEmphasis.test(source) && /^[-*](?:[ \t]+.*|[^-*].*)?$/.test(source)) ||
       /^\d+[.)](?:\s+.*|\s*)$/.test(source) ||
       /^#{1,6}\s+/.test(source) ||
       /^```[^\s`]*[ \t]*$/.test(source),

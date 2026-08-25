@@ -55,6 +55,8 @@ compromised operating system, or OS swap.
 - Type `/arrow_left`, `/arrow_right`, `/arrow_up`, or `/arrow_down` and press
   Enter to insert an arrow. Typing `->` or `<-` also inserts an arrow; press
   Backspace immediately after the replacement to restore the typed characters.
+- Select text and use the *Italic* toolbar button to wrap it in `*...*`, including
+  phrases. `__...__` remains bold, while `_word_` supports single-word italics.
 
 Markdown supports GFM tables, task lists, fenced code, headings, links,
 dividers, and collapsible nested sections. Consecutive `>` lines form a

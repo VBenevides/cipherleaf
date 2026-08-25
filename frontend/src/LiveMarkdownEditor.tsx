@@ -1131,6 +1131,16 @@ function decorateInlineMarkdown(
     hideSyntaxRange(end - 1, end, decorations, atomicRanges);
   }
 
+  const asteriskItalic = /(?<![\p{L}\p{N}*])\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/gu;
+  for (const match of text.matchAll(asteriskItalic)) {
+    if (match.index === undefined) continue;
+    const start = offset + match.index;
+    const end = start + match[0].length;
+    decorations.push(Decoration.mark({ class: "cm-live-em" }).range(start + 1, end - 1));
+    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
+    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
+  }
+
   const inlineCode = /`([^`\n]+)`/g;
   for (const match of text.matchAll(inlineCode)) {
     if (match.index === undefined) continue;
@@ -3064,7 +3074,7 @@ export default function LiveMarkdownEditor({
                 aria-label="Make text bold"
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  runWithEditor((editor) => wrapSelection(editor, "**"));
+                  runWithEditor((editor) => wrapSelection(editor, "__"));
                 }}
               >
                 <strong>B</strong>
@@ -3075,7 +3085,7 @@ export default function LiveMarkdownEditor({
                 aria-label="Make text italic"
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  runWithEditor((editor) => wrapSelection(editor, "_"));
+                  runWithEditor((editor) => wrapSelection(editor, "*"));
                 }}
               >
                 <em>I</em>
