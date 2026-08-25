@@ -74,6 +74,10 @@ test("normalizes link labels without changing destinations", () => {
   );
 });
 
+test("limits underscore emphasis to standalone words", () => {
+  assert.match(editor, /const italic = \/\(\?<\!\[\\p\{L\}\\p\{N\}_\]\)_\(\?=\\S\)\(\[\^\\s_\]\+\)_\(\?!\[\\p\{L\}\\p\{N\}_\]\)\/gu/);
+});
+
 test("recognizes a three-dash horizontal rule line", () => {
   assert.equal(isHorizontalRule("---"), true);
   assert.equal(isHorizontalRule("  ---  "), true);

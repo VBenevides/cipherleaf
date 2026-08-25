@@ -1121,7 +1121,7 @@ function decorateInlineMarkdown(
     hideSyntaxRange(end - markerSize, end, decorations, atomicRanges);
   }
 
-  const italic = /(?<!_)_(?=\S)(.+?\S)_(?!_)/g;
+  const italic = /(?<![\p{L}\p{N}_])_(?=\S)([^\s_]+)_(?![\p{L}\p{N}_])/gu;
   for (const match of text.matchAll(italic)) {
     if (match.index === undefined) continue;
     const start = offset + match.index;
