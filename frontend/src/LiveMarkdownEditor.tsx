@@ -2087,7 +2087,7 @@ function removeBareTaskPrefix(view: EditorView): boolean {
 }
 
 function snippetCompletion(context: CompletionContext): CompletionResult | null {
-  const before = context.matchBefore(/\/[A-Za-z]*/);
+  const before = context.matchBefore(/\/[A-Za-z][A-Za-z_]*/);
   if (!before || !context.explicit && !/\//.test(before.text)) {
     return null;
   }
@@ -2104,7 +2104,7 @@ function snippetCompletion(context: CompletionContext): CompletionResult | null 
         applySnippetExpansion(view, snippet.trigger, from, to);
       },
     })),
-    validFor: /^[A-Za-z]*$/,
+    validFor: /^[A-Za-z][A-Za-z_]*$/,
   };
 }
 
@@ -2150,7 +2150,7 @@ function expandSnippetBeforeCursor(view: EditorView) {
   if (!range.empty) return false;
 
   const before = view.state.sliceDoc(0, range.head);
-  const match = before.match(/\/([A-Za-z]+)$/);
+  const match = before.match(/\/([A-Za-z][A-Za-z_]*)$/);
   if (!match) return false;
 
   const from = range.head - match[0].length;
