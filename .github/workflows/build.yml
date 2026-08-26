@@ -97,7 +97,11 @@ jobs:
     needs:
       - validate
       - test
+      - release
     runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
 
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
@@ -132,18 +136,21 @@ jobs:
           mv bin/cipherleaf "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
           chmod +x "bin/cipherleaf-v${APP_VERSION}-linux-amd64"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cipherleaf-v${{ env.APP_VERSION }}-linux-amd64
-          path: bin/cipherleaf-v${{ env.APP_VERSION }}-linux-amd64
-          if-no-files-found: error
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "bin/cipherleaf-v${APP_VERSION}-linux-amd64" --clobber
 
   windows:
     name: Windows amd64
     needs:
       - validate
       - test
+      - release
     runs-on: windows-latest
+
+    permissions:
+      contents: write
 
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
@@ -174,18 +181,16 @@ jobs:
         shell: pwsh
         run: Move-Item bin/cipherleaf.exe "bin/cipherleaf-v$env:APP_VERSION-windows-amd64.exe"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cipherleaf-v${{ env.APP_VERSION }}-windows-amd64
-          path: bin/cipherleaf-v${{ env.APP_VERSION }}-windows-amd64.exe
-          if-no-files-found: error
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" "bin/cipherleaf-v$env:APP_VERSION-windows-amd64.exe" --clobber
 
   release:
-    name: Release
+    name: Prepare release
     needs:
       - validate
-      - linux
-      - windows
+      - test
     runs-on: ubuntu-24.04
 
     permissions:
@@ -195,18 +200,45 @@ jobs:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
 
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          path: release
-          merge-multiple: true
+      - name: Ensure GitHub release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --title "Cipherleaf v${APP_VERSION}" \
+              --notes ""
+          fi
+
+  publish:
+    name: Publish release
+    needs:
+      - linux
+      - windows
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern "cipherleaf-${GITHUB_REF_NAME}-*" \
+            --dir release
 
       - name: Create SHA-256 checksums
         working-directory: release
         run: sha256sum cipherleaf-* > SHA256SUMS
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          name: Cipherleaf v${{ env.APP_VERSION }}
-          tag_name: v${{ env.APP_VERSION }}
-          files: release/*
+      - name: Upload checksums and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" release/SHA256SUMS --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
