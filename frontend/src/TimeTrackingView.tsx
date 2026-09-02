@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { TimeClient, TimeDashboard, TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeProject, TimeTag, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
@@ -48,6 +48,71 @@ type TimeTrackingViewProps = {
   readonly now: Date;
   readonly onActiveEntryChange?: (entry: TimeEntry | null) => void;
 };
+
+function labelValues(
+  kind: LabelAction["kind"],
+  catalog: TimeTrackingCatalog | null,
+): TimeLabel[] {
+  if (kind === "client") return catalog?.clients ?? [];
+  if (kind === "project") return catalog?.projects ?? [];
+  return catalog?.tags ?? [];
+}
+
+async function performLabelAction(action: LabelAction): Promise<TimeLabel | null> {
+  if (action.kind === "client") {
+    if (action.action === "delete") {
+      await VaultService.DeleteClient(action.id);
+      return null;
+    }
+    if (action.action === "restore") return VaultService.RestoreClient(action.id);
+    return VaultService.ArchiveClient(action.id);
+  }
+  if (action.kind === "project") {
+    if (action.action === "delete") {
+      await VaultService.DeleteProject(action.id);
+      return null;
+    }
+    if (action.action === "restore") return VaultService.RestoreProject(action.id);
+    return VaultService.ArchiveProject(action.id);
+  }
+  if (action.action === "delete") {
+    await VaultService.DeleteTag(action.id);
+    return null;
+  }
+  if (action.action === "restore") return VaultService.RestoreTag(action.id);
+  return VaultService.ArchiveTag(action.id);
+}
+
+function updateLabelList<T extends TimeLabel>(
+  values: T[] | null | undefined,
+  action: LabelAction,
+  value: TimeLabel | null,
+): T[] {
+  const remaining = (values ?? []).filter((item) => item.id !== action.id);
+  if (action.action === "delete" || !value) return remaining;
+  return [...remaining, value as T];
+}
+
+function updateCatalogAfterLabelAction(
+  catalog: TimeTrackingCatalog | null,
+  action: LabelAction,
+  value: TimeLabel | null,
+): TimeTrackingCatalog | null {
+  if (!catalog) return catalog;
+  if (action.kind === "client") {
+    return { ...catalog, clients: updateLabelList(catalog.clients, action, value) };
+  }
+  if (action.kind === "project") {
+    return { ...catalog, projects: updateLabelList(catalog.projects, action, value) };
+  }
+  return { ...catalog, tags: updateLabelList(catalog.tags, action, value) };
+}
+
+function labelActionName(action: LabelAction["action"]): string {
+  if (action === "delete") return "Delete";
+  if (action === "restore") return "Restore";
+  return "Archive";
+}
 
 function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals: TimeDashboardDay[]): CalendarDay[] {
   const totalsByDate = new Map(totals.map((day) => [day.localDate, day.totalSeconds]));
@@ -235,38 +300,15 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
     if (!labelAction) return;
     setBusy(true); setError("");
     try {
-      if (labelAction.kind === "client") {
-        if (labelAction.action === "delete") {
-          await VaultService.DeleteClient(labelAction.id);
-          setCatalog((current) => current && ({ ...current, clients: (current.clients ?? []).filter((item) => item.id !== labelAction.id) }));
-        } else {
-          const value = labelAction.action === "restore" ? await VaultService.RestoreClient(labelAction.id) : await VaultService.ArchiveClient(labelAction.id);
-          setCatalog((current) => current && ({ ...current, clients: [...(current.clients ?? []).filter((item) => item.id !== value.id), value] }));
-        }
-      } else if (labelAction.kind === "project") {
-        if (labelAction.action === "delete") {
-          await VaultService.DeleteProject(labelAction.id);
-          setCatalog((current) => current && ({ ...current, projects: (current.projects ?? []).filter((item) => item.id !== labelAction.id) }));
-        } else {
-          const value = labelAction.action === "restore" ? await VaultService.RestoreProject(labelAction.id) : await VaultService.ArchiveProject(labelAction.id);
-          setCatalog((current) => current && ({ ...current, projects: [...(current.projects ?? []).filter((item) => item.id !== value.id), value] }));
-        }
-      } else if (labelAction.kind === "tag") {
-        if (labelAction.action === "delete") {
-          await VaultService.DeleteTag(labelAction.id);
-          setCatalog((current) => current && ({ ...current, tags: (current.tags ?? []).filter((item) => item.id !== labelAction.id) }));
-        } else {
-          const value = labelAction.action === "restore" ? await VaultService.RestoreTag(labelAction.id) : await VaultService.ArchiveTag(labelAction.id);
-          setCatalog((current) => current && ({ ...current, tags: [...(current.tags ?? []).filter((item) => item.id !== value.id), value] }));
-        }
-      }
+      const value = await performLabelAction(labelAction);
+      setCatalog((current) => updateCatalogAfterLabelAction(current, labelAction, value));
       setLabelAction(null);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
 
   const labelManager = (kind: "client" | "project" | "tag") => {
-    const values: TimeLabel[] = kind === "client" ? catalog?.clients ?? [] : kind === "project" ? catalog?.projects ?? [] : catalog?.tags ?? [];
+    const values = labelValues(kind, catalog);
     const projectClientID = (item: TimeLabel) => kind === "project" ? (item as TimeProject).clientId ?? "" : "";
     const beginRename = (item: TimeClient | TimeProject | TimeTag) => { setRenamingLabelID(item.id); setLabelName(item.name); setLabelClientID(projectClientID(item)); };
     return <div className="time-label-manager"><form onSubmit={(event) => { event.preventDefault(); void saveLabel(kind); }}><input aria-label={`${kind} name`} value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder={`New ${kind} name`} />{kind === "project" && <ClientSelect clients={clients} selected={labelClientID} onChange={setLabelClientID} />}<button type="submit" className="primary-button" disabled={busy}>{renamingLabelID ? "Save changes" : `Create ${kind}`}</button>{renamingLabelID && <button type="button" className="secondary-button" onClick={() => { setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>Cancel</button>}</form><section><h3>Active</h3>{values.filter((item) => !item.archivedAtUtc).map((item) => <article key={item.id}><span><strong>{item.name}</strong>{projectClientID(item) && <small>{(catalog?.clients ?? []).find((client) => client.id === projectClientID(item))?.name}</small>}</span><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "archive" })}>Archive</button></div></article>)}</section><section><h3>Archived</h3>{values.filter((item) => item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "restore" })}>Restore</button><button className="secondary-button danger-button" onClick={() => setLabelAction({ kind, id: item.id, action: "delete" })}>Delete</button></div></article>)}</section></div>;
@@ -336,19 +378,9 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
     </div>;
   };
 
-  return (
-    <section className="time-tracking-view">
-      <header className="time-tracking-header">
-        <div><p className="eyebrow">Task View</p><h2>Time tracking</h2></div>
-        {activeEntry && <button className="secondary-button" onClick={() => setConfirmAction("finish")}>Finish “{activeEntry.name}”</button>}
-      </header>
-      <nav className="time-tracking-tabs" aria-label="Time tracking views" role="tablist">
-        {TIME_TRACKING_TABS.map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => { setTab(item); setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>{TAB_LABELS[item]}</button>)}
-      </nav>
-      <div className="time-tracking-panel" role="tabpanel">
-        {loading ? <output className="settings-loading">Loading time tracking...</output> : <>
-          {error && <div className="time-tracking-error" role="alert">{error}</div>}
-          {tab === "week" ? <>
+  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
+    week: () => <>
+
             <form className="time-entry-form" onSubmit={(event) => { event.preventDefault(); void startEntry(); }}>
               <input aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => setName(event.target.value)} disabled={!!activeEntry || busy} />
               <ClientSelect clients={clients} selected={clientID} onChange={(id) => { setClientID(id); if (projectID && projects.find((project) => project.id === projectID)?.clientId !== id) setProjectID(""); }} disabled={!!activeEntry || busy} />
@@ -375,7 +407,9 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
               </article>)}
               {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
             </div>
-          </> : tab === "month" ? <>
+    </>,
+    month: () => <>
+
             <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
             {busy ? <output className="settings-loading">Loading month...</output> : <div className="time-month-grid">
               {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
@@ -383,12 +417,31 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
                 return <div key={key} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === todayKey ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
               })}
             </div>}
-          </> : tab === "dashboard" ? dashboardView() : tab === "clients" ? labelManager("client") : tab === "projects" ? labelManager("project") : labelManager("tag")}
+    </>,
+    dashboard: dashboardView,
+    clients: () => labelManager("client"),
+    projects: () => labelManager("project"),
+    tags: () => labelManager("tag"),
+  };
+
+  return (
+    <section className="time-tracking-view">
+      <header className="time-tracking-header">
+        <div><p className="eyebrow">Task View</p><h2>Time tracking</h2></div>
+        {activeEntry && <button className="secondary-button" onClick={() => setConfirmAction("finish")}>Finish “{activeEntry.name}”</button>}
+      </header>
+      <nav className="time-tracking-tabs" aria-label="Time tracking views" role="tablist">
+        {TIME_TRACKING_TABS.map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => { setTab(item); setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>{TAB_LABELS[item]}</button>)}
+      </nav>
+      <div className="time-tracking-panel" role="tabpanel">
+        {loading ? <output className="settings-loading">Loading time tracking...</output> : <>
+          {error && <div className="time-tracking-error" role="alert">{error}</div>}
+          {tabRenderers[tab]()}
         </>}
       </div>
       {editing && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3>{error && <div className="time-tracking-error" role="alert">{error}</div>}<label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><ClientSelect clients={catalog?.clients ?? []} selected={editClientID} onChange={(id) => { setEditClientID(id); if (editProjectID && (catalog?.projects ?? []).find((project) => project.id === editProjectID)?.clientId !== id) setEditProjectID(""); }} /><ProjectSelect projects={(catalog?.projects ?? []).filter((project) => !editClientID || project.clientId === editClientID)} selected={editProjectID} onChange={(id) => { setEditProjectID(id); if (!editClientID) setEditClientID((catalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} /><TagMultiSelect tags={catalog?.tags ?? []} selected={editTagIDs} onChange={setEditTagIDs} /><div className="time-tracking-date-time"><label>Started date<ThemedDatePicker ariaLabel="Started date" value={editStartedAt.slice(0, 10)} onChange={(date) => setEditStartedAt(`${date}T${editStartedAt.slice(11, 16)}`)} /></label><label>Started time<input aria-label="Started time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editStartedAt.slice(11, 16)} onChange={(event) => setEditStartedAt(`${editStartedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="time-tracking-date-time"><label>Ended date<ThemedDatePicker ariaLabel="Ended date" value={editEndedAt.slice(0, 10)} onChange={(date) => setEditEndedAt(`${date}T${editEndedAt.slice(11, 16)}`)} /></label><label>Ended time<input aria-label="Ended time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editEndedAt.slice(11, 16)} onChange={(event) => setEditEndedAt(`${editEndedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setEditing(null); setError(""); }}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>Save correction</button></div></form></dialog>}
       {confirmAction && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label={confirmAction === "finish" ? "Finish timer" : "Delete time entry"}><div><h3>{confirmAction === "finish" ? "Finish active timer?" : "Delete this entry?"}</h3><p>{confirmAction === "finish" ? activeEntry?.name : deleting?.name}</p><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setConfirmAction(null); setDeleting(null); }}>Cancel</button><button type="button" className="primary-button" disabled={busy} onClick={() => confirmAction === "finish" ? void finishEntry() : void deleteEntry()}>{confirmAction === "finish" ? "Finish timer" : "Delete entry"}</button></div></div></dialog>}
-      {labelAction && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label={`${labelAction.action === "delete" ? "Delete" : labelAction.action === "restore" ? "Restore" : "Archive"} ${labelAction.kind}`}><div><h3>{labelAction.action === "delete" ? "Delete" : labelAction.action === "restore" ? "Restore" : "Archive"} this {labelAction.kind}?</h3>{labelAction.action === "delete" && <p>Historical time entries will not be changed.</p>}<div className="settings-actions"><button type="button" className="secondary-button" onClick={() => setLabelAction(null)}>Cancel</button><button type="button" className={labelAction.action === "delete" ? "danger-button" : "primary-button"} disabled={busy} onClick={() => void applyLabelAction()}>Confirm</button></div></div></dialog>}
+      {labelAction && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label={labelActionName(labelAction.action) + " " + labelAction.kind}><div><h3>{labelActionName(labelAction.action)} this {labelAction.kind}?</h3>{labelAction.action === "delete" && <p>Historical time entries will not be changed.</p>}<div className="settings-actions"><button type="button" className="secondary-button" onClick={() => setLabelAction(null)}>Cancel</button><button type="button" className={labelAction.action === "delete" ? "danger-button" : "primary-button"} disabled={busy} onClick={() => void applyLabelAction()}>Confirm</button></div></div></dialog>}
     </section>
   );
 }
