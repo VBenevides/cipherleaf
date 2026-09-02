@@ -3714,7 +3714,7 @@ export function clipboardMayContainImage(event: ClipboardEvent): boolean {
   if (!clipboard) return true;
   const text = clipboard.getData("text/plain").trim();
   const types = Array.from(clipboard.types);
-  return text === "" && !types.some((type) => type === "text/html");
+  return text === "" && !types.includes("text/html");
 }
 
 export async function readClipboardImage(): Promise<Blob | string | null> {
