@@ -92,7 +92,7 @@ function readFrontmatter(markdown: string): { values: Map<string, string>; body:
   if (end < 0) return null;
   const values = new Map<string, string>();
   for (const line of normalized.slice(4, end).split("\n")) {
-    const match = line.match(frontmatterLine);
+    const match = frontmatterLine.exec(line);
     if (match) values.set(match[1].trim(), match[2].trim());
   }
   const bodyStart = end + 4;
@@ -156,7 +156,7 @@ export function transitionCard(metadata: CardMetadata, nextStatus: CardStatus, n
 
 export function parseCardDocument(markdown: string, id: string, title: string): CardDocument | null {
   const frontmatter = readFrontmatter(markdown);
-  if (!frontmatter || frontmatter.values.get(CARD_KEYS.marker) !== "true") return null;
+  if (frontmatter?.values.get(CARD_KEYS.marker) !== "true") return null;
   const status = frontmatter.values.get(CARD_KEYS.status);
   const createdAt = frontmatter.values.get(CARD_KEYS.createdAt);
   if (!validStatus(status) || !createdAt) return null;
@@ -202,13 +202,13 @@ export function cardReference(id: string): string {
 }
 
 export function parseCardReference(value: string): string | null {
-  const match = value.trim().match(/^\[card\]\(([^\s)]+)\)$/i);
+  const match = /^\[card\]\(([^\s)]+)\)$/i.exec(value.trim());
   return match?.[1] ?? null;
 }
 
 export function parseTemplateDocument(markdown: string, id: string): { template: CardTemplate; body: string } | null {
   const frontmatter = readFrontmatter(markdown);
-  if (!frontmatter || frontmatter.values.get(TEMPLATE_KEYS.marker) !== "true") return null;
+  if (frontmatter?.values.get(TEMPLATE_KEYS.marker) !== "true") return null;
   const status = frontmatter.values.get(TEMPLATE_KEYS.status);
   const name = frontmatter.values.get(TEMPLATE_KEYS.name)?.replace(/^"|"$/g, "").trim();
   if (!name || !validStatus(status)) return null;
@@ -242,7 +242,7 @@ export function boardMarker(
 }
 
 export function parseBoardMarker(line: string): BoardMarker | null {
-  const match = line.trim().match(/^<!--\s*cipherleaf-board:([^:\s]+):([^>]*)\s*-->$/);
+  const match = /^<!--\s*cipherleaf-board:([^:\s]+):([^>]*)\s*-->$/.exec(line.trim());
   if (!match) return null;
   const payload = match[2].trim();
   const fields = payload.split(":");
@@ -262,7 +262,7 @@ export function replaceBoardMarker(
   update: (marker: BoardMarker) => BoardMarker,
 ): string {
   const escaped = boardID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const marker = new RegExp(`<!--\\s*cipherleaf-board:${escaped}:[^>]*-->`);
+  const marker = new RegExp(String.raw`<!--\s*cipherleaf-board:${escaped}:[^>]*-->`);
   return markdown.replace(marker, (line) => {
     const current = parseBoardMarker(line);
     const next = current && update(current);
