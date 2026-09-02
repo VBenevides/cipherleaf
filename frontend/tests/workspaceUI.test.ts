@@ -145,5 +145,5 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /cm-live-board-title[\s\S]*Kanban Board/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 18px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
-  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*padding: 0 !important/);
+  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*width: 100% !important[\s\S]*max-width: none[\s\S]*padding: 0 !important/);
 });
