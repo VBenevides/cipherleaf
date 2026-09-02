@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
 
 test("note tabs expose navigation, close, new-tab, and idle unloading", () => {
@@ -136,4 +137,11 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
+});
+
+test("embedded boards are centered without journal rules", () => {
+  assert.match(liveEditor, /cm-live-board-line/);
+  assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
+  assert.match(style, /\.cm-live-board \{[\s\S]*width: min\(100%, 1040px\)[\s\S]*margin: 18px auto/);
+  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*width: 100% !important[\s\S]*padding: 0 !important/);
 });

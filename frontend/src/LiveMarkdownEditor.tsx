@@ -294,7 +294,7 @@ function installJournalRules(editor: EditorView) {
     const scrollerRect = scroller.getBoundingClientRect();
     const positions: { top: number; left: number }[] = [];
     for (const line of editor.dom.querySelectorAll<HTMLElement>(
-      ".cm-line:not(.cm-live-attachment-line):not(.cm-live-code-block)",
+      ".cm-line:not(.cm-live-attachment-line):not(.cm-live-code-block):not(.cm-live-board-line)",
     )) {
       const lineRect = line.getBoundingClientRect();
       if (lineRect.bottom < scrollerRect.top || lineRect.top > scrollerRect.bottom) continue;
@@ -1646,6 +1646,9 @@ function buildLivePreviewState(
 
     const board = parseBoardMarker(line.text);
     if (board) {
+      decorations.push(
+        Decoration.line({ attributes: { class: "cm-live-board-line" } }).range(line.from),
+      );
       addHiddenRange(
         line.from,
         line.to,
