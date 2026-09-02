@@ -62,12 +62,21 @@ type timeDashboardTotals struct {
 	totalSeconds                   int64
 }
 
+type timeDashboardEntryContext struct {
+	start, end time.Time
+	filters    TimeEntryFilters
+	location   *time.Location
+	now        time.Time
+	catalog    timeTrackingCatalog
+}
+
 func (s *Store) timeDashboardTotals(start, end time.Time, filters TimeEntryFilters, location *time.Location, now time.Time) (timeDashboardTotals, error) {
 	totals := timeDashboardTotals{
 		clients: make(map[string]time.Duration), projects: make(map[string]time.Duration),
 		tags: make(map[string]time.Duration), tasks: make(map[string]time.Duration),
 		taskCounts: make(map[string]int), days: make(map[string]time.Duration),
 	}
+	context := timeDashboardEntryContext{start: start, end: end, filters: filters, location: location, now: now, catalog: *s.timeTrackingCatalog}
 	for _, summary := range s.timeTrackingCatalog.Buckets {
 		selected, err := timeTrackingBucketIntersects(summary, start, end)
 		if err != nil {
@@ -81,7 +90,7 @@ func (s *Store) timeDashboardTotals(start, end time.Time, filters TimeEntryFilte
 			return timeDashboardTotals{}, err
 		}
 		for _, entry := range bucket.Entries {
-			if err := addTimeDashboardEntry(&totals, entry, start, end, filters, location, now, *s.timeTrackingCatalog); err != nil {
+			if err := addTimeDashboardEntry(&totals, entry, context); err != nil {
 				return timeDashboardTotals{}, err
 			}
 		}
@@ -89,19 +98,19 @@ func (s *Store) timeDashboardTotals(start, end time.Time, filters TimeEntryFilte
 	return totals, nil
 }
 
-func addTimeDashboardEntry(totals *timeDashboardTotals, entry TimeEntry, start, end time.Time, filters TimeEntryFilters, location *time.Location, now time.Time, catalog timeTrackingCatalog) error {
-	clippedStart, clippedEnd, ok, err := clippedTimeEntryRange(entry, start, end, now)
+func addTimeDashboardEntry(totals *timeDashboardTotals, entry TimeEntry, context timeDashboardEntryContext) error {
+	clippedStart, clippedEnd, ok, err := clippedTimeEntryRange(entry, context.start, context.end, context.now)
 	if err != nil {
 		return err
 	}
-	if !ok || !timeEntryMatchesFilters(entry, filters, catalog) {
+	if !ok || !timeEntryMatchesFilters(entry, context.filters, context.catalog) {
 		return nil
 	}
 	duration := clippedEnd.Sub(clippedStart)
 	totals.totalSeconds += int64(duration / time.Second)
 	clientID := entry.ClientID
 	if clientID == "" {
-		clientID = trackingProjectClientID(catalog, entry.ProjectID)
+		clientID = trackingProjectClientID(context.catalog, entry.ProjectID)
 	}
 	if clientID != "" {
 		totals.clients[clientID] += duration
@@ -115,7 +124,7 @@ func addTimeDashboardEntry(totals *timeDashboardTotals, entry TimeEntry, start, 
 	name := strings.TrimSpace(entry.Name)
 	totals.tasks[name] += duration
 	totals.taskCounts[name]++
-	addTimeEntryLocalDays(totals.days, clippedStart, clippedEnd, location)
+	addTimeEntryLocalDays(totals.days, clippedStart, clippedEnd, context.location)
 	return nil
 }
 
