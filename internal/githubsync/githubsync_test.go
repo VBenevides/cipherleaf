@@ -638,11 +638,19 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	}
 
 	tree := runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
+	assertEncryptedRepositoryTree(t, remote, tree, note.ID)
+	assertProviderDownloadCanBeRestored(t, provider, settings, store, session, note, result.LastCommit)
+	assertProviderPushAfterDelete(t, provider, settings, store, note.ID, result.LastCommit, remote, transport)
+	assertProviderRejectsOtherVault(t, provider, settings)
+}
+
+func assertEncryptedRepositoryTree(t *testing.T, remote, tree, noteID string) {
+	t.Helper()
 	for _, required := range []string{
 		"vault.json",
 		"sync/folders.enc",
 		"sync/manifest.enc",
-		"objects/" + note.ID[:2] + "/" + note.ID + ".enc",
+		"objects/" + noteID[:2] + "/" + noteID + ".enc",
 	} {
 		if !strings.Contains(tree, required+"\n") {
 			t.Fatalf("repository tree is missing %q:\n%s", required, tree)
@@ -656,24 +664,31 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 			t.Fatalf("repository tree contains the local manifest:\n%s", tree)
 		}
 		data := runGitTestCommand(t, "", "--git-dir="+remote, "show", "main:"+path)
-		for _, plaintext := range []string{
-			"Provider private folder",
-			"Provider private title",
-			"Provider private content",
-		} {
-			if strings.Contains(data, plaintext) {
-				t.Fatalf("Git object %q leaked plaintext %q", path, plaintext)
-			}
+		assertNoPlaintext(t, path, data)
+	}
+}
+
+func assertNoPlaintext(t *testing.T, path, data string) {
+	t.Helper()
+	for _, plaintext := range []string{
+		"Provider private folder",
+		"Provider private title",
+		"Provider private content",
+	} {
+		if strings.Contains(data, plaintext) {
+			t.Fatalf("Git object %q leaked plaintext %q", path, plaintext)
 		}
 	}
+}
 
+func assertProviderDownloadCanBeRestored(t *testing.T, provider *GitHubSSHProvider, settings SyncSettings, store *vault.Store, session vault.Session, note vault.Note, previousCommit string) {
+	t.Helper()
 	downloaded, err := provider.Download(context.Background(), settings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if downloaded.VaultID != session.VaultID ||
-		downloaded.LastCommit != result.LastCommit {
-		t.Fatalf("download result = %#v, link result = %#v", downloaded, result)
+	if downloaded.VaultID != session.VaultID || downloaded.LastCommit != previousCommit {
+		t.Fatalf("download result = %#v, want commit %q", downloaded, previousCommit)
 	}
 	restoredStore := vault.NewStore()
 	restoredSession, err := restoredStore.RestoreRemoteSnapshot(
@@ -696,22 +711,25 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 		t.Fatalf("restored content = %q", restoredNote.Content)
 	}
 	restoredStore.Lock()
+}
 
+func assertProviderPushAfterDelete(t *testing.T, provider *GitHubSSHProvider, settings SyncSettings, store *vault.Store, noteID, previousCommit, remote string, transport *countingGitTransport) {
+	t.Helper()
 	reopened, err := provider.Link(context.Background(), settings, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reopened.LastCommit != result.LastCommit {
-		t.Fatalf("reopened commit = %q, want %q", reopened.LastCommit, result.LastCommit)
+	if reopened.LastCommit != previousCommit {
+		t.Fatalf("reopened commit = %q, want %q", reopened.LastCommit, previousCommit)
 	}
 	unchanged, err := provider.Push(context.Background(), settings, store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !unchanged.UpToDate || unchanged.LastCommit != result.LastCommit {
-		t.Fatalf("unchanged push = %#v, want commit %q", unchanged, result.LastCommit)
+	if !unchanged.UpToDate || unchanged.LastCommit != previousCommit {
+		t.Fatalf("unchanged push = %#v, want commit %q", unchanged, previousCommit)
 	}
-	if err := store.DeleteNote(note.ID); err != nil {
+	if err := store.DeleteNote(noteID); err != nil {
 		t.Fatal(err)
 	}
 	deleted, err := provider.Push(context.Background(), settings, store)
@@ -730,11 +748,11 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	if cacheRemoteTip != deleted.LastCommit {
 		t.Fatalf("cached remote tip = %q, want pushed commit %q", cacheRemoteTip, deleted.LastCommit)
 	}
-	tree = runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
-	if strings.Contains(tree, note.ID+".enc") {
+	tree := runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
+	if strings.Contains(tree, noteID+".enc") {
 		t.Fatalf("repository retained deleted final note:\n%s", tree)
 	}
-	downloaded, err = provider.Download(context.Background(), settings)
+	downloaded, err := provider.Download(context.Background(), settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -748,15 +766,17 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	if transport.showCalls != 0 {
 		t.Fatalf("provider spawned %d per-file git show commands", transport.showCalls)
 	}
+}
 
+func assertProviderRejectsOtherVault(t *testing.T, provider *GitHubSSHProvider, settings SyncSettings) {
+	t.Helper()
 	otherStore := vault.NewStore()
 	otherSession, err := otherStore.Create(t.TempDir(), "another correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherSettings := settings
-	otherSettings.VaultID = otherSession.VaultID
-	if _, err := provider.Link(context.Background(), otherSettings, otherStore); err == nil ||
+	settings.VaultID = otherSession.VaultID
+	if _, err := provider.Link(context.Background(), settings, otherStore); err == nil ||
 		!strings.Contains(err.Error(), "another vault") {
 		t.Fatalf("vault mismatch link error = %v", err)
 	}
