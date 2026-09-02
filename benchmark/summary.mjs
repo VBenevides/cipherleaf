@@ -79,8 +79,10 @@ for (const [name, values] of samples) {
   const measured = values.reduce((sum, { operations, milliseconds }) => sum + operations * milliseconds, 0);
   const frameMisses = values.reduce((sum, value) => sum + (value.metrics["frame-miss"] ?? 0), 0);
   const units = metric(values, "items/op") ?? metric(values, "edges") ?? metric(values, "objects") ?? metric(values, "dom-nodes");
+  const unitsText = units === null ? "-" : (times.average * 1000 / units).toFixed(3);
+  const frameMissText = name.startsWith("frontend/") ? `${frameMisses}/${values.length}` : "-";
   console.log(
-    `| ${name} | ${values.length} | ${(measured / 1000).toFixed(2)} s | ${times.average.toFixed(3)} ms | ${times.stdDev.toFixed(3)} ms | ${times.median.toFixed(3)} ms | ${times.p95.toFixed(3)} ms | ${times.min.toFixed(3)} ms | ${times.max.toFixed(3)} ms | ${times.cv.toFixed(1)}% | ${(1000 / times.average).toFixed(1)} | ${units === null ? "-" : (times.average * 1000 / units).toFixed(3)} | ${name.startsWith("frontend/") ? `${frameMisses}/${values.length}` : "-"} |`,
+    `| ${name} | ${values.length} | ${(measured / 1000).toFixed(2)} s | ${times.average.toFixed(3)} ms | ${times.stdDev.toFixed(3)} ms | ${times.median.toFixed(3)} ms | ${times.p95.toFixed(3)} ms | ${times.min.toFixed(3)} ms | ${times.max.toFixed(3)} ms | ${times.cv.toFixed(1)}% | ${(1000 / times.average).toFixed(1)} | ${unitsText} | ${frameMissText} |`,
   );
 }
 
