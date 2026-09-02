@@ -570,6 +570,7 @@ function App() {
   const [cardPanel, setCardPanel] = useState<CardPanelState | null>(null);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
+  const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
   const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
@@ -3162,6 +3163,8 @@ function App() {
 
   const openCard = async (id: string) => {
     try {
+      const origin = noteRef.current;
+      cardOriginRef.current = origin ? { noteID: origin.id, offset: noteCaretOffsetsRef.current.get(origin.id) ?? 0 } : null;
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) throw new Error("This reference is not a card.");
@@ -3171,6 +3174,28 @@ function App() {
       setError(errorText(reason));
     }
   };
+
+  const closeCardPanel = () => {
+    const origin = cardOriginRef.current;
+    if (origin) {
+      noteCaretOffsetsRef.current.set(origin.noteID, origin.offset);
+      setCaretRestoreVersion((version) => version + 1);
+    }
+    cardOriginRef.current = null;
+    setCardPanel(null);
+  };
+
+  useEffect(() => {
+    if (!cardPanel) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCardPanel();
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [cardPanel]);
 
   const createCard = async () => {
     try {
@@ -4609,7 +4634,7 @@ function App() {
         onBlur={persistWhenEditorLosesFocus}
         onClick={(event) => {
           if (cardPanel && !(event.target instanceof Element && event.target.closest(".card-sidebar"))) {
-            setCardPanel(null);
+            closeCardPanel();
           }
         }}
       >
@@ -5018,7 +5043,7 @@ function App() {
                 <p className="eyebrow">Card</p>
                 <h2>{cardPanel.metadata.title || "Untitled"}</h2>
               </div>
-              <button type="button" className="icon-button" aria-label="Close card" title="Close card" onClick={() => setCardPanel(null)}>
+              <button type="button" autoFocus className="icon-button" aria-label="Close card" title="Close card" onClick={closeCardPanel}>
                 <Icon name="x" size={16} />
               </button>
             </header>
