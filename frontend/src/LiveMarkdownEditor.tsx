@@ -2702,11 +2702,21 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
   duplicate.role = "menuitem";
   duplicate.textContent = "Duplicate";
   duplicate.addEventListener("click", () => {
-    const lines = view.state.doc.toString().split("\n");
+    close();
+    const state = view.state;
+    const doc = state.doc.toString();
+    const lines = doc.split("\n");
     if (lineNumber < 1 || lineNumber > lines.length) return;
     logicalObjectClipboard = lines.slice(lineNumber - 1, objectBlockEnd(lines, lineNumber)).join("\n");
     void navigator.clipboard?.writeText(logicalObjectClipboard).catch(() => {});
-    close();
+    const next = insertLogicalObjectAfterCaret(doc, logicalObjectClipboard, state.doc.line(lineNumber).to);
+    if (next === doc) return;
+    const duplicateStart = state.doc.line(objectBlockEnd(lines, lineNumber)).to + 1;
+    view.dispatch({
+      changes: { from: 0, to: state.doc.length, insert: next },
+      selection: EditorSelection.cursor(Math.min(duplicateStart, next.length)),
+    });
+    view.focus();
   });
   queueMicrotask(() => document.addEventListener("pointerdown", close));
 }

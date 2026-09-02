@@ -14,3 +14,11 @@ test("logical object paste inserts the complete object after its target", () => 
 test("logical text duplication inserts the complete object after its target", () => {
   assert.equal(insertLogicalObjectAfterCaret("Plain\nNext", "Plain", 2), "Plain\nPlain\nNext");
 });
+
+test("logical duplication inserts directly after the copied object block", () => {
+  const source = "- Parent\n  - Child\n- Next";
+  assert.equal(
+    insertLogicalObjectAfterCaret(source, "- Parent\n  - Child", source.indexOf("Parent")),
+    "- Parent\n  - Child\n- Parent\n  - Child\n- Next",
+  );
+});
