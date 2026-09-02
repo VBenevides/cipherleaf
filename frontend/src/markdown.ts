@@ -15,7 +15,7 @@ export function normalizeArrowText(text: string): string {
     const fence = /^\s{0,3}(`{3,}|~{3,})/.exec(part);
     if (activeFence) {
       const fenceValue = fence?.[1];
-      if (fenceValue?.[0] === activeFence && fenceValue.length >= activeFenceLength) {
+      if (fenceValue?.startsWith(activeFence) && fenceValue.length >= activeFenceLength) {
         activeFence = null;
       }
       return part;
