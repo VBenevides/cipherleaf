@@ -10,17 +10,22 @@ function add(name, operations, milliseconds, metrics = {}) {
 }
 
 function equalsMetrics(text) {
-  return Object.fromEntries(
-    [...text.matchAll(/([A-Za-z][A-Za-z0-9-]*)=([\d.]+)/g)].map((match) => [match[1], Number(match[2])]),
-  );
+  const metrics = {};
+  for (const token of text.trim().split(/\s+/)) {
+    const separator = token.indexOf("=");
+    if (separator < 1) continue;
+    metrics[token.slice(0, separator)] = Number(token.slice(separator + 1));
+  }
+  return metrics;
 }
 
 for (const line of readFileSync(process.argv[2], "utf8").split("\n")) {
   const match = line.match(/^Benchmark(.+)-\d+\s+(\d+)\s+([\d.]+)\s+ns\/op(.*)$/);
   if (!match) continue;
   const metrics = {};
-  for (const metric of match[4].matchAll(/([\d.]+)\s+([A-Za-z][A-Za-z0-9/-]*)/g)) {
-    metrics[metric[2]] = Number(metric[1]);
+  const metricTokens = match[4].trim().split(/\s+/);
+  for (let index = 0; index + 1 < metricTokens.length; index += 2) {
+    metrics[metricTokens[index + 1]] = Number(metricTokens[index]);
   }
   add(`go/${match[1]}`, Number(match[2]), Number(match[3]) / 1e6, metrics);
 }
@@ -36,8 +41,9 @@ for (const line of readFileSync(process.argv[3], "utf8").split("\n")) {
 }
 
 for (const line of readFileSync(process.argv[4], "utf8").split("\n")) {
-  const match = line.match(/^BenchmarkBundle\/(\S+)\s+(.*)$/);
-  if (match) bundles.push({ name: match[1], metrics: equalsMetrics(match[2]) });
+  if (!line.startsWith("BenchmarkBundle/")) continue;
+  const [name, ...metricTokens] = line.slice("BenchmarkBundle/".length).trim().split(/\s+/);
+  bundles.push({ name, metrics: equalsMetrics(metricTokens.join(" ")) });
 }
 
 function stats(values) {
