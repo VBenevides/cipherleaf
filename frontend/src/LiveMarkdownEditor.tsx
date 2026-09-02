@@ -53,6 +53,8 @@ import {
   objectContentIndent,
   objectDepthByLine,
   objectOwnerLineNumber,
+  objectBlockEnd,
+  insertLogicalObjectAfterCaret,
   normalizeStackedExclusiveObjectPrefix,
   parseObjectDocument,
   replaceExclusiveObjectPrefix,
@@ -2571,6 +2573,8 @@ function multilineObjectPaste(view: EditorView, text: string) {
   return true;
 }
 
+let logicalObjectClipboard = "";
+
 function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
   view.dispatch({ effects: setAllQuotesCollapsed.of(collapsed) });
   view.focus();
@@ -2676,6 +2680,17 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
       selection: EditorSelection.cursor(Math.min(line.from, next.length)),
     });
     view.focus();
+  });
+  const copy = menu.insertBefore(document.createElement("button"), remove);
+  copy.type = "button";
+  copy.role = "menuitem";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", () => {
+    const lines = view.state.doc.toString().split("\n");
+    if (lineNumber < 1 || lineNumber > lines.length) return;
+    logicalObjectClipboard = lines.slice(lineNumber - 1, objectBlockEnd(lines, lineNumber)).join("\n");
+    void navigator.clipboard?.writeText(logicalObjectClipboard).catch(() => {});
+    close();
   });
   queueMicrotask(() => document.addEventListener("pointerdown", close));
 }
@@ -3170,6 +3185,19 @@ export default function LiveMarkdownEditor({
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) {
                 const text = event.clipboardData?.getData("text/plain") ?? "";
+                if (logicalObjectClipboard && text === logicalObjectClipboard) {
+                  const next = insertLogicalObjectAfterCaret(
+                    pastedView.state.doc.toString(),
+                    text,
+                    pastedView.state.selection.main.head,
+                  );
+                  if (next !== pastedView.state.doc.toString()) {
+                    event.preventDefault();
+                    pastedView.dispatch({ changes: { from: 0, to: pastedView.state.doc.length, insert: next } });
+                    pastedView.focus();
+                    return true;
+                  }
+                }
                 if (!multilineObjectPaste(pastedView, text)) return false;
                 event.preventDefault();
                 return true;

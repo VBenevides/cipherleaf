@@ -581,6 +581,28 @@ export function deleteObjectInMarkdown(markdown: string, lineNumber: number): st
   return lines.join("\n");
 }
 
+export function insertLogicalObjectAfterCaret(markdown: string, pasted: string, offset: number): string {
+  const source = pasted.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+  if (!source || classifyObjectLine(source.split("\n", 1)[0] ?? "").tag === "text") return markdown;
+  const lines = markdown.split("\n");
+  const position = Math.max(0, Math.min(offset, markdown.length));
+  let lineNumber = 1;
+  let cursor = 0;
+  for (const [index, line] of lines.entries()) {
+    if (position <= cursor + line.length) { lineNumber = index + 1; break; }
+    cursor += line.length + 1;
+    lineNumber = index + 1;
+  }
+  const target = objectOwnerLineNumber(lines, lineNumber);
+  const end = objectBlockEnd(lines, target);
+  const before = lines.slice(0, end).join("\n");
+  const after = lines.slice(end).join("\n");
+  const targetIndent = classifyObjectLine(lines[target - 1] ?? "").indent;
+  const sourceIndent = classifyObjectLine(source.split("\n", 1)[0] ?? "").indent;
+  const inserted = reindentLines(source.split("\n"), sourceIndent, targetIndent).join("\n");
+  return `${before}\n${inserted}${after ? `\n${after}` : ""}`;
+}
+
 export function moveObject(
   markdown: string,
   sourceId: string,
