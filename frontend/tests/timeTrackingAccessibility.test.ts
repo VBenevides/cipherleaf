@@ -36,7 +36,8 @@ test("tracking conflicts require an explicit accessible dialog choice", () => {
 test("timer shortcuts open opaque modals without changing workspace views", () => {
   assert.match(app, /event\.preventDefault\(\); openStartTimerDialog\(\); return;/);
   assert.match(app, /setTimerDialog\("finish"\); return;/);
-  assert.match(app, /<dialog open className="vault-modal timer-modal" aria-modal="true"/);
+  assert.match(app, /<dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title" onMouseDown=/);
+  assert.match(app, /<div className="vault-modal timer-modal">/);
   assert.match(style, /\.timer-modal \{ background: var\(--modal-surface\); \}/);
 });
 

@@ -6122,8 +6122,8 @@ function App() {
   const renderTimerDialog = () => (
     <>
       {timerDialog && (
-        <div className="modal-backdrop timer-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
-          <dialog open className="vault-modal timer-modal" aria-modal="true" aria-labelledby="timer-dialog-title">
+        <dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
+          <div className="vault-modal timer-modal">
             <button type="button" className="icon-button modal-close" aria-label="Close timer dialog" onClick={() => setTimerDialog(null)}><Icon name="x" /></button>
             <p className="eyebrow">Time tracking</p>
             {timerDialog === "start" ? <form onSubmit={(event) => { event.preventDefault(); void startTimerFromDialog(); }}>
@@ -6141,8 +6141,8 @@ function App() {
               {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
               <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button autoFocus type="button" className="primary-button" disabled={!activeTimeEntry || timerBusy} onClick={() => void finishTimerFromDialog()}>{timerBusy ? "Finishing…" : "Finish timer"}</button></div>
             </div>}
-          </dialog>
-        </div>
+          </div>
+        </dialog>
       )}
 
     </>

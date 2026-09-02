@@ -655,6 +655,16 @@ a:focus-visible {
   backdrop-filter: blur(7px);
 }
 
+dialog.modal-backdrop {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
+}
+
 .vault-action-backdrop {
   z-index: 120;
 }
