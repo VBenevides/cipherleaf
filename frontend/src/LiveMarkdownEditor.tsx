@@ -1539,9 +1539,8 @@ function objectTreeEnd(object: ObjectLine): number {
 
 function toggleSectionEnd(document: ObjectDocument, lineNumber: number): number {
   const object = document.byLine.get(lineNumber);
-  return object?.lineNumber === lineNumber && object.tags.includes("section")
-    ? objectTreeEnd(object)
-    : lineNumber;
+  const section = object?.lineNumber === lineNumber && object?.tags.includes("section") ? object : null;
+  return section ? objectTreeEnd(section) : lineNumber;
 }
 
 function toggleHasChildren(toggle: ToggleLine): boolean {
