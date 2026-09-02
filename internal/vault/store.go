@@ -2593,6 +2593,37 @@ func mergeRemoteFolderUpdates(
 	return mergedFolders, mergedDeletedFolders
 }
 
+func mergeRemoteFolderDeletion(
+	deleted Tombstone,
+	folderByID map[string]Folder,
+	childCounts map[string]int,
+	noteFolderRefs map[string]struct{},
+	deletedFolderIDs map[string]struct{},
+	mergedDeletedFolders []Tombstone,
+	result *MergeResult,
+) []Tombstone {
+	local, found := folderByID[deleted.ID]
+	if found {
+		updated, _ := time.Parse(time.RFC3339Nano, local.UpdatedAt)
+		_, referenced := noteFolderRefs[deleted.ID]
+		if deleted.ModifiedAt <= updated.Unix() || referenced || childCounts[deleted.ID] > 0 {
+			return mergedDeletedFolders
+		}
+		deletedFolderIDs[deleted.ID] = struct{}{}
+		if local.ParentID != "" && childCounts[local.ParentID] > 0 {
+			childCounts[local.ParentID]--
+		}
+		result.DeletedFolders++
+		result.UpToDate = false
+	}
+	before, existed := findTombstone(mergedDeletedFolders, deleted.ID)
+	mergedDeletedFolders = upsertTombstone(mergedDeletedFolders, deleted)
+	if !found && (!existed || deleted.ModifiedAt > before.ModifiedAt) {
+		result.UpToDate = false
+	}
+	return mergedDeletedFolders
+}
+
 func mergeRemoteFolderDeletions(
 	deletedFolders []Tombstone,
 	mergedFolders []Folder,
@@ -2616,29 +2647,7 @@ func mergeRemoteFolderDeletions(
 	}
 	deletedFolderIDs := make(map[string]struct{})
 	for _, deleted := range deletedFolders {
-		local, found := folderByID[deleted.ID]
-		acceptTombstone := true
-		if found {
-			updated, _ := time.Parse(time.RFC3339Nano, local.UpdatedAt)
-			_, referenced := noteFolderRefs[deleted.ID]
-			if deleted.ModifiedAt <= updated.Unix() || referenced || childCounts[deleted.ID] > 0 {
-				acceptTombstone = false
-			} else {
-				deletedFolderIDs[deleted.ID] = struct{}{}
-				if local.ParentID != "" && childCounts[local.ParentID] > 0 {
-					childCounts[local.ParentID]--
-				}
-				result.DeletedFolders++
-				result.UpToDate = false
-			}
-		}
-		if acceptTombstone {
-			before, existed := findTombstone(mergedDeletedFolders, deleted.ID)
-			mergedDeletedFolders = upsertTombstone(mergedDeletedFolders, deleted)
-			if !found && (!existed || deleted.ModifiedAt > before.ModifiedAt) {
-				result.UpToDate = false
-			}
-		}
+		mergedDeletedFolders = mergeRemoteFolderDeletion(deleted, folderByID, childCounts, noteFolderRefs, deletedFolderIDs, mergedDeletedFolders, result)
 	}
 	if len(deletedFolderIDs) > 0 {
 		kept := mergedFolders[:0]
