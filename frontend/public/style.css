@@ -3862,6 +3862,10 @@ a:focus-visible {
   background: color-mix(in srgb, var(--green-dark) 20%, transparent) !important;
 }
 
+.document-body .live-markdown-editor:not(.source-markdown-editor) .cm-selectionLayer {
+  clip-path: inset(0 var(--editor-content-right) 0 var(--editor-content-left));
+}
+
 .live-markdown-editor .cm-cursor {
   border-left-color: var(--green-dark);
 }
