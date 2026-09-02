@@ -159,7 +159,7 @@ const deepCodeHighlightLoader = ViewPlugin.fromClass(class {
   private generation = 0;
 
   constructor(view: EditorView) {
-    void this.refresh(view);
+    queueMicrotask(() => void this.refresh(view));
   }
 
   update(update: { docChanged: boolean; view: EditorView }) {
