@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+const (
+	noteHistoryObjectType = "note-history"
+	trashNoteObjectType   = "trash-note"
+	trashFolderObjectType = "trash-folder"
+)
+
 func (s *Store) trashPathLocked(kind, id string) string {
 	return filepath.Join(s.root, trashDirectory, kind+"s", id+".enc")
 }
@@ -28,7 +34,7 @@ func (s *Store) writeRecoveryRecordLocked(path, objectType, objectID string, val
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if objectType == "note-history" {
+	if objectType == noteHistoryObjectType {
 		envelope, err := s.buildEnvelopeLocked(objectType, objectID, data, "")
 		if err != nil {
 			return err
@@ -75,7 +81,7 @@ func (s *Store) writeNoteHistoryLocked(note Note) error {
 		revision, _ := historyRevision(entry.Name())
 		var previous Note
 		objectID := fmt.Sprintf("%s:%d", note.ID, revision)
-		if err := s.readRecoveryRecordLocked(filepath.Join(directory, entry.Name()), "note-history", objectID, &previous); err != nil {
+		if err := s.readRecoveryRecordLocked(filepath.Join(directory, entry.Name()), noteHistoryObjectType, objectID, &previous); err != nil {
 			return err
 		}
 		if noteContentsEqual(previous.Content, note.Content) {
@@ -83,7 +89,7 @@ func (s *Store) writeNoteHistoryLocked(note Note) error {
 		}
 	}
 	objectID := fmt.Sprintf("%s:%d", note.ID, note.Revision)
-	if err := s.writeRecoveryRecordLocked(path, "note-history", objectID, note); err != nil {
+	if err := s.writeRecoveryRecordLocked(path, noteHistoryObjectType, objectID, note); err != nil {
 		return fmt.Errorf("save note history: %w", err)
 	}
 	limit := normalizeVaultSettings(s.manifest.Settings).FileHistoryLimit
@@ -92,12 +98,12 @@ func (s *Store) writeNoteHistoryLocked(note Note) error {
 
 func (s *Store) writeTrashedNoteLocked(note Note) error {
 	item := trashedNote{Note: note, DeletedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	return s.writeRecoveryRecordLocked(s.trashPathLocked("note", note.ID), "trash-note", note.ID, item)
+	return s.writeRecoveryRecordLocked(s.trashPathLocked("note", note.ID), trashNoteObjectType, note.ID, item)
 }
 
 func (s *Store) writeTrashedFolderLocked(folder Folder) error {
 	item := trashedFolder{Folder: folder, DeletedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	return s.writeRecoveryRecordLocked(s.trashPathLocked("folder", folder.ID), "trash-folder", folder.ID, item)
+	return s.writeRecoveryRecordLocked(s.trashPathLocked("folder", folder.ID), trashFolderObjectType, folder.ID, item)
 }
 
 func (s *Store) listTrashedNotesLocked() ([]trashedNote, error) {
@@ -115,7 +121,7 @@ func (s *Store) listTrashedNotesLocked() ([]trashedNote, error) {
 			continue
 		}
 		var item trashedNote
-		if err := s.readRecoveryRecordLocked(s.trashPathLocked("note", id), "trash-note", id, &item); err != nil {
+		if err := s.readRecoveryRecordLocked(s.trashPathLocked("note", id), trashNoteObjectType, id, &item); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -138,7 +144,7 @@ func (s *Store) listTrashedFoldersLocked() ([]trashedFolder, error) {
 			continue
 		}
 		var item trashedFolder
-		if err := s.readRecoveryRecordLocked(s.trashPathLocked("folder", id), "trash-folder", id, &item); err != nil {
+		if err := s.readRecoveryRecordLocked(s.trashPathLocked("folder", id), trashFolderObjectType, id, &item); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -185,7 +191,7 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 	switch kind {
 	case "note":
 		var item trashedNote
-		if err := s.readRecoveryRecordLocked(path, "trash-note", id, &item); err != nil {
+		if err := s.readRecoveryRecordLocked(path, trashNoteObjectType, id, &item); err != nil {
 			return err
 		}
 		if s.folderExistsLocked(item.Note.FolderID) {
@@ -221,7 +227,7 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 		s.updateSearchIndexLocked(id, derivedMarkdownContent(item.Note.Content))
 	case "folder":
 		var item trashedFolder
-		if err := s.readRecoveryRecordLocked(path, "trash-folder", id, &item); err != nil {
+		if err := s.readRecoveryRecordLocked(path, trashFolderObjectType, id, &item); err != nil {
 			return err
 		}
 		if _, found := s.findFolderLocked(id); found {
@@ -363,7 +369,7 @@ func (s *Store) ListNoteVersions(id string) ([]NoteVersion, error) {
 		}
 		var note Note
 		objectID := fmt.Sprintf("%s:%d", id, revision)
-		if err := s.readRecoveryRecordLocked(filepath.Join(s.root, historyDirectory, id, entry.Name()), "note-history", objectID, &note); err != nil {
+		if err := s.readRecoveryRecordLocked(filepath.Join(s.root, historyDirectory, id, entry.Name()), noteHistoryObjectType, objectID, &note); err != nil {
 			return nil, err
 		}
 		content := derivedMarkdownContent(note.Content)
@@ -395,7 +401,7 @@ func (s *Store) RestoreNoteVersion(id string, revision uint64) (Note, error) {
 	}
 	var historical Note
 	objectID := fmt.Sprintf("%s:%d", id, revision)
-	if err := s.readRecoveryRecordLocked(s.historyPathLocked(id, revision), "note-history", objectID, &historical); err != nil {
+	if err := s.readRecoveryRecordLocked(s.historyPathLocked(id, revision), noteHistoryObjectType, objectID, &historical); err != nil {
 		return Note{}, err
 	}
 	if !s.folderExistsLocked(historical.FolderID) {
