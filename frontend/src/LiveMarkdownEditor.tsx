@@ -1353,16 +1353,26 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
   decorateDelimitedMarkdown(context, /\x60([^\x60\n]+)\x60/g, "cm-live-code", 1);
   decorateDelimitedMarkdown(context, /~~(?=\S)(.+?\S)~~/g, "cm-live-strike", 2);
 
-  for (const match of text.matchAll(/\[\[([^\]\n]+)\]\]/g)) {
-    if (match.index === undefined) continue;
-    const start = offset + match.index;
+  let searchFrom = 0;
+  while (true) {
+    const opening = text.indexOf("[[", searchFrom);
+    if (opening < 0) break;
+    const closing = text.indexOf("]]", opening + 2);
+    if (closing < 0) break;
+    const target = text.slice(opening + 2, closing);
+    if (!target || target.includes("]") || target.includes("\n")) {
+      searchFrom = opening + 2;
+      continue;
+    }
+    const start = offset + opening;
     addHiddenRange(
       start,
-      start + match[0].length,
+      start + closing + 2 - opening,
       decorations,
       atomicRanges,
-      new WikilinkWidget(match[1], start, openWikilink),
+      new WikilinkWidget(target, start, openWikilink),
     );
+    searchFrom = closing + 2;
   }
 
   for (const match of text.matchAll(/(?<!!)\[card\]\(([a-f0-9]{32})\)/gi)) {
