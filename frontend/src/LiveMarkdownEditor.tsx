@@ -70,7 +70,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { BOARD_COLUMNS, CARD_STATUS_LABELS, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -1146,13 +1146,13 @@ class BoardWidget extends WidgetType {
     const render = () => {
       columns.replaceChildren();
       const titleQuery = filter.value.trim().toLocaleLowerCase();
-      const tagQuery = tagFilter.value.trim().toLocaleLowerCase();
+      const requiredTags = tagFilter.value.split(",");
       for (const status of BOARD_COLUMNS) {
         const column = columns.appendChild(document.createElement("div"));
         column.className = `cm-live-board-column status-${status}`;
         column.dataset.status = status;
         column.setAttribute("role", "group");
-        column.setAttribute("aria-label", CARD_STATUS_LABELS[status]);
+        column.setAttribute("aria-label", BOARD_COLUMN_LABELS[status]);
         column.addEventListener("dragover", (event) => event.preventDefault());
         column.addEventListener("drop", (event) => {
           event.preventDefault();
@@ -1160,17 +1160,8 @@ class BoardWidget extends WidgetType {
           if (id) this.moveCard(id, status);
         });
         const heading = column.appendChild(document.createElement("h4"));
-        heading.textContent = CARD_STATUS_LABELS[status];
-        const cards = this.cardIDs
-          .map((id) => this.cards.get(id))
-          .filter((card): card is CardMetadata => !!card && card.status === status)
-          .filter((card) => !titleQuery || card.title.toLocaleLowerCase().includes(titleQuery))
-          .filter((card) => !tagQuery || card.tags.some((tag) => tag.toLocaleLowerCase().includes(tagQuery)))
-          .sort((left, right) => {
-            const leftDate = status === "not-started" ? left.createdAt : left.columnEnteredAt ?? left.createdAt;
-            const rightDate = status === "not-started" ? right.createdAt : right.columnEnteredAt ?? right.createdAt;
-            return rightDate.localeCompare(leftDate);
-          });
+        heading.textContent = BOARD_COLUMN_LABELS[status];
+        const cards = boardCardsForColumn(this.cards, this.cardIDs, status, titleQuery, requiredTags);
         for (const card of cards) {
           const item = column.appendChild(document.createElement("button"));
           item.type = "button";
@@ -1182,6 +1173,15 @@ class BoardWidget extends WidgetType {
           item.addEventListener("click", (event) => {
             event.stopPropagation();
             this.openCard(card.id);
+          });
+          item.setAttribute("aria-label", `${card.title || "Untitled"}, ${BOARD_COLUMN_LABELS[status]}`);
+          item.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            const index = BOARD_COLUMNS.indexOf(status);
+            const nextIndex = index + (event.key === "ArrowRight" ? 1 : -1);
+            if (nextIndex < 0 || nextIndex >= BOARD_COLUMNS.length) return;
+            event.preventDefault();
+            this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
           });
           const date = status === "not-started" ? card.createdAt
             : status === "in-progress" ? card.startedAt

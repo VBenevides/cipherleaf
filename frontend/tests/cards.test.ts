@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   boardMarker,
+  boardCardsForColumn,
   cardReference,
   newCardMetadata,
   normalizeCardTags,
@@ -60,4 +61,12 @@ test("lifecycle transitions retain first start and record latest block/finish", 
 
 test("lifecycle rejects invalid runtime statuses", () => {
   assert.throws(() => transitionCard(newCardMetadata("card-1"), "unknown" as never), /Unsupported card status/);
+});
+
+test("board cards filter by all selected tags and sort newest first", () => {
+  const cards = new Map([
+    ["a", { ...newCardMetadata("a", new Date("2026-01-01T00:00:00Z")), title: "Alpha", tags: ["Work", "Urgent"] }],
+    ["b", { ...newCardMetadata("b", new Date("2026-01-02T00:00:00Z")), title: "Beta", tags: ["Work"] }],
+  ]);
+  assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "a", ["work", "urgent"]).map((card) => card.id), ["a"]);
 });

@@ -8,6 +8,13 @@ export const CARD_STATUS_LABELS: Record<CardStatus, string> = {
   finished: "Finished",
 };
 
+export const BOARD_COLUMN_LABELS: Record<CardStatus, string> = {
+  "not-started": "Backlog",
+  "in-progress": "In Progress",
+  blocked: "Blocked",
+  finished: "Concluded",
+};
+
 export const BOARD_COLUMNS = ["not-started", "in-progress", "blocked", "finished"] as const;
 
 export type CardMetadata = {
@@ -35,6 +42,27 @@ export type CardTemplate = {
   tags: string[];
   body: string;
 };
+
+export function boardCardsForColumn(
+  cards: ReadonlyMap<string, CardMetadata>,
+  ids: readonly string[],
+  status: CardStatus,
+  titleQuery = "",
+  requiredTags: readonly string[] = [],
+): CardMetadata[] {
+  const title = titleQuery.trim().toLocaleLowerCase();
+  const tags = requiredTags.map((tag) => tag.trim().toLocaleLowerCase()).filter(Boolean);
+  return ids
+    .map((id) => cards.get(id))
+    .filter((card): card is CardMetadata => !!card && card.status === status)
+    .filter((card) => !title || card.title.toLocaleLowerCase().includes(title))
+    .filter((card) => tags.every((tag) => card.tags.some((value) => value.toLocaleLowerCase() === tag)))
+    .sort((left, right) => {
+      const leftDate = status === "not-started" ? left.createdAt : left.columnEnteredAt ?? left.createdAt;
+      const rightDate = status === "not-started" ? right.createdAt : right.columnEnteredAt ?? right.createdAt;
+      return rightDate.localeCompare(leftDate);
+    });
+}
 
 const CARD_KEYS = {
   marker: "cipherleaf-card",
