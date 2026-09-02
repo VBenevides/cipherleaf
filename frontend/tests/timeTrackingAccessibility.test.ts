@@ -13,7 +13,6 @@ test("time tracking navigation and dialogs expose keyboard semantics", () => {
   assert.match(view, /aria-selected=\{tab === item\}/);
   assert.match(view, /<ThemedDatePicker ariaLabel="Started date"/);
   assert.match(view, /aria-modal="true"/);
-  assert.match(view, /tabIndex=\{0\}/);
 });
 
 test("dashboard chart and global timer have accessible descriptions", () => {
@@ -47,7 +46,7 @@ test("all modal surfaces and controls use opaque theme colors", () => {
 });
 
 test("week days are keyboard-selectable and filter the activity list", () => {
-  assert.match(view, /role="button" tabIndex=\{0\} aria-pressed=\{selectedWeekDay === key\}/);
+  assert.match(view, /<button type="button" key=\{key\} aria-pressed=\{selectedWeekDay === key\}/);
   assert.match(view, /selectedWeekEntries\.map/);
 });
 
