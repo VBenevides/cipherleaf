@@ -1104,6 +1104,8 @@ class CardReferenceWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+const boardCardMime = "application/x-cipherleaf-board-card";
+
 class BoardWidget extends WidgetType {
   constructor(
     readonly boardID: string,
@@ -1183,6 +1185,7 @@ class BoardWidget extends WidgetType {
         column.addEventListener("dragover", (event) => event.preventDefault());
         column.addEventListener("drop", (event) => {
           event.preventDefault();
+          event.stopPropagation();
           const id = event.dataTransfer?.getData("text/plain");
           if (id) this.moveCard(id, status);
         });
@@ -1201,7 +1204,11 @@ class BoardWidget extends WidgetType {
           item.draggable = true;
           item.textContent = card.title || "Untitled";
           item.title = `Open card “${card.title || "Untitled"}”`;
-          item.addEventListener("dragstart", (event) => event.dataTransfer?.setData("text/plain", card.id));
+          item.addEventListener("dragstart", (event) => {
+            event.dataTransfer?.setData("text/plain", card.id);
+            event.dataTransfer?.setData(boardCardMime, card.id);
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+          });
           item.addEventListener("click", (event) => {
             event.stopPropagation();
             this.openCard(card.id);
@@ -3235,6 +3242,12 @@ export default function LiveMarkdownEditor({
               document.addEventListener("pointermove", move);
               document.addEventListener("pointerup", finish);
               document.addEventListener("pointercancel", finish);
+              return true;
+            },
+            drop(event) {
+              if (!Array.from(event.dataTransfer?.types ?? []).includes(boardCardMime)) return false;
+              event.preventDefault();
+              event.stopPropagation();
               return true;
             },
             paste(event, pastedView) {
