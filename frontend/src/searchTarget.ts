@@ -131,7 +131,7 @@ export function rangeForActiveDocument(
   document: string,
   sourceDocument = document,
 ): SearchRange | null {
-  if (!target || target.noteID !== activeNoteID) return null;
+  if (target?.noteID !== activeNoteID) return null;
 
   const utf8End = target.offset + target.matchLength;
   if (!Number.isSafeInteger(utf8End)) return null;
