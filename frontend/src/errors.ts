@@ -1,10 +1,7 @@
 export function errorText(error: unknown): string {
-  let message =
-    typeof error === "string"
-      ? error
-      : error instanceof Error
-        ? error.message
-        : "";
+  let message = "";
+  if (typeof error === "string") message = error;
+  else if (error instanceof Error) message = error.message;
   try {
     const parsed = JSON.parse(message) as { message?: unknown };
     if (typeof parsed.message === "string") message = parsed.message;
