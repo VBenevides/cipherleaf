@@ -48,9 +48,21 @@ func TestTimeDashboardAggregatesAndLoadsGroupDetailsLazily(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertDashboardTotals(t, result)
+	assertDashboardGroups(t, result)
+	assertDashboardReads(t, reads, oldBucket.ID, bucket.ID)
+	assertDashboardDetails(t, store, projectA.ID, tagB.ID, clientB.ID, projectB.ID)
+}
+
+func assertDashboardTotals(t *testing.T, result TimeDashboard) {
+	t.Helper()
 	if result.ProjectCount != 2 || result.TagCount != 2 || result.TotalSeconds != 14400 || result.AverageDaySeconds != 7200 {
 		t.Fatalf("unexpected dashboard counters: %#v", result)
 	}
+}
+
+func assertDashboardGroups(t *testing.T, result TimeDashboard) {
+	t.Helper()
 	if len(result.Projects) != 2 || result.Projects[0].Name != "Beta" || result.Projects[0].TotalSeconds != 7200 {
 		t.Fatalf("unexpected project groups: %#v", result.Projects)
 	}
@@ -66,20 +78,27 @@ func TestTimeDashboardAggregatesAndLoadsGroupDetailsLazily(t *testing.T) {
 	if len(result.Days) != 2 || result.Days[0].TotalSeconds != 10800 || result.Days[1].TotalSeconds != 3600 {
 		t.Fatalf("unexpected daily chart: %#v", result.Days)
 	}
-	if reads[oldBucket.ID] != 0 || reads[bucket.ID] != 1 {
+}
+
+func assertDashboardReads(t *testing.T, reads map[string]int, oldBucketID, bucketID string) {
+	t.Helper()
+	if reads[oldBucketID] != 0 || reads[bucketID] != 1 {
 		t.Fatalf("dashboard read unrelated buckets: %#v", reads)
 	}
+}
 
+func assertDashboardDetails(t *testing.T, store *Store, projectAID, tagBID, clientBID, projectBID string) {
+	t.Helper()
 	details, err := store.ListTimeDashboardGroupEntries("Task", "2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{})
 	if err != nil || len(details) != 2 {
 		t.Fatalf("unexpected lazy details: %#v, %v", details, err)
 	}
-	filtered, err := store.GetTimeDashboard("2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{ProjectIDs: []string{projectA.ID}, TagIDs: []string{tagB.ID}})
+	filtered, err := store.GetTimeDashboard("2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{ProjectIDs: []string{projectAID}, TagIDs: []string{tagBID}})
 	if err != nil || filtered.TotalSeconds != 3600 || filtered.ProjectCount != 1 || filtered.TagCount != 2 {
 		t.Fatalf("unexpected filtered dashboard: %#v, %v", filtered, err)
 	}
-	clientFiltered, err := store.GetTimeDashboard("2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{ClientIDs: []string{clientB.ID}})
-	if err != nil || clientFiltered.TotalSeconds != 7200 || len(clientFiltered.Projects) != 1 || clientFiltered.Projects[0].ID != projectB.ID {
+	clientFiltered, err := store.GetTimeDashboard("2026-07-01T00:00:00Z", "2026-07-03T00:00:00Z", TimeEntryFilters{ClientIDs: []string{clientBID}})
+	if err != nil || clientFiltered.TotalSeconds != 7200 || len(clientFiltered.Projects) != 1 || clientFiltered.Projects[0].ID != projectBID {
 		t.Fatalf("unexpected client-filtered dashboard: %#v, %v", clientFiltered, err)
 	}
 }
