@@ -26,6 +26,25 @@ github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAA
 github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
 `
 
+const (
+	gitQuietFlag           = "--quiet"
+	gitNoVerifyFlag        = "--no-verify"
+	gitNoGPGSignFlag       = "--no-gpg-sign"
+	gitDepthOneFlag        = "--depth=1"
+	gitNoCheckoutFlag      = "--no-checkout"
+	gitNameOnlyFlag        = "--name-only"
+	gitHooksPathPrefix     = "core.hooksPath="
+	gitEmptyHooksDirectory = "empty-hooks"
+	gitLsRemoteCommand     = "ls-remote"
+	gitOriginPrefix        = "origin/"
+	gitUserNameConfig      = "user.name=Cipherleaf"
+	gitUserEmailConfig     = "user.email=sync@cipherleaf.local"
+	gitHeadsRefPrefix      = "HEAD:refs/heads/"
+	gitVaultConfigPath     = "vault.json"
+	gitSyncManifestPath    = "sync/manifest.enc"
+	gitSyncFoldersPath     = "sync/folders.enc"
+)
+
 type ConnectionTester interface {
 	TestConnection(ctx context.Context, settings SyncSettings) (ConnectionResult, error)
 }
@@ -100,7 +119,7 @@ func (t *GitConnectionTester) TestConnection(
 	if err != nil {
 		return ConnectionResult{}, err
 	}
-	emptyHooks := filepath.Join(t.runtimeDir, "empty-hooks")
+	emptyHooks := filepath.Join(t.runtimeDir, gitEmptyHooksDirectory)
 	if err := os.MkdirAll(emptyHooks, 0o700); err != nil {
 		return ConnectionResult{}, errors.New("could not prepare safe Git hooks configuration")
 	}
@@ -111,7 +130,7 @@ func (t *GitConnectionTester) TestConnection(
 	output, err := t.runner.Run(
 		contextWithTimeout,
 		"git",
-		[]string{"ls-remote", "--symref", settings.RepositorySSH, "HEAD"},
+		[]string{gitLsRemoteCommand, "--symref", settings.RepositorySSH, "HEAD"},
 		environment,
 	)
 	if err != nil {
@@ -124,13 +143,13 @@ func (t *GitConnectionTester) TestConnection(
 	}
 	defer os.RemoveAll(testRepository)
 	localCommands := [][]string{
-		{"-C", testRepository, "init", "--quiet"},
+		{"-C", testRepository, "init", gitQuietFlag},
 		{
-			"-c", "core.hooksPath=" + emptyHooks,
+			"-c", gitHooksPathPrefix + emptyHooks,
 			"-c", "user.name=Cipherleaf connection test",
 			"-c", "user.email=connection-test@cipherleaf.local",
 			"-C", testRepository,
-			"commit", "--quiet", "--allow-empty", "--no-gpg-sign", "--no-verify",
+			"commit", gitQuietFlag, "--allow-empty", gitNoGPGSignFlag, gitNoVerifyFlag,
 			"-m", "Cipherleaf connection test",
 		},
 	}
@@ -141,16 +160,16 @@ func (t *GitConnectionTester) TestConnection(
 		}
 	}
 	testRef := fmt.Sprintf(
-		"HEAD:refs/heads/cipherleaf-connection-test-%d",
+		gitHeadsRefPrefix+"cipherleaf-connection-test-%d",
 		time.Now().UTC().UnixNano(),
 	)
 	output, err = t.runner.Run(
 		contextWithTimeout,
 		"git",
 		[]string{
-			"-c", "core.hooksPath=" + emptyHooks,
+			"-c", gitHooksPathPrefix + emptyHooks,
 			"-C", testRepository,
-			"push", "--dry-run", "--no-verify", settings.RepositorySSH, testRef,
+			"push", "--dry-run", gitNoVerifyFlag, settings.RepositorySSH, testRef,
 		},
 		environment,
 	)
@@ -233,7 +252,7 @@ func (p *GitHubSSHProvider) Prefetch(ctx context.Context, settings SyncSettings)
 	contextWithTimeout, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	output, err := p.runner.Run(contextWithTimeout, "git", []string{
-		"-C", cachePath, "fetch", "--quiet", "--prune", "--depth=1", "origin",
+		"-C", cachePath, "fetch", gitQuietFlag, "--prune", gitDepthOneFlag, "origin",
 		"+refs/heads/" + settings.Branch + ":refs/remotes/origin/" + settings.Branch,
 	}, secureGitEnvironment(settings, knownHosts, wrapper))
 	if err != nil {
@@ -279,7 +298,7 @@ func (p *GitHubSSHProvider) Link(
 	if err := os.Chmod(p.cacheRoot, 0o700); err != nil {
 		return LinkResult{}, errors.New("could not protect the encrypted Git cache")
 	}
-	emptyHooks := filepath.Join(p.runtimeDir, "empty-hooks")
+	emptyHooks := filepath.Join(p.runtimeDir, gitEmptyHooksDirectory)
 	if err := os.MkdirAll(emptyHooks, 0o700); err != nil {
 		return LinkResult{}, errors.New("could not prepare safe Git hooks configuration")
 	}
@@ -290,7 +309,7 @@ func (p *GitHubSSHProvider) Link(
 	refs, err := p.runner.Run(
 		contextWithTimeout,
 		"git",
-		[]string{"ls-remote", settings.RepositorySSH},
+		[]string{gitLsRemoteCommand, settings.RepositorySSH},
 		environment,
 	)
 	if err != nil {
@@ -311,7 +330,7 @@ func (p *GitHubSSHProvider) Link(
 	output, err := p.runner.Run(
 		contextWithTimeout,
 		"git",
-		[]string{"clone", "--quiet", "--no-checkout", settings.RepositorySSH, workingTree},
+		[]string{"clone", gitQuietFlag, gitNoCheckoutFlag, settings.RepositorySSH, workingTree},
 		environment,
 	)
 	if err != nil {
@@ -383,7 +402,7 @@ func (p *GitHubSSHProvider) Download(
 	refs, err := p.runner.Run(
 		contextWithTimeout,
 		"git",
-		[]string{"ls-remote", settings.RepositorySSH},
+		[]string{gitLsRemoteCommand, settings.RepositorySSH},
 		environment,
 	)
 	if err != nil {
@@ -406,8 +425,8 @@ func (p *GitHubSSHProvider) Download(
 		contextWithTimeout,
 		"git",
 		[]string{
-			"clone", "--quiet", "--depth=1", "--single-branch",
-			"--branch", settings.Branch, "--no-checkout",
+			"clone", gitQuietFlag, gitDepthOneFlag, "--single-branch",
+			"--branch", settings.Branch, gitNoCheckoutFlag,
 			settings.RepositorySSH, workingTree,
 		},
 		environment,
@@ -415,7 +434,7 @@ func (p *GitHubSSHProvider) Download(
 	if err != nil {
 		return DownloadedVault{}, transportError(contextWithTimeout, output)
 	}
-	reference := "origin/" + settings.Branch
+	reference := gitOriginPrefix + settings.Branch
 	if err := p.materializeExistingRepository(contextWithTimeout, workingTree, reference); err != nil {
 		return DownloadedVault{}, err
 	}
@@ -491,7 +510,7 @@ func (p *GitHubSSHProvider) push(
 	if err != nil {
 		return PushResult{}, err
 	}
-	emptyHooks := filepath.Join(p.runtimeDir, "empty-hooks")
+	emptyHooks := filepath.Join(p.runtimeDir, gitEmptyHooksDirectory)
 	if err := os.MkdirAll(emptyHooks, 0o700); err != nil {
 		return PushResult{}, errors.New("could not prepare safe Git hooks configuration")
 	}
@@ -511,7 +530,7 @@ func (p *GitHubSSHProvider) push(
 	staged, err := p.runner.Run(
 		contextWithTimeout,
 		"git",
-		[]string{"-C", cachePath, "diff", "--cached", "--name-only"},
+		[]string{"-C", cachePath, "diff", "--cached", gitNameOnlyFlag},
 		localGitEnvironment(),
 	)
 	if err != nil {
@@ -531,11 +550,11 @@ func (p *GitHubSSHProvider) push(
 		}, nil
 	}
 	commitArguments := []string{
-		"-c", "core.hooksPath=" + emptyHooks,
-		"-c", "user.name=Cipherleaf",
-		"-c", "user.email=sync@cipherleaf.local",
+		"-c", gitHooksPathPrefix + emptyHooks,
+		"-c", gitUserNameConfig,
+		"-c", gitUserEmailConfig,
 		"-C", cachePath,
-		"commit", "--quiet", "--no-gpg-sign", "--no-verify",
+		"commit", gitQuietFlag, gitNoGPGSignFlag, gitNoVerifyFlag,
 		"-m", "Update encrypted Cipherleaf vault",
 	}
 	if output, err := p.runner.Run(contextWithTimeout, "git", commitArguments, localGitEnvironment()); err != nil {
@@ -543,16 +562,16 @@ func (p *GitHubSSHProvider) push(
 		return PushResult{}, errors.New("Git could not commit the encrypted vault snapshot")
 	}
 	pushArguments := []string{
-		"-c", "core.hooksPath=" + emptyHooks,
+		"-c", gitHooksPathPrefix + emptyHooks,
 		"-C", cachePath,
-		"push", "--quiet", "--no-verify",
+		"push", gitQuietFlag, gitNoVerifyFlag,
 	}
 	if force {
 		pushArguments = append(pushArguments, "--force-with-lease")
 	}
 	pushArguments = append(pushArguments,
 		"origin",
-		"HEAD:refs/heads/"+settings.Branch,
+		gitHeadsRefPrefix+settings.Branch,
 	)
 	localMilliseconds := time.Since(localStartedAt).Milliseconds()
 	transportStartedAt := time.Now()
@@ -649,11 +668,11 @@ func (p *GitHubSSHProvider) Pull(
 	if err != nil {
 		return PullResult{}, err
 	}
-	reference := "origin/" + settings.Branch
+	reference := gitOriginPrefix + settings.Branch
 	previousCommit, _ := p.resolveCommit(contextWithTimeout, cachePath)
 	fetchArguments := []string{
 		"-C", cachePath,
-		"fetch", "--quiet", "--prune", "--depth=1", "origin",
+		"fetch", gitQuietFlag, "--prune", gitDepthOneFlag, "origin",
 		"+refs/heads/" + settings.Branch + ":refs/remotes/origin/" + settings.Branch,
 	}
 	p.prefetchMu.Lock()
@@ -762,8 +781,8 @@ func (p *GitHubSSHProvider) ensureLinkedCache(
 		ctx,
 		"git",
 		[]string{
-			"clone", "--quiet", "--depth=1", "--single-branch",
-			"--branch", settings.Branch, "--no-checkout",
+			"clone", gitQuietFlag, gitDepthOneFlag, "--single-branch",
+			"--branch", settings.Branch, gitNoCheckoutFlag,
 			settings.RepositorySSH, workingTree,
 		},
 		environment,
@@ -788,7 +807,7 @@ func (p *GitHubSSHProvider) initializeEmptyRepository(
 	if output, err := p.runner.Run(
 		ctx,
 		"git",
-		[]string{"-C", workingTree, "switch", "--quiet", "--orphan", settings.Branch},
+		[]string{"-C", workingTree, "switch", gitQuietFlag, "--orphan", settings.Branch},
 		localGitEnvironment(),
 	); err != nil {
 		_ = output
@@ -811,11 +830,11 @@ func (p *GitHubSSHProvider) initializeEmptyRepository(
 		return "", errors.New("Git could not stage the encrypted vault snapshot")
 	}
 	commitArguments := []string{
-		"-c", "core.hooksPath=" + emptyHooks,
-		"-c", "user.name=Cipherleaf",
-		"-c", "user.email=sync@cipherleaf.local",
+		"-c", gitHooksPathPrefix + emptyHooks,
+		"-c", gitUserNameConfig,
+		"-c", gitUserEmailConfig,
 		"-C", workingTree,
-		"commit", "--quiet", "--no-gpg-sign", "--no-verify",
+		"commit", gitQuietFlag, gitNoGPGSignFlag, gitNoVerifyFlag,
 		"-m", "Initialize encrypted Cipherleaf vault",
 	}
 	if output, err := p.runner.Run(
@@ -828,10 +847,10 @@ func (p *GitHubSSHProvider) initializeEmptyRepository(
 		return "", errors.New("Git could not commit the encrypted vault snapshot")
 	}
 	pushArguments := []string{
-		"-c", "core.hooksPath=" + emptyHooks,
+		"-c", gitHooksPathPrefix + emptyHooks,
 		"-C", workingTree,
-		"push", "--quiet", "--no-verify", "origin",
-		"HEAD:refs/heads/" + settings.Branch,
+		"push", gitQuietFlag, gitNoVerifyFlag, "origin",
+		gitHeadsRefPrefix + settings.Branch,
 	}
 	output, err := p.runner.Run(ctx, "git", pushArguments, environment)
 	if err != nil {
@@ -849,7 +868,7 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 	emptyHooks string,
 	environment []string,
 ) (string, error) {
-	reference := "origin/" + settings.Branch
+	reference := gitOriginPrefix + settings.Branch
 	if remoteReference == "" {
 		return "", errors.New("the configured Git branch could not be resolved")
 	}
@@ -884,7 +903,7 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 	staged, err := p.runner.Run(
 		ctx,
 		"git",
-		[]string{"-C", workingTree, "diff", "--cached", "--name-only"},
+		[]string{"-C", workingTree, "diff", "--cached", gitNameOnlyFlag},
 		localGitEnvironment(),
 	)
 	if err != nil {
@@ -892,11 +911,11 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 	}
 	if len(bytes.TrimSpace(staged)) > 0 {
 		commitArguments := []string{
-			"-c", "core.hooksPath=" + emptyHooks,
-			"-c", "user.name=Cipherleaf",
-			"-c", "user.email=sync@cipherleaf.local",
+			"-c", gitHooksPathPrefix + emptyHooks,
+			"-c", gitUserNameConfig,
+			"-c", gitUserEmailConfig,
 			"-C", workingTree,
-			"commit", "--quiet", "--no-gpg-sign", "--no-verify",
+			"commit", gitQuietFlag, gitNoGPGSignFlag, gitNoVerifyFlag,
 			"-m", "Repair encrypted Cipherleaf vault metadata",
 		}
 		if output, err := p.runner.Run(ctx, "git", commitArguments, localGitEnvironment()); err != nil {
@@ -904,10 +923,10 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 			return "", errors.New("Git could not commit the encrypted vault snapshot")
 		}
 		pushArguments := []string{
-			"-c", "core.hooksPath=" + emptyHooks,
+			"-c", gitHooksPathPrefix + emptyHooks,
 			"-C", workingTree,
-			"push", "--quiet", "--no-verify", "origin",
-			"HEAD:refs/heads/" + settings.Branch,
+			"push", gitQuietFlag, gitNoVerifyFlag, "origin",
+			gitHeadsRefPrefix + settings.Branch,
 		}
 		output, err := p.runner.Run(ctx, "git", pushArguments, environment)
 		if err != nil {
@@ -925,7 +944,7 @@ func (p *GitHubSSHProvider) materializeExistingRepository(
 	output, err := p.runner.Run(
 		ctx,
 		"git",
-		[]string{"-C", workingTree, "ls-tree", "-rz", "--name-only", reference},
+		[]string{"-C", workingTree, "ls-tree", "-rz", gitNameOnlyFlag, reference},
 		localGitEnvironment(),
 	)
 	if err != nil {
@@ -966,7 +985,7 @@ func (p *GitHubSSHProvider) changedRemotePaths(
 	remotePaths, err := p.runner.Run(
 		ctx,
 		"git",
-		[]string{"-C", workingTree, "ls-tree", "-rz", "--name-only", to},
+		[]string{"-C", workingTree, "ls-tree", "-rz", gitNameOnlyFlag, to},
 		localGitEnvironment(),
 	)
 	if err != nil {
@@ -1107,9 +1126,9 @@ func parseRemotePaths(data []byte) ([]string, error) {
 	raw := bytes.Split(data, []byte{0})
 	paths := make([]string, 0, len(raw))
 	required := map[string]bool{
-		"vault.json":        false,
-		"sync/manifest.enc": false,
-		"sync/folders.enc":  false,
+		gitVaultConfigPath:  false,
+		gitSyncManifestPath: false,
+		gitSyncFoldersPath:  false,
 	}
 	for _, item := range raw {
 		if len(item) == 0 {
@@ -1135,7 +1154,7 @@ func parseRemotePaths(data []byte) ([]string, error) {
 }
 
 func validRemotePath(path string) bool {
-	if path == "vault.json" || path == "sync/manifest.enc" || path == "sync/folders.enc" ||
+	if path == gitVaultConfigPath || path == gitSyncManifestPath || path == gitSyncFoldersPath ||
 		path == "sync/tracking.enc" || path == "tracking/catalog.enc" {
 		return true
 	}
@@ -1191,7 +1210,7 @@ func parseChangedRemotePaths(data []byte) ([]changedRemotePath, error) {
 }
 
 func readRemoteVaultID(root string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(root, "vault.json"))
+	data, err := os.ReadFile(filepath.Join(root, gitVaultConfigPath))
 	if err != nil {
 		return "", errors.New("could not read the downloaded vault identity")
 	}
@@ -1237,9 +1256,9 @@ func validateWorkingTreeLayout(root string) error {
 			return errors.New("encrypted snapshot contains a non-regular file")
 		}
 		slashPath := filepath.ToSlash(relative)
-		if slashPath == "vault.json" ||
-			slashPath == "sync/manifest.enc" ||
-			slashPath == "sync/folders.enc" ||
+		if slashPath == gitVaultConfigPath ||
+			slashPath == gitSyncManifestPath ||
+			slashPath == gitSyncFoldersPath ||
 			slashPath == "sync/tracking.enc" ||
 			slashPath == "tracking/catalog.enc" {
 			return nil
