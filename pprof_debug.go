@@ -11,6 +11,9 @@ import (
 )
 
 func startPprofServer() {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("CIPHERLEAF_ENV")), "production") {
+		return
+	}
 	addr := strings.TrimSpace(os.Getenv("CIPHERLEAF_PPROF_ADDR"))
 	if addr == "" {
 		return
