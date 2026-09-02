@@ -2911,7 +2911,7 @@ export default function LiveMarkdownEditor({
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Markdown formatting");
 
-    editorShell.insertBefore(toolbar, documentBody);
+    documentBody.before(toolbar);
     setToolbarHost(toolbar);
 
     return () => {
