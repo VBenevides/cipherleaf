@@ -3270,7 +3270,7 @@ export default function LiveMarkdownEditor({
                 document.removeEventListener("pointerup", finish);
                 document.removeEventListener("pointercancel", finish);
                 const targetLine = objectLineElementAt(lastX, lastY);
-                const targetLineNumber = targetLine ? objectTargetLineNumber(pointerView, targetLine) : NaN;
+                const targetLineNumber = targetLine ? objectTargetLineNumber(pointerView, targetLine) : Number.NaN;
                 if (!targetLine || !Number.isFinite(targetLineNumber)) return;
                 moveObjectBlock(pointerView, sourceLine, targetLineNumber, lastY, targetLine, previewMode);
               };
