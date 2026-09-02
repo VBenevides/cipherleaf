@@ -76,31 +76,31 @@ import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
-  noteID: string;
-  value: string;
-  onChange: (value: string) => void;
-  onSave: () => void;
-  onError: (reason: unknown) => void;
-  onOpenWikilink: (title: string) => void;
-  onOpenCard?: (id: string) => void;
-  cardTitles?: ReadonlyMap<string, string>;
-  cardData?: ReadonlyMap<string, CardMetadata>;
-  onCreateCard?: () => Promise<string | null>;
-  onCreateBoard?: () => Promise<string | null>;
-  onMoveCard?: (id: string, status: CardStatus) => void;
-  onAddCardToBoard?: (boardID: string) => void;
-  onChangeBoardTitle?: (boardID: string, title: string) => void;
-  onDecreaseFontSize: () => void;
-  onIncreaseFontSize: () => void;
-  searchTarget?: SearchTarget | null;
-  onSearchTargetApplied?: () => void;
-  caretOffset?: number | null;
-  caretRestoreVersion?: number;
-  onCaretChange?: (offset: number) => void;
-  readOnly?: boolean;
-  showToolbar?: boolean;
-  highlightLineNumbers?: ReadonlySet<number>;
-  defaultSectionsCollapsed?: boolean;
+  readonly noteID: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly onSave: () => void;
+  readonly onError: (reason: unknown) => void;
+  readonly onOpenWikilink: (title: string) => void;
+  readonly onOpenCard?: (id: string) => void;
+  readonly cardTitles?: ReadonlyMap<string, string>;
+  readonly cardData?: ReadonlyMap<string, CardMetadata>;
+  readonly onCreateCard?: () => Promise<string | null>;
+  readonly onCreateBoard?: () => Promise<string | null>;
+  readonly onMoveCard?: (id: string, status: CardStatus) => void;
+  readonly onAddCardToBoard?: (boardID: string) => void;
+  readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
+  readonly onDecreaseFontSize: () => void;
+  readonly onIncreaseFontSize: () => void;
+  readonly searchTarget?: SearchTarget | null;
+  readonly onSearchTargetApplied?: () => void;
+  readonly caretOffset?: number | null;
+  readonly caretRestoreVersion?: number;
+  readonly onCaretChange?: (offset: number) => void;
+  readonly readOnly?: boolean;
+  readonly showToolbar?: boolean;
+  readonly highlightLineNumbers?: ReadonlySet<number>;
+  readonly defaultSectionsCollapsed?: boolean;
 };
 
 type LivePreviewState = {
