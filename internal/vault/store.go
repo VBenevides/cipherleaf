@@ -2968,26 +2968,47 @@ func (s *Store) readRemoteSnapshotMetadataLocked(source string) (remoteSnapshotM
 	return metadata, nil
 }
 
+func validateRemoteFolderMetadataItem(folder Folder, seen map[string]struct{}) error {
+	if !validID(folder.ID) {
+		return errors.New("remote folder metadata contains an invalid folder ID")
+	}
+	normalizedName, err := normalizeFolderName(folder.Name)
+	if err != nil || normalizedName != folder.Name {
+		return errors.New("remote folder metadata contains an invalid folder name")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, folder.CreatedAt); err != nil {
+		return errors.New("remote folder metadata contains an invalid creation time")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, folder.UpdatedAt); err != nil {
+		return errors.New("remote folder metadata contains an invalid update time")
+	}
+	if _, duplicate := seen[folder.ID]; duplicate {
+		return errors.New("remote folder metadata contains a duplicate folder")
+	}
+	seen[folder.ID] = struct{}{}
+	return nil
+}
+
+func validateRemoteFolderTombstone(item Tombstone, seen map[string]struct{}) error {
+	if !validID(item.ID) || item.ModifiedAt < 0 {
+		return errors.New("remote folder metadata contains an invalid tombstone")
+	}
+	if _, live := seen[item.ID]; live {
+		return errors.New("remote folder is both live and deleted")
+	}
+	if _, duplicate := seen[item.ID]; duplicate {
+		return errors.New("remote folder metadata contains a duplicate tombstone")
+	}
+	seen[item.ID] = struct{}{}
+	return nil
+}
+
 func validateRemoteFolderMetadata(folders []Folder, deleted []Tombstone) ([]Tombstone, error) {
 	seen := make(map[string]struct{}, len(folders)+len(deleted))
 	for _, folder := range folders {
-		if !validID(folder.ID) {
-			return nil, errors.New("remote folder metadata contains an invalid folder ID")
+		if err := validateRemoteFolderMetadataItem(folder, seen); err != nil {
+			return nil, err
 		}
-		normalizedName, err := normalizeFolderName(folder.Name)
-		if err != nil || normalizedName != folder.Name {
-			return nil, errors.New("remote folder metadata contains an invalid folder name")
-		}
-		if _, err := time.Parse(time.RFC3339Nano, folder.CreatedAt); err != nil {
-			return nil, errors.New("remote folder metadata contains an invalid creation time")
-		}
-		if _, err := time.Parse(time.RFC3339Nano, folder.UpdatedAt); err != nil {
-			return nil, errors.New("remote folder metadata contains an invalid update time")
-		}
-		if _, duplicate := seen[folder.ID]; duplicate {
-			return nil, errors.New("remote folder metadata contains a duplicate folder")
-		}
-		seen[folder.ID] = struct{}{}
 	}
 	if err := validateFolderHierarchy(folders); err != nil {
 		return nil, fmt.Errorf("remote folder metadata %w", err)
@@ -2995,16 +3016,9 @@ func validateRemoteFolderMetadata(folders []Folder, deleted []Tombstone) ([]Tomb
 	result := slices.Clone(deleted)
 	sortTombstones(result)
 	for _, item := range result {
-		if !validID(item.ID) || item.ModifiedAt < 0 {
-			return nil, errors.New("remote folder metadata contains an invalid tombstone")
+		if err := validateRemoteFolderTombstone(item, seen); err != nil {
+			return nil, err
 		}
-		if _, live := seen[item.ID]; live {
-			return nil, errors.New("remote folder is both live and deleted")
-		}
-		if _, duplicate := seen[item.ID]; duplicate {
-			return nil, errors.New("remote folder metadata contains a duplicate tombstone")
-		}
-		seen[item.ID] = struct{}{}
 	}
 	return result, nil
 }
