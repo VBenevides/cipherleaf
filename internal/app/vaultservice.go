@@ -147,7 +147,7 @@ func (s *VaultService) ListInstalledFonts() ([]string, error) {
 	if runtime.GOOS != "linux" {
 		return nil, nil
 	}
-	output, err := exec.Command("fc-list", "--format=%{family}\n").Output()
+	output, err := exec.Command("/usr/bin/fc-list", "--format=%{family}\n").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list installed fonts: %w", err)
 	}
