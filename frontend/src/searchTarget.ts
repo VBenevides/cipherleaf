@@ -91,7 +91,7 @@ export function targetForMatch(match: FindMatchLike, query = ""): SearchTarget |
 
 function queryRanges(document: string, query: string): SearchRange[] {
   if (!query) return [];
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   let expression: RegExp;
   try {
     expression = new RegExp(escaped, "giu");
