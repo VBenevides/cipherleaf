@@ -1349,6 +1349,7 @@ function decorateInlineMarkdown(
   }
 
   for (const citation of markdownCitations(text)) {
+    if (/^\[card\]\([a-f0-9]{32}\)$/i.test(text.slice(citation.index, citation.index + citation.length))) continue;
     const start = offset + citation.index;
     addHiddenRange(
       start,
@@ -2375,7 +2376,7 @@ function applySnippetExpansion(
   onCreateBoard?: () => Promise<string | null>,
 ) {
   const isRoll = trigger === "rollb" || trigger === "rollf";
-  const replacement = isRoll ? rollReplacementRange(view, from, to) : { from, to };
+  const replacement = isRoll || trigger === "board" ? rollReplacementRange(view, from, to) : { from, to };
   const create = trigger === "card" ? onCreateCard : trigger === "board" ? onCreateBoard : undefined;
   if (create) {
     void create().then((expansion) => {

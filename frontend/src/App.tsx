@@ -265,6 +265,12 @@ function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
   return metadata;
 }
 
+function isStructuredSummary(summary: NoteSummary): boolean {
+  const properties = summary.properties ?? {};
+  return properties["cipherleaf-card"] === true || properties["cipherleaf-card"] === "true" ||
+    properties["cipherleaf-card-template"] === true || properties["cipherleaf-card-template"] === "true";
+}
+
 function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
   const leftLines = left.split("\n");
   const rightLines = right.split("\n");
@@ -1336,7 +1342,8 @@ function App() {
   const refreshNotes = async (preferredID?: string, preferredNote?: Note) => {
     const result = (await VaultService.ListNotes()) ?? [];
     setNotes(result);
-    const targetID = preferredID ?? noteRef.current?.id ?? result[0]?.id;
+    const visible = result.filter((item) => !isStructuredSummary(item));
+    const targetID = preferredID ?? noteRef.current?.id ?? visible[0]?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
       const loaded = preferredNote?.id === targetID
         ? preferredNote
@@ -2972,7 +2979,7 @@ function App() {
   }, [folders, unlockedFolderIDs]);
 
   const publicNotes = useMemo(
-    () => notes.filter((item) => {
+    () => notes.filter((item) => !isStructuredSummary(item)).filter((item) => {
       if (!item.folderId) return true;
       return !folderIsHidden(item.folderId, folderByID) &&
         !folderIsLocked(item.folderId, folderByID, unlockedFolderIDs);
@@ -2992,7 +2999,7 @@ function App() {
 
   const noteCountsByFolder = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of notes) {
+    for (const item of notes.filter((summary) => !isStructuredSummary(summary))) {
       counts.set(item.folderId, (counts.get(item.folderId) ?? 0) + 1);
     }
     return counts;
@@ -3088,6 +3095,15 @@ function App() {
     () => notes.filter((summary) => summary.properties?.["cipherleaf-card-template"] === true || summary.properties?.["cipherleaf-card-template"] === "true"),
     [notes],
   );
+  const cardTagSuggestions = useMemo(() => {
+    const tags = new Set<string>();
+    for (const card of cardMetadata.values()) {
+      if (!cardPanel?.metadata.boardID || card.boardID === cardPanel.metadata.boardID) {
+        for (const tag of card.tags) tags.add(tag);
+      }
+    }
+    return [...tags].sort((left, right) => left.localeCompare(right));
+  }, [cardMetadata, cardPanel?.metadata.boardID]);
   const cardSignature = useMemo(
     () => [...cardMetadata.values()].map((item) => `${item.id}:${item.title}:${item.status}:${item.columnEnteredAt ?? ""}`).join("|")
     , [cardMetadata],
@@ -3198,8 +3214,10 @@ function App() {
   }, [cardPanel]);
 
   const createCard = async () => {
+    let createdID = "";
     try {
       const created = await VaultService.CreateNote("Untitled");
+      createdID = created.id;
       const metadata = newCardMetadata(created.id, new Date(created.createdAt));
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
       updateSummary(saved.summary);
@@ -3207,6 +3225,7 @@ function App() {
       setCardPanel({ note: saved.note, metadata, body: "" });
       return cardReference(created.id);
     } catch (reason) {
+      if (createdID) await VaultService.DeleteNote(createdID).catch(() => {});
       setError(errorText(reason));
       return null;
     }
@@ -3223,13 +3242,18 @@ function App() {
   const addCardToBoard = async (boardID: string) => {
     const current = noteRef.current;
     if (!current) return;
+    let createdID = "";
     try {
       const reference = await createCard();
       const id = reference ? parseCardReference(reference) : null;
       if (!id) return;
+      createdID = id;
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
-      if (!parsed || parsed.metadata.boardID) return;
+      if (!parsed || parsed.metadata.boardID) {
+        await VaultService.DeleteNote(id).catch(() => {});
+        return;
+      }
       const metadata = { ...parsed.metadata, boardID };
       const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
@@ -3246,6 +3270,7 @@ function App() {
       }
       editNote({ content });
     } catch (reason) {
+      if (createdID) await VaultService.DeleteNote(createdID).catch(() => {});
       setError(errorText(reason));
     }
   };
@@ -5051,7 +5076,8 @@ function App() {
             <label>Status<select value={cardPanel.metadata.status} onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, event.target.value as CardStatus) } : current)}>
               {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
             </select></label>
-            <label>Tags<input value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+            <label>Tags<input list="card-tag-suggestions" value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+            <datalist id="card-tag-suggestions">{cardTagSuggestions.map((tag) => <option value={tag} key={tag} />)}</datalist>
             {cardTemplates.length > 0 && (
               <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
                 <option value="">Choose a template</option>
