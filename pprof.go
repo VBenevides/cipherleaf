@@ -2,4 +2,6 @@
 
 package main
 
-func startPprofServer() {}
+func startPprofServer() {
+	// Production builds intentionally omit the debug pprof server.
+}
