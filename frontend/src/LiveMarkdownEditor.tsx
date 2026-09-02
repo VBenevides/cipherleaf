@@ -1124,7 +1124,10 @@ class BoardWidget extends WidgetType {
   toDOM() {
     const board = document.createElement("section");
     board.className = "cm-live-board";
-    board.setAttribute("aria-label", "Board");
+    const title = board.appendChild(document.createElement("h3"));
+    title.className = "cm-live-board-title";
+    title.textContent = "Kanban Board";
+    board.setAttribute("aria-label", title.textContent);
     const controls = board.appendChild(document.createElement("div"));
     controls.className = "cm-live-board-controls";
     const filter = controls.appendChild(document.createElement("input"));

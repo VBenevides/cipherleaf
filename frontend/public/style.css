@@ -3993,17 +3993,17 @@ a:focus-visible {
 
 .cm-live-board {
   display: block;
-  width: min(100%, 1040px);
-  margin: 18px auto;
+  width: 100%;
+  margin: 18px 0;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
 }
 
+.cm-live-board-title { margin: 0 0 10px; color: var(--ink); font-size: 1.05em; }
+
 .live-markdown-editor .cm-line.cm-live-board-line {
-  width: 100% !important;
-  max-width: none;
   padding: 0 !important;
 }
 

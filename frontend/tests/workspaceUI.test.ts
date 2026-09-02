@@ -139,9 +139,11 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
 });
 
-test("embedded boards are centered without journal rules", () => {
+test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /cm-live-board-line/);
   assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
-  assert.match(style, /\.cm-live-board \{[\s\S]*width: min\(100%, 1040px\)[\s\S]*margin: 18px auto/);
-  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*width: 100% !important[\s\S]*padding: 0 !important/);
+  assert.match(liveEditor, /cm-live-board-title[\s\S]*Kanban Board/);
+  assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 18px 0/);
+  assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*padding: 0 !important/);
 });
