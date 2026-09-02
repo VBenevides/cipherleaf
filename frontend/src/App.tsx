@@ -184,17 +184,21 @@ type CardPanelState = {
   body: string;
 };
 
+type CloneVaultSubmission = {
+  repository: string;
+  sshKey: string;
+  branch: string;
+  passphrase: string;
+  repositoryPrivate: boolean;
+};
+
 function vaultSubmissionError(
   action: VaultAction,
   vaultName: string,
   vaultSecret: string,
   secretCopied: boolean,
   secretConfirmed: boolean,
-  cloneRepository: string,
-  cloneSSHKey: string,
-  cloneBranch: string,
-  passphrase: string,
-  cloneRepositoryPrivate: boolean,
+  clone: CloneVaultSubmission,
 ): string | null {
   if ((action === "create" || action === "clone") && !vaultName.trim()) {
     return "Enter a name for the local vault folder.";
@@ -202,7 +206,7 @@ function vaultSubmissionError(
   if (action === "create" && (!vaultSecret || !secretCopied || !secretConfirmed)) {
     return "Copy the vault secret and confirm that you saved it before creating the vault.";
   }
-  if (action === "clone" && (!cloneRepository.trim() || !cloneSSHKey.trim() || !cloneBranch.trim() || !passphrase || !cloneRepositoryPrivate)) {
+  if (action === "clone" && (!clone.repository.trim() || !clone.sshKey.trim() || !clone.branch.trim() || !clone.passphrase || !clone.repositoryPrivate)) {
     return "Complete the repository, SSH key, branch, vault secret, and private-repository confirmation.";
   }
   return null;
@@ -1961,11 +1965,13 @@ function App() {
       vaultSecret,
       secretCopied,
       secretConfirmed,
-      cloneRepository,
-      cloneSSHKey,
-      cloneBranch,
-      passphrase,
-      cloneRepositoryPrivate,
+      {
+        repository: cloneRepository,
+        sshKey: cloneSSHKey,
+        branch: cloneBranch,
+        passphrase,
+        repositoryPrivate: cloneRepositoryPrivate,
+      },
     );
     if (validationError) {
       setError(validationError);
