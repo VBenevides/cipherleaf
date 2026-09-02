@@ -70,6 +70,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
+import { BOARD_COLUMNS, CARD_STATUS_LABELS, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -79,6 +80,12 @@ type LiveMarkdownEditorProps = {
   onSave: () => void;
   onError: (reason: unknown) => void;
   onOpenWikilink: (title: string) => void;
+  onOpenCard?: (id: string) => void;
+  cardTitles?: ReadonlyMap<string, string>;
+  cardData?: ReadonlyMap<string, CardMetadata>;
+  onCreateCard?: () => Promise<string | null>;
+  onCreateBoard?: () => Promise<string | null>;
+  onMoveCard?: (id: string, status: CardStatus) => void;
   onDecreaseFontSize: () => void;
   onIncreaseFontSize: () => void;
   searchTarget?: SearchTarget | null;
@@ -784,6 +791,7 @@ class AttachmentWidget extends WidgetType {
     readonly from: number,
     readonly to: number,
     readonly onError: (reason: unknown) => void,
+    readonly selected = false,
   ) {
     super();
   }
@@ -793,17 +801,23 @@ class AttachmentWidget extends WidgetType {
       other.attachmentID === this.attachmentID &&
       other.alt === this.alt &&
       other.width === this.width &&
-      other.align === this.align;
+      other.align === this.align &&
+      other.selected === this.selected;
   }
 
   toDOM(view: EditorView) {
     const figure = document.createElement("span");
-    figure.className = `cm-live-attachment align-${this.align}`;
+    figure.className = `cm-live-attachment align-${this.align}${this.selected ? " is-selected" : ""}`;
     const image = figure.appendChild(document.createElement("img"));
     image.alt = this.alt;
     image.style.width = `${this.width}px`;
     image.style.maxWidth = "100%";
     image.draggable = false;
+    figure.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+      document.querySelectorAll<HTMLElement>(".cm-live-attachment.is-selected").forEach((item) => item.classList.remove("is-selected"));
+      figure.classList.add("is-selected");
+    });
     image.setAttribute("aria-busy", "true");
     void cachedAttachmentData(this.noteID, this.attachmentID)
       .then((data) => {
@@ -1060,6 +1074,118 @@ class CitationWidget extends WidgetType {
   }
 }
 
+class CardReferenceWidget extends WidgetType {
+  constructor(readonly id: string, readonly title: string, readonly open: (id: string) => void) { super(); }
+
+  eq(other: CardReferenceWidget) {
+    return other.id === this.id && other.title === this.title;
+  }
+
+  toDOM() {
+    const link = document.createElement("span");
+    link.className = "cm-live-card-reference";
+    link.textContent = this.title || "Untitled";
+    link.title = `Open card “${this.title || "Untitled"}”`;
+    link.setAttribute("role", "link");
+    link.tabIndex = 0;
+    const activate = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.open(this.id);
+    };
+    link.addEventListener("mousedown", activate);
+    link.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") activate(event);
+    });
+    return link;
+  }
+
+  ignoreEvent() { return true; }
+}
+
+class BoardWidget extends WidgetType {
+  constructor(
+    readonly boardID: string,
+    readonly cardIDs: readonly string[],
+    readonly cards: ReadonlyMap<string, CardMetadata>,
+    readonly openCard: (id: string) => void,
+    readonly moveCard: (id: string, status: CardStatus) => void,
+  ) { super(); }
+
+  eq(other: BoardWidget) {
+    return other.boardID === this.boardID && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
+  }
+
+  toDOM() {
+    const board = document.createElement("section");
+    board.className = "cm-live-board";
+    board.setAttribute("aria-label", "Board");
+    const controls = board.appendChild(document.createElement("div"));
+    controls.className = "cm-live-board-controls";
+    const filter = controls.appendChild(document.createElement("input"));
+    filter.type = "search";
+    filter.placeholder = "Filter cards by title";
+    filter.setAttribute("aria-label", "Filter board cards by title");
+    const tagFilter = controls.appendChild(document.createElement("input"));
+    tagFilter.type = "search";
+    tagFilter.placeholder = "Filter tags";
+    tagFilter.setAttribute("aria-label", "Filter board cards by tags");
+    const columns = board.appendChild(document.createElement("div"));
+    columns.className = "cm-live-board-columns";
+    const render = () => {
+      columns.replaceChildren();
+      const titleQuery = filter.value.trim().toLocaleLowerCase();
+      const tagQuery = tagFilter.value.trim().toLocaleLowerCase();
+      for (const status of BOARD_COLUMNS) {
+        const column = columns.appendChild(document.createElement("div"));
+        column.className = `cm-live-board-column status-${status}`;
+        column.dataset.status = status;
+        column.setAttribute("role", "group");
+        column.setAttribute("aria-label", CARD_STATUS_LABELS[status]);
+        column.addEventListener("dragover", (event) => event.preventDefault());
+        column.addEventListener("drop", (event) => {
+          event.preventDefault();
+          const id = event.dataTransfer?.getData("text/plain");
+          if (id) this.moveCard(id, status);
+        });
+        const heading = column.appendChild(document.createElement("h4"));
+        heading.textContent = CARD_STATUS_LABELS[status];
+        const cards = this.cardIDs
+          .map((id) => this.cards.get(id))
+          .filter((card): card is CardMetadata => !!card && card.status === status)
+          .filter((card) => !titleQuery || card.title.toLocaleLowerCase().includes(titleQuery))
+          .filter((card) => !tagQuery || card.tags.some((tag) => tag.toLocaleLowerCase().includes(tagQuery)))
+          .sort((left, right) => {
+            const leftDate = status === "not-started" ? left.createdAt : left.columnEnteredAt ?? left.createdAt;
+            const rightDate = status === "not-started" ? right.createdAt : right.columnEnteredAt ?? right.createdAt;
+            return rightDate.localeCompare(leftDate);
+          });
+        for (const card of cards) {
+          const item = column.appendChild(document.createElement("button"));
+          item.type = "button";
+          item.className = "cm-live-board-card";
+          item.draggable = true;
+          item.textContent = card.title || "Untitled";
+          item.title = `Open card “${card.title || "Untitled"}”`;
+          item.addEventListener("dragstart", (event) => event.dataTransfer?.setData("text/plain", card.id));
+          item.addEventListener("click", () => this.openCard(card.id));
+          const date = status === "not-started" ? card.createdAt
+            : status === "in-progress" ? card.startedAt
+              : status === "blocked" ? card.blockedOn
+                : card.finishedAt;
+          if (date) item.append(` · ${new Date(date).toLocaleDateString()}`);
+        }
+      }
+    };
+    filter.addEventListener("input", render);
+    tagFilter.addEventListener("input", render);
+    render();
+    return board;
+  }
+
+  ignoreEvent() { return true; }
+}
+
 function lineIsActive(state: EditorState, lineNumber: number): boolean {
   return state.selection.ranges.some((range) => {
     const startLine = state.doc.lineAt(range.from).number;
@@ -1106,6 +1232,8 @@ function decorateInlineMarkdown(
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
   openWikilink: (title: string) => void,
+  openCard: (id: string) => void,
+  cardTitle: (id: string) => string | null,
   onError: (reason: unknown) => void,
 ) {
   const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
@@ -1172,6 +1300,20 @@ function decorateInlineMarkdown(
       decorations,
       atomicRanges,
       new WikilinkWidget(match[1], start, openWikilink),
+    );
+  }
+
+  for (const match of text.matchAll(/(?<!\!)\[card\]\(([a-f0-9]{32})\)/gi)) {
+    if (match.index === undefined) continue;
+    const title = cardTitle(match[1]);
+    if (title === null) continue;
+    const start = offset + match.index;
+    addHiddenRange(
+      start,
+      start + match[0].length,
+      decorations,
+      atomicRanges,
+      new CardReferenceWidget(match[1], title, openCard),
     );
   }
 
@@ -1434,6 +1576,10 @@ function buildLivePreviewState(
   state: EditorState,
   collapsedQuotes: ReadonlySet<string>,
   openWikilink: (title: string) => void,
+  openCard: (id: string) => void,
+  cardTitle: (id: string) => string | null,
+  cards: ReadonlyMap<string, CardMetadata>,
+  moveCard: (id: string, status: CardStatus) => void,
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
@@ -1464,6 +1610,19 @@ function buildLivePreviewState(
     const lineObject = objectDocument.byLine.get(lineNumber);
     const toggle = toggleLine(objectDocument, lineNumber, line.text);
     const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
+
+    const board = parseBoardMarker(line.text);
+    if (board) {
+      addHiddenRange(
+        line.from,
+        line.to,
+        decorations,
+        atomicRanges,
+        new BoardWidget(board.id, board.cardIDs, cards, openCard, moveCard),
+      );
+      lineNumber++;
+      continue;
+    }
 
     if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationOwner) {
       decorations.push(
@@ -1559,6 +1718,7 @@ function buildLivePreviewState(
           line.from,
           line.to,
           onError,
+          lineIsActive(state, lineNumber),
         ),
       );
       lineNumber++;
@@ -1629,6 +1789,7 @@ function buildLivePreviewState(
             contentOffset,
             line.to,
             onError,
+            lineIsActive(state, lineNumber),
           ),
         );
       } else {
@@ -1638,6 +1799,8 @@ function buildLivePreviewState(
           decorations,
           atomicRanges,
           openWikilink,
+          openCard,
+          cardTitle,
           onError,
         );
       }
@@ -1725,6 +1888,8 @@ function buildLivePreviewState(
         decorations,
         atomicRanges,
         openWikilink,
+        openCard,
+        cardTitle,
         onError,
       );
 
@@ -1772,6 +1937,8 @@ function buildLivePreviewState(
         decorations,
           atomicRanges,
           openWikilink,
+          openCard,
+          cardTitle,
           onError,
       );
       lineNumber++;
@@ -1838,6 +2005,8 @@ function buildLivePreviewState(
       decorations,
       atomicRanges,
       openWikilink,
+      openCard,
+      cardTitle,
       onError,
     );
 
@@ -1855,6 +2024,10 @@ function buildLivePreviewState(
 
 function livePreviewExtension(
   openWikilink: (title: string) => void,
+  openCard: (id: string) => void,
+  cardTitle: (id: string) => string | null,
+  cards: ReadonlyMap<string, CardMetadata>,
+  moveCard: (id: string, status: CardStatus) => void,
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
@@ -1870,6 +2043,10 @@ function livePreviewExtension(
         state,
         collapsed,
         openWikilink,
+        openCard,
+        cardTitle,
+        cards,
+        moveCard,
         noteID,
         onError,
         highlightLineNumbers,
@@ -1949,6 +2126,10 @@ function livePreviewExtension(
         transaction.state,
         collapsed,
         openWikilink,
+        openCard,
+        cardTitle,
+        cards,
+        moveCard,
         noteID,
         onError,
         highlightLineNumbers,
@@ -2114,7 +2295,11 @@ function handleBackspace(view: EditorView): boolean {
   return restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
 }
 
-function snippetCompletion(context: CompletionContext): CompletionResult | null {
+function snippetCompletion(
+  context: CompletionContext,
+  onCreateCard?: () => Promise<string | null>,
+  onCreateBoard?: () => Promise<string | null>,
+): CompletionResult | null {
   const before = context.matchBefore(/\/[A-Za-z][A-Za-z_]*/);
   if (!before || !context.explicit && !/\//.test(before.text)) {
     return null;
@@ -2128,8 +2313,8 @@ function snippetCompletion(context: CompletionContext): CompletionResult | null 
     options: SNIPPETS.map((snippet) => ({
       label: `/${snippet.trigger}`,
       detail: snippet.description,
-      apply: (view: EditorView, _completion: unknown, from: number, to: number) => {
-        applySnippetExpansion(view, snippet.trigger, from, to);
+        apply: (view: EditorView, _completion: unknown, from: number, to: number) => {
+        applySnippetExpansion(view, snippet.trigger, from, to, onCreateCard, onCreateBoard);
       },
     })),
     validFor: /^[A-Za-z][A-Za-z_]*$/,
@@ -2146,9 +2331,28 @@ function rollReplacementRange(view: EditorView, from: number, to: number) {
   return { from, to };
 }
 
-function applySnippetExpansion(view: EditorView, trigger: string, from: number, to: number) {
+function applySnippetExpansion(
+  view: EditorView,
+  trigger: string,
+  from: number,
+  to: number,
+  onCreateCard?: () => Promise<string | null>,
+  onCreateBoard?: () => Promise<string | null>,
+) {
   const isRoll = trigger === "rollb" || trigger === "rollf";
   const replacement = isRoll ? rollReplacementRange(view, from, to) : { from, to };
+  const create = trigger === "card" ? onCreateCard : trigger === "board" ? onCreateBoard : undefined;
+  if (create) {
+    void create().then((expansion) => {
+      if (!expansion) return;
+      view.dispatch({
+        changes: { ...replacement, insert: expansion },
+        selection: EditorSelection.cursor(replacement.from + expansion.length),
+      });
+      view.focus();
+    }).catch(() => {});
+    return true;
+  }
   const expansion = expandSnippetWithContext(
     trigger,
     view.state.sliceDoc(0, replacement.from),
@@ -2173,7 +2377,11 @@ function applySnippetExpansion(view: EditorView, trigger: string, from: number, 
   return true;
 }
 
-function expandSnippetBeforeCursor(view: EditorView) {
+function expandSnippetBeforeCursor(
+  view: EditorView,
+  onCreateCard?: () => Promise<string | null>,
+  onCreateBoard?: () => Promise<string | null>,
+) {
   const range = view.state.selection.main;
   if (!range.empty) return false;
 
@@ -2182,7 +2390,7 @@ function expandSnippetBeforeCursor(view: EditorView) {
   if (!match) return false;
 
   const from = range.head - match[0].length;
-  return applySnippetExpansion(view, match[1], from, range.head);
+  return applySnippetExpansion(view, match[1], from, range.head, onCreateCard, onCreateBoard);
 }
 
 function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
@@ -2530,6 +2738,12 @@ export default function LiveMarkdownEditor({
   onSave,
   onError,
   onOpenWikilink,
+  onOpenCard,
+  cardTitles = new Map<string, string>(),
+  cardData = new Map<string, CardMetadata>(),
+  onCreateCard,
+  onCreateBoard,
+  onMoveCard,
   onDecreaseFontSize,
   onIncreaseFontSize,
   searchTarget = null,
@@ -2548,6 +2762,12 @@ export default function LiveMarkdownEditor({
   const onSaveRef = useRef(onSave);
   const onErrorRef = useRef(onError);
   const onOpenWikilinkRef = useRef(onOpenWikilink);
+  const onOpenCardRef = useRef(onOpenCard);
+  const cardTitlesRef = useRef(cardTitles);
+  const cardDataRef = useRef(cardData);
+  const onCreateCardRef = useRef(onCreateCard);
+  const onCreateBoardRef = useRef(onCreateBoard);
+  const onMoveCardRef = useRef(onMoveCard);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
@@ -2586,11 +2806,17 @@ export default function LiveMarkdownEditor({
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
     onOpenWikilinkRef.current = onOpenWikilink;
+    onOpenCardRef.current = onOpenCard;
+    cardTitlesRef.current = cardTitles;
+    cardDataRef.current = cardData;
+    onCreateCardRef.current = onCreateCard;
+    onCreateBoardRef.current = onCreateBoard;
+    onMoveCardRef.current = onMoveCard;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
-  }, [onChange, onSave, onError, onOpenWikilink, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -2684,7 +2910,11 @@ export default function LiveMarkdownEditor({
               key: "Enter",
               run: (editor) =>
                 acceptCompletion(editor) ||
-                expandSnippetBeforeCursor(editor) ||
+                expandSnippetBeforeCursor(
+                  editor,
+                  () => onCreateCardRef.current?.() ?? Promise.resolve(null),
+                  () => onCreateBoardRef.current?.() ?? Promise.resolve(null),
+                ) ||
                 insertNewlineAtOutlineDepth(editor),
             },
             {
@@ -2740,7 +2970,11 @@ export default function LiveMarkdownEditor({
           search(),
           keymap.of(searchKeymap),
           autocompletion({
-            override: [snippetCompletion],
+            override: [(context) => snippetCompletion(
+              context,
+              () => onCreateCardRef.current?.() ?? Promise.resolve(null),
+              () => onCreateBoardRef.current?.() ?? Promise.resolve(null),
+            )],
           }),
           minimalSetup,
           history({ newGroupDelay: 250 }),
@@ -2957,6 +3191,10 @@ export default function LiveMarkdownEditor({
           placeholder("Begin writing…"),
           livePreviewExtension(
             (title) => onOpenWikilinkRef.current(title),
+            (id) => onOpenCardRef.current?.(id),
+            (id) => cardTitlesRef.current.get(id) ?? null,
+            cardDataRef.current,
+            (id, status) => onMoveCardRef.current?.(id, status),
             noteID,
             (reason) => onErrorRef.current(reason),
             highlightLineNumbers,

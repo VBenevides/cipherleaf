@@ -51,6 +51,18 @@ import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
+import {
+  BOARD_COLUMNS,
+  CARD_STATUS_LABELS,
+  newCardMetadata,
+  cardReference,
+  normalizeCardTags,
+  parseCardDocument,
+  serializeCardDocument,
+  transitionCard,
+  type CardMetadata,
+  type CardStatus,
+} from "./cards";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -151,6 +163,12 @@ type ConflictResolution = {
   cloudHighlightLines: ReadonlySet<number>;
 };
 
+type CardPanelState = {
+  note: Note;
+  metadata: CardMetadata;
+  body: string;
+};
+
 const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 const ObjectTreeView = lazy(() => import("./ObjectTreeView"));
 const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
@@ -214,6 +232,34 @@ function noteForEditing(note: Note): { note: Note; migrated: boolean } {
 function markdownForEditing(content: string): string {
   const canonical = parseCanonicalObjectDocumentText(content);
   return canonical ? markdownFromCanonicalObjectDocument(canonical) : content;
+}
+
+function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
+  const properties = summary.properties ?? {};
+  if (properties["cipherleaf-card"] !== true && properties["cipherleaf-card"] !== "true") return null;
+  const status = String(properties["cipherleaf-card-status"] ?? "not-started") as CardStatus;
+  if (!BOARD_COLUMNS.includes(status as typeof BOARD_COLUMNS[number])) return null;
+  const tags = Array.isArray(properties["cipherleaf-card-tags"])
+    ? properties["cipherleaf-card-tags"].filter((tag): tag is string => typeof tag === "string")
+    : [];
+  const metadata: CardMetadata = {
+    id: summary.id,
+    title: summary.title || "Untitled",
+    status,
+    tags,
+    createdAt: String(properties["cipherleaf-card-created-at"] ?? summary.createdAt),
+  };
+  for (const [key, field] of [
+    ["cipherleaf-card-started-at", "startedAt"],
+    ["cipherleaf-card-blocked-on", "blockedOn"],
+    ["cipherleaf-card-finished-at", "finishedAt"],
+    ["cipherleaf-card-board-id", "boardID"],
+    ["cipherleaf-card-column-entered-at", "columnEnteredAt"],
+  ] as const) {
+    const value = properties[key];
+    if (typeof value === "string" && value) metadata[field] = value;
+  }
+  return metadata;
 }
 
 function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
@@ -518,6 +564,8 @@ function App() {
   const [syncLinked, setSyncLinked] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
+  const [cardPanel, setCardPanel] = useState<CardPanelState | null>(null);
+  const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
@@ -3017,6 +3065,21 @@ function App() {
     [note?.content],
   );
 
+  const cardMetadata = useMemo(() => {
+    const cards = new Map<string, CardMetadata>();
+    for (const summary of notes) {
+      const metadata = cardMetadataFromSummary(summary);
+      if (metadata) cards.set(summary.id, metadata);
+    }
+    if (cardPanel) cards.set(cardPanel.note.id, cardPanel.metadata);
+    return cards;
+  }, [cardPanel, notes]);
+
+  const cardTitles = useMemo(
+    () => new Map([...cardMetadata].map(([id, metadata]) => [id, metadata.title])),
+    [cardMetadata],
+  );
+
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
   useEffect(() => {
@@ -3082,6 +3145,76 @@ function App() {
       await selectNote(linked.id, { appendTrail: true });
     } catch {
       setError(`No note named “${title}” exists yet.`);
+    }
+  };
+
+  const openCard = async (id: string) => {
+    try {
+      const loaded = await VaultService.GetNote(id);
+      const parsed = parseCardDocument(loaded.content, id, loaded.title);
+      if (!parsed) throw new Error("This reference is not a card.");
+      setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const createCard = async () => {
+    try {
+      const created = await VaultService.CreateNote("Untitled");
+      const metadata = newCardMetadata(created.id, new Date(created.createdAt));
+      const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
+      updateSummary(saved.summary);
+      setCardPanel({ note: saved.note, metadata, body: "" });
+      return cardReference(created.id);
+    } catch (reason) {
+      setError(errorText(reason));
+      return null;
+    }
+  };
+
+  const createBoard = async () => {
+    if (!noteRef.current) return null;
+    const id = typeof crypto?.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `board-${Date.now().toString(36)}`;
+    return `<!-- cipherleaf-board:${id}: -->`;
+  };
+
+  const saveCardPanel = async () => {
+    if (!cardPanel) return;
+    setCardPanelSaving(true);
+    try {
+      const title = cardPanel.metadata.title.trim() || "Untitled";
+      const metadata = { ...cardPanel.metadata, title, tags: normalizeCardTags(cardPanel.metadata.tags) };
+      const saved = await VaultService.SaveNote(
+        cardPanel.note.id,
+        title,
+        serializeCardDocument(metadata, cardPanel.body),
+      );
+      updateSummary(saved.summary);
+      setCardPanel({ note: saved.note, metadata, body: cardPanel.body });
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setCardPanelSaving(false);
+    }
+  };
+
+  const moveCard = async (id: string, status: CardStatus) => {
+    const summary = notes.find((item) => item.id === id);
+    const current = cardMetadata.get(id);
+    if (!summary || !current || current.status === status) return;
+    try {
+      const loaded = await VaultService.GetNote(id);
+      const parsed = parseCardDocument(loaded.content, id, loaded.title);
+      if (!parsed) return;
+      const metadata = transitionCard(parsed.metadata, status);
+      const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
+      updateSummary(saved.summary);
+      if (cardPanel?.note.id === id) setCardPanel({ note: saved.note, metadata, body: parsed.body });
+    } catch (reason) {
+      setError(errorText(reason));
     }
   };
 
@@ -4382,7 +4515,15 @@ function App() {
         </div>
       </aside>
 
-      <section className="editor-shell" onBlur={persistWhenEditorLosesFocus}>
+      <section
+        className="editor-shell"
+        onBlur={persistWhenEditorLosesFocus}
+        onClick={(event) => {
+          if (cardPanel && !(event.target instanceof Element && event.target.closest(".card-sidebar"))) {
+            setCardPanel(null);
+          }
+        }}
+      >
         <header className="editor-topbar">
           <button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
             <Icon name="menu" />
@@ -4686,6 +4827,12 @@ function App() {
                       onSave={() => persistCurrentInBackground()}
                       onError={(reason) => setError(errorText(reason))}
                       onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                      onOpenCard={openCard}
+                      cardTitles={cardTitles}
+                      cardData={cardMetadata}
+                      onCreateCard={createCard}
+                      onCreateBoard={createBoard}
+                      onMoveCard={moveCard}
                       onDecreaseFontSize={decreaseEditorFontSize}
                       onIncreaseFontSize={increaseEditorFontSize}
                       searchTarget={globalSearchTarget}
@@ -4773,6 +4920,32 @@ function App() {
               <Icon name="plus" size={17} /> New note
             </button>
           </div>
+        )}
+        {cardPanel && (
+          <aside className="card-sidebar" aria-label="Card details" onClick={(event) => event.stopPropagation()}>
+            <header className="card-sidebar-header">
+              <div>
+                <p className="eyebrow">Card</p>
+                <h2>{cardPanel.metadata.title || "Untitled"}</h2>
+              </div>
+              <button type="button" className="icon-button" aria-label="Close card" title="Close card" onClick={() => setCardPanel(null)}>
+                <Icon name="x" size={16} />
+              </button>
+            </header>
+            <label>Title<input value={cardPanel.metadata.title} placeholder="Untitled" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, title: event.target.value }, note: { ...current.note, title: event.target.value } } : current)} /></label>
+            <label>Status<select value={cardPanel.metadata.status} onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, event.target.value as CardStatus) } : current)}>
+              {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
+            </select></label>
+            <label>Tags<input value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+            <div className="card-sidebar-dates" aria-label="Card dates">
+              <span>Created: {new Date(cardPanel.metadata.createdAt).toLocaleString()}</span>
+              {cardPanel.metadata.startedAt && <span>Started: {new Date(cardPanel.metadata.startedAt).toLocaleString()}</span>}
+              {cardPanel.metadata.blockedOn && <span>Blocked: {new Date(cardPanel.metadata.blockedOn).toLocaleString()}</span>}
+              {cardPanel.metadata.finishedAt && <span>Finished: {new Date(cardPanel.metadata.finishedAt).toLocaleString()}</span>}
+            </div>
+            <label className="card-sidebar-notes">Notes<textarea value={cardPanel.body} onChange={(event) => setCardPanel((current) => current ? { ...current, body: event.target.value } : current)} /></label>
+            <button type="button" className="primary-button" disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
+          </aside>
         )}
       </section>
       {logOpen && (

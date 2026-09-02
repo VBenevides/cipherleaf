@@ -135,6 +135,8 @@ function rollFirstDatedSection(markdown: string, now = new Date()): string | nul
 }
 
 export const SNIPPETS: Snippet[] = [
+  { trigger: "card", description: "Create a card reference", expand: () => "/card" },
+  { trigger: "board", description: "Insert a four-column board", expand: () => "/board" },
   { trigger: "today", description: "Insert the current date (local timezone)", expand: localDate },
   { trigger: "date", description: "Insert the current date (local timezone)", expand: localDate },
   { trigger: "now", description: "Insert the current date and time (local timezone)", expand: localDateTime },
