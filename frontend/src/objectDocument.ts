@@ -164,7 +164,7 @@ function parseBulletPrefix(text: string): PrefixParts | null {
 }
 
 function parseCheckbox(text: string): { marker: string; rest: string } | null {
-  if (text[0] !== "[") return null;
+  if (!text.startsWith("[")) return null;
   const marker = text[1] === "]" ? "" : text[1];
   if (marker !== "" && marker !== " " && marker !== "x" && marker !== "X") return null;
   const endMarker = marker === "" ? 1 : 2;
