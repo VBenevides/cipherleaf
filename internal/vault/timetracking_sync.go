@@ -561,6 +561,16 @@ func buildMergedTimeTrackingBuckets(
 	return mergedBuckets, nil
 }
 
+func removeTimeTrackingFiles(path string) error {
+	var removeErr error
+	for _, candidate := range []string{path, path + ".bak"} {
+		if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+			removeErr = errors.Join(removeErr, err)
+		}
+	}
+	return removeErr
+}
+
 func (s *Store) rollbackTimeTrackingMergeLocked(
 	localCatalog timeTrackingCatalog,
 	localBuckets, mergedBuckets map[string]timeTrackingBucket,
@@ -576,11 +586,7 @@ func (s *Store) rollbackTimeTrackingMergeLocked(
 			rollbackErr = errors.Join(rollbackErr, err)
 			continue
 		}
-		for _, candidate := range []string{path, path + ".bak"} {
-			if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
+		rollbackErr = errors.Join(rollbackErr, removeTimeTrackingFiles(path))
 	}
 	for _, bucket := range localBuckets {
 		rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingBucketLocked(bucket))
@@ -589,11 +595,7 @@ func (s *Store) rollbackTimeTrackingMergeLocked(
 		rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingCatalogLocked(localCatalog))
 	} else {
 		path := filepath.Join(s.root, trackingDirectory, trackingCatalogFilename)
-		for _, candidate := range []string{path, path + ".bak"} {
-			if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
+		rollbackErr = errors.Join(rollbackErr, removeTimeTrackingFiles(path))
 	}
 	s.clearTimeTrackingBucketCacheLocked()
 	return rollbackErr
