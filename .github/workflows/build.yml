@@ -5,9 +5,6 @@ on:
     tags:
       - "v*"
 
-env:
-  WAILS_VERSION: "v3.0.0-alpha2.112"
-
 jobs:
   validate:
     name: Validate release tag
@@ -128,11 +125,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libgtk-4-dev libwebkitgtk-6.0-dev
 
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.112
-
       - name: Build
-        run: wails3 build
+        run: go run github.com/wailsapp/wails/v3/cmd/wails3 build
 
       - name: Version binary
         run: |
@@ -172,13 +166,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Wails
-        shell: pwsh
-        run: go install "github.com/wailsapp/wails/v3/cmd/wails3@$env:WAILS_VERSION"
-
       - name: Build
         shell: pwsh
-        run: wails3 build
+        run: go run "github.com/wailsapp/wails/v3/cmd/wails3" build
 
       - name: Version binary
         shell: pwsh
