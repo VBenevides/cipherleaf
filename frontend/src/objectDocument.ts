@@ -95,7 +95,7 @@ export function visualIndent(text: string): number {
 }
 
 export function lineIndent(text: string): number {
-  return visualIndent(text.match(/^[ \t]*/)?.[0] ?? "");
+  return visualIndent(/^[ \t]*/.exec(text)?.[0] ?? "");
 }
 
 const leadingAsteriskEmphasis = /^\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/u;
@@ -108,7 +108,7 @@ type ExclusiveObjectPrefix = {
 };
 
 function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
-  const bare = text.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const bare = /^([ \t]*)<([ \t]?)(.*)$/.exec(text);
   if (bare) {
     return {
       indent: visualIndent(bare[1]),
@@ -118,7 +118,7 @@ function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
     };
   }
 
-  const section = text.match(/^([ \t]*)(>+)[ \t]?(.*)$/);
+  const section = /^([ \t]*)(>+)[ \t]?(.*)$/.exec(text);
   if (section) {
     return {
       indent: visualIndent(section[1]) + (section[2].length - 1) * 2,
@@ -128,7 +128,7 @@ function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
     };
   }
 
-  const list = text.match(/^([ \t]*)(?:(\d+)([.)])[ \t]+(.*)|([-*])(?:[ \t]+(.*)|([^-*].*))?)$/);
+  const list = /^([ \t]*)(?:(\d+)([.)])[ \t]+(.*)|([-*])(?:[ \t]+(.*)|([^-*].*))?)$/.exec(text);
   if (!list) return null;
   return {
     indent: visualIndent(list[1]),
@@ -143,7 +143,7 @@ function numberedMarker(previousLine: string | undefined, indent: number, fallba
   const previous = exclusiveObjectPrefix(previousLine);
   if (!previous || previous.kind !== "numbering" || previous.indent !== indent) return fallback;
   const number = Number.parseInt(previous.marker, 10);
-  const punctuation = fallback.match(/[.)]/)?.[0] ?? ".";
+  const punctuation = /[.)]/.exec(fallback)?.[0] ?? ".";
   return `${number + 1}${punctuation} `;
 }
 
@@ -155,21 +155,19 @@ type StrippedObjectPrefix = {
 };
 
 function stripObjectPrefixes(text: string): StrippedObjectPrefix {
-  const rawIndent = text.match(/^[ \t]*/)?.[0] ?? "";
+  const rawIndent = /^[ \t]*/.exec(text)?.[0] ?? "";
   let rest = text.slice(rawIndent.length);
   let quoteDepth = 0;
 
   while (rest) {
-    const quote = rest.match(/^>+[ \t]?/);
+    const quote = /^>+[ \t]?/.exec(rest);
     if (quote) {
-      quoteDepth += (quote[0].match(/>/g) ?? []).length;
+      quoteDepth += quote[0].split(">").length - 1;
       rest = rest.slice(quote[0].length);
       continue;
     }
 
-    const prefix = rest.match(
-      /^(?:#{1,6}[ \t]+|<[ \t]?|\d+[.)][ \t]+|[-*+](?:[ \t]+|(?=[^-*+\s])|$)|\[[ xX]?\][ \t]*)/,
-    );
+    const prefix = /^(?:#{1,6}[ \t]+|<[ \t]?|\d+[.)][ \t]+|[-*+](?:[ \t]+|(?=[^-*+\s])|$)|\[[ xX]?\][ \t]*)/.exec(rest);
     if (!prefix) break;
     rest = rest.slice(prefix[0].length);
   }
@@ -233,7 +231,7 @@ function stableUuid(input: string): string {
 }
 
 export function classifyObjectLine(raw: string): ParsedObjectLine {
-  const fence = raw.match(/^([ \t]*)```([^\s`]*)[ \t]*$/);
+  const fence = /^([ \t]*)```([^\s`]*)[ \t]*$/.exec(raw);
   if (fence) {
     const indent = visualIndent(fence[1]);
     return {
@@ -249,8 +247,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  const bare = !outline && raw.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const outline = /^([ \t]*)(>+)([ \t]?)(.*)$/.exec(raw);
+  const bare = !outline && /^([ \t]*)<([ \t]?)(.*)$/.exec(raw);
   const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
   const tags: ObjectTag[] = outline ? ["section"] : [];
   const indent = outline
@@ -293,10 +291,10 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   const bullet = !leadingAsteriskEmphasis.test(source) &&
-    source.match(/^([-*])(?:[ \t]+(.*)|([^-*].*))?$/);
+    /^([-*])(?:[ \t]+(.*)|([^-*].*))?$/.exec(source);
   if (bullet) {
     const bulletText = bullet[2] ?? bullet[3] ?? "";
-    const checked = bulletText.match(/^\[([ xX]?)\]\s*(.*)$/);
+    const checked = /^\[([ xX]?)\]\s*(.*)$/.exec(bulletText);
     const text = checked ? checked[2].trim() : bulletText.trim();
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
@@ -313,9 +311,9 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const ordered = source.match(/^(\d+[.)])(?:\s+(.*)|\s*)$/);
+  const ordered = /^(\d+[.)])(?:\s+(.*)|\s*)$/.exec(source);
   if (ordered) {
-    const checked = ordered[2]?.match(/^\[([ xX]?)\]\s*(.*)$/);
+    const checked = ordered[2] && /^\[([ xX]?)\]\s*(.*)$/.exec(ordered[2]);
     const text = checked ? checked[2].trim() : ordered[2]?.trim() ?? "";
     const prefix = sourcePrefix(text);
     tags.push("bulletpoint");
@@ -346,7 +344,7 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
   }
 
   tags.push("text");
-  const checkbox = source.match(/^\[([ xX]?)\]\s*(.*)$/);
+  const checkbox = /^\[([ xX]?)\]\s*(.*)$/.exec(source);
   const text = checkbox ? checkbox[2].trim() : source.trim();
   const checkboxContentIndent = checkbox
     ? raw.indexOf(source) + source.length - checkbox[2].length
@@ -365,8 +363,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
 }
 
 function lineStartsExplicitObject(raw: string): boolean {
-  const outline = raw.match(/^([ \t]*)(>+)([ \t]?)(.*)$/);
-  const bare = !outline && raw.match(/^([ \t]*)<([ \t]?)(.*)$/);
+  const outline = /^([ \t]*)(>+)([ \t]?)(.*)$/.exec(raw);
+  const bare = !outline && /^([ \t]*)<([ \t]?)(.*)$/.exec(raw);
   const source = outline ? outline[4] : bare ? bare[3] : raw.trimStart();
 
   return Boolean(
@@ -388,22 +386,22 @@ export function objectContentIndent(raw: string): number {
 }
 
 export function repeatedObjectPrefix(raw: string): string | null {
-  const quote = raw.match(/^([ \t]*)(>+)([ \t]?)/);
+  const quote = /^([ \t]*)(>+)([ \t]?)/.exec(raw);
   if (quote) return `${quote[1]}${quote[2]} `;
 
-  const bare = raw.match(/^([ \t]*)<([ \t]?)/);
+  const bare = /^([ \t]*)<([ \t]?)/.exec(raw);
   if (bare) return `${bare[1]}< `;
 
-  const task = raw.match(/^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/);
+  const task = /^([ \t]*)([-+*][ \t]+)?\[([ xX])\][ \t]+/.exec(raw);
   if (task) return `${task[1]}${task[2] ?? ""}[ ] `;
 
-  const unordered = raw.match(/^([ \t]*)([-+*])(?:[ \t]+|(?=[^-*\s])|$)/);
+  const unordered = /^([ \t]*)([-+*])(?:[ \t]+|(?=[^-*\s])|$)/.exec(raw);
   if (unordered) return `${unordered[1]}${unordered[2]} `;
 
-  const ordered = raw.match(/^([ \t]*)(\d+)([.)])[ \t]+/);
+  const ordered = /^([ \t]*)(\d+)([.)])[ \t]+/.exec(raw);
   if (ordered) return `${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]} `;
 
-  return raw.match(/^[ \t]+/)?.[0] ?? null;
+  return /^[ \t]+/.exec(raw)?.[0] ?? null;
 }
 
 export function continuationPrefix(raw: string): string | null {
@@ -412,7 +410,7 @@ export function continuationPrefix(raw: string): string | null {
 }
 
 function continuationText(raw: string, parent: ParsedObjectLine): string {
-  const leading = raw.match(/^[ \t]*/)?.[0] ?? "";
+  const leading = /^[ \t]*/.exec(raw)?.[0] ?? "";
   let offset = 0;
   let column = 0;
 
@@ -505,7 +503,7 @@ export function objectBlockEnd(lines: readonly string[], startLineNumber: number
 function reindentLine(text: string, delta: number): string {
   if (text.trim() === "" || delta === 0) return text;
   if (delta > 0) return `${" ".repeat(delta)}${text}`;
-  const removable = Math.min(text.match(/^ */)?.[0].length ?? 0, Math.abs(delta));
+  const removable = Math.min(/^( *)/.exec(text)?.[0].length ?? 0, Math.abs(delta));
   return text.slice(removable);
 }
 
@@ -839,7 +837,7 @@ export function portableMarkdown(markdown: string): string {
       ].join("\n");
     }
     if (object.tag === "bulletpoint") {
-      const ordered = object.sourcePrefix.trimStart().match(/^\d+[.)]/)?.[0];
+      const ordered = /^\d+[.)]/.exec(object.sourcePrefix.trimStart())?.[0];
       const marker = ordered ?? "-";
       const lines = object.text.split("\n");
       return [
