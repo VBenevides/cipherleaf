@@ -1448,13 +1448,15 @@ function decorateObjectTask(
   return true;
 }
 
+type ListKind = "unordered" | "ordered" | null;
+
 function decorateObjectListMarker(
   object: ObjectLine,
   syntaxFrom: number,
   decorations: Range<Decoration>[],
   atomicRanges: Range<Decoration>[],
   to = object.textFrom,
-): "unordered" | "ordered" | null {
+): ListKind {
   const marker = object.listMarker;
   if (!marker) return null;
   if (marker === "-" || marker === "*") {
@@ -1857,7 +1859,7 @@ function renderToggleLine(
     decorations,
     atomicRanges,
   );
-  let listKind: "unordered" | "ordered" | null = null;
+  let listKind: ListKind = null;
   if (!toggleAttachment && !isTask) {
     listKind = decorateObjectListMarker(toggle.object, contentOffset, decorations, atomicRanges);
   }
@@ -2061,7 +2063,7 @@ function renderPlainLine(
 
   let task = false;
   if (object) task = decorateObjectTask(object, line.from, decorations, atomicRanges);
-  let listKind: "unordered" | "ordered" | null = null;
+  let listKind: ListKind = null;
   if (object && !task) {
     listKind = decorateObjectListMarker(object, line.from, decorations, atomicRanges);
   }
