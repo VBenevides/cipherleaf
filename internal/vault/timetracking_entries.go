@@ -271,6 +271,13 @@ func validateTimeEntryReferences(catalog timeTrackingCatalog, clientID, projectI
 	if err := validateProjectClient(catalog.Clients, clientID, activeOnly); err != nil && (activeOnly || !trackingTombstoneExists(catalog.DeletedClients, clientID)) {
 		return err
 	}
+	if err := validateTimeEntryProject(catalog, clientID, projectID, activeOnly); err != nil {
+		return err
+	}
+	return validateTimeEntryTags(catalog, tagIDs, activeOnly)
+}
+
+func validateTimeEntryProject(catalog timeTrackingCatalog, clientID, projectID string, activeOnly bool) error {
 	if projectID != "" {
 		index := slices.IndexFunc(catalog.Projects, func(project TimeProject) bool { return project.ID == projectID })
 		if (index < 0 && (activeOnly || !trackingTombstoneExists(catalog.DeletedProjects, projectID))) || (index >= 0 && activeOnly && catalog.Projects[index].ArchivedAtUTC != "") {
@@ -280,6 +287,10 @@ func validateTimeEntryReferences(catalog timeTrackingCatalog, clientID, projectI
 			return errors.New("project does not belong to the selected client")
 		}
 	}
+	return nil
+}
+
+func validateTimeEntryTags(catalog timeTrackingCatalog, tagIDs []string, activeOnly bool) error {
 	seen := make(map[string]struct{}, len(tagIDs))
 	for _, id := range tagIDs {
 		if _, duplicate := seen[id]; duplicate {
