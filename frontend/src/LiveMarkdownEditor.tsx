@@ -2489,7 +2489,8 @@ function rollReplacementRange(view: EditorView, from: number, to: number) {
   const line = view.state.doc.lineAt(from);
   const beforeTrigger = view.state.sliceDoc(line.from, from);
   const afterTrigger = view.state.sliceDoc(to, line.to);
-  if (/^\s*>?\s*$/.test(beforeTrigger) && /^\s*$/.test(afterTrigger)) {
+  const trimmedBeforeTrigger = beforeTrigger.trim();
+  if ((!trimmedBeforeTrigger || trimmedBeforeTrigger === ">") && !afterTrigger.trim()) {
     return { from: line.from, to: line.to };
   }
   return { from, to };
