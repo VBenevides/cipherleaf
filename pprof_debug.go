@@ -5,7 +5,7 @@ package main
 import (
 	"log"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" // Register the /debug/pprof handlers on the default mux.
 	"os"
 	"strings"
 )
