@@ -1174,39 +1174,46 @@ func parseChangedRemotePaths(data []byte) ([]changedRemotePath, error) {
 		}
 		status := string(fields[index])
 		index++
-		if index >= len(fields) {
-			return nil, errors.New("Git returned malformed encrypted repository changes")
+		changes, next, err := parseChangedRemotePath(fields, index, status)
+		if err != nil {
+			return nil, err
 		}
-		if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
-			if index+1 >= len(fields) {
-				return nil, errors.New("Git returned malformed encrypted repository changes")
-			}
-			oldPath, newPath := string(fields[index]), string(fields[index+1])
-			index += 2
-			if !validRemotePath(oldPath) || !validRemotePath(newPath) {
-				return nil, errors.New("the encrypted repository contains an unknown or unsafe layout")
-			}
-			if strings.HasPrefix(status, "R") {
-				result = append(result, changedRemotePath{path: oldPath, deleted: true})
-			}
-			result = append(result, changedRemotePath{path: newPath})
-			continue
-		}
-		path := string(fields[index])
-		index++
-		if !validRemotePath(path) {
-			return nil, errors.New("the encrypted repository contains an unknown or unsafe layout")
-		}
-		switch status {
-		case "A", "M", "T":
-			result = append(result, changedRemotePath{path: path})
-		case "D":
-			result = append(result, changedRemotePath{path: path, deleted: true})
-		default:
-			return nil, errors.New("Git returned an unsupported encrypted repository change")
-		}
+		result = append(result, changes...)
+		index = next
 	}
 	return result, nil
+}
+
+func parseChangedRemotePath(fields [][]byte, index int, status string) ([]changedRemotePath, int, error) {
+	if index >= len(fields) {
+		return nil, index, errors.New("Git returned malformed encrypted repository changes")
+	}
+	if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
+		if index+1 >= len(fields) {
+			return nil, index, errors.New("Git returned malformed encrypted repository changes")
+		}
+		oldPath, newPath := string(fields[index]), string(fields[index+1])
+		if !validRemotePath(oldPath) || !validRemotePath(newPath) {
+			return nil, index, errors.New("the encrypted repository contains an unknown or unsafe layout")
+		}
+		changes := []changedRemotePath{{path: newPath}}
+		if strings.HasPrefix(status, "R") {
+			changes = append([]changedRemotePath{{path: oldPath, deleted: true}}, changes...)
+		}
+		return changes, index + 2, nil
+	}
+	path := string(fields[index])
+	if !validRemotePath(path) {
+		return nil, index, errors.New("the encrypted repository contains an unknown or unsafe layout")
+	}
+	switch status {
+	case "A", "M", "T":
+		return []changedRemotePath{{path: path}}, index + 1, nil
+	case "D":
+		return []changedRemotePath{{path: path, deleted: true}}, index + 1, nil
+	default:
+		return nil, index, errors.New("Git returned an unsupported encrypted repository change")
+	}
 }
 
 func readRemoteVaultID(root string) (string, error) {
@@ -1248,34 +1255,22 @@ func validateWorkingTreeLayout(root string) error {
 		if relative == ".git" && entry.IsDir() {
 			return filepath.SkipDir
 		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			return errors.New("encrypted snapshot contains a non-regular file")
-		}
-		slashPath := filepath.ToSlash(relative)
-		if slashPath == gitVaultConfigPath ||
-			slashPath == gitSyncManifestPath ||
-			slashPath == gitSyncFoldersPath ||
-			slashPath == "sync/tracking.enc" ||
-			slashPath == "tracking/catalog.enc" {
-			return nil
-		}
-		match := remoteObjectPath.FindStringSubmatch(slashPath)
-		if len(match) == 3 && match[1] == match[2][:2] {
-			return nil
-		}
-		trackingMatch := remoteTrackingObjectPath.FindStringSubmatch(slashPath)
-		if len(trackingMatch) == 3 && trackingMatch[1] == trackingMatch[2][:2] {
-			return nil
-		}
-		if remoteAttachmentPath.MatchString(slashPath) {
-			return nil
-		}
-		return errors.New("encrypted snapshot export produced an unsafe repository path")
+		return validateWorkingTreeEntry(relative, entry)
 	})
+}
+
+func validateWorkingTreeEntry(relative string, entry fs.DirEntry) error {
+	if entry.IsDir() {
+		return nil
+	}
+	info, err := entry.Info()
+	if err != nil || !info.Mode().IsRegular() {
+		return errors.New("encrypted snapshot contains a non-regular file")
+	}
+	if validRemotePath(filepath.ToSlash(relative)) {
+		return nil
+	}
+	return errors.New("encrypted snapshot export produced an unsafe repository path")
 }
 
 func protectMaterializedSnapshot(root string) error {
