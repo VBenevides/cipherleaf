@@ -2813,12 +2813,12 @@ function dropModeForPoint(
 function clearObjectDropPreview(target?: HTMLElement | null) {
   if (target) {
     target.classList.remove("is-drop-before", "is-drop-child", "is-drop-after");
-    target.removeAttribute("data-drop-mode");
+    delete target.dataset.dropMode;
     return;
   }
-  document.querySelectorAll(".cm-live-object-line[data-drop-mode]").forEach((element) => {
+  document.querySelectorAll<HTMLElement>(".cm-live-object-line[data-drop-mode]").forEach((element) => {
     element.classList.remove("is-drop-before", "is-drop-child", "is-drop-after");
-    element.removeAttribute("data-drop-mode");
+    delete element.dataset.dropMode;
   });
 }
 
