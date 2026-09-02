@@ -75,7 +75,7 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
 
       - name: Install frontend dependencies
-        run: npm ci --prefix frontend
+        run: npm ci --ignore-scripts --prefix frontend
 
       - name: Build frontend
         run: npm run build --prefix frontend
