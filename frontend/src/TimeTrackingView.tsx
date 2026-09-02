@@ -212,6 +212,28 @@ function WeekView({
   </>;
 }
 
+type MonthViewProps = {
+  readonly busy: boolean;
+  readonly monthAnchor: Date;
+  readonly monthCalendarDays: CalendarDay[];
+  readonly todayKey: string;
+  readonly onPrevious: () => void;
+  readonly onCurrent: () => void;
+  readonly onNext: () => void;
+};
+
+function MonthView({ busy, monthAnchor, monthCalendarDays, todayKey, onPrevious, onCurrent, onNext }: MonthViewProps) {
+  return <>
+    <div className="time-calendar-navigation"><button className="secondary-button" onClick={onPrevious}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={onCurrent}>Current month</button><button className="secondary-button" onClick={onNext}>Next</button></div>
+    {busy ? <output className="settings-loading">Loading month...</output> : <div className="time-month-grid">
+      {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
+      {monthCalendarDays.map(({ date: day, items, key, total }) => {
+        return <div key={key} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === todayKey ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
+      })}
+    </div>}
+  </>;
+}
+
 export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrackingViewProps) {
   const [tab, setTab] = useState<TimeTrackingTab>("week");
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
@@ -494,16 +516,15 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
       onBeginEdit={beginEdit}
       onDeleteRequest={(entry) => { setDeleting(entry); setConfirmAction("delete"); }}
     />,
-    month: () => <>
-
-            <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
-            {busy ? <output className="settings-loading">Loading month...</output> : <div className="time-month-grid">
-              {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
-              {monthCalendarDays.map(({ date: day, items, key, total }) => {
-                return <div key={key} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === todayKey ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
-              })}
-            </div>}
-    </>,
+    month: () => <MonthView
+      busy={busy}
+      monthAnchor={monthAnchor}
+      monthCalendarDays={monthCalendarDays}
+      todayKey={todayKey}
+      onPrevious={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}
+      onCurrent={() => setMonthAnchor(new Date())}
+      onNext={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}
+    />,
     dashboard: dashboardView,
     clients: () => labelManager("client"),
     projects: () => labelManager("project"),
