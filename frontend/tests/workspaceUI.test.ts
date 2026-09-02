@@ -135,4 +135,5 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /className="card-sidebar-notes"[\s\S]*<LiveMarkdownEditor/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
+  assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
 });
