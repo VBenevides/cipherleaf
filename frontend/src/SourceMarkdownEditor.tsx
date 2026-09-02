@@ -16,14 +16,14 @@ import {
 } from "./LiveMarkdownEditor";
 
 type Props = {
-  noteID: string;
-  value: string;
-  onChange: (value: string) => void;
-  onError: (reason: unknown) => void;
-  readOnly?: boolean;
-  scrollSync?: {
-    register: (scroller: HTMLElement) => () => void;
-    sync: (source: HTMLElement) => void;
+  readonly noteID: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly onError: (reason: unknown) => void;
+  readonly readOnly?: boolean;
+  readonly scrollSync?: {
+    readonly register: (scroller: HTMLElement) => () => void;
+    readonly sync: (source: HTMLElement) => void;
   };
 };
 
