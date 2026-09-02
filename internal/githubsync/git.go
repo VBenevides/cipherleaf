@@ -30,7 +30,7 @@ type ConnectionTester interface {
 	TestConnection(ctx context.Context, settings SyncSettings) (ConnectionResult, error)
 }
 
-type GitTransport interface {
+type GitRunner interface {
 	Run(ctx context.Context, name string, args []string, environment []string) ([]byte, error)
 }
 
@@ -73,7 +73,7 @@ func (ExecCommandRunner) Run(
 }
 
 type GitConnectionTester struct {
-	runner     GitTransport
+	runner     GitRunner
 	runtimeDir string
 	timeout    time.Duration
 }
@@ -203,7 +203,7 @@ var remoteTrackingObjectPath = regexp.MustCompile(`^tracking/objects/([a-f0-9]{2
 var remoteVaultID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 type GitHubSSHProvider struct {
-	runner     GitTransport
+	runner     GitRunner
 	runtimeDir string
 	cacheRoot  string
 	timeout    time.Duration
