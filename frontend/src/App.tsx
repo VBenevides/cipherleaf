@@ -208,7 +208,7 @@ function RunningTimerText({ startedAtUtc }: { startedAtUtc: string }) {
     const id = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(id);
   }, []);
-  return <>{formatRunningDuration(startedAtUtc, now)}</>;
+  return formatRunningDuration(startedAtUtc, now);
 }
 
 function EditorLoading() {
