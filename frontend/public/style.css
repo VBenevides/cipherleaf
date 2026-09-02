@@ -4013,6 +4013,7 @@ a:focus-visible {
 .cm-live-board-column.status-finished { background: color-mix(in srgb, #2ca36b 18%, transparent); }
 .cm-live-board-column h4 { margin: 0 0 8px; font-size: .85em; }
 .cm-live-board-card { display: block; width: 100%; margin: 5px 0; padding: 7px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: grab; }
+.cm-live-board-empty { margin: 8px 0; color: var(--muted-foreground); font-size: .85em; }
 
 .card-sidebar {
   position: absolute;

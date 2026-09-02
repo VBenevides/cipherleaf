@@ -70,3 +70,11 @@ test("board cards filter by all selected tags and sort newest first", () => {
   ]);
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "a", ["work", "urgent"]).map((card) => card.id), ["a"]);
 });
+
+test("board ordering uses latest column entry outside backlog", () => {
+  const older = { ...newCardMetadata("a"), status: "in-progress" as const, columnEnteredAt: "2026-01-01T00:00:00Z" };
+  const newer = { ...newCardMetadata("b"), status: "in-progress" as const, columnEnteredAt: "2026-01-02T00:00:00Z" };
+  const cards = new Map([[older.id, older], [newer.id, newer]]);
+  assert.deepEqual(boardCardsForColumn(cards, [older.id, newer.id], "in-progress").map((card) => card.id), ["b", "a"]);
+  assert.deepEqual(boardCardsForColumn(cards, ["missing"], "in-progress"), []);
+});

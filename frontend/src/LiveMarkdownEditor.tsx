@@ -1143,6 +1143,16 @@ class BoardWidget extends WidgetType {
       event.stopPropagation();
       this.addCard(this.boardID);
     });
+    const clear = controls.appendChild(document.createElement("button"));
+    clear.type = "button";
+    clear.className = "secondary-button";
+    clear.textContent = "Clear";
+    clear.addEventListener("click", (event) => {
+      event.stopPropagation();
+      filter.value = "";
+      tagFilter.value = "";
+      render();
+    });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
     const render = () => {
@@ -1164,6 +1174,11 @@ class BoardWidget extends WidgetType {
         const heading = column.appendChild(document.createElement("h4"));
         heading.textContent = BOARD_COLUMN_LABELS[status];
         const cards = boardCardsForColumn(this.cards, this.cardIDs, status, titleQuery, requiredTags);
+        if (cards.length === 0) {
+          const empty = column.appendChild(document.createElement("p"));
+          empty.className = "cm-live-board-empty";
+          empty.textContent = "No cards";
+        }
         for (const card of cards) {
           const item = column.appendChild(document.createElement("button"));
           item.type = "button";
