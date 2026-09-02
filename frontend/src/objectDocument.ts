@@ -217,7 +217,7 @@ function stableUuid(input: string): string {
   let second = 0x01000193;
 
   for (let index = 0; index < input.length; index++) {
-    const code = input.charCodeAt(index);
+    const code = input.codePointAt(index) ?? 0;
     first ^= code;
     first = Math.imul(first, 0x01000193) >>> 0;
     second ^= code + index;
