@@ -242,9 +242,17 @@ export function boardMarker(
 }
 
 export function parseBoardMarker(line: string): BoardMarker | null {
-  const match = /^<!--\s*cipherleaf-board:([^:\s]+):([^>]*)\s*-->$/.exec(line.trim());
-  if (!match) return null;
-  const payload = match[2].trim();
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("<!--") || !trimmed.endsWith("-->")) return null;
+  const content = trimmed.slice(4, -3).trimStart();
+  const prefix = "cipherleaf-board:";
+  if (!content.startsWith(prefix)) return null;
+  const marker = content.slice(prefix.length).trimEnd();
+  const separator = marker.indexOf(":");
+  if (separator <= 0) return null;
+  const id = marker.slice(0, separator);
+  if ([...id].some((character) => character.trim() === "") || marker.includes(">")) return null;
+  const payload = marker.slice(separator + 1).trim();
   const fields = payload.split(":");
   const hasTitle = fields.length > 1;
   const encodedTitle = hasTitle ? fields.shift() ?? "" : "";
@@ -253,7 +261,7 @@ export function parseBoardMarker(line: string): BoardMarker | null {
     try { title = decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { title = encodedTitle; }
   }
   const ids = (hasTitle ? fields.join(":") : payload);
-  return { id: match[1], title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
+  return { id, title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
 }
 
 export function replaceBoardMarker(
