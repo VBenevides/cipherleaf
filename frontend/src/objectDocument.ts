@@ -141,7 +141,7 @@ function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
 function numberedMarker(previousLine: string | undefined, indent: number, fallback: string) {
   if (!previousLine) return fallback;
   const previous = exclusiveObjectPrefix(previousLine);
-  if (!previous || previous.kind !== "numbering" || previous.indent !== indent) return fallback;
+  if (previous?.kind !== "numbering" || previous.indent !== indent) return fallback;
   const number = Number.parseInt(previous.marker, 10);
   const punctuation = /[.)]/.exec(fallback)?.[0] ?? ".";
   return `${number + 1}${punctuation} `;
