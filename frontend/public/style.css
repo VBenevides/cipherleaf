@@ -5019,7 +5019,7 @@ a:focus-visible {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .command-palette {
