@@ -38,7 +38,11 @@ func NewRecentVaultStore(path string) *RecentVaultStore {
 func NewDefaultRecentVaultStore() *RecentVaultStore {
 	root, err := os.UserConfigDir()
 	if err != nil || strings.TrimSpace(root) == "" {
-		root = filepath.Join(os.TempDir(), "cipherleaf-config")
+		root, err = os.UserHomeDir()
+		if err != nil || strings.TrimSpace(root) == "" {
+			return NewRecentVaultStore("")
+		}
+		root = filepath.Join(root, ".config")
 	}
 	return NewRecentVaultStore(filepath.Join(root, "Cipherleaf", recentFilename))
 }
