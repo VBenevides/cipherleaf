@@ -58,6 +58,7 @@ import {
   cardReference,
   normalizeCardTags,
   parseCardDocument,
+  parseCardReference,
   parseTemplateDocument,
   serializeTemplateDocument,
   serializeCardDocument,
@@ -3194,6 +3195,36 @@ function App() {
     return `<!-- cipherleaf-board:${id}: -->`;
   };
 
+  const addCardToBoard = async (boardID: string) => {
+    const current = noteRef.current;
+    if (!current) return;
+    try {
+      const reference = await createCard();
+      const id = reference ? parseCardReference(reference) : null;
+      if (!id) return;
+      const loaded = await VaultService.GetNote(id);
+      const parsed = parseCardDocument(loaded.content, id, loaded.title);
+      if (!parsed || parsed.metadata.boardID) return;
+      const metadata = { ...parsed.metadata, boardID };
+      const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
+      updateSummary(saved.summary);
+      setCardPanel({ note: saved.note, metadata, body: parsed.body });
+      const marker = new RegExp(`(<!--\\s*cipherleaf-board:${boardID.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}:)([^>]*)(-->)`);
+      const source = markdownForEditing(current.content);
+      const content = source.replace(marker, (_match, prefix, ids, suffix) => {
+        const cardIDs = ids.trim() ? ids.split(",").map((value: string) => value.trim()).filter(Boolean) : [];
+        return `${prefix}${[...cardIDs, id].join(",")}${suffix}`;
+      });
+      if (content === source) {
+        await VaultService.DeleteNote(id);
+        return;
+      }
+      editNote({ content });
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
   const saveCardPanel = async () => {
     if (!cardPanel) return;
     setCardPanelSaving(true);
@@ -4891,6 +4922,7 @@ function App() {
                       onCreateCard={createCard}
                       onCreateBoard={createBoard}
                       onMoveCard={moveCard}
+                      onAddCardToBoard={addCardToBoard}
                       onDecreaseFontSize={decreaseEditorFontSize}
                       onIncreaseFontSize={increaseEditorFontSize}
                       searchTarget={globalSearchTarget}

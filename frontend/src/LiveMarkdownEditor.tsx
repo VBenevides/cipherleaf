@@ -86,6 +86,7 @@ type LiveMarkdownEditorProps = {
   onCreateCard?: () => Promise<string | null>;
   onCreateBoard?: () => Promise<string | null>;
   onMoveCard?: (id: string, status: CardStatus) => void;
+  onAddCardToBoard?: (boardID: string) => void;
   onDecreaseFontSize: () => void;
   onIncreaseFontSize: () => void;
   searchTarget?: SearchTarget | null;
@@ -1111,6 +1112,7 @@ class BoardWidget extends WidgetType {
     readonly cards: ReadonlyMap<string, CardMetadata>,
     readonly openCard: (id: string) => void,
     readonly moveCard: (id: string, status: CardStatus) => void,
+    readonly addCard: (boardID: string) => void,
   ) { super(); }
 
   eq(other: BoardWidget) {
@@ -1131,6 +1133,14 @@ class BoardWidget extends WidgetType {
     tagFilter.type = "search";
     tagFilter.placeholder = "Filter tags";
     tagFilter.setAttribute("aria-label", "Filter board cards by tags");
+    const add = controls.appendChild(document.createElement("button"));
+    add.type = "button";
+    add.className = "secondary-button";
+    add.textContent = "New card";
+    add.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.addCard(this.boardID);
+    });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
     const render = () => {
@@ -1584,6 +1594,7 @@ function buildLivePreviewState(
   cardTitle: (id: string) => string | null,
   cards: ReadonlyMap<string, CardMetadata>,
   moveCard: (id: string, status: CardStatus) => void,
+  addCard: (boardID: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
@@ -1622,7 +1633,7 @@ function buildLivePreviewState(
         line.to,
         decorations,
         atomicRanges,
-        new BoardWidget(board.id, board.cardIDs, cards, openCard, moveCard),
+        new BoardWidget(board.id, board.cardIDs, cards, openCard, moveCard, addCard),
       );
       lineNumber++;
       continue;
@@ -2032,6 +2043,7 @@ function livePreviewExtension(
   cardTitle: (id: string) => string | null,
   cards: ReadonlyMap<string, CardMetadata>,
   moveCard: (id: string, status: CardStatus) => void,
+  addCard: (boardID: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
@@ -2051,6 +2063,7 @@ function livePreviewExtension(
         cardTitle,
         cards,
         moveCard,
+        addCard,
         noteID,
         onError,
         highlightLineNumbers,
@@ -2134,6 +2147,7 @@ function livePreviewExtension(
         cardTitle,
         cards,
         moveCard,
+        addCard,
         noteID,
         onError,
         highlightLineNumbers,
@@ -2748,6 +2762,7 @@ export default function LiveMarkdownEditor({
   onCreateCard,
   onCreateBoard,
   onMoveCard,
+  onAddCardToBoard,
   onDecreaseFontSize,
   onIncreaseFontSize,
   searchTarget = null,
@@ -2772,6 +2787,7 @@ export default function LiveMarkdownEditor({
   const onCreateCardRef = useRef(onCreateCard);
   const onCreateBoardRef = useRef(onCreateBoard);
   const onMoveCardRef = useRef(onMoveCard);
+  const onAddCardToBoardRef = useRef(onAddCardToBoard);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
@@ -2816,11 +2832,12 @@ export default function LiveMarkdownEditor({
     onCreateCardRef.current = onCreateCard;
     onCreateBoardRef.current = onCreateBoard;
     onMoveCardRef.current = onMoveCard;
+    onAddCardToBoardRef.current = onAddCardToBoard;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
-  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -3199,6 +3216,7 @@ export default function LiveMarkdownEditor({
             (id) => cardTitlesRef.current.get(id) ?? null,
             cardDataRef.current,
             (id, status) => onMoveCardRef.current?.(id, status),
+            (boardID) => onAddCardToBoardRef.current?.(boardID),
             noteID,
             (reason) => onErrorRef.current(reason),
             highlightLineNumbers,
