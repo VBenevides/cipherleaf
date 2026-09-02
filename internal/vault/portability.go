@@ -18,6 +18,8 @@ var portableAttachmentLink = regexp.MustCompile(`attachments/([a-f0-9]{32})\.web
 var portableFileLink = regexp.MustCompile(`attachments/([^\s)]+)`)
 var portableImageFilename = regexp.MustCompile(`(?i)^[a-f0-9]{32}\.webp$`)
 
+const attachmentLinkPrefix = "attachment:"
+
 func portableName(value, fallback string) string {
 	value = strings.TrimSpace(unsafeExportCharacter.ReplaceAllString(value, "_"))
 	value = strings.Trim(value, ". ")
@@ -146,7 +148,7 @@ func (s *Store) ExportMarkdown(parent string) (PortabilityResult, error) {
 			if err := os.WriteFile(filepath.Join(attachmentDirectory, name), data, 0o600); err != nil {
 				return PortabilityResult{}, err
 			}
-			content = strings.ReplaceAll(content, "attachment:"+id, "attachments/"+url.PathEscape(name))
+			content = strings.ReplaceAll(content, attachmentLinkPrefix+id, "attachments/"+url.PathEscape(name))
 			result.Attachments++
 		}
 		path := uniquePortablePath(directory, note.Title, ".md", usedFiles)
@@ -307,7 +309,7 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 			if err != nil {
 				return result, err
 			}
-			replacement := "attachment:" + attachmentID
+			replacement := attachmentLinkPrefix + attachmentID
 			replaced[match[0]] = replacement
 			content = strings.ReplaceAll(content, match[0], replacement)
 			attachments = append(attachments, markdownImportAttachment{id: attachmentID, objectType: "attachment", payload: data})
@@ -349,7 +351,7 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 			if err != nil {
 				return result, err
 			}
-			replacement := "attachment:" + attachmentID
+			replacement := attachmentLinkPrefix + attachmentID
 			replaced[match[0]] = replacement
 			content = strings.ReplaceAll(content, match[0], replacement)
 			attachments = append(attachments, markdownImportAttachment{id: attachmentID, objectType: "file-attachment", payload: payload})
