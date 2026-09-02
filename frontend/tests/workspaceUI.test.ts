@@ -155,3 +155,12 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*width: 100% !important[\s\S]*max-width: none[\s\S]*padding: 0 !important/);
   assert.match(style, /\.cm-selectionLayer \{[\s\S]*clip-path: inset\(0 var\(--editor-content-right\) 0 var\(--editor-content-left\)\)/);
 });
+
+test("board handles expose delete-only menus and block keyboard deletion", () => {
+  assert.match(liveEditor, /if \(board\) \{[\s\S]*new DragHandleWidget\(lineNumber\)/);
+  assert.match(liveEditor, /showObjectHandleMenu\([\s\S]*parseBoardMarker\(contextView\.state\.doc\.line\(sourceLine\)\.text\)/);
+  assert.match(liveEditor, /if \(!board\) \{[\s\S]*textContent = "Duplicate"/);
+  assert.match(liveEditor, /boardMarkerAtDeletionBoundary\(view\)/);
+  assert.match(liveEditor, /key: "Delete"[\s\S]*run: handleBoardDelete/);
+  assert.match(style, /cm-live-board-line:hover \.cm-live-object-handle/);
+});

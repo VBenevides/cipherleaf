@@ -3709,6 +3709,7 @@ a:focus-visible {
 }
 
 .live-markdown-editor .cm-live-object-line:hover .cm-live-object-handle,
+.live-markdown-editor .cm-live-board-line:hover .cm-live-object-handle,
 .live-markdown-editor .cm-live-object-handle:hover,
 .live-markdown-editor .cm-live-object-handle.is-dragging {
   opacity: 1;

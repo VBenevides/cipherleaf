@@ -1239,6 +1239,15 @@ class BoardWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+function rangeTouchesBoard(state: EditorState, from: number, to: number): boolean {
+  const firstLine = state.doc.lineAt(from).number;
+  const lastLine = state.doc.lineAt(Math.max(from, to - 1)).number;
+  for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber++) {
+    if (parseBoardMarker(state.doc.line(lineNumber).text)) return true;
+  }
+  return false;
+}
+
 function lineIsActive(state: EditorState, lineNumber: number): boolean {
   return state.selection.ranges.some((range) => {
     const startLine = state.doc.lineAt(range.from).number;
@@ -1671,6 +1680,10 @@ function buildLivePreviewState(
     if (board) {
       decorations.push(
         Decoration.line({ attributes: { class: "cm-live-board-line" } }).range(line.from),
+        Decoration.widget({
+          widget: new DragHandleWidget(lineNumber),
+          side: -1,
+        }).range(line.from),
       );
       addHiddenRange(
         line.from,
@@ -2356,8 +2369,21 @@ function restoreArrowSubstitution(view: EditorView): boolean {
   return true;
 }
 
+function boardMarkerAtDeletionBoundary(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return rangeTouchesBoard(view.state, range.from, range.to);
+  const positions = [range.head, range.head - 1, range.head + 1];
+  return positions.some((position) =>
+    position >= 0 && position <= view.state.doc.length && parseBoardMarker(view.state.doc.lineAt(position).text) !== null,
+  );
+}
+
 function handleBackspace(view: EditorView): boolean {
-  return restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
+  return boardMarkerAtDeletionBoundary(view) || restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
+}
+
+function handleBoardDelete(view: EditorView): boolean {
+  return boardMarkerAtDeletionBoundary(view);
 }
 
 function snippetCompletion(
@@ -2696,7 +2722,7 @@ function objectHandleElement(target: EventTarget | null): HTMLElement | null {
     : null;
 }
 
-function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: number) {
+function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: number, board = false) {
   document.querySelector(".cm-live-object-menu")?.remove();
   const menu = document.body.appendChild(document.createElement("div"));
   menu.className = "cm-live-attachment-menu cm-live-object-menu";
@@ -2726,27 +2752,29 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
     });
     view.focus();
   });
-  const duplicate = menu.insertBefore(document.createElement("button"), remove);
-  duplicate.type = "button";
-  duplicate.role = "menuitem";
-  duplicate.textContent = "Duplicate";
-  duplicate.addEventListener("click", () => {
-    close();
-    const state = view.state;
-    const doc = state.doc.toString();
-    const lines = doc.split("\n");
-    if (lineNumber < 1 || lineNumber > lines.length) return;
-    logicalObjectClipboard = lines.slice(lineNumber - 1, objectBlockEnd(lines, lineNumber)).join("\n");
-    void navigator.clipboard?.writeText(logicalObjectClipboard).catch(() => {});
-    const next = insertLogicalObjectAfterCaret(doc, logicalObjectClipboard, state.doc.line(lineNumber).to);
-    if (next === doc) return;
-    const duplicateStart = state.doc.line(objectBlockEnd(lines, lineNumber)).to + 1;
-    view.dispatch({
-      changes: { from: 0, to: state.doc.length, insert: next },
-      selection: EditorSelection.cursor(Math.min(duplicateStart, next.length)),
+  if (!board) {
+    const duplicate = menu.insertBefore(document.createElement("button"), remove);
+    duplicate.type = "button";
+    duplicate.role = "menuitem";
+    duplicate.textContent = "Duplicate";
+    duplicate.addEventListener("click", () => {
+      close();
+      const state = view.state;
+      const doc = state.doc.toString();
+      const lines = doc.split("\n");
+      if (lineNumber < 1 || lineNumber > lines.length) return;
+      logicalObjectClipboard = lines.slice(lineNumber - 1, objectBlockEnd(lines, lineNumber)).join("\n");
+      void navigator.clipboard?.writeText(logicalObjectClipboard).catch(() => {});
+      const next = insertLogicalObjectAfterCaret(doc, logicalObjectClipboard, state.doc.line(lineNumber).to);
+      if (next === doc) return;
+      const duplicateStart = state.doc.line(objectBlockEnd(lines, lineNumber)).to + 1;
+      view.dispatch({
+        changes: { from: 0, to: state.doc.length, insert: next },
+        selection: EditorSelection.cursor(Math.min(duplicateStart, next.length)),
+      });
+      view.focus();
     });
-    view.focus();
-  });
+  }
   queueMicrotask(() => document.addEventListener("pointerdown", close));
 }
 
@@ -3001,6 +3029,10 @@ export default function LiveMarkdownEditor({
               run: handleBackspace,
             },
             {
+              key: "Delete",
+              run: handleBoardDelete,
+            },
+            {
               key: "Enter",
               run: (editor) =>
                 acceptCompletion(editor) ||
@@ -3083,9 +3115,7 @@ export default function LiveMarkdownEditor({
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
             if (readOnly) return false;
-            const firstLine = inputView.state.doc.lineAt(from);
-            const lastLine = inputView.state.doc.lineAt(Math.max(from, to - 1));
-            if (parseBoardMarker(firstLine.text) || parseBoardMarker(lastLine.text)) return true;
+            if (rangeTouchesBoard(inputView.state, from, to)) return true;
             let changeFrom = from;
             let changeTo = to;
             let inserted = text;
@@ -3177,7 +3207,12 @@ export default function LiveMarkdownEditor({
               if (!handle || !Number.isFinite(sourceLine)) return false;
               event.preventDefault();
               event.stopPropagation();
-              showObjectHandleMenu(event, contextView, sourceLine);
+              showObjectHandleMenu(
+                event,
+                contextView,
+                sourceLine,
+                parseBoardMarker(contextView.state.doc.line(sourceLine).text) !== null,
+              );
               return true;
             },
             pointerdown(event, pointerView) {
@@ -3253,9 +3288,7 @@ export default function LiveMarkdownEditor({
             paste(event, pastedView) {
               if (readOnly) return false;
               const selection = pastedView.state.selection.main;
-              const firstLine = pastedView.state.doc.lineAt(selection.from);
-              const lastLine = pastedView.state.doc.lineAt(Math.max(selection.from, selection.to - 1));
-              if (parseBoardMarker(firstLine.text) || parseBoardMarker(lastLine.text)) {
+              if (rangeTouchesBoard(pastedView.state, selection.from, selection.to)) {
                 event.preventDefault();
                 return true;
               }
