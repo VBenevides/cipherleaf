@@ -28,21 +28,26 @@ import (
 )
 
 const (
-	configFilename               = "vault.json"
-	manifestFilename             = "manifest.enc"
-	syncDirectory                = "sync"
-	syncManifestFile             = "manifest.enc"
-	syncFoldersFile              = "folders.enc"
-	syncTrackingFile             = "tracking.enc"
-	maxNoteBytes                 = 10 * 1024 * 1024
-	maxAttachmentBytes           = 10 * 1024 * 1024
-	maxFileAttachmentBytes       = 64 * 1024 * 1024
-	maxTimeTrackingBytes         = 32 * 1024 * 1024
-	maxEnvelopeBytes             = 96 * 1024 * 1024
-	maxTitleRunes                = 200
-	maxFolderRunes               = 120
-	folderPasswordSaltBytes      = 16
-	folderPasswordVerifierPrefix = "argon2id-v1:"
+	configFilename                = "vault.json"
+	manifestFilename              = "manifest.enc"
+	syncDirectory                 = "sync"
+	syncManifestFile              = "manifest.enc"
+	syncFoldersFile               = "folders.enc"
+	syncTrackingFile              = "tracking.enc"
+	syncManifestObjectType        = "sync-manifest"
+	syncFoldersObjectType         = "sync-folders"
+	noteContentObjectType         = "note-content"
+	canonicalObjectDocumentFormat = "cipherleaf.object-document"
+	encryptedBackupSuffix         = ".enc.bak"
+	maxNoteBytes                  = 10 * 1024 * 1024
+	maxAttachmentBytes            = 10 * 1024 * 1024
+	maxFileAttachmentBytes        = 64 * 1024 * 1024
+	maxTimeTrackingBytes          = 32 * 1024 * 1024
+	maxEnvelopeBytes              = 96 * 1024 * 1024
+	maxTitleRunes                 = 200
+	maxFolderRunes                = 120
+	folderPasswordSaltBytes       = 16
+	folderPasswordVerifierPrefix  = "argon2id-v1:"
 )
 
 var (
@@ -1144,7 +1149,7 @@ func (s *Store) pruneSharedAttachmentsLocked() error {
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".enc") &&
-			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			!strings.HasSuffix(entry.Name(), encryptedBackupSuffix) {
 			return errors.New("shared attachments folder contains an invalid path")
 		}
 		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
@@ -1296,7 +1301,7 @@ func (s *Store) sharedAttachmentIDsLocked() (map[string]struct{}, error) {
 	ids := make(map[string]struct{})
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".enc") &&
-			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			!strings.HasSuffix(entry.Name(), encryptedBackupSuffix) {
 			return nil, errors.New("shared attachments folder contains an invalid path")
 		}
 		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
@@ -1327,7 +1332,7 @@ func (s *Store) pruneNoteAttachmentsByIDLocked(noteID string, ids []string) erro
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".enc") &&
-			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			!strings.HasSuffix(entry.Name(), encryptedBackupSuffix) {
 			return errors.New("note attachments folder contains an invalid path")
 		}
 		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
@@ -2084,8 +2089,8 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	inventoryPath := filepath.Join(destination, syncDirectory, syncManifestFile)
 	if err := s.writeRemoteEnvelopeIfChangedLocked(
 		inventoryPath,
-		"sync-manifest",
-		"sync-manifest",
+		syncManifestObjectType,
+		syncManifestObjectType,
 		inventoryPlaintext,
 	); err != nil {
 		return fmt.Errorf("encrypt remote sync inventory: %w", err)
@@ -2110,8 +2115,8 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	foldersPath := filepath.Join(destination, syncDirectory, syncFoldersFile)
 	if err := s.writeRemoteEnvelopeIfChangedLocked(
 		foldersPath,
-		"sync-folders",
-		"sync-folders",
+		syncFoldersObjectType,
+		syncFoldersObjectType,
 		folderPlaintext,
 	); err != nil {
 		return fmt.Errorf("encrypt remote folders: %w", err)
@@ -2209,8 +2214,8 @@ func (s *Store) readExistingRemoteInventoryLocked(
 ) map[string]remoteSyncObject {
 	plaintext, err := s.readEnvelopeFileLocked(
 		filepath.Join(root, syncDirectory, syncManifestFile),
-		"sync-manifest",
-		"sync-manifest",
+		syncManifestObjectType,
+		syncManifestObjectType,
 	)
 	if err != nil {
 		return nil
@@ -2617,7 +2622,7 @@ func (s *Store) exportAttachmentsLocked(destination string) error {
 			return err
 		}
 		parts := strings.Split(filepath.ToSlash(relative), "/")
-		if len(parts) == 2 && strings.HasSuffix(parts[1], ".enc.bak") {
+		if len(parts) == 2 && strings.HasSuffix(parts[1], encryptedBackupSuffix) {
 			return nil
 		}
 		if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
@@ -2721,8 +2726,8 @@ func (s *Store) readRemoteSnapshotLocked(
 
 	inventoryPlaintext, err := s.readEnvelopeFileLocked(
 		filepath.Join(source, syncDirectory, syncManifestFile),
-		"sync-manifest",
-		"sync-manifest",
+		syncManifestObjectType,
+		syncManifestObjectType,
 	)
 	if err != nil {
 		return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote sync inventory: %w", err)
@@ -2737,8 +2742,8 @@ func (s *Store) readRemoteSnapshotLocked(
 
 	folderPlaintext, err := s.readEnvelopeFileLocked(
 		filepath.Join(source, syncDirectory, syncFoldersFile),
-		"sync-folders",
-		"sync-folders",
+		syncFoldersObjectType,
+		syncFoldersObjectType,
 	)
 	if err != nil {
 		return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote folder metadata: %w", err)
@@ -3026,7 +3031,7 @@ func (s *Store) RestoreRemoteSnapshot(
 		}
 		for _, target := range []string{
 			filepath.Join(directory, item.ID+".enc"),
-			filepath.Join(directory, item.ID+".enc.bak"),
+			filepath.Join(directory, item.ID+encryptedBackupSuffix),
 		} {
 			if err := writeBytesAtomic(target, data); err != nil {
 				return Session{}, fmt.Errorf("stage restored encrypted note %s: %w", item.ID, err)
@@ -3268,7 +3273,7 @@ func (s *Store) writeNoteLocked(note Note) (string, error) {
 		return "", err
 	}
 	if err := s.writeEnvelopePayloadLocked(
-		path, "note-content", note.ID, payload, compression,
+		path, noteContentObjectType, note.ID, payload, compression,
 	); err != nil {
 		return "", err
 	}
@@ -3323,9 +3328,9 @@ func (s *Store) readNoteContentAtLocked(root, id string) (string, *Note, error) 
 	var err error
 	legacyEnvelope := false
 	if root == s.root {
-		plaintext, err = s.readEnvelopeLocked(path, "note-content", id)
+		plaintext, err = s.readEnvelopeLocked(path, noteContentObjectType, id)
 	} else {
-		plaintext, err = s.readEnvelopeFileLocked(path, "note-content", id)
+		plaintext, err = s.readEnvelopeFileLocked(path, noteContentObjectType, id)
 	}
 	if err != nil {
 		legacyEnvelope = true
@@ -3561,7 +3566,7 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 	}
 	if value.Compression != "" &&
 		(value.Compression != "gzip" ||
-			(objectType != "note" && objectType != "note-content" && objectType != trackingBucketObjectType)) {
+			(objectType != "note" && objectType != noteContentObjectType && objectType != trackingBucketObjectType)) {
 		return nil, errors.New("encrypted object compression is invalid")
 	}
 	nonce, err := base64.RawURLEncoding.DecodeString(value.Nonce)
@@ -4229,7 +4234,7 @@ func canonicalizeNoteContent(content string) string {
 func isCanonicalObjectDocument(content string) bool {
 	var document canonicalObjectDocument
 	return json.Unmarshal([]byte(content), &document) == nil &&
-		document.Format == "cipherleaf.object-document" &&
+		document.Format == canonicalObjectDocumentFormat &&
 		document.Version == 1
 }
 
@@ -4340,7 +4345,7 @@ func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument
 	for _, object := range objectPointers {
 		objects = append(objects, *object)
 	}
-	return canonicalObjectDocument{Format: "cipherleaf.object-document", Version: 1, Objects: objects}
+	return canonicalObjectDocument{Format: canonicalObjectDocumentFormat, Version: 1, Objects: objects}
 }
 
 func stableCanonicalObjectID(input string) string {
@@ -4504,7 +4509,7 @@ func lineVisualIndent(text string) int {
 func derivedMarkdownContent(content string) string {
 	var document canonicalObjectDocument
 	if err := json.Unmarshal([]byte(content), &document); err != nil ||
-		document.Format != "cipherleaf.object-document" ||
+		document.Format != canonicalObjectDocumentFormat ||
 		document.Version != 1 {
 		return content
 	}
