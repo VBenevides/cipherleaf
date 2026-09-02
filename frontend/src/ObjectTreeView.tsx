@@ -56,7 +56,8 @@ function renderObjectBlock(node: ObjectLine, type: EditableObjectTag, text: stri
     ].join("\n");
   }
 
-  const sectionCheckmark = node.checked === undefined ? "" : `[${node.checked ? "x" : " "}] `;
+  let sectionCheckmark = "";
+  if (node.checked !== undefined) sectionCheckmark = `[${node.checked ? "x" : " "}] `;
   let marker = "";
   if (type === "section") marker = `> ${sectionCheckmark}`;
   else if (type === "checkbox") marker = `- [${node.checked ? "x" : " "}] `;
