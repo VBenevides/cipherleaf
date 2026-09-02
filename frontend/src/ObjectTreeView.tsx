@@ -74,8 +74,8 @@ function renderObjectBlock(node: ObjectLine, type: EditableObjectTag, text: stri
 }
 
 type Props = {
-  value: string;
-  onChange: (value: string) => void;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
 };
 
 function dropModeForPoint(target: HTMLElement, clientY: number): ObjectDropMode {
@@ -109,16 +109,16 @@ function ObjectTreeNode({
   onDelete,
   onToggleCheck,
 }: {
-  node: ObjectLine;
-  depth: number;
-  draggedId: string | null;
-  dropTarget: { id: string; mode: ObjectDropMode } | null;
-  onPointerDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
-  onEdit: (node: ObjectLine, text: string) => void;
-  onChangeType: (node: ObjectLine, type: EditableObjectTag) => void;
-  onAddChild: (node: ObjectLine) => void;
-  onDelete: (node: ObjectLine) => void;
-  onToggleCheck: (node: ObjectLine, checked: boolean) => void;
+  readonly node: ObjectLine;
+  readonly depth: number;
+  readonly draggedId: string | null;
+  readonly dropTarget: { id: string; mode: ObjectDropMode } | null;
+  readonly onPointerDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
+  readonly onEdit: (node: ObjectLine, text: string) => void;
+  readonly onChangeType: (node: ObjectLine, type: EditableObjectTag) => void;
+  readonly onAddChild: (node: ObjectLine) => void;
+  readonly onDelete: (node: ObjectLine) => void;
+  readonly onToggleCheck: (node: ObjectLine, checked: boolean) => void;
 }) {
   const currentDrop = dropTarget?.id === node.id ? dropTarget.mode : null;
   const [editing, setEditing] = useState(false);
