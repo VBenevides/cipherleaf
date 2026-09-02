@@ -362,6 +362,123 @@ function stableUuid(input: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((Number.parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80).toString(16)}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
 }
 
+type ObjectLineContext = {
+  raw: string;
+  source: string;
+  outline: PrefixParts | null;
+  tags: ObjectTag[];
+  indent: number;
+  contentIndent: number;
+  sectionPrefixSize: number;
+  barePrefixSize: number;
+};
+
+function objectLineContext(raw: string): ObjectLineContext {
+  const outline = parseOutlinePrefix(raw);
+  const bare = !outline ? parseBarePrefix(raw) : null;
+  const source = outline?.rest ?? bare?.rest ?? raw.trimStart();
+  const indent = outline
+    ? visualIndent(outline.indent) + (outline.marker.length - 1) * 2
+    : lineIndent(raw);
+  return {
+    raw,
+    source,
+    outline,
+    tags: outline ? ["section"] : [],
+    indent,
+    contentIndent: outline
+      ? visualIndent(outline.indent) + outline.marker.length + visualIndent(outline.separator)
+      : indent,
+    sectionPrefixSize: outline
+      ? outline.indent.length + outline.marker.length + outline.separator.length
+      : 0,
+    barePrefixSize: bare ? bare.indent.length + 1 + bare.separator.length : 0,
+  };
+}
+
+function objectSourcePrefix(context: ObjectLineContext, text: string): string {
+  if (!text) return context.raw;
+  const index = context.raw.indexOf(text);
+  return index >= 0 ? context.raw.slice(0, index) : context.raw.slice(0, Math.min(context.raw.length, context.contentIndent));
+}
+
+function objectLineFields(context: ObjectLineContext, text: string) {
+  return {
+    tags: context.tags,
+    indent: context.indent,
+    contentIndent: context.contentIndent,
+    text,
+    sourcePrefix: objectSourcePrefix(context, text),
+    sectionPrefixSize: context.sectionPrefixSize,
+    barePrefixSize: context.barePrefixSize,
+  };
+}
+
+function classifyImageOrAttachment(context: ObjectLineContext): ParsedObjectLine | null {
+  const attachment = parseAttachmentReferenceMarkdown(context.source);
+  if (parseAttachmentMarkdown(context.source) || attachment?.kind === "image" || /^!\[[^\]]*]\([^)]+\)\s*$/.test(context.source.trim())) {
+    context.tags.push("image");
+    if (attachment) context.tags.push("attachment");
+    return {
+      tag: "image",
+      ...objectLineFields(context, context.source.trim()),
+      attachmentId: attachment?.id,
+      attachmentKind: attachment?.kind,
+    };
+  }
+  if (!attachment) return null;
+  context.tags.push("attachment", "text");
+  return {
+    tag: "text",
+    ...objectLineFields(context, context.source.trim()),
+    attachmentId: attachment.id,
+    attachmentKind: attachment.kind,
+  };
+}
+
+function classifyList(context: ObjectLineContext): ParsedObjectLine | null {
+  const bullet = !leadingAsteriskEmphasis.test(context.source) ? parseBulletPrefix(context.source) : null;
+  const list = bullet ?? parseNumberedPrefix(context.source, false);
+  if (!list) return null;
+  const checked = parseCheckbox(list.rest);
+  const text = checked ? checked.rest.trim() : list.rest.trim();
+  const prefix = objectSourcePrefix(context, text);
+  context.tags.push("bulletpoint");
+  return {
+    tag: "bulletpoint",
+    ...objectLineFields(context, text),
+    contentIndent: visualIndent(prefix),
+    checked: checked ? checked.marker.toLowerCase() === "x" : undefined,
+    sourcePrefix: prefix,
+    listMarker: list.marker,
+  };
+}
+
+function classifyHeading(context: ObjectLineContext): ParsedObjectLine | null {
+  if (!/^#{1,6}\s+/.test(context.source)) return null;
+  context.tags.push("text");
+  return {
+    tag: context.outline ? "section" : "text",
+    ...objectLineFields(context, context.source.trim()),
+  };
+}
+
+function classifyText(context: ObjectLineContext): ParsedObjectLine {
+  context.tags.push("text");
+  const checkbox = parseCheckbox(context.source);
+  const text = checkbox ? checkbox.rest.trim() : context.source.trim();
+  const checkboxContentIndent = checkbox
+    ? context.raw.indexOf(context.source) + context.source.length - checkbox.rest.length
+    : null;
+  if (!context.outline && !checkbox) context.contentIndent = context.indent + 2;
+  return {
+    tag: context.outline ? "section" : "text",
+    ...objectLineFields(context, text),
+    contentIndent: checkboxContentIndent ?? context.contentIndent,
+    checked: checkbox ? checkbox.marker.toLowerCase() === "x" : undefined,
+  };
+}
+
 export function classifyObjectLine(raw: string): ParsedObjectLine {
   const fence = /^([ \t]*)```([^\s`]*)[ \t]*$/.exec(raw);
   if (fence) {
@@ -379,118 +496,8 @@ export function classifyObjectLine(raw: string): ParsedObjectLine {
     };
   }
 
-  const outline = parseOutlinePrefix(raw);
-  const bare = !outline ? parseBarePrefix(raw) : null;
-  const source = outline?.rest ?? bare?.rest ?? raw.trimStart();
-  const tags: ObjectTag[] = outline ? ["section"] : [];
-  const indent = outline
-    ? visualIndent(outline.indent) + (outline.marker.length - 1) * 2
-    : lineIndent(raw);
-  let contentIndent = outline
-    ? visualIndent(outline.indent) + outline.marker.length + visualIndent(outline.separator)
-    : indent;
-  const sourcePrefix = (text: string) => {
-    if (!text) return raw;
-    const index = raw.indexOf(text);
-    return index >= 0 ? raw.slice(0, index) : raw.slice(0, Math.min(raw.length, contentIndent));
-  };
-  const sectionPrefixSize = outline
-    ? outline.indent.length + outline.marker.length + outline.separator.length
-    : 0;
-  const barePrefixSize = bare ? bare.indent.length + 1 + bare.separator.length : 0;
-  const objectPrefix = { sectionPrefixSize, barePrefixSize };
-
-  const attachment = parseAttachmentReferenceMarkdown(source);
-  if (parseAttachmentMarkdown(source) || attachment?.kind === "image" || /^!\[[^\]]*]\([^)]+\)\s*$/.test(source.trim())) {
-    tags.push("image");
-    if (attachment) tags.push("attachment");
-    const text = source.trim();
-    return {
-      tag: "image", tags, indent, contentIndent, text,
-      sourcePrefix: sourcePrefix(text), attachmentId: attachment?.id,
-      attachmentKind: attachment?.kind, ...objectPrefix,
-    };
-  }
-
-  if (attachment) {
-    tags.push("attachment", "text");
-    const text = source.trim();
-    return {
-      tag: "text", tags, indent, contentIndent, text,
-      sourcePrefix: sourcePrefix(text), attachmentId: attachment.id,
-      attachmentKind: attachment.kind, ...objectPrefix,
-    };
-  }
-
-  const bullet = !leadingAsteriskEmphasis.test(source) ? parseBulletPrefix(source) : null;
-  if (bullet) {
-    const bulletText = bullet.rest;
-    const checked = parseCheckbox(bulletText);
-    const text = checked ? checked.rest.trim() : bulletText.trim();
-    const prefix = sourcePrefix(text);
-    tags.push("bulletpoint");
-    return {
-      tag: "bulletpoint",
-      tags,
-      indent,
-      contentIndent: visualIndent(prefix),
-      text,
-      checked: checked ? checked.marker.toLowerCase() === "x" : undefined,
-      sourcePrefix: prefix,
-      listMarker: bullet.marker,
-      ...objectPrefix,
-    };
-  }
-
-  const ordered = parseNumberedPrefix(source, false);
-  if (ordered) {
-    const checked = parseCheckbox(ordered.rest);
-    const text = checked ? checked.rest.trim() : ordered.rest.trim();
-    const prefix = sourcePrefix(text);
-    tags.push("bulletpoint");
-    return {
-      tag: "bulletpoint",
-      tags,
-      indent,
-      contentIndent: visualIndent(prefix),
-      text,
-      checked: checked ? checked.marker.toLowerCase() === "x" : undefined,
-      sourcePrefix: prefix,
-      listMarker: ordered.marker,
-      ...objectPrefix,
-    };
-  }
-
-  if (/^#{1,6}\s+/.test(source)) {
-    tags.push("text");
-    return {
-      tag: outline ? "section" : "text",
-      tags,
-      indent,
-      contentIndent,
-      text: source.trim(),
-      sourcePrefix: sourcePrefix(source.trim()),
-      ...objectPrefix,
-    };
-  }
-
-  tags.push("text");
-  const checkbox = parseCheckbox(source);
-  const text = checkbox ? checkbox.rest.trim() : source.trim();
-  const checkboxContentIndent = checkbox
-    ? raw.indexOf(source) + source.length - checkbox.rest.length
-    : null;
-  if (!outline && !checkbox) contentIndent = indent + 2;
-  return {
-    tag: outline ? "section" : "text",
-    tags,
-    indent,
-    contentIndent: checkboxContentIndent ?? contentIndent,
-    text,
-    checked: checkbox ? checkbox.marker.toLowerCase() === "x" : undefined,
-    sourcePrefix: sourcePrefix(text),
-    ...objectPrefix,
-  };
+  const context = objectLineContext(raw);
+  return classifyImageOrAttachment(context) ?? classifyList(context) ?? classifyHeading(context) ?? classifyText(context);
 }
 
 function lineStartsExplicitObject(raw: string): boolean {
