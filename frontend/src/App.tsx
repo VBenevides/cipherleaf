@@ -96,6 +96,16 @@ const NOTE_SORT_OPTIONS = [
   { value: "updated", label: "Updated" },
   { value: "created", label: "Created" },
 ] as const;
+const JOURNAL_LINE_LABELS: Record<JournalLines, string> = {
+  none: "None",
+  full: "Solid",
+  dotted: "Dotted",
+};
+const EDITOR_VIEW_LABELS: Record<EditorView, string> = {
+  live: "Live Preview",
+  object: "Object Tree",
+  markdown: "Markdown",
+};
 
 function NoteSortSelect({ value, onChange }: { readonly value: string; readonly onChange: (value: string) => void }) {
   const details = useRef<HTMLDetailsElement>(null);
@@ -174,6 +184,30 @@ type CardPanelState = {
   body: string;
 };
 
+function vaultSubmissionError(
+  action: VaultAction,
+  vaultName: string,
+  vaultSecret: string,
+  secretCopied: boolean,
+  secretConfirmed: boolean,
+  cloneRepository: string,
+  cloneSSHKey: string,
+  cloneBranch: string,
+  passphrase: string,
+  cloneRepositoryPrivate: boolean,
+): string | null {
+  if ((action === "create" || action === "clone") && !vaultName.trim()) {
+    return "Enter a name for the local vault folder.";
+  }
+  if (action === "create" && (!vaultSecret || !secretCopied || !secretConfirmed)) {
+    return "Copy the vault secret and confirm that you saved it before creating the vault.";
+  }
+  if (action === "clone" && (!cloneRepository.trim() || !cloneSSHKey.trim() || !cloneBranch.trim() || !passphrase || !cloneRepositoryPrivate)) {
+    return "Complete the repository, SSH key, branch, vault secret, and private-repository confirmation.";
+  }
+  return null;
+}
+
 const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 const ObjectTreeView = lazy(() => import("./ObjectTreeView"));
 const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
@@ -190,7 +224,12 @@ function LastSyncLabel({ timestamp }: { readonly timestamp: number }) {
   const minutes = Math.floor(Math.max(0, now - then) / 60_000);
   let label: string;
   if (minutes < 60) {
-    label = minutes < 1 ? "Last Sync just now" : `Last Sync ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+    if (minutes < 1) {
+      label = "Last Sync just now";
+    } else {
+      const minuteUnit = minutes === 1 ? "minute" : "minutes";
+      label = `Last Sync ${minutes} ${minuteUnit} ago`;
+    }
   } else if (minutes < 24 * 60) {
     const hours = Math.floor(minutes / 60);
     label = `Last Sync ${hours} hour${hours === 1 ? "" : "s"} ago`;
@@ -298,11 +337,11 @@ function CardTagsEditor({ tags, suggestions, onChange }: { readonly tags: string
     </div>
     <details ref={details} className="tag-multi-select card-tag-picker">
       <summary>Add tag</summary>
-      <div className="tag-multi-select-options" role="group" aria-label="Add tag">
+      <fieldset className="tag-multi-select-options" aria-label="Add tag">
         <input aria-label="New tag" value={draft} placeholder="New tag" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }} />
         <button type="button" onClick={() => add()}>Add tag</button>
         {available.map((tag) => <button type="button" key={tag} onClick={() => add(tag)}>{tag}</button>)}
-      </div>
+      </fieldset>
     </details>
   </div>;
 }
@@ -334,7 +373,7 @@ function openAppearanceDatabase(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error instanceof Error ? request.error : new Error("Could not open appearance settings"));
   });
 }
 
@@ -344,7 +383,7 @@ async function readStoredEditorFont(): Promise<StoredEditorFont | null> {
     const transaction = database.transaction(EDITOR_FONT_STORE, "readonly");
     const request = transaction.objectStore(EDITOR_FONT_STORE).get(EDITOR_FONT_KEY);
     request.onsuccess = () => resolve(request.result ?? null);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error instanceof Error ? request.error : new Error("Could not read editor font"));
     transaction.oncomplete = () => database.close();
   });
 }
@@ -358,7 +397,7 @@ async function writeStoredEditorFont(font: StoredEditorFont): Promise<void> {
       database.close();
       resolve();
     };
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error instanceof Error ? transaction.error : new Error("Could not save editor font"));
   });
 }
 
@@ -371,7 +410,7 @@ async function removeStoredEditorFont(): Promise<void> {
       database.close();
       resolve();
     };
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error instanceof Error ? transaction.error : new Error("Could not remove editor font"));
   });
 }
 
@@ -379,8 +418,8 @@ function Icon({
   name,
   size = 18,
 }: {
-  name: "book" | "clock" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
-  size?: number;
+  readonly name: "book" | "clock" | "copy" | "dots" | "eye" | "file" | "folder" | "graph" | "lock" | "plus" | "search" | "trash" | "x" | "menu";
+  readonly size?: number;
 }) {
   const paths = {
     book: (
@@ -444,11 +483,7 @@ function Icon({
         <path d="m21 21-4.35-4.35" />
       </>
     ),
-    trash: (
-      <>
-        <path d="M3 6h18M8 6V4h8v2M19 6l-1 16H6L5 6M10 11v6M14 11v6" />
-      </>
-    ),
+    trash: <path d="M3 6h18M8 6V4h8v2M19 6l-1 16H6L5 6M10 11v6M14 11v6" />,
     x: <path d="M18 6 6 18M6 6l12 12" />,
     menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   };
@@ -1131,7 +1166,7 @@ function App() {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (session?.locked || !(event.ctrlKey || event.metaKey) || !event.shiftKey || event.key.toLowerCase() !== "p") return;
-      if ((event.target as HTMLElement | null)?.closest("[role=dialog]")) return;
+      if ((event.target as HTMLElement | null)?.closest("dialog, [role=dialog]")) return;
       event.preventDefault();
       openCommandPalette();
     };
@@ -1278,10 +1313,11 @@ function App() {
       return;
     }
     const noteIDs = Array.from(new Set(globalSearchMatches.map((m) => m.noteId)));
+    const noteUnit = noteIDs.length === 1 ? "" : "s";
     const confirmMessage =
       noteIDs.length === 0
         ? `Replace "${globalSearchQuery}" with "${globalSearchReplacement}" across every note?`
-        : `Replace "${globalSearchQuery}" with "${globalSearchReplacement}" in ${noteIDs.length} note${noteIDs.length === 1 ? "" : "s"}?`;
+        : `Replace "${globalSearchQuery}" with "${globalSearchReplacement}" in ${noteIDs.length} note${noteUnit}?`;
     if (
       !(await requestAppConfirm({
         kind: "confirm",
@@ -1384,8 +1420,8 @@ function App() {
   const refreshNotes = async (preferredID?: string, preferredNote?: Note) => {
     const result = (await VaultService.ListNotes()) ?? [];
     setNotes(result);
-    const visible = result.filter((item) => !isStructuredSummary(item));
-    const targetID = preferredID ?? noteRef.current?.id ?? visible[0]?.id;
+    const firstVisible = result.find((item) => !isStructuredSummary(item));
+    const targetID = preferredID ?? noteRef.current?.id ?? firstVisible?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
       const loaded = preferredNote?.id === targetID
         ? preferredNote
@@ -1683,30 +1719,32 @@ function App() {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("[role=dialog]")) return;
-      if (event.shiftKey && event.key.toLowerCase() === "t") {
+      if (target?.closest("dialog, [role=dialog]")) return;
+      const key = event.key.toLowerCase();
+      if (event.shiftKey && key === "t") {
         event.preventDefault(); openStartTimerDialog(); return;
       }
-      if (event.shiftKey && event.key.toLowerCase() === "e") {
+      if (event.shiftKey && key === "e") {
         event.preventDefault(); setTimerError(""); setTimerDialog("finish"); return;
       }
-      if (!event.shiftKey && event.key.toLowerCase() === "b") {
+      if (!event.shiftKey && key === "b") {
         event.preventDefault();
         setSidebarCollapsed((current) => !current);
         return;
       }
       if (target?.closest("input, textarea, select")) return;
-      if (event.key.toLowerCase() === "s" && !event.shiftKey) {
+      if (key === "s") {
         event.preventDefault();
-        persistCurrentInBackground();
-      } else if (event.key.toLowerCase() === "s" && event.shiftKey) {
-        event.preventDefault();
-        void saveAndSync();
-      } else if (event.key.toLowerCase() === "r" && event.shiftKey) {
+        if (event.shiftKey) void saveAndSync();
+        else persistCurrentInBackground();
+        return;
+      }
+      if (event.shiftKey && key === "r") {
         event.preventDefault();
         void syncNow();
+        return;
       }
-      if (event.key.toLowerCase() === "n") {
+      if (key === "n") {
         event.preventDefault();
         void createNote();
       }
@@ -1919,23 +1957,20 @@ function App() {
 
   const submitVault = async () => {
     if (!vaultAction) return;
-    if ((vaultAction === "create" || vaultAction === "clone") && !vaultName.trim()) {
-      setError("Enter a name for the local vault folder.");
-      return;
-    }
-    if (vaultAction === "create" && (!vaultSecret || !secretCopied || !secretConfirmed)) {
-      setError("Copy the vault secret and confirm that you saved it before creating the vault.");
-      return;
-    }
-    if (
-      vaultAction === "clone" &&
-      (!cloneRepository.trim() ||
-        !cloneSSHKey.trim() ||
-        !cloneBranch.trim() ||
-        !passphrase ||
-        !cloneRepositoryPrivate)
-    ) {
-      setError("Complete the repository, SSH key, branch, vault secret, and private-repository confirmation.");
+    const validationError = vaultSubmissionError(
+      vaultAction,
+      vaultName,
+      vaultSecret,
+      secretCopied,
+      secretConfirmed,
+      cloneRepository,
+      cloneSSHKey,
+      cloneBranch,
+      passphrase,
+      cloneRepositoryPrivate,
+    );
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setBusy(true);
@@ -1945,30 +1980,35 @@ function App() {
       const completedAction = vaultAction;
       let opened: Session;
       let restoreWarning = "";
-      if (completedAction === "create") {
-        opened = await VaultService.CreateVault(vaultPath, vaultName, vaultSecret);
-      } else if (completedAction === "clone") {
-        const restored = await VaultService.CloneGitHubVault(
-          vaultPath,
-          vaultName,
-          cloneRepository,
-          cloneSSHKey,
-          cloneBranch,
-          passphrase,
-          cloneRepositoryPrivate,
-        );
-        opened = restored.session;
-        restoreWarning = restored.warning;
-        setSyncLinked(restored.linked);
-      } else {
-        opened = await VaultService.OpenVault(vaultPath, passphrase);
+      switch (completedAction) {
+        case "create":
+          opened = await VaultService.CreateVault(vaultPath, vaultName, vaultSecret);
+          break;
+        case "clone": {
+          const restored = await VaultService.CloneGitHubVault(
+            vaultPath,
+            vaultName,
+            cloneRepository,
+            cloneSSHKey,
+            cloneBranch,
+            passphrase,
+            cloneRepositoryPrivate,
+          );
+          opened = restored.session;
+          restoreWarning = restored.warning;
+          setSyncLinked(restored.linked);
+          break;
+        }
+        default:
+          opened = await VaultService.OpenVault(vaultPath, passphrase);
       }
       unlockedRef.current = true;
       setSession(opened);
       setLastVaultPath(opened.path);
       if (rememberSecret) {
         try {
-          await VaultService.RememberVaultSecret(completedAction === "create" ? vaultSecret : passphrase);
+          const secretToRemember = completedAction === "create" ? vaultSecret : passphrase;
+          await VaultService.RememberVaultSecret(secretToRemember);
         } catch (reason) {
           setRememberError(
             "Your vault secret could not be saved to the system keychain. You will be asked for it again next time. (" + errorText(reason) + ")",
@@ -2151,22 +2191,34 @@ function App() {
   const resolveTrackingConflict = async (conflict: TimeTrackingConflict, choice: "local" | "remote" | "delete-local" | "delete-remote" | "finish") => {
     setError("");
     try {
-      if (choice === "remote" && conflict.remoteEntry?.endedAtUtc) {
-        const entry = conflict.remoteEntry;
-        await VaultService.UpdateTimeEntryForClient(entry.id, entry.name, entry.clientId ?? "", entry.projectId ?? "", entry.tagIds ?? [], entry.startedAtUtc, entry.endedAtUtc!);
-      } else if (choice === "remote" && conflict.remoteProject) {
-        await VaultService.UpdateProject(conflict.remoteProject.id, conflict.remoteProject.name, conflict.remoteProject.clientId ?? "");
-      } else if (choice === "remote" && conflict.remoteClient) {
-        await VaultService.RenameClient(conflict.remoteClient.id, conflict.remoteClient.name);
-      } else if (choice === "remote" && conflict.remoteTag) {
-        await VaultService.RenameTag(conflict.remoteTag.id, conflict.remoteTag.name);
-      } else if (choice === "delete-local" && conflict.localEntry) {
-        await VaultService.DeleteTimeEntry(conflict.localEntry.id);
-      } else if (choice === "delete-remote" && conflict.remoteEntry) {
-        await VaultService.DeleteTimeEntry(conflict.remoteEntry.id);
-      } else if (choice === "finish") {
-        const finished = await VaultService.FinishActiveTimeEntry(); setActiveTimeEntry(null);
-        if (!finished.id) throw new Error("Active timer could not be finished");
+      const applyRemoteChoice = async () => {
+        if (conflict.remoteEntry?.endedAtUtc) {
+          const entry = conflict.remoteEntry;
+          await VaultService.UpdateTimeEntryForClient(entry.id, entry.name, entry.clientId ?? "", entry.projectId ?? "", entry.tagIds ?? [], entry.startedAtUtc, entry.endedAtUtc!);
+        } else if (conflict.remoteProject) {
+          await VaultService.UpdateProject(conflict.remoteProject.id, conflict.remoteProject.name, conflict.remoteProject.clientId ?? "");
+        } else if (conflict.remoteClient) {
+          await VaultService.RenameClient(conflict.remoteClient.id, conflict.remoteClient.name);
+        } else if (conflict.remoteTag) {
+          await VaultService.RenameTag(conflict.remoteTag.id, conflict.remoteTag.name);
+        }
+      };
+      switch (choice) {
+        case "remote":
+          await applyRemoteChoice();
+          break;
+        case "delete-local":
+          if (conflict.localEntry) await VaultService.DeleteTimeEntry(conflict.localEntry.id);
+          break;
+        case "delete-remote":
+          if (conflict.remoteEntry) await VaultService.DeleteTimeEntry(conflict.remoteEntry.id);
+          break;
+        case "finish": {
+          const finished = await VaultService.FinishActiveTimeEntry();
+          setActiveTimeEntry(null);
+          if (!finished.id) throw new Error("Active timer could not be finished");
+          break;
+        }
       }
       await VaultService.ResolveTimeTrackingConflict(conflict.id);
       setTrackingConflicts((current) => current.filter((item) => item.id !== conflict.id));
@@ -2805,7 +2857,8 @@ function App() {
       const ordered = current
         .filter((item) => item.folderId === target.folderId && item.id !== id);
       const targetIndex = ordered.findIndex((item) => item.id === targetID);
-      const insertAt = targetIndex < 0 ? ordered.length : targetIndex + (placeAfter ? 1 : 0);
+      let insertAt = ordered.length;
+      if (targetIndex >= 0) insertAt = targetIndex + (placeAfter ? 1 : 0);
       ordered.splice(insertAt, 0,
         current.find((item) => item.id === id)!);
       await VaultService.ReorderNotes(target.folderId, ordered.map((item) => item.id));
@@ -2909,7 +2962,7 @@ function App() {
     editVersion.current++;
     setAutosaveVersion(editVersion.current);
     dirtyRef.current = true;
-    setDirty((current) => current ? current : true);
+    setDirty(true);
     setSaveState((current) => current === "idle" ? current : "idle");
   };
 
@@ -3066,11 +3119,9 @@ function App() {
     return sortNotesForMode(items, mode);
   }, [folderByID, sortNotesForMode, unfiledSortMode]);
 
-  const currentSortMode = selectedFolderID === "all"
-    ? globalSortMode
-    : selectedFolderID === ""
-      ? unfiledSortMode
-      : folderByID.get(selectedFolderID)?.sortMode || "manual";
+  let currentSortMode = globalSortMode;
+  if (selectedFolderID === "") currentSortMode = unfiledSortMode;
+  else if (selectedFolderID !== "all") currentSortMode = folderByID.get(selectedFolderID)?.sortMode || "manual";
 
   const setCurrentSortMode = (mode: string) => {
     if (selectedFolderID === "all") {
@@ -3258,6 +3309,19 @@ function App() {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [cardPanel]);
 
+  useEffect(() => {
+    const closeOnDocumentClick = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const target = event.target;
+      if (cardPanel && target.closest(".editor-shell") && !target.closest(".card-sidebar")) closeCardPanel();
+      if (quickSwitcherOpen && target.classList.contains("quick-switcher-scrim")) setQuickSwitcherOpen(false);
+      if (commandPaletteOpen && target.classList.contains("command-palette-scrim")) closeCommandPalette();
+      if (globalSearchOpen && target.classList.contains("global-search-scrim")) setGlobalSearchOpen(false);
+    };
+    document.addEventListener("click", closeOnDocumentClick);
+    return () => document.removeEventListener("click", closeOnDocumentClick);
+  }, [cardPanel, commandPaletteOpen, globalSearchOpen, quickSwitcherOpen]);
+
   const createCard = async () => {
     let createdID = "";
     try {
@@ -3402,9 +3466,9 @@ function App() {
   };
 
   const moveCard = async (id: string, status: CardStatus) => {
-    const summary = notes.find((item) => item.id === id);
+    const exists = notes.some((item) => item.id === id);
     const current = cardMetadata.get(id);
-    if (!summary || !current || current.status === status) return;
+    if (!exists || !current || current.status === status) return;
     try {
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
@@ -3998,7 +4062,222 @@ function App() {
     );
   }
 
-  if (session.locked) {
+  const renderVaultActionModal = (vaultEyebrow: string, vaultTitle: string, vaultSubmitDisabled: boolean, vaultSubmitLabel: string) => (
+    <>
+        {vaultAction && (
+        <div className="modal-backdrop vault-action-backdrop" style={{ zIndex: windowLayers.vaultAction }}>
+            <form
+              className={`vault-modal ${vaultAction === "clone" ? "clone-vault-modal" : ""}`}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitVault();
+              }}
+            >
+              <button
+                type="button"
+                className="icon-button modal-close"
+                aria-label="Close"
+                onClick={() => {
+                  setVaultAction(null);
+                  setVaultName("");
+                  setPassphrase("");
+                  setVaultSecret("");
+                  setSecretCopied(false);
+                  setSecretConfirmed(false);
+                  setCloneRepository("");
+                  setCloneSSHKey("");
+                  setCloneBranch("main");
+                  setCloneRepositoryPrivate(false);
+                  setError("");
+                }}
+              >
+                <Icon name="x" />
+              </button>
+              <div className="modal-icon"><Icon name="lock" size={21} /></div>
+              <p className="eyebrow">{vaultEyebrow}</p>
+              <h2>{vaultTitle}</h2>
+              <p className="path-label" title={vaultPath}>{vaultPath}</p>
+              {vaultAction === "create" && (
+                <>
+                  <label>
+                      Vault name{" "}
+                    <input
+                      autoFocus
+                      value={vaultName}
+                      onChange={(event) => setVaultName(event.target.value)}
+                      placeholder="Personal notes"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <div className="secret-heading">
+                    <span>256-bit vault secret</span>
+                    <span>Shown once</span>
+                  </div>
+                  <div className="secret-box">
+                    <code>{vaultSecret}</code>
+                    <button
+                      type="button"
+                      className={`copy-secret-button ${secretCopied ? "copied" : ""}`}
+                      onClick={() => void copyVaultSecret()}
+                    >
+                      <Icon name="copy" size={15} />
+                      {secretCopied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <p className="secret-help">
+                    This secret unlocks your vault. Store it in a password manager before continuing.
+                    Anyone with it can decrypt a copy of the vault.
+                  </p>
+                  <label className="secret-confirmation">
+                    <input
+                      type="checkbox"
+                      checked={secretConfirmed}
+                      onChange={(event) => setSecretConfirmed(event.target.checked)}
+                    />
+                    <span>I saved this secret somewhere safe.</span>
+                  </label>
+                </>
+              )}
+              {vaultAction === "clone" && (
+                <>
+                  <label>
+                      Local vault folder name{" "}
+                    <input
+                      autoFocus
+                      value={vaultName}
+                      onChange={(event) => setVaultName(event.target.value)}
+                      placeholder="Personal notes"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label>
+                      GitHub repository{" "}
+                    <input
+                      value={cloneRepository}
+                      onChange={(event) => setCloneRepository(event.target.value)}
+                      placeholder="git@github.com:OWNER/REPOSITORY.git"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label>
+                    GitHub SSH private key
+                    <div className="settings-path-field">
+                      <input
+                        value={cloneSSHKey}
+                        onChange={(event) => setCloneSSHKey(event.target.value)}
+                        placeholder="/home/user/.ssh/cipherleaf_vault"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void chooseCloneSSHKey()}
+                      >
+                        Browse…
+                      </button>
+                    </div>
+                  </label>
+                  <div className="clone-vault-grid">
+                    <label>
+                      Branch{" "}
+                      <input
+                        value={cloneBranch}
+                        onChange={(event) => setCloneBranch(event.target.value)}
+                        placeholder="main"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </label>
+                    <label>
+                      Vault secret{" "}
+                      <input
+                        type="password"
+                        value={passphrase}
+                        onChange={(event) => setPassphrase(event.target.value)}
+                        placeholder="Paste your vault secret"
+                        autoComplete="current-password"
+                      />
+                    </label>
+                  </div>
+                  <label className="secret-confirmation">
+                    <input
+                      type="checkbox"
+                      checked={cloneRepositoryPrivate}
+                      onChange={(event) => setCloneRepositoryPrivate(event.target.checked)}
+                    />
+                    <span>I confirm this GitHub repository is private.</span>
+                  </label>
+                  <p className="secret-help">
+                    The SSH key downloads encrypted files. The separate vault secret
+                    authenticates and decrypts them locally.
+                  </p>
+                </>
+              )}
+              {vaultAction !== "create" && vaultAction !== "clone" && (
+                <label>
+                  Vault secret{" "}
+                  <input
+                    autoFocus
+                    type="password"
+                    value={passphrase}
+                    onChange={(event) => setPassphrase(event.target.value)}
+                    placeholder="Paste your vault secret"
+                    autoComplete="current-password"
+                  />
+                </label>
+              )}
+              {vaultAction && (
+                <label className="remember-secret-row">
+                  <input
+                    type="checkbox"
+                    checked={rememberSecret}
+                    onChange={(event) => setRememberSecret(event.target.checked)}
+                  />
+                  <span>Don't ask again for 7 days</span>
+                </label>
+              )}
+              {rememberError && (
+                <p className="form-error" role="alert">
+                  {rememberError}
+                </p>
+              )}
+              {error && <p className="form-error" role="alert">{error}</p>}
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={busy || vaultSubmitDisabled}
+              >
+                {vaultSubmitLabel}
+              </button>
+              {vaultAction === "create" && (
+                <p className="recovery-warning">
+                  There is no reset or recovery service. The clipboard may also be readable by other applications.
+                </p>
+              )}
+            </form>
+          </div>
+        )}
+    </>
+  );
+  const renderLockedScreen = () => {
+    let vaultEyebrow = "Unlock vault";
+    let vaultTitle = folderName(vaultPath);
+    let vaultSubmitDisabled = !passphrase;
+    let vaultSubmitLabel = "Unlock vault";
+    if (vaultAction === "create") {
+      vaultEyebrow = "New encrypted vault";
+      vaultTitle = "Create a vault";
+      vaultSubmitDisabled = !vaultName.trim() || !vaultSecret || !secretCopied || !secretConfirmed;
+      vaultSubmitLabel = "Create encrypted vault";
+    } else if (vaultAction === "clone") {
+      vaultEyebrow = "Restore encrypted vault";
+      vaultTitle = "Clone from GitHub";
+      vaultSubmitDisabled = !vaultName.trim() || !cloneRepository.trim() || !cloneSSHKey.trim() || !cloneBranch.trim() || !passphrase || !cloneRepositoryPrivate;
+      vaultSubmitLabel = "Clone and open vault";
+    }
+    if (busy) vaultSubmitLabel = vaultAction === "clone" ? "Downloading and restoring…" : "Working…";
     return (
       <main className="welcome-screen">
         <section className="welcome-card">
@@ -4046,234 +4325,64 @@ function App() {
           </div>
         </aside>
 
-        {vaultAction && (
-          <div className="modal-backdrop vault-action-backdrop" role="presentation" style={{ zIndex: windowLayers.vaultAction }}>
-            <form
-              className={`vault-modal ${vaultAction === "clone" ? "clone-vault-modal" : ""}`}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submitVault();
-              }}
-            >
-              <button
-                type="button"
-                className="icon-button modal-close"
-                aria-label="Close"
-                onClick={() => {
-                  setVaultAction(null);
-                  setVaultName("");
-                  setPassphrase("");
-                  setVaultSecret("");
-                  setSecretCopied(false);
-                  setSecretConfirmed(false);
-                  setCloneRepository("");
-                  setCloneSSHKey("");
-                  setCloneBranch("main");
-                  setCloneRepositoryPrivate(false);
-                  setError("");
-                }}
-              >
-                <Icon name="x" />
-              </button>
-              <div className="modal-icon"><Icon name="lock" size={21} /></div>
-              <p className="eyebrow">
-                {vaultAction === "create"
-                  ? "New encrypted vault"
-                  : vaultAction === "clone"
-                    ? "Restore encrypted vault"
-                    : "Unlock vault"}
-              </p>
-              <h2>
-                {vaultAction === "create"
-                  ? "Create a vault"
-                  : vaultAction === "clone"
-                    ? "Clone from GitHub"
-                    : folderName(vaultPath)}
-              </h2>
-              <p className="path-label" title={vaultPath}>{vaultPath}</p>
-              {vaultAction === "create" ? (
-                <>
-                  <label>
-                    Vault name
-                    <input
-                      autoFocus
-                      value={vaultName}
-                      onChange={(event) => setVaultName(event.target.value)}
-                      placeholder="Personal notes"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <div className="secret-heading">
-                    <span>256-bit vault secret</span>
-                    <span>Shown once</span>
-                  </div>
-                  <div className="secret-box">
-                    <code>{vaultSecret}</code>
-                    <button
-                      type="button"
-                      className={`copy-secret-button ${secretCopied ? "copied" : ""}`}
-                      onClick={() => void copyVaultSecret()}
-                    >
-                      <Icon name="copy" size={15} />
-                      {secretCopied ? "Copied" : "Copy"}
-                    </button>
-                  </div>
-                  <p className="secret-help">
-                    This secret unlocks your vault. Store it in a password manager before continuing.
-                    Anyone with it can decrypt a copy of the vault.
-                  </p>
-                  <label className="secret-confirmation">
-                    <input
-                      type="checkbox"
-                      checked={secretConfirmed}
-                      onChange={(event) => setSecretConfirmed(event.target.checked)}
-                    />
-                    <span>I saved this secret somewhere safe.</span>
-                  </label>
-                </>
-              ) : vaultAction === "clone" ? (
-                <>
-                  <label>
-                    Local vault folder name
-                    <input
-                      autoFocus
-                      value={vaultName}
-                      onChange={(event) => setVaultName(event.target.value)}
-                      placeholder="Personal notes"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label>
-                    GitHub repository
-                    <input
-                      value={cloneRepository}
-                      onChange={(event) => setCloneRepository(event.target.value)}
-                      placeholder="git@github.com:OWNER/REPOSITORY.git"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  </label>
-                  <label>
-                    GitHub SSH private key
-                    <div className="settings-path-field">
-                      <input
-                        value={cloneSSHKey}
-                        onChange={(event) => setCloneSSHKey(event.target.value)}
-                        placeholder="/home/user/.ssh/cipherleaf_vault"
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => void chooseCloneSSHKey()}
-                      >
-                        Browse…
-                      </button>
-                    </div>
-                  </label>
-                  <div className="clone-vault-grid">
-                    <label>
-                      Branch
-                      <input
-                        value={cloneBranch}
-                        onChange={(event) => setCloneBranch(event.target.value)}
-                        placeholder="main"
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </label>
-                    <label>
-                      Vault secret
-                      <input
-                        type="password"
-                        value={passphrase}
-                        onChange={(event) => setPassphrase(event.target.value)}
-                        placeholder="Paste your vault secret"
-                        autoComplete="current-password"
-                      />
-                    </label>
-                  </div>
-                  <label className="secret-confirmation">
-                    <input
-                      type="checkbox"
-                      checked={cloneRepositoryPrivate}
-                      onChange={(event) => setCloneRepositoryPrivate(event.target.checked)}
-                    />
-                    <span>I confirm this GitHub repository is private.</span>
-                  </label>
-                  <p className="secret-help">
-                    The SSH key downloads encrypted files. The separate vault secret
-                    authenticates and decrypts them locally.
-                  </p>
-                </>
-              ) : (
-                <label>
-                  Vault secret
-                  <input
-                    autoFocus
-                    type="password"
-                    value={passphrase}
-                    onChange={(event) => setPassphrase(event.target.value)}
-                    placeholder="Paste your vault secret"
-                    autoComplete="current-password"
-                  />
-                </label>
-              )}
-              {vaultAction && (
-                <label className="remember-secret-row">
-                  <input
-                    type="checkbox"
-                    checked={rememberSecret}
-                    onChange={(event) => setRememberSecret(event.target.checked)}
-                  />
-                  <span>Don't ask again for 7 days</span>
-                </label>
-              )}
-              {rememberError && (
-                <p className="form-error" role="alert">
-                  {rememberError}
-                </p>
-              )}
-              {error && <p className="form-error" role="alert">{error}</p>}
-              <button
-                className="primary-button"
-                disabled={
-                  busy ||
-                  (vaultAction === "create"
-                    ? !vaultName.trim() || !vaultSecret || !secretCopied || !secretConfirmed
-                    : vaultAction === "clone"
-                      ? !vaultName.trim() ||
-                        !cloneRepository.trim() ||
-                        !cloneSSHKey.trim() ||
-                        !cloneBranch.trim() ||
-                        !passphrase ||
-                        !cloneRepositoryPrivate
-                      : !passphrase)
-                }
-              >
-                {busy
-                  ? vaultAction === "clone" ? "Downloading and restoring…" : "Working…"
-                  : vaultAction === "create"
-                    ? "Create encrypted vault"
-                    : vaultAction === "clone"
-                      ? "Clone and open vault"
-                      : "Unlock vault"}
-              </button>
-              {vaultAction === "create" && (
-                <p className="recovery-warning">
-                  There is no reset or recovery service. The clipboard may also be readable by other applications.
-                </p>
-              )}
-            </form>
-          </div>
-        )}
+        {renderVaultActionModal(vaultEyebrow, vaultTitle, vaultSubmitDisabled, vaultSubmitLabel)}
       </main>
     );
+  };
+
+  if (session.locked) return renderLockedScreen();
+  const folderItemClass = (folderID: string) => [
+    "folder-list-item",
+    selectedFolderID === folderID ? "active" : "",
+    dropTarget === `folder:${folderID}` ? "drag-over" : "",
+    dropTarget === `folder:${folderID}:before` ? "drag-over-before" : "",
+    dropTarget === `folder:${folderID}:after` ? "drag-over-after" : "",
+  ].filter(Boolean).join(" ");
+  const noteItemClass = (noteID: string) => [
+    "note-list-item",
+    note?.id === noteID ? "active" : "",
+    dropTarget === `note:${noteID}:before` ? "drag-over-before" : "",
+    dropTarget === `note:${noteID}:after` ? "drag-over-after" : "",
+  ].filter(Boolean).join(" ");
+  let notesHeading = "Notes";
+  if (selectedFolderID === "") notesHeading = "Unfiled";
+  else if (selectedFolderID !== "all") notesHeading = folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes";
+
+  let syncMenuTitle = "Pull then push the vault to GitHub";
+  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
+  else if (syncing) syncMenuTitle = "Syncing…";
+
+  let saveStatusLabel = "Saved locally";
+  if (dirty) saveStatusLabel = "Unsaved";
+  if (saveState === "error") saveStatusLabel = "Save failed";
+  if (saveState === "saving") saveStatusLabel = "Encrypting…";
+
+  let saveFileTitle = "Save this note (Ctrl + S)";
+  if (!note) saveFileTitle = "No note open";
+  if (conflictResolution) saveFileTitle = "Save the merged conflict result";
+  let saveFileLabel = "Save file";
+  if (conflictResolution) saveFileLabel = "Save merged file";
+  if (saveState === "saving") saveFileLabel = "Encrypting…";
+  const saveFileAction = () => {
+    if (conflictResolution) void saveResolvedConflict();
+    else persistCurrentInBackground();
+  };
+
+  let syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
+  if (!syncLinked) syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
+  if (!note) syncButtonTitle = "No note open";
+  const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
+  let settingsSubmitLabel = "Link vault";
+  if (syncSettings?.linked) settingsSubmitLabel = "Verify link";
+  if (settingsBusy) settingsSubmitLabel = "Linking…";
+  let breadcrumbItems: NoteCrumb[] = noteTrail;
+  if (!noteTrail.length) {
+    breadcrumbItems = [{ id: "", title: folderName(session.path) }];
+    if (currentFolder) breadcrumbItems.push({ id: "", title: currentFolder.name });
+    if (note) breadcrumbItems.push({ id: note.id, title: note.title || "Untitled" });
   }
 
-  return (
-    <main className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${logOpen ? "log-open" : ""}`}>
+  const renderWorkspaceHeader = () => (
       <header className="app-menubar">
         <button
           type="button"
@@ -4362,7 +4471,7 @@ function App() {
             </button>
             {titlebarMenu === "vault" && (
               <div className="titlebar-menu-popover" role="menu">
-                <button role="menuitem" disabled={!syncLinked || syncing} title={!syncLinked ? "Link this vault in Vault Settings first" : syncing ? "Syncing…" : "Pull then push the vault to GitHub"} onClick={() => {
+                <button role="menuitem" disabled={!syncLinked || syncing} title={syncMenuTitle} onClick={() => {
                   setTitlebarMenu(null);
                   void syncNow();
                 }}>
@@ -4435,6 +4544,178 @@ function App() {
           {folderName(session.path)}
         </div>
       </header>
+  );
+
+  const renderFolderList = () => (
+        <nav className="folder-list" aria-label="Folders">
+          <button
+            className={`folder-list-item ${selectedFolderID === "all" ? "active" : ""}`}
+            onClick={() => {
+              setGraphOpen(false);
+              setTimeTrackingOpen(false);
+              setSelectedFolderID("all");
+            }}
+          >
+            <Icon name="book" size={15} />
+            <span>All notes</span>
+            <small>{publicNotes.length}</small>
+          </button>
+          <button
+            className={`folder-list-item ${selectedFolderID === "" ? "active" : ""} ${dropTarget === "folder:" ? "drag-over" : ""}`}
+            onClick={() => {
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
+              setGraphOpen(false);
+              setTimeTrackingOpen(false);
+              setSelectedFolderID("");
+            }}
+            onMouseEnter={(event) => {
+              if (event.buttons === 1 && dragCandidateRef.current?.kind === "note") activatePointerDrag("folder:");
+            }}
+            onMouseUp={() => finishPointerDrag({ kind: "folder", id: "" })}
+          >
+            <Icon name="folder" size={15} />
+            <span>Unfiled</span>
+            <small>{noteCountsByFolder.get("") ?? 0}</small>
+          </button>
+          {folderRows.map(({ folder, depth }) => (
+            <button
+              key={folder.id}
+              className={folderItemClass(folder.id)}
+              style={{ paddingLeft: `${10 + depth * 14}px` }}
+              onClick={() => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+              }
+              setGraphOpen(false);
+              void selectFolder(folder);
+              }}
+              onMouseDown={(event) => {
+                if (event.button === 0) {
+                  dragCandidateRef.current = { kind: "folder", id: folder.id, active: false };
+                }
+              }}
+              onContextMenu={(event) =>
+                showContextMenu(event, {
+                  kind: "folder",
+                  id: folder.id,
+                  label: folder.name,
+                })
+              }
+              onMouseEnter={(event) => {
+                if (event.buttons !== 1 || !dragCandidateRef.current) return;
+                if (dragCandidateRef.current.kind === "note") activatePointerDrag(`folder:${folder.id}`);
+                else if (dragCandidateRef.current.id !== folder.id) activatePointerDrag(folderDropTargetFromPointer(event, folder.id).key);
+              }}
+              onMouseMove={(event) => {
+                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "folder" || !dragCandidateRef.current.active) return;
+                if (dragCandidateRef.current.id === folder.id) return;
+                setDropTarget(folderDropTargetFromPointer(event, folder.id).key);
+              }}
+              onMouseUp={(event) => {
+                const target = folderDropTargetFromPointer(event, folder.id);
+                finishPointerDrag({ kind: "folder", id: folder.id, after: target.after });
+              }}
+            >
+              <Icon name={folderIsLocked(folder.id, folderByID, unlockedFolderIDs) ? "lock" : "folder"} size={15} />
+              <span>{folder.name}</span>
+              <small>{folderIsLocked(folder.id, folderByID, unlockedFolderIDs) ? "Locked" : (noteCountsByFolder.get(folder.id) ?? 0)}</small>
+            </button>
+          ))}
+        </nav>
+  );
+
+  const renderSidebarTags = () => (
+    <>
+        {availableTags.length > 0 && (
+          <>
+            <div className="notes-heading tags-heading">
+              <span>Tags</span>
+            </div>
+            <nav className="tag-list" aria-label="Tags">
+              <button
+                className={`tag-list-item ${selectedTag === "" ? "active" : ""}`}
+                onClick={() => setSelectedTag("")}
+              >
+                All tags
+              </button>
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  className={`tag-list-item ${selectedTag === tag ? "active" : ""}`}
+                  onClick={() => setSelectedTag(tag)}
+                >
+                  #{tag}
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
+    </>
+  );
+
+  const renderNoteList = () => (
+        <nav className="note-list" aria-label="Notes">
+          {visibleNotes.map((item) => (
+            <button
+              key={item.id}
+              className={noteItemClass(item.id)}
+              onClick={() => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+              }
+              setGraphOpen(false);
+              void selectNote(item.id);
+              }}
+              onMouseDown={(event) => {
+                if (event.button === 0) {
+                  dragCandidateRef.current = { kind: "note", id: item.id, active: false };
+                }
+              }}
+              onMouseEnter={(event) => {
+                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "note" || dragCandidateRef.current.id === item.id) return;
+                activatePointerDrag(noteDropTargetFromPointer(event, item.id).key);
+              }}
+              onMouseMove={(event) => {
+                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "note" || !dragCandidateRef.current.active) return;
+                if (dragCandidateRef.current.id === item.id) return;
+                setDropTarget(noteDropTargetFromPointer(event, item.id).key);
+              }}
+              onMouseUp={(event) => {
+                finishPointerDrag({
+                  kind: "note",
+                  id: item.id,
+                  after: noteDropTargetFromPointer(event, item.id).after,
+                });
+              }}
+              onContextMenu={(event) =>
+                showContextMenu(event, {
+                  kind: "note",
+                  id: item.id,
+                  label: item.title,
+                })
+              }
+            >
+              <Icon name="file" size={16} />
+              <span>
+                <strong>{item.title}</strong>
+                <small>{new Date(item.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
+              </span>
+            </button>
+          ))}
+          {visibleNotes.length === 0 && (
+            <div className="empty-list">
+              <p>This folder is empty.</p>
+            </div>
+          )}
+        </nav>
+  );
+
+  const renderWorkspaceSidebar = () => (
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
           <div className="brand-glyph small"><img src={logo} alt="" /></div>
@@ -4494,177 +4775,16 @@ function App() {
             <Icon name="plus" size={17} />
           </button>
         </div>
-        <nav className="folder-list" aria-label="Folders">
-          <button
-            className={`folder-list-item ${selectedFolderID === "all" ? "active" : ""}`}
-            onClick={() => {
-              setGraphOpen(false);
-              setTimeTrackingOpen(false);
-              setSelectedFolderID("all");
-            }}
-          >
-            <Icon name="book" size={15} />
-            <span>All notes</span>
-            <small>{publicNotes.length}</small>
-          </button>
-          <button
-            className={`folder-list-item ${selectedFolderID === "" ? "active" : ""} ${dropTarget === "folder:" ? "drag-over" : ""}`}
-            onClick={() => {
-              if (suppressClickRef.current) {
-                suppressClickRef.current = false;
-                return;
-              }
-              setGraphOpen(false);
-              setTimeTrackingOpen(false);
-              setSelectedFolderID("");
-            }}
-            onMouseEnter={(event) => {
-              if (event.buttons === 1 && dragCandidateRef.current?.kind === "note") activatePointerDrag("folder:");
-            }}
-            onMouseUp={() => finishPointerDrag({ kind: "folder", id: "" })}
-          >
-            <Icon name="folder" size={15} />
-            <span>Unfiled</span>
-            <small>{noteCountsByFolder.get("") ?? 0}</small>
-          </button>
-          {folderRows.map(({ folder, depth }) => (
-            <button
-              key={folder.id}
-              className={`folder-list-item ${selectedFolderID === folder.id ? "active" : ""} ${dropTarget === `folder:${folder.id}` ? "drag-over" : ""} ${dropTarget === `folder:${folder.id}:before` ? "drag-over-before" : ""} ${dropTarget === `folder:${folder.id}:after` ? "drag-over-after" : ""}`}
-              style={{ paddingLeft: `${10 + depth * 14}px` }}
-              onClick={() => {
-                if (suppressClickRef.current) {
-                  suppressClickRef.current = false;
-                  return;
-              }
-              setGraphOpen(false);
-              void selectFolder(folder);
-              }}
-              onMouseDown={(event) => {
-                if (event.button === 0) {
-                  dragCandidateRef.current = { kind: "folder", id: folder.id, active: false };
-                }
-              }}
-              onContextMenu={(event) =>
-                showContextMenu(event, {
-                  kind: "folder",
-                  id: folder.id,
-                  label: folder.name,
-                })
-              }
-              onMouseEnter={(event) => {
-                if (event.buttons !== 1 || !dragCandidateRef.current) return;
-                if (dragCandidateRef.current.kind === "note") activatePointerDrag(`folder:${folder.id}`);
-                else if (dragCandidateRef.current.id !== folder.id) activatePointerDrag(folderDropTargetFromPointer(event, folder.id).key);
-              }}
-              onMouseMove={(event) => {
-                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "folder" || !dragCandidateRef.current.active) return;
-                if (dragCandidateRef.current.id === folder.id) return;
-                setDropTarget(folderDropTargetFromPointer(event, folder.id).key);
-              }}
-              onMouseUp={(event) => {
-                const target = folderDropTargetFromPointer(event, folder.id);
-                finishPointerDrag({ kind: "folder", id: folder.id, after: target.after });
-              }}
-            >
-              <Icon name={folderIsLocked(folder.id, folderByID, unlockedFolderIDs) ? "lock" : "folder"} size={15} />
-              <span>{folder.name}</span>
-              <small>{folderIsLocked(folder.id, folderByID, unlockedFolderIDs) ? "Locked" : (noteCountsByFolder.get(folder.id) ?? 0)}</small>
-            </button>
-          ))}
-        </nav>
-        {availableTags.length > 0 && (
-          <>
-            <div className="notes-heading tags-heading">
-              <span>Tags</span>
-            </div>
-            <nav className="tag-list" aria-label="Tags">
-              <button
-                className={`tag-list-item ${selectedTag === "" ? "active" : ""}`}
-                onClick={() => setSelectedTag("")}
-              >
-                All tags
-              </button>
-              {availableTags.map((tag) => (
-                <button
-                  key={tag}
-                  className={`tag-list-item ${selectedTag === tag ? "active" : ""}`}
-                  onClick={() => setSelectedTag(tag)}
-                >
-                  #{tag}
-                </button>
-              ))}
-            </nav>
-          </>
-        )}
+        {renderFolderList()}
+        {renderSidebarTags()}
         <div className="notes-heading">
-          <span>
-            {selectedFolderID === "all"
-              ? "Notes"
-              : selectedFolderID === ""
-                ? "Unfiled"
-                : folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes"}
-          </span>
+          <span>{notesHeading}</span>
           <NoteSortSelect value={currentSortMode} onChange={setCurrentSortMode} />
           <button className="icon-button" onClick={() => void createNote()} aria-label="Create note" title="New note (Ctrl + N)">
             <Icon name="plus" size={17} />
           </button>
         </div>
-        <nav className="note-list" aria-label="Notes">
-          {visibleNotes.map((item) => (
-            <button
-              key={item.id}
-              className={`note-list-item ${note?.id === item.id ? "active" : ""} ${dropTarget === `note:${item.id}:before` ? "drag-over-before" : ""} ${dropTarget === `note:${item.id}:after` ? "drag-over-after" : ""}`}
-              onClick={() => {
-                if (suppressClickRef.current) {
-                  suppressClickRef.current = false;
-                  return;
-              }
-              setGraphOpen(false);
-              void selectNote(item.id);
-              }}
-              onMouseDown={(event) => {
-                if (event.button === 0) {
-                  dragCandidateRef.current = { kind: "note", id: item.id, active: false };
-                }
-              }}
-              onMouseEnter={(event) => {
-                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "note" || dragCandidateRef.current.id === item.id) return;
-                activatePointerDrag(noteDropTargetFromPointer(event, item.id).key);
-              }}
-              onMouseMove={(event) => {
-                if (event.buttons !== 1 || dragCandidateRef.current?.kind !== "note" || !dragCandidateRef.current.active) return;
-                if (dragCandidateRef.current.id === item.id) return;
-                setDropTarget(noteDropTargetFromPointer(event, item.id).key);
-              }}
-              onMouseUp={(event) => {
-                finishPointerDrag({
-                  kind: "note",
-                  id: item.id,
-                  after: noteDropTargetFromPointer(event, item.id).after,
-                });
-              }}
-              onContextMenu={(event) =>
-                showContextMenu(event, {
-                  kind: "note",
-                  id: item.id,
-                  label: item.title,
-                })
-              }
-            >
-              <Icon name="file" size={16} />
-              <span>
-                <strong>{item.title}</strong>
-                <small>{new Date(item.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
-              </span>
-            </button>
-          ))}
-          {visibleNotes.length === 0 && (
-            <div className="empty-list">
-              <p>This folder is empty.</p>
-            </div>
-          )}
-        </nav>
+        {renderNoteList()}
         <div className="sidebar-footer">
           <div className="encrypted-status"><span /> Encrypted locally</div>
           <div className="sidebar-vault-buttons">
@@ -4714,46 +4834,37 @@ function App() {
           </div>
         </div>
       </aside>
+  );
 
-      <section
-        className="editor-shell"
-        onBlur={persistWhenEditorLosesFocus}
-        onClick={(event) => {
-          if (cardPanel && !(event.target instanceof Element && event.target.closest(".card-sidebar"))) {
-            closeCardPanel();
-          }
-        }}
-      >
+  const renderEditorTopbar = () => (
         <header className="editor-topbar">
           <button className="icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar">
             <Icon name="menu" />
           </button>
           <div className="breadcrumbs">
-            {graphOpen ? (
-              <span className="breadcrumb-item"><strong>Graph view</strong></span>
-            ) : timeTrackingOpen ? (
-              <span className="breadcrumb-item"><strong>Time tracking</strong></span>
-            ) : (noteTrail.length ? noteTrail : [
-              { id: "", title: folderName(session.path) },
-              ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
-              ...(note ? [{ id: note.id, title: note.title || "Untitled" }] : []),
-            ]).map((crumb, index, items) => (
-              <span className="breadcrumb-item" key={`${crumb.id || crumb.title}-${index}`}>
-                {index > 0 && <b>/</b>}
-                {crumb.id && index < items.length - 1 ? (
+            {graphOpen && <span className="breadcrumb-item"><strong>Graph view</strong></span>}
+            {timeTrackingOpen && <span className="breadcrumb-item"><strong>Time tracking</strong></span>}
+            {!graphOpen && !timeTrackingOpen && breadcrumbItems.map((crumb, index, items) => {
+              const isLast = index === items.length - 1;
+              let content = <span>{crumb.title}</span>;
+              if (isLast) content = <strong>{crumb.title}</strong>;
+              else if (crumb.id) {
+                content = (
                   <button
                     type="button"
                     onClick={() => void selectNote(crumb.id, { replaceTrail: items.slice(0, index + 1) })}
                   >
                     {crumb.title}
                   </button>
-                ) : index === items.length - 1 ? (
-                  <strong>{crumb.title}</strong>
-                ) : (
-                  <span>{crumb.title}</span>
-                )}
-              </span>
-            ))}
+                );
+              }
+              return (
+                <span className="breadcrumb-item" key={`${crumb.id || crumb.title}-${index}`}>
+                  {index > 0 && <b>/</b>}
+                  {content}
+                </span>
+              );
+            })}
           </div>
           {globalSearchOrigin && (
             <button
@@ -4768,22 +4879,16 @@ function App() {
             {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
             <div className={`save-status ${saveState}`}>
               <span />
-              {saveState === "saving"
-                ? "Encrypting…"
-                : saveState === "error"
-                  ? "Save failed"
-                  : dirty
-                    ? "Unsaved"
-                    : "Saved locally"}
+              {saveStatusLabel}
             </div>
           </div>
           <button
             className="save-file-button"
             disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
-            title={conflictResolution ? "Save the merged conflict result" : !note ? "No note open" : "Save this note (Ctrl + S)"}
-            onClick={() => conflictResolution ? void saveResolvedConflict() : persistCurrentInBackground()}
+            title={saveFileTitle}
+            onClick={saveFileAction}
           >
-            {saveState === "saving" ? "Encrypting…" : conflictResolution ? "Save merged file" : "Save file"}
+            {saveFileLabel}
           </button>
           <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
             <span />
@@ -4792,16 +4897,10 @@ function App() {
           <button
             className="save-and-sync-button"
             disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
-            title={
-              !note
-                ? "No note open"
-                : !syncLinked
-                  ? "Link this vault to GitHub in Vault Settings first"
-                  : "Save and sync to GitHub (Ctrl + Shift + S)"
-            }
+            title={syncButtonTitle}
             onClick={() => void saveAndSync()}
           >
-            {syncing ? "Syncing…" : "Save file and sync"}
+            {syncButtonLabel}
           </button>
           {syncLinked && lastSyncedAt > 0 && <LastSyncLabel timestamp={lastSyncedAt} />}
           {note && !graphOpen && !timeTrackingOpen && (
@@ -4810,7 +4909,9 @@ function App() {
             </button>
           )}
         </header>
+  );
 
+  const renderEditorTabs = () => (
         <nav className="note-tabs" aria-label="Open notes" role="tablist">
           {tabs.map((tab, index) => (
             <div className={`note-tab ${tab.id === activeTabID ? "active" : ""}`} key={tab.id}>
@@ -4828,8 +4929,11 @@ function App() {
           ))}
           <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
         </nav>
+  );
 
-        {(error || syncNotification) && (
+  const renderEditorNotifications = () => {
+    if (!error && !syncNotification) return null;
+    return (
           <div className="notification-stack">
             {error && (
               <div className="error-banner" role="alert">
@@ -4841,21 +4945,29 @@ function App() {
             )}
 
             {syncNotification && (
-              <div className="sync-notification" role="status" aria-live="polite">
+              <output className="sync-notification" aria-live="polite">
                 <span>{syncNotification}</span>
                 <button className="icon-button" onClick={() => setSyncNotification("")} aria-label="Dismiss notification">
                   <Icon name="x" size={16} />
                 </button>
-              </div>
+              </output>
             )}
           </div>
-        )}
+    );
+  };
 
-        {timeTrackingOpen ? (
+  const renderEditorTimeTracking = () => {
+    if (!timeTrackingOpen) return null;
+    return (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
             <TimeTrackingView key={`${session.vaultId}:${activeTimeEntry?.id ?? "idle"}`} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
           </Suspense>
-        ) : graphOpen ? (
+    );
+  };
+
+  const renderEditorGraph = () => {
+    if (!graphOpen || timeTrackingOpen) return null;
+    return (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
             <GraphView
               folders={graphFolders}
@@ -4870,7 +4982,12 @@ function App() {
               }}
             />
           </Suspense>
-        ) : conflictResolution ? (
+    );
+  };
+
+  const renderConflictEditor = () => {
+    if (!conflictResolution || timeTrackingOpen || graphOpen) return null;
+    return (
           <>
             <div className="document-heading conflict-heading">
               <div>
@@ -4948,7 +5065,12 @@ function App() {
               <span className="footer-encryption"><Icon name="lock" size={12} /> Encrypted at rest</span>
             </footer>
           </>
-        ) : note ? (
+    );
+  };
+
+  const renderNoteEditor = () => {
+    if (!note || timeTrackingOpen || graphOpen || conflictResolution) return null;
+    return (
           <>
             <div className={`document-heading ${titleCollapsed ? "is-collapsed" : ""}`}>
               <div className="document-heading-main">
@@ -4994,11 +5116,7 @@ function App() {
                         className={view === item ? "active" : ""}
                         onClick={() => setEditorView(item)}
                       >
-                        {item === "live"
-                          ? "Live Preview"
-                          : item === "object"
-                            ? "Object Tree"
-                            : "Markdown"}
+                        {EDITOR_VIEW_LABELS[item]}
                       </button>
                     ))}
                   </div>
@@ -5113,7 +5231,12 @@ function App() {
               </aside>
             )}
           </>
-        ) : (
+    );
+  };
+
+  const renderEmptyEditor = () => {
+    if (timeTrackingOpen || graphOpen || conflictResolution || note) return null;
+    return (
           <div className="empty-editor">
             <div className="modal-icon"><Icon name="file" size={21} /></div>
             <h2>A fresh page is waiting.</h2>
@@ -5122,9 +5245,13 @@ function App() {
               <Icon name="plus" size={17} /> New note
             </button>
           </div>
-        )}
-        {cardPanel && (
-          <aside className="card-sidebar" aria-label="Card details" onClick={(event) => event.stopPropagation()}>
+    );
+  };
+
+  const renderCardPanel = () => {
+    if (!cardPanel) return null;
+    return (
+          <aside className="card-sidebar" aria-label="Card details">
             <header className="card-sidebar-header">
               <input
                 className="card-sidebar-title"
@@ -5182,8 +5309,30 @@ function App() {
               <button type="button" className="primary-button" disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
             </div>
           </aside>
-        )}
+    );
+  };
+
+  const renderWorkspaceEditor = () => (
+      <section
+        className="editor-shell"
+        onBlur={persistWhenEditorLosesFocus}
+      >
+        {renderEditorTopbar()}
+
+        {renderEditorTabs()}
+
+        {renderEditorNotifications()}
+        {renderEditorTimeTracking()}
+        {renderEditorGraph()}
+        {renderConflictEditor()}
+        {renderNoteEditor()}
+        {renderEmptyEditor()}
+        {renderCardPanel()}
       </section>
+  );
+
+  const renderLogPanel = () => (
+    <>
       {logOpen && (
         <section className="log-panel" aria-labelledby="log-title">
           <div className="log-panel-header">
@@ -5222,8 +5371,14 @@ function App() {
           </div>
         </section>
       )}
+
+    </>
+  );
+
+  const renderFolderPasswordPrompt = () => (
+    <>
       {folderPasswordPrompt && (
-        <div className="modal-backdrop folder-password-backdrop" role="presentation" style={{ zIndex: windowLayers.folderPassword }}>
+        <div className="modal-backdrop folder-password-backdrop" style={{ zIndex: windowLayers.folderPassword }}>
           <form
             className="vault-modal folder-password-modal"
             onSubmit={(event) => {
@@ -5263,15 +5418,21 @@ function App() {
                 </button>
               </div>
             </label>
-            <button className="primary-button">
+            <button type="submit" className="primary-button">
               {folderPasswordPrompt.submitLabel}
             </button>
           </form>
         </div>
       )}
+
+    </>
+  );
+
+  const renderRecoveryPanel = () => (
+    <>
       {recoveryOpen && (
-        <div className="modal-backdrop" role="presentation" style={{ zIndex: windowLayers.recovery }}>
-          <section className="vault-modal settings-modal recovery-modal" role="dialog" aria-labelledby="recovery-title">
+        <div className="modal-backdrop" style={{ zIndex: windowLayers.recovery }}>
+          <dialog open className="vault-modal settings-modal recovery-modal" aria-labelledby="recovery-title">
             <button type="button" className="icon-button modal-close" aria-label="Close recovery" onClick={() => setRecoveryOpen(false)}>
               <Icon name="x" />
             </button>
@@ -5299,14 +5460,19 @@ function App() {
                 </div>
               ))}
             </div>
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderAppearanceSettings = () => (
+    <>
       {appearanceSettingsOpen && (
-        <div className="modal-backdrop appearance-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.appearanceSettings }}>
-          <section
+        <div className="modal-backdrop appearance-settings-backdrop" style={{ zIndex: windowLayers.appearanceSettings }}>
+          <dialog open
             className="vault-modal settings-modal appearance-settings-modal"
-            role="dialog"
             aria-labelledby="appearance-settings-title"
           >
             <button
@@ -5362,18 +5528,18 @@ function App() {
                     <fieldset id="settings-daily-notes" className="appearance-fieldset settings-section settings-section-card">
                       <legend>Daily notes</legend>
                       <label>
-                        Title format
+                        Title format{" "}
                         <input value={dailyNoteFormat} onChange={(event) => setDailyNoteFormat(event.target.value)} placeholder="YYYY-MM-DD" />
                       </label>
                       <label>
-                        Folder
+                        Folder{" "}
                         <select value={dailyNoteFolderID} onChange={(event) => setDailyNoteFolderID(event.target.value)}>
                           <option value="">Unfiled</option>
                           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                         </select>
                       </label>
                       <label>
-                        Template note
+                        Template note{" "}
                         <select value={dailyTemplateNoteID} onChange={(event) => setDailyTemplateNoteID(event.target.value)}>
                           <option value="">Default heading</option>
                           {notes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
@@ -5384,7 +5550,7 @@ function App() {
                     <div id="settings-autosave" className="settings-section settings-section-card">
                       <label>
                         Auto-save interval (seconds)
-                        <input
+                        {" "}<input
                           type="number"
                           min="60"
                           step="1"
@@ -5395,7 +5561,7 @@ function App() {
                     </div>
                     <div id="settings-auto-sync" className="settings-section settings-section-card">
                       <label>
-                        Auto-sync after inactivity (minutes)
+                        Auto-sync after inactivity (minutes){" "}
                         <input
                           type="number"
                           min="1"
@@ -5407,7 +5573,7 @@ function App() {
                     </div>
                     <div id="settings-auto-lock" className="settings-section settings-section-card">
                       <label>
-                        Lock vault after inactivity (minutes)
+                        Lock vault after inactivity (minutes){" "}
                         <input
                           type="number"
                           min="1"
@@ -5453,7 +5619,7 @@ function App() {
                       <div className="appearance-theme-options">
                         {(["none", "full", "dotted"] as JournalLines[]).map((value) => (
                           <button key={value} type="button" className={journalLines === value ? "active" : ""} aria-pressed={journalLines === value} onClick={() => setJournalLines(value)}>
-                            {value === "none" ? "None" : value === "full" ? "Solid" : "Dotted"}
+                            {JOURNAL_LINE_LABELS[value]}
                           </button>
                         ))}
                       </div>
@@ -5493,13 +5659,19 @@ function App() {
                 )}
               </div>
             </div>
-          </section>
+          </dialog>
         </div>
       )}
 
+
+    </>
+  );
+
+  const renderStatisticsPanel = () => (
+    <>
       {statisticsOpen && (
-        <div className="modal-backdrop" role="presentation" style={{ zIndex: windowLayers.statistics }}>
-          <section className="vault-modal statistics-modal" role="dialog" aria-modal="true" aria-labelledby="statistics-title">
+        <div className="modal-backdrop" style={{ zIndex: windowLayers.statistics }}>
+          <dialog open className="vault-modal statistics-modal" aria-modal="true" aria-labelledby="statistics-title">
             <button type="button" className="icon-button modal-close" aria-label="Close statistics" onClick={() => setStatisticsOpen(false)}>
               <Icon name="x" />
             </button>
@@ -5525,11 +5697,17 @@ function App() {
                 )}
               </>
             )}
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderVaultSettings = () => (
+    <>
       {vaultSettingsOpen && (
-        <div className="modal-backdrop vault-settings-backdrop" role="presentation" style={{ zIndex: windowLayers.vaultSettings }}>
+        <div className="modal-backdrop vault-settings-backdrop" style={{ zIndex: windowLayers.vaultSettings }}>
           <form
             className="vault-modal settings-modal"
             onSubmit={(event) => {
@@ -5593,7 +5771,7 @@ function App() {
               </div>
               <small>Creates one encrypted snapshot per day while Cipherleaf is open. Clear the destination to disable backups.</small>
             </label>
-            {backupStatus && <div className="connection-result success" role="status">{backupStatus}</div>}
+            {backupStatus && <output className="connection-result success">{backupStatus}</output>}
             <h2>GitHub sync (experimental)</h2>
             <div className={`sync-link-state ${syncSettings?.linked ? "linked" : ""}`}>
               <span />
@@ -5602,7 +5780,7 @@ function App() {
             {syncSettings ? (
               <>
                 <label>
-                  GitHub repository
+                  GitHub repository{" "}
                   <input
                     autoFocus
                     value={syncSettings.repositorySsh}
@@ -5638,7 +5816,7 @@ function App() {
                   </div>
                 </label>
                 <label>
-                  Branch
+                  Branch{" "}
                   <input
                     value={syncSettings.branch}
                     onChange={(event) => {
@@ -5671,14 +5849,14 @@ function App() {
                   object count, and ciphertext size.
                 </div>
                 {connectionResult && (
-                  <div
+                  <output
                     className={`connection-result ${connectionResult.success ? "success" : "error"}`}
-                    role="status"
+                    aria-live="polite"
                   >
                     <strong>{connectionResult.success ? "Ready" : "Connection failed"}</strong>
                     <span>{connectionResult.message}</span>
                     {connectionResult.warning && <span>{connectionResult.warning}</span>}
-                  </div>
+                  </output>
                 )}
                 <div className="settings-actions">
                   {syncConflicts.length > 0 && (
@@ -5735,12 +5913,8 @@ function App() {
                       Pull remote and link
                     </button>
                   )}
-                  <button className="primary-button" disabled={settingsBusy}>
-                    {settingsBusy
-                      ? "Linking…"
-                      : syncSettings.linked
-                        ? "Verify link"
-                        : "Link vault"}
+                  <button type="submit" className="primary-button" disabled={settingsBusy}>
+                    {settingsSubmitLabel}
                   </button>
                 </div>
               </>
@@ -5750,6 +5924,12 @@ function App() {
           </form>
         </div>
       )}
+
+    </>
+  );
+
+  const renderContextMenu = () => (
+    <>
       {contextMenu && (
         <div
           className="context-menu"
@@ -5935,9 +6115,15 @@ function App() {
           )}
         </div>
       )}
+
+    </>
+  );
+
+  const renderTimerDialog = () => (
+    <>
       {timerDialog && (
-        <div className="modal-backdrop timer-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
-          <section className="vault-modal timer-modal" role="dialog" aria-modal="true" aria-labelledby="timer-dialog-title">
+        <div className="modal-backdrop timer-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
+          <dialog open className="vault-modal timer-modal" aria-modal="true" aria-labelledby="timer-dialog-title">
             <button type="button" className="icon-button modal-close" aria-label="Close timer dialog" onClick={() => setTimerDialog(null)}><Icon name="x" /></button>
             <p className="eyebrow">Time tracking</p>
             {timerDialog === "start" ? <form onSubmit={(event) => { event.preventDefault(); void startTimerFromDialog(); }}>
@@ -5948,25 +6134,36 @@ function App() {
               <ProjectSelect projects={(timerCatalog?.projects ?? []).filter((item) => !item.archivedAtUtc && (!timerClientID || item.clientId === timerClientID))} selected={timerProjectID} onChange={(id) => { setTimerProjectID(id); if (!timerClientID) setTimerClientID((timerCatalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} disabled={!!activeTimeEntry || timerBusy} />
               <TagMultiSelect tags={(timerCatalog?.tags ?? []).filter((item) => !item.archivedAtUtc)} selected={timerTagIDs} onChange={setTimerTagIDs} disabled={!!activeTimeEntry || timerBusy} />
               {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
-              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>
+              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button type="submit" className="primary-button" disabled={!!activeTimeEntry || timerBusy}>{timerBusy ? "Starting…" : "Start timer"}</button></div>
             </form> : <div>
               <h2 id="timer-dialog-title">Finish active timer?</h2>
               <p>{activeTimeEntry ? <>Finish <strong>{activeTimeEntry.name}</strong> at <RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} />?</> : "There is no active timer."}</p>
               {timerError && <div className="timer-modal-error" role="alert">{timerError}</div>}
               <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setTimerDialog(null)}>Cancel</button><button autoFocus type="button" className="primary-button" disabled={!activeTimeEntry || timerBusy} onClick={() => void finishTimerFromDialog()}>{timerBusy ? "Finishing…" : "Finish timer"}</button></div>
             </div>}
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderSyncOverlay = () => (
+    <>
       {syncing && (
-        <div className="sync-overlay" role="status" aria-live="polite" aria-busy="true">
+        <output className="sync-overlay" aria-live="polite" aria-busy="true">
           <div className="sync-spinner" aria-hidden="true" />
           <div className="sync-overlay-label">Sync in progress</div>
-        </div>
+        </output>
       )}
+    </>
+  );
+
+  const renderSyncConflicts = () => (
+    <>
       {syncConflicts.length > 0 && (
-        <div className="modal-backdrop conflict-backdrop" role="presentation" style={{ zIndex: windowLayers.syncConflicts }}>
-          <section className="vault-modal conflict-modal" role="dialog" aria-labelledby="conflict-title">
+        <div className="modal-backdrop conflict-backdrop" style={{ zIndex: windowLayers.syncConflicts }}>
+          <dialog open className="vault-modal conflict-modal" aria-labelledby="conflict-title">
             <button
               type="button"
               className="icon-button modal-close"
@@ -6002,29 +6199,39 @@ function App() {
                 Force push local vault
               </button>
             </div>
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+  const renderTrackingConflicts = () => (
+    <>
       {trackingConflicts.length > 0 && (
-        <div className="modal-backdrop conflict-backdrop tracking-conflict-backdrop" role="presentation">
-          <section className="vault-modal conflict-modal tracking-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="tracking-conflict-title">
+        <div className="modal-backdrop conflict-backdrop tracking-conflict-backdrop">
+          <dialog open className="vault-modal conflict-modal tracking-conflict-modal" aria-modal="true" aria-labelledby="tracking-conflict-title">
             <p className="eyebrow">Time tracking sync conflicts</p>
             <h2 id="tracking-conflict-title">Choose each result explicitly</h2>
             <p>Sync remains blocked until every preserved variant is resolved.</p>
             <div className="tracking-conflict-list">{trackingConflicts.map((conflict) => <article key={conflict.id}><h3>{conflict.message}</h3><div className="tracking-conflict-variants"><div><strong>Local</strong><span>{conflict.localEntry?.name ?? conflict.localClient?.name ?? conflict.localProject?.name ?? conflict.localTag?.name ?? "No local variant"}</span>{conflict.localEntry && <small>{formatLocalDateTime(new Date(conflict.localEntry.startedAtUtc))} – {conflict.localEntry.endedAtUtc ? formatLocalDateTime(new Date(conflict.localEntry.endedAtUtc)) : "Running"}</small>}</div><div><strong>Remote</strong><span>{conflict.remoteEntry?.name ?? conflict.remoteClient?.name ?? conflict.remoteProject?.name ?? conflict.remoteTag?.name ?? "No remote variant"}</span>{conflict.remoteEntry && <small>{formatLocalDateTime(new Date(conflict.remoteEntry.startedAtUtc))} – {conflict.remoteEntry.endedAtUtc ? formatLocalDateTime(new Date(conflict.remoteEntry.endedAtUtc)) : "Running"}</small>}</div></div><div className="settings-actions"><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "local")}>Keep local</button><button className="secondary-button" onClick={() => void resolveTrackingConflict(conflict, "remote")}>Use remote</button>{conflict.localEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-local")}>Delete local entry</button>}{conflict.remoteEntry && <button className="secondary-button danger-button" onClick={() => void resolveTrackingConflict(conflict, "delete-remote")}>Delete remote entry</button>}{conflict.kind === "active-entries" && activeTimeEntry && <button className="primary-button" onClick={() => void resolveTrackingConflict(conflict, "finish")}>Finish active timer</button>}</div></article>)}</div>
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderCalendar = () => (
+    <>
       {calendarOpen && (
         <div
           className="modal-backdrop calendar-backdrop"
-          role="presentation"
           style={{ zIndex: windowLayers.calendar }}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setCalendarOpen(false);
           }}
         >
-          <section className="vault-modal calendar-modal" role="dialog" aria-modal="true" aria-labelledby="calendar-title">
+          <dialog open className="vault-modal calendar-modal" aria-modal="true" aria-labelledby="calendar-title">
             <button type="button" className="icon-button modal-close" aria-label="Close calendar" onClick={() => setCalendarOpen(false)}>
               <Icon name="x" />
             </button>
@@ -6112,14 +6319,18 @@ function App() {
                 Today
               </button>
             </div>
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderQuickSwitcher = () => (
+    <>
       {quickSwitcherOpen && (
-        <div className="global-search-scrim" style={{ zIndex: windowLayers.quickSwitcher }} onClick={(event) => {
-          if (event.target === event.currentTarget) setQuickSwitcherOpen(false);
-        }}>
-          <div className="global-search-panel" role="dialog" aria-label="Quick note switcher">
+        <div className="global-search-scrim quick-switcher-scrim" style={{ zIndex: windowLayers.quickSwitcher }}>
+          <dialog open className="global-search-panel" aria-label="Quick note switcher" style={{ position: "static", margin: 0, padding: 0 }}>
             <div className="global-search-header">
               <span>Quick note switcher</span>
               <button type="button" className="icon-button" onClick={() => setQuickSwitcherOpen(false)} aria-label="Close"><Icon name="x" size={14} /></button>
@@ -6159,18 +6370,21 @@ function App() {
                 </button>
               )}
             </div>
-          </div>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderCommandPalette = () => (
+    <>
       {commandPaletteOpen && (
         <div
-          className="global-search-scrim"
+          className="global-search-scrim command-palette-scrim"
           style={{ zIndex: windowLayers.commandPalette }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) closeCommandPalette();
-          }}
         >
-          <section className="global-search-panel command-palette" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
+          <dialog open className="global-search-panel command-palette" aria-modal="true" aria-labelledby="command-palette-title" style={{ position: "static", margin: 0, padding: 0 }}>
             <div className="global-search-header">
               <span id="command-palette-title">Command palette</span>
               <button type="button" className="icon-button" onClick={closeCommandPalette} aria-label="Close command palette"><Icon name="x" size={14} /></button>
@@ -6228,24 +6442,24 @@ function App() {
               ))}
               {!matchingCommandPaletteCommands.length && <p className="command-palette-empty">No matching commands.</p>}
             </div>
-          </section>
+          </dialog>
         </div>
       )}
+
+    </>
+  );
+
+  const renderGlobalSearch = () => (
+    <>
       {globalSearchOpen && (
         <div
           className="global-search-scrim"
           style={{ zIndex: windowLayers.globalSearch }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setGlobalSearchOpen(false);
-            }
-          }}
         >
-          <div
+          <dialog open
             className="global-search-panel"
-            role="dialog"
             aria-label="Find in all notes"
-            onClick={(event) => event.stopPropagation()}
+            style={{ position: "static", margin: 0, padding: 0 }}
           >
             <div className="global-search-header">
               <span>{globalSearchReplace ? "Find and replace in all notes" : "Find in all notes"}</span>
@@ -6292,7 +6506,7 @@ function App() {
                     setGlobalSearchBusy(Boolean(globalSearchQuery.trim()));
                     setGlobalSearchCaseSensitive(event.target.checked);
                   }}
-                />
+                />{" "}
                 Case sensitive
               </label>
               <label>
@@ -6306,7 +6520,7 @@ function App() {
                     setGlobalSearchBusy(Boolean(globalSearchQuery.trim()));
                     setGlobalSearchWholeWord(event.target.checked);
                   }}
-                />
+                />{" "}
                 Match whole word
               </label>
             </div>
@@ -6360,12 +6574,18 @@ function App() {
                 </button>
               ))}
             </div>
-          </div>
+          </dialog>
         </div>
       )}
       {sidebarOpen && <button className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
+
+    </>
+  );
+
+  const renderAppDialog = () => (
+    <>
       {appDialog && (
-        <div className="modal-backdrop app-dialog-backdrop" role="presentation" style={{ zIndex: windowLayers.appDialog }}>
+        <div className="modal-backdrop app-dialog-backdrop" style={{ zIndex: windowLayers.appDialog }}>
           <form
             className={`vault-modal app-dialog-modal${appDialog.kind === "confirm" && appDialog.danger ? " danger-dialog" : ""}`}
             onSubmit={(event) => {
@@ -6415,8 +6635,39 @@ function App() {
           </form>
         </div>
       )}
+    </>
+  );
+
+  const renderWorkspaceOverlays = () => (
+    <>
+      {renderLogPanel()}
+      {renderFolderPasswordPrompt()}
+      {renderRecoveryPanel()}
+      {renderAppearanceSettings()}
+      {renderStatisticsPanel()}
+      {renderVaultSettings()}
+      {renderContextMenu()}
+      {renderTimerDialog()}
+      {renderSyncOverlay()}
+      {renderSyncConflicts()}
+      {renderTrackingConflicts()}
+      {renderCalendar()}
+      {renderQuickSwitcher()}
+      {renderCommandPalette()}
+      {renderGlobalSearch()}
+      {renderAppDialog()}
+    </>
+  );
+  const renderWorkspace = () => (
+        <main className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${logOpen ? "log-open" : ""}`}>
+      {renderWorkspaceHeader()}
+      {renderWorkspaceSidebar()}
+      {renderWorkspaceEditor()}
+      {renderWorkspaceOverlays()}
     </main>
   );
+
+  return renderWorkspace();
 }
 
 export default App;
