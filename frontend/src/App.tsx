@@ -97,7 +97,7 @@ const NOTE_SORT_OPTIONS = [
   { value: "created", label: "Created" },
 ] as const;
 
-function NoteSortSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function NoteSortSelect({ value, onChange }: { readonly value: string; readonly onChange: (value: string) => void }) {
   const details = useRef<HTMLDetailsElement>(null);
   const label = NOTE_SORT_OPTIONS.find((option) => option.value === value)?.label ?? "Manual";
   const choose = (next: string) => { onChange(next); if (details.current) details.current.open = false; };
@@ -180,7 +180,7 @@ const SourceMarkdownEditor = lazy(() => import("./SourceMarkdownEditor"));
 const GraphView = lazy(() => import("./GraphView").then(({ GraphView }) => ({ default: GraphView })));
 const TimeTrackingView = lazy(() => import("./TimeTrackingView"));
 
-function LastSyncLabel({ timestamp }: { timestamp: number }) {
+function LastSyncLabel({ timestamp }: { readonly timestamp: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -267,7 +267,7 @@ function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
   return metadata;
 }
 
-function CardStatusPicker({ value, onChange }: { value: CardStatus; onChange: (value: CardStatus) => void }) {
+function CardStatusPicker({ value, onChange }: { readonly value: CardStatus; readonly onChange: (value: CardStatus) => void }) {
   const details = useRef<HTMLDetailsElement>(null);
   const choose = (next: CardStatus) => {
     onChange(next);
@@ -281,7 +281,7 @@ function CardStatusPicker({ value, onChange }: { value: CardStatus; onChange: (v
   </details>;
 }
 
-function CardTagsEditor({ tags, suggestions, onChange }: { tags: string[]; suggestions: string[]; onChange: (tags: string[]) => void }) {
+function CardTagsEditor({ tags, suggestions, onChange }: { readonly tags: string[]; readonly suggestions: string[]; readonly onChange: (tags: string[]) => void }) {
   const details = useRef<HTMLDetailsElement>(null);
   const [draft, setDraft] = useState("");
   const add = (value = draft) => {
