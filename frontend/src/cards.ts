@@ -230,14 +230,42 @@ export function serializeTemplateDocument(template: CardTemplate): string {
   ].join("\n");
 }
 
-export type BoardMarker = { id: string; cardIDs: string[] };
+export const DEFAULT_BOARD_TITLE = "Kanban Board";
+export type BoardMarker = { id: string; title: string; cardIDs: string[] };
 
-export function boardMarker(boardID: string, cardIDs: readonly string[] = []): string {
-  return `<!-- cipherleaf-board:${boardID}:${cardIDs.join(",")} -->`;
+export function boardMarker(
+  boardID: string,
+  cardIDs: readonly string[] = [],
+  title = DEFAULT_BOARD_TITLE,
+): string {
+  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")} -->`;
 }
 
 export function parseBoardMarker(line: string): BoardMarker | null {
   const match = line.trim().match(/^<!--\s*cipherleaf-board:([^:\s]+):([^>]*)\s*-->$/);
   if (!match) return null;
-  return { id: match[1], cardIDs: match[2] ? match[2].split(",").map((id) => id.trim()).filter(Boolean) : [] };
+  const payload = match[2].trim();
+  const fields = payload.split(":");
+  const hasTitle = fields.length > 1;
+  const encodedTitle = hasTitle ? fields.shift() ?? "" : "";
+  let title = DEFAULT_BOARD_TITLE;
+  if (encodedTitle) {
+    try { title = decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { title = encodedTitle; }
+  }
+  const ids = (hasTitle ? fields.join(":") : payload);
+  return { id: match[1], title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
+}
+
+export function replaceBoardMarker(
+  markdown: string,
+  boardID: string,
+  update: (marker: BoardMarker) => BoardMarker,
+): string {
+  const escaped = boardID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const marker = new RegExp(`<!--\\s*cipherleaf-board:${escaped}:[^>]*-->`);
+  return markdown.replace(marker, (line) => {
+    const current = parseBoardMarker(line);
+    const next = current && update(current);
+    return next ? boardMarker(next.id, next.cardIDs, next.title) : line;
+  });
 }

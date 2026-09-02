@@ -37,7 +37,14 @@ test("template and board markers round-trip", () => {
     id: "tpl-1", name: "Bug", status: "blocked", tags: ["Ops"], body: "Steps",
   });
   assert.deepEqual(parseBoardMarker(boardMarker("board-1", ["card-1", "card-2"])), {
-    id: "board-1", cardIDs: ["card-1", "card-2"],
+    id: "board-1", title: "Kanban Board", cardIDs: ["card-1", "card-2"],
+  });
+  assert.equal(parseBoardMarker(boardMarker("board-1", [], "Roadmap"))?.title, "Roadmap");
+  assert.deepEqual(parseBoardMarker("<!-- cipherleaf-board:board-1:card-1,card-2 -->"), {
+    id: "board-1", title: "Kanban Board", cardIDs: ["card-1", "card-2"],
+  });
+  assert.deepEqual(parseBoardMarker("<!-- cipherleaf-board:board-1: -->"), {
+    id: "board-1", title: "Kanban Board", cardIDs: [],
   });
 });
 

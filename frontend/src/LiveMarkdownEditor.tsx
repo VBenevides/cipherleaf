@@ -72,7 +72,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -89,6 +89,7 @@ type LiveMarkdownEditorProps = {
   onCreateBoard?: () => Promise<string | null>;
   onMoveCard?: (id: string, status: CardStatus) => void;
   onAddCardToBoard?: (boardID: string) => void;
+  onChangeBoardTitle?: (boardID: string, title: string) => void;
   onDecreaseFontSize: () => void;
   onIncreaseFontSize: () => void;
   searchTarget?: SearchTarget | null;
@@ -1106,24 +1107,39 @@ class CardReferenceWidget extends WidgetType {
 class BoardWidget extends WidgetType {
   constructor(
     readonly boardID: string,
+    readonly title: string,
     readonly cardIDs: readonly string[],
     readonly cards: ReadonlyMap<string, CardMetadata>,
     readonly openCard: (id: string) => void,
     readonly moveCard: (id: string, status: CardStatus) => void,
     readonly addCard: (boardID: string) => void,
+    readonly changeTitle: (boardID: string, title: string) => void,
   ) { super(); }
 
   eq(other: BoardWidget) {
-    return other.boardID === this.boardID && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
+    return other.boardID === this.boardID && other.title === this.title && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
   }
 
   toDOM() {
     const board = document.createElement("section");
     board.className = "cm-live-board";
-    const title = board.appendChild(document.createElement("h3"));
+    const title = board.appendChild(document.createElement("input"));
     title.className = "cm-live-board-title";
-    title.textContent = "Kanban Board";
-    board.setAttribute("aria-label", title.textContent);
+    title.type = "text";
+    title.value = this.title || DEFAULT_BOARD_TITLE;
+    title.setAttribute("aria-label", "Board title");
+    const stopEditorEvent = (event: Event) => event.stopPropagation();
+    for (const eventName of ["mousedown", "click", "input", "change"])
+      title.addEventListener(eventName, stopEditorEvent);
+    title.addEventListener("change", () => this.changeTitle(this.boardID, title.value));
+    title.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        title.blur();
+      }
+    });
+    board.setAttribute("aria-label", title.value);
     const controls = board.appendChild(document.createElement("div"));
     controls.className = "cm-live-board-controls";
     const filter = controls.appendChild(document.createElement("input"));
@@ -1612,6 +1628,7 @@ function buildLivePreviewState(
   cards: ReadonlyMap<string, CardMetadata>,
   moveCard: (id: string, status: CardStatus) => void,
   addCard: (boardID: string) => void,
+  changeBoardTitle: (boardID: string, title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
@@ -1653,7 +1670,7 @@ function buildLivePreviewState(
         line.to,
         decorations,
         atomicRanges,
-        new BoardWidget(board.id, board.cardIDs, cards, openCard, moveCard, addCard),
+        new BoardWidget(board.id, board.title, board.cardIDs, cards, openCard, moveCard, addCard, changeBoardTitle),
       );
       lineNumber++;
       continue;
@@ -2064,6 +2081,7 @@ function livePreviewExtension(
   cards: ReadonlyMap<string, CardMetadata>,
   moveCard: (id: string, status: CardStatus) => void,
   addCard: (boardID: string) => void,
+  changeBoardTitle: (boardID: string, title: string) => void,
   noteID: string,
   onError: (reason: unknown) => void,
   highlightLineNumbers: ReadonlySet<number>,
@@ -2084,6 +2102,7 @@ function livePreviewExtension(
         cards,
         moveCard,
         addCard,
+        changeBoardTitle,
         noteID,
         onError,
         highlightLineNumbers,
@@ -2168,6 +2187,7 @@ function livePreviewExtension(
         cards,
         moveCard,
         addCard,
+        changeBoardTitle,
         noteID,
         onError,
         highlightLineNumbers,
@@ -2806,6 +2826,7 @@ export default function LiveMarkdownEditor({
   onCreateBoard,
   onMoveCard,
   onAddCardToBoard,
+  onChangeBoardTitle,
   onDecreaseFontSize,
   onIncreaseFontSize,
   searchTarget = null,
@@ -2831,6 +2852,7 @@ export default function LiveMarkdownEditor({
   const onCreateBoardRef = useRef(onCreateBoard);
   const onMoveCardRef = useRef(onMoveCard);
   const onAddCardToBoardRef = useRef(onAddCardToBoard);
+  const onChangeBoardTitleRef = useRef(onChangeBoardTitle);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
@@ -2876,11 +2898,12 @@ export default function LiveMarkdownEditor({
     onCreateBoardRef.current = onCreateBoard;
     onMoveCardRef.current = onMoveCard;
     onAddCardToBoardRef.current = onAddCardToBoard;
+    onChangeBoardTitleRef.current = onChangeBoardTitle;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
-  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -3053,6 +3076,9 @@ export default function LiveMarkdownEditor({
           EditorView.lineWrapping,
           EditorView.inputHandler.of((inputView, from, to, text) => {
             if (readOnly) return false;
+            const firstLine = inputView.state.doc.lineAt(from);
+            const lastLine = inputView.state.doc.lineAt(Math.max(from, to - 1));
+            if (parseBoardMarker(firstLine.text) || parseBoardMarker(lastLine.text)) return true;
             let changeFrom = from;
             let changeTo = to;
             let inserted = text;
@@ -3213,6 +3239,13 @@ export default function LiveMarkdownEditor({
             },
             paste(event, pastedView) {
               if (readOnly) return false;
+              const selection = pastedView.state.selection.main;
+              const firstLine = pastedView.state.doc.lineAt(selection.from);
+              const lastLine = pastedView.state.doc.lineAt(Math.max(selection.from, selection.to - 1));
+              if (parseBoardMarker(firstLine.text) || parseBoardMarker(lastLine.text)) {
+                event.preventDefault();
+                return true;
+              }
               const image = clipboardImage(event);
               if (!image && !clipboardMayContainImage(event)) {
                 const text = event.clipboardData?.getData("text/plain") ?? "";
@@ -3276,6 +3309,7 @@ export default function LiveMarkdownEditor({
             cardDataRef.current,
             (id, status) => onMoveCardRef.current?.(id, status),
             (boardID) => onAddCardToBoardRef.current?.(boardID),
+            (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
             noteID,
             (reason) => onErrorRef.current(reason),
             highlightLineNumbers,

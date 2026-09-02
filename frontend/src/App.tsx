@@ -54,11 +54,13 @@ import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 import {
   BOARD_COLUMNS,
   CARD_STATUS_LABELS,
+  boardMarker,
   newCardMetadata,
   cardReference,
   normalizeCardTags,
   parseCardDocument,
   parseCardReference,
+  replaceBoardMarker,
   parseTemplateDocument,
   serializeTemplateDocument,
   serializeCardDocument,
@@ -3279,7 +3281,7 @@ function App() {
     const id = typeof crypto?.randomUUID === "function"
       ? crypto.randomUUID()
       : `board-${Date.now().toString(36)}`;
-    return `<!-- cipherleaf-board:${id}: -->`;
+    return boardMarker(id);
   };
 
   const addCardToBoard = async (boardID: string) => {
@@ -3301,21 +3303,37 @@ function App() {
       const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
       setCardPanel({ note: saved.note, metadata, body: parsed.body });
-      const marker = new RegExp(`(<!--\\s*cipherleaf-board:${boardID.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}:)([^>]*)(-->)`);
       const source = markdownForEditing(current.content);
-      const content = source.replace(marker, (_match, prefix, ids, suffix) => {
-        const cardIDs = ids.trim() ? ids.split(",").map((value: string) => value.trim()).filter(Boolean) : [];
-        return `${prefix}${[...cardIDs, id].join(",")}${suffix}`;
-      });
+      const content = replaceBoardMarker(source, boardID, (board) => ({
+        ...board,
+        cardIDs: [...board.cardIDs, id],
+      }));
       if (content === source) {
         await VaultService.DeleteNote(id);
         return;
       }
-      editNote({ content });
+      editNote({ content }, true);
     } catch (reason) {
       if (createdID) await VaultService.DeleteNote(createdID).catch(() => {});
       setError(errorText(reason));
     }
+  };
+
+  const changeBoardTitle = (boardID: string, title: string) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => ({ ...board, title }));
+    if (content !== source) editNote({ content }, true);
+  };
+
+  const changeCardBoardTitle = (boardID: string, title: string) => {
+    setCardPanel((current) => {
+      if (!current) return current;
+      const source = markdownForEditing(current.body);
+      const content = replaceBoardMarker(source, boardID, (board) => ({ ...board, title }));
+      return content === source ? current : { ...current, body: content };
+    });
   };
 
   const saveCardPanel = async () => {
@@ -5016,6 +5034,7 @@ function App() {
                       onCreateBoard={createBoard}
                       onMoveCard={moveCard}
                       onAddCardToBoard={addCardToBoard}
+                      onChangeBoardTitle={changeBoardTitle}
                       onDecreaseFontSize={decreaseEditorFontSize}
                       onIncreaseFontSize={increaseEditorFontSize}
                       searchTarget={globalSearchTarget}
@@ -5149,6 +5168,7 @@ function App() {
                   onCreateBoard={createBoard}
                   onMoveCard={moveCard}
                   onAddCardToBoard={addCardToBoard}
+                  onChangeBoardTitle={changeCardBoardTitle}
                   onDecreaseFontSize={decreaseEditorFontSize}
                   onIncreaseFontSize={increaseEditorFontSize}
                   showToolbar={false}

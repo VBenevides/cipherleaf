@@ -143,7 +143,8 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /cm-live-board-line/);
   assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
   assert.doesNotMatch(liveEditor, /rule\.style\.left/);
-  assert.match(liveEditor, /cm-live-board-title[\s\S]*Kanban Board/);
+  assert.match(liveEditor, /cm-live-board-title[\s\S]*value = this\.title \|\| DEFAULT_BOARD_TITLE/);
+  assert.match(liveEditor, /onChangeBoardTitle/);
   assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 18px 0/);
