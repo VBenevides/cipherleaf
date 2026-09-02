@@ -11,6 +11,7 @@ import {
   parseTemplateDocument,
   serializeCardDocument,
   serializeTemplateDocument,
+  transitionCard,
 } from "../src/cards.ts";
 
 test("card metadata round-trips through frontmatter", () => {
@@ -41,4 +42,22 @@ test("template and board markers round-trip", () => {
 
 test("tags trim and deduplicate without losing first display casing", () => {
   assert.deepEqual(normalizeCardTags([" Work ", "work", "", "Ops"]), ["Work", "Ops"]);
+});
+
+test("lifecycle transitions retain first start and record latest block/finish", () => {
+  const initial = newCardMetadata("card-1", new Date("2026-01-01T00:00:00Z"));
+  const started = transitionCard(initial, "in-progress", new Date("2026-01-02T00:00:00Z"));
+  assert.equal(started.startedAt, "2026-01-02T00:00:00.000Z");
+  const blocked = transitionCard(started, "blocked", new Date("2026-01-03T00:00:00Z"));
+  assert.equal(blocked.startedAt, started.startedAt);
+  assert.equal(blocked.blockedOn, "2026-01-03T00:00:00.000Z");
+  const finished = transitionCard(blocked, "finished", new Date("2026-01-04T00:00:00Z"));
+  assert.equal(finished.finishedAt, "2026-01-04T00:00:00.000Z");
+  const reblocked = transitionCard(finished, "blocked", new Date("2026-01-05T00:00:00Z"));
+  assert.equal(reblocked.blockedOn, "2026-01-05T00:00:00.000Z");
+  assert.equal(transitionCard(reblocked, "blocked"), reblocked);
+});
+
+test("lifecycle rejects invalid runtime statuses", () => {
+  assert.throws(() => transitionCard(newCardMetadata("card-1"), "unknown" as never), /Unsupported card status/);
 });

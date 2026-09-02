@@ -115,6 +115,17 @@ export function newCardMetadata(id: string, now = new Date()): CardMetadata {
   };
 }
 
+export function transitionCard(metadata: CardMetadata, nextStatus: CardStatus, now = new Date()): CardMetadata {
+  if (!validStatus(nextStatus)) throw new Error(`Unsupported card status: ${nextStatus}`);
+  if (metadata.status === nextStatus) return metadata;
+  const timestamp = now.toISOString();
+  const next: CardMetadata = { ...metadata, status: nextStatus, columnEnteredAt: timestamp };
+  if (nextStatus !== "not-started" && !next.startedAt) next.startedAt = timestamp;
+  if (nextStatus === "blocked") next.blockedOn = timestamp;
+  if (nextStatus === "finished") next.finishedAt = timestamp;
+  return next;
+}
+
 export function parseCardDocument(markdown: string, id: string, title: string): CardDocument | null {
   const frontmatter = readFrontmatter(markdown);
   if (!frontmatter || frontmatter.values.get(CARD_KEYS.marker) !== "true") return null;
