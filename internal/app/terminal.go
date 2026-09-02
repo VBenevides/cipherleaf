@@ -9,10 +9,10 @@ import (
 
 func openTerminal(directory string) error {
 	if runtime.GOOS == "darwin" {
-		return startTerminal(exec.Command("open", "-a", "Terminal", directory))
+		return startTerminal(exec.Command("/usr/bin/open", "-a", "Terminal", directory))
 	}
 	if runtime.GOOS == "windows" {
-		command := exec.Command("cmd.exe", "/K")
+		command := exec.Command(`C:\Windows\System32\cmd.exe`, "/K")
 		command.Dir = directory
 		return startTerminal(command)
 	}
