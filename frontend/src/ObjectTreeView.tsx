@@ -20,19 +20,15 @@ const editableObjectTypes: Array<{ value: EditableObjectTag; label: string }> = 
 ];
 
 function objectTypeLabel(tag: ObjectLine["tag"]): string {
-  return tag === "bulletpoint"
-    ? "Bullet"
-    : tag === "checkbox"
-      ? "Checklist"
-      : tag === "section"
-        ? "Section"
-        : tag === "code"
-          ? "Code block"
-          : tag === "image"
-            ? "Image"
-            : tag === "attachment"
-              ? "Attachment"
-              : "Text";
+  switch (tag) {
+    case "bulletpoint": return "Bullet";
+    case "checkbox": return "Checklist";
+    case "section": return "Section";
+    case "code": return "Code block";
+    case "image": return "Image";
+    case "attachment": return "Attachment";
+    default: return "Text";
+  }
 }
 
 function editableTypeFor(node: ObjectLine): EditableObjectTag | null {
@@ -61,13 +57,10 @@ function renderObjectBlock(node: ObjectLine, type: EditableObjectTag, text: stri
   }
 
   const sectionCheckmark = node.checked === undefined ? "" : `[${node.checked ? "x" : " "}] `;
-  const marker = type === "section"
-    ? `> ${sectionCheckmark}`
-    : type === "checkbox"
-      ? `- [${node.checked ? "x" : " "}] `
-      : type === "bulletpoint"
-        ? "- "
-        : "";
+  let marker = "";
+  if (type === "section") marker = `> ${sectionCheckmark}`;
+  else if (type === "checkbox") marker = `- [${node.checked ? "x" : " "}] `;
+  else if (type === "bulletpoint") marker = "- ";
   return [
     `${indent}${marker}${lines[0] ?? ""}`,
     ...lines.slice(1).map((line) => line ? `${continuationIndent}${line}` : ""),
