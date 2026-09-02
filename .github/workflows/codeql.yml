@@ -42,7 +42,7 @@ jobs:
 
       - name: Install frontend dependencies
         if: matrix.language == 'go'
-        run: npm ci --prefix frontend
+        run: npm ci --ignore-scripts --prefix frontend
 
       - name: Build frontend
         if: matrix.language == 'go'
