@@ -3677,15 +3677,13 @@ export async function imageDataURL(source: Blob | string): Promise<string> {
 export function clipboardImage(event: ClipboardEvent): Blob | string | null {
   const clipboard = event.clipboardData;
   if (!clipboard) return null;
-  for (let index = 0; index < clipboard.items.length; index++) {
-    const item = clipboard.items[index];
+  for (const item of clipboard.items) {
     if (item.kind === "file" && item.type.startsWith("image/")) {
       const file = item.getAsFile();
       if (file) return file;
     }
   }
-  for (let index = 0; index < clipboard.files.length; index++) {
-    const file = clipboard.files[index];
+  for (const file of clipboard.files) {
     if (file.type.startsWith("image/")) return file;
   }
   const encoded = `${clipboard.getData("text/html")}\n${clipboard.getData("text/plain")}`;
@@ -3695,11 +3693,10 @@ export function clipboardImage(event: ClipboardEvent): Blob | string | null {
 export function clipboardClaimsImage(event: ClipboardEvent): boolean {
   const clipboard = event.clipboardData;
   if (!clipboard) return false;
-  for (let index = 0; index < clipboard.items.length; index++) {
-    if (clipboard.items[index].type.startsWith("image/")) return true;
+  for (const item of clipboard.items) {
+    if (item.type.startsWith("image/")) return true;
   }
-  for (let index = 0; index < clipboard.types.length; index++) {
-    const type = clipboard.types[index];
+  for (const type of clipboard.types) {
     if (type.startsWith("image/") || type === "Files") return true;
   }
   return /^(?:\/?(?:PNG|JPE?G)|image\/(?:png|jpe?g))$/i.test(
