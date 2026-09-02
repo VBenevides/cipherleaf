@@ -152,7 +152,7 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 18px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(style, /\.cm-journal-rule \{[\s\S]*left: var\(--editor-content-left\)[\s\S]*right: var\(--editor-content-right\)/);
-  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*width: 100% !important[\s\S]*max-width: none[\s\S]*padding: 0 !important/);
+  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*position: relative[\s\S]*width: 100% !important[\s\S]*max-width: none[\s\S]*padding: 0 !important/);
   assert.match(style, /\.cm-selectionLayer \{[\s\S]*clip-path: inset\(0 var\(--editor-content-right\) 0 var\(--editor-content-left\)\)/);
 });
 

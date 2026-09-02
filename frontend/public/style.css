@@ -4026,6 +4026,7 @@ a:focus-visible {
 .cm-live-board-title:focus { outline: 1px solid var(--accent); outline-offset: 2px; }
 
 .live-markdown-editor .cm-line.cm-live-board-line {
+  position: relative;
   width: 100% !important;
   max-width: none;
   padding: 0 !important;
