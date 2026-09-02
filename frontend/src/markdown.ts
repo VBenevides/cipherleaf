@@ -39,14 +39,17 @@ export function normalizeArrowText(text: string): string {
 }
 
 export function markdownCitations(text: string) {
-  return [...text.matchAll(/(?<!!)\[([^\]\n]+)\]\(([^)\s]+)\)/gi)]
-    .filter((match) => isMarkdownLinkTarget(match[2]))
-    .map((match) => ({
-      label: match[1],
-      url: match[2],
-      index: match.index,
-      length: match[0].length,
-    }));
+  return [...text.matchAll(/(?<!\!)\[[^\]\n]*\]\([^\)\n]*\)/gi)]
+    .map((match) => {
+      const separator = match[0].indexOf("](");
+      return {
+        label: match[0].slice(1, separator),
+        url: match[0].slice(separator + 2, -1),
+        index: match.index,
+        length: match[0].length,
+      };
+    })
+    .filter((match) => match.label && isMarkdownLinkTarget(match.url));
 }
 
 export function markdownCitation(label: string, url: string): string | null {
