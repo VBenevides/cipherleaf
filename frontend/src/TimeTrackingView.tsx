@@ -125,6 +125,93 @@ function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals:
   });
 }
 
+type WeekViewProps = {
+  readonly now: Date;
+  readonly busy: boolean;
+  readonly activeEntry: TimeEntry | null;
+  readonly name: string;
+  readonly clients: TimeClient[];
+  readonly clientID: string;
+  readonly taskProjects: TimeProject[];
+  readonly projectID: string;
+  readonly tags: TimeTag[];
+  readonly tagIDs: string[];
+  readonly weekDates: Date[];
+  readonly weekDays: CalendarDay[];
+  readonly selectedWeekDay: string;
+  readonly selectedWeekDate: CalendarDay | undefined;
+  readonly selectedWeekEntries: TimeEntryRangeItem[];
+  readonly todayKey: string;
+  readonly onStart: () => void;
+  readonly onNameChange: (value: string) => void;
+  readonly onClientChange: (value: string) => void;
+  readonly onProjectChange: (value: string) => void;
+  readonly onTagChange: (value: string[]) => void;
+  readonly onNavigate: (days: number) => void;
+  readonly onWeekDayChange: (value: string) => void;
+  readonly onResume: (entry: TimeEntry) => void;
+  readonly onBeginEdit: (entry: TimeEntry) => void;
+  readonly onDeleteRequest: (entry: TimeEntry) => void;
+};
+
+function WeekView({
+  now,
+  busy,
+  activeEntry,
+  name,
+  clients,
+  clientID,
+  taskProjects,
+  projectID,
+  tags,
+  tagIDs,
+  weekDates,
+  weekDays,
+  selectedWeekDay,
+  selectedWeekDate,
+  selectedWeekEntries,
+  todayKey,
+  onStart,
+  onNameChange,
+  onClientChange,
+  onProjectChange,
+  onTagChange,
+  onNavigate,
+  onWeekDayChange,
+  onResume,
+  onBeginEdit,
+  onDeleteRequest,
+}: WeekViewProps) {
+  return <>
+    <form className="time-entry-form" onSubmit={(event) => { event.preventDefault(); onStart(); }}>
+      <input aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => onNameChange(event.target.value)} disabled={!!activeEntry || busy} />
+      <ClientSelect clients={clients} selected={clientID} onChange={onClientChange} disabled={!!activeEntry || busy} />
+      <ProjectSelect projects={taskProjects} selected={projectID} onChange={onProjectChange} disabled={!!activeEntry || busy} />
+      <TagMultiSelect tags={tags} selected={tagIDs} onChange={onTagChange} disabled={!!activeEntry || busy} />
+      <button type="submit" className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
+    </form>
+    <div className="time-calendar-navigation">
+      <button className="secondary-button" onClick={() => onNavigate(-7)}>Previous</button>
+      <strong>{formatLocalDate(weekDates[0])} – {formatLocalDate(weekDates[6])}</strong>
+      <button className="secondary-button" onClick={() => onNavigate(0)}>Current week</button>
+      <button className="secondary-button" onClick={() => onNavigate(7)}>Next</button>
+    </div>
+    <div className="time-week-grid">
+      {weekDays.map(({ date: day, end, items, key, start, total }) => {
+        return <button type="button" key={key} aria-pressed={selectedWeekDay === key} className={`${key === todayKey ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => onWeekDayChange(key)}><header><strong>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), end) - Math.max(new Date(item.entry.startedAtUtc).getTime(), start)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></button>;
+      })}
+    </div>
+    <div className="time-entry-list">
+      <h3>{selectedWeekDate && formatLocalDate(selectedWeekDate.date)}</h3>
+      {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
+        <div><strong>{entry.name}</strong><span>{formatLocalDateTime(new Date(entry.startedAtUtc))} – {formatLocalDateTime(new Date(entry.endedAtUtc!))} · <strong>{formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</strong></span></div>
+        <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => void onResume(entry)}>Resume</button><button className="secondary-button" onClick={() => onBeginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => onDeleteRequest(entry)}>Delete</button></div>
+      </article>)}
+      {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
+    </div>
+  </>;
+}
+
 export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrackingViewProps) {
   const [tab, setTab] = useState<TimeTrackingTab>("week");
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
@@ -379,35 +466,34 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
   };
 
   const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
-    week: () => <>
-
-            <form className="time-entry-form" onSubmit={(event) => { event.preventDefault(); void startEntry(); }}>
-              <input aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => setName(event.target.value)} disabled={!!activeEntry || busy} />
-              <ClientSelect clients={clients} selected={clientID} onChange={(id) => { setClientID(id); if (projectID && projects.find((project) => project.id === projectID)?.clientId !== id) setProjectID(""); }} disabled={!!activeEntry || busy} />
-              <ProjectSelect projects={taskProjects} selected={projectID} onChange={(id) => { setProjectID(id); if (!clientID) setClientID(projects.find((project) => project.id === id)?.clientId ?? ""); }} disabled={!!activeEntry || busy} />
-              <TagMultiSelect tags={tags} selected={tagIDs} onChange={setTagIDs} disabled={!!activeEntry || busy} />
-              <button type="submit" className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
-            </form>
-            <div className="time-calendar-navigation">
-              <button className="secondary-button" onClick={() => navigateWeek(-7)}>Previous</button>
-              <strong>{formatLocalDate(weekDates[0])} – {formatLocalDate(weekDates[6])}</strong>
-              <button className="secondary-button" onClick={() => navigateWeek(0)}>Current week</button>
-              <button className="secondary-button" onClick={() => navigateWeek(7)}>Next</button>
-            </div>
-            <div className="time-week-grid">
-              {weekDays.map(({ date: day, end, items, key, start, total }) => {
-                return <button type="button" key={key} aria-pressed={selectedWeekDay === key} className={`${key === todayKey ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => setSelectedWeekDay(key)}><header><strong>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), end) - Math.max(new Date(item.entry.startedAtUtc).getTime(), start)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></button>;
-              })}
-            </div>
-            <div className="time-entry-list">
-              <h3>{selectedWeekDate && formatLocalDate(selectedWeekDate.date)}</h3>
-              {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
-                <div><strong>{entry.name}</strong><span>{formatLocalDateTime(new Date(entry.startedAtUtc))} – {formatLocalDateTime(new Date(entry.endedAtUtc!))} · <strong>{formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</strong></span></div>
-                <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => void resumeEntry(entry)}>Resume</button><button className="secondary-button" onClick={() => beginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => { setDeleting(entry); setConfirmAction("delete"); }}>Delete</button></div>
-              </article>)}
-              {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
-            </div>
-    </>,
+    week: () => <WeekView
+      now={now}
+      busy={busy}
+      activeEntry={activeEntry}
+      name={name}
+      clients={clients}
+      clientID={clientID}
+      taskProjects={taskProjects}
+      projectID={projectID}
+      tags={tags}
+      tagIDs={tagIDs}
+      weekDates={weekDates}
+      weekDays={weekDays}
+      selectedWeekDay={selectedWeekDay}
+      selectedWeekDate={selectedWeekDate}
+      selectedWeekEntries={selectedWeekEntries}
+      todayKey={todayKey}
+      onStart={startEntry}
+      onNameChange={setName}
+      onClientChange={(id) => { setClientID(id); if (projectID && projects.find((project) => project.id === projectID)?.clientId !== id) setProjectID(""); }}
+      onProjectChange={(id) => { setProjectID(id); if (!clientID) setClientID(projects.find((project) => project.id === id)?.clientId ?? ""); }}
+      onTagChange={setTagIDs}
+      onNavigate={navigateWeek}
+      onWeekDayChange={setSelectedWeekDay}
+      onResume={resumeEntry}
+      onBeginEdit={beginEdit}
+      onDeleteRequest={(entry) => { setDeleting(entry); setConfirmAction("delete"); }}
+    />,
     month: () => <>
 
             <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
