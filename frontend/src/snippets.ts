@@ -37,8 +37,11 @@ function uuidV4(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
+  if (typeof crypto === "undefined") {
+    throw new Error("Secure random UUID generation is unavailable");
+  }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
-    const random = (Math.random() * 16) | 0;
+    const random = (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 * 16) | 0;
     const value = char === "x" ? random : (random & 0x3) | 0x8;
     return value.toString(16);
   });
