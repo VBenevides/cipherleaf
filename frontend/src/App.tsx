@@ -559,6 +559,18 @@ function formatStorageSize(bytes: number): string {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
 }
 
+function VaultStatisticsGrid({ statistics }: { readonly statistics: VaultStatistics | null }) {
+  const items = [
+    ["Notes", statistics?.notesBytes],
+    ["Attachments", statistics?.attachmentsBytes],
+    ["Time Tracking", statistics?.timeTrackingBytes],
+    ["Git metadata (.git)", statistics?.gitBytes],
+  ] as const;
+  return <div className="vault-statistics">
+    {items.map(([label, bytes]) => <div key={label}><span>{label}</span><strong>{bytes === undefined ? "—" : formatStorageSize(bytes)}</strong></div>)}
+  </div>;
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -5717,12 +5729,7 @@ function App() {
             <div className="modal-icon"><Icon name="lock" size={21} /></div>
             <p className="eyebrow">Vault settings</p>
             <h2>Vault Statistics</h2>
-            <div className="vault-statistics">
-              <div><span>Notes</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.notesBytes) : "—"}</strong></div>
-              <div><span>Attachments</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.attachmentsBytes) : "—"}</strong></div>
-              <div><span>Time Tracking</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.timeTrackingBytes) : "—"}</strong></div>
-              <div><span>Git metadata (.git)</span><strong>{vaultStatistics ? formatStorageSize(vaultStatistics.gitBytes) : "—"}</strong></div>
-            </div>
+            <VaultStatisticsGrid statistics={vaultStatistics} />
             <h2>File history</h2>
             <label>
               Versions kept per file
