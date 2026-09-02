@@ -2614,6 +2614,7 @@ a:focus-visible {
   height: .45em;
   box-sizing: border-box;
   content: "";
+  vertical-align: middle;
   border-right: .12em solid;
   border-bottom: .12em solid;
   transform: rotate(-45deg);

@@ -114,6 +114,7 @@ test("note titles can be collapsed and restored", () => {
   assert.match(style, /\.document-heading-toolbar > \.view-tabs/);
   assert.match(style, /\.document-heading-toolbar \{[\s\S]*margin-top: 8px/);
   assert.match(style, /:root\[data-theme="archivist"\] \.document-heading-toolbar > \.view-tabs/);
+  assert.match(style, /\.disclosure-chevron::before,[\s\S]*width: \.45em[\s\S]*height: \.45em[\s\S]*vertical-align: middle/);
 });
 
 test("editor chrome stays compact", () => {
