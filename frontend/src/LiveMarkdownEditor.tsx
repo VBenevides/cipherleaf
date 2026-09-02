@@ -277,6 +277,60 @@ const caretLocatorField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+type JournalRow = { top: number; bottom: number };
+
+function journalRowsForLine(line: HTMLElement): JournalRow[] {
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  const rects: DOMRect[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent?.trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    rects.push(...range.getClientRects());
+  }
+  rects.sort((left, right) => left.top - right.top);
+  const rows: JournalRow[] = [];
+  for (const rect of rects) {
+    const row = rows[rows.length - 1];
+    if (row && rect.top < row.bottom && rect.bottom > row.top) {
+      row.top = Math.min(row.top, rect.top);
+      row.bottom = Math.max(row.bottom, rect.bottom);
+    } else {
+      rows.push({ top: rect.top, bottom: rect.bottom });
+    }
+  }
+  if (rows.length > 0) return rows;
+  const lineRect = line.getBoundingClientRect();
+  return [{ top: lineRect.top, bottom: lineRect.bottom }];
+}
+
+function journalRulePositions(editor: EditorView, scroller: HTMLElement): number[] {
+  const scrollerRect = scroller.getBoundingClientRect();
+  const positions: number[] = [];
+  for (const line of editor.dom.querySelectorAll<HTMLElement>(
+    ".cm-line:not(.cm-live-attachment-line):not(.cm-live-code-block):not(.cm-live-board-line)",
+  )) {
+    const lineRect = line.getBoundingClientRect();
+    if (lineRect.bottom < scrollerRect.top || lineRect.top > scrollerRect.bottom) continue;
+    for (const row of journalRowsForLine(line)) {
+      positions.push(row.bottom - scrollerRect.top + scroller.scrollTop);
+    }
+  }
+  return positions;
+}
+
+function renderJournalRules(layer: HTMLElement, positions: number[]) {
+  const fragment = document.createDocumentFragment();
+  for (const position of positions) {
+    const rule = document.createElement("span");
+    rule.className = "cm-journal-rule";
+    rule.style.top = position + "px";
+    fragment.appendChild(rule);
+  }
+  layer.replaceChildren(fragment);
+}
+
 function installJournalRules(editor: EditorView) {
   const scroller = editor.scrollDOM;
   const layer = document.createElement("div");
@@ -291,54 +345,7 @@ function installJournalRules(editor: EditorView) {
   const render = () => {
     frame = 0;
     if (!enabled()) return;
-
-    const scrollerRect = scroller.getBoundingClientRect();
-    const positions: { top: number }[] = [];
-    for (const line of editor.dom.querySelectorAll<HTMLElement>(
-      ".cm-line:not(.cm-live-attachment-line):not(.cm-live-code-block):not(.cm-live-board-line)",
-    )) {
-      const lineRect = line.getBoundingClientRect();
-      if (lineRect.bottom < scrollerRect.top || lineRect.top > scrollerRect.bottom) continue;
-
-      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
-      const rects: DOMRect[] = [];
-      let node: Node | null;
-      while ((node = walker.nextNode())) {
-        if (!node.textContent?.trim()) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        rects.push(...range.getClientRects());
-      }
-      rects.sort((left, right) => left.top - right.top);
-      const rows: { top: number; bottom: number }[] = [];
-      for (const rect of rects) {
-        const row = rows[rows.length - 1];
-        if (row) {
-          if (rect.top < row.bottom && rect.bottom > row.top) {
-            row.top = Math.min(row.top, rect.top);
-            row.bottom = Math.max(row.bottom, rect.bottom);
-            continue;
-          }
-        }
-        rows.push({ top: rect.top, bottom: rect.bottom });
-      }
-      if (rows.length === 0) rows.push({ top: lineRect.top, bottom: lineRect.bottom });
-
-      for (const row of rows) {
-        positions.push({
-          top: row.bottom - scrollerRect.top + scroller.scrollTop,
-        });
-      }
-    }
-
-    const fragment = document.createDocumentFragment();
-    for (const position of positions) {
-      const rule = document.createElement("span");
-      rule.className = "cm-journal-rule";
-      rule.style.top = `${position.top}px`;
-      fragment.appendChild(rule);
-    }
-    layer.replaceChildren(fragment);
+    renderJournalRules(layer, journalRulePositions(editor, scroller));
   };
 
   const schedule = () => {
@@ -516,11 +523,14 @@ class TaskWidget extends WidgetType {
     checkbox.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      let insert = "x";
+      if (this.checked) insert = " ";
+      else if (this.empty) insert = "x]";
       view.dispatch({
         changes: {
           from: this.checkPosition,
           to: this.checkPosition + 1,
-          insert: this.checked ? " " : this.empty ? "x]" : "x",
+          insert,
         },
       });
       view.focus();
@@ -636,23 +646,15 @@ class QuoteToggleWidget extends WidgetType {
       this.empty ? "is-empty" : "",
     ].filter(Boolean).join(" ");
 
-    button.setAttribute(
-      "aria-label",
-      this.empty
-        ? "Bullet point"
-        : this.collapsed
-          ? "Expand section"
-          : "Collapse section",
-    );
+    let label = "Collapse section";
+    if (this.empty) label = "Bullet point";
+    else if (this.collapsed) label = "Expand section";
+    button.setAttribute("aria-label", label);
 
     if (!this.empty) {
       button.setAttribute("aria-expanded", String(!this.collapsed));
     }
-    button.title = this.empty
-      ? "Bullet point"
-      : this.collapsed
-        ? "Expand section"
-        : "Collapse section";
+    button.title = label;
 
     button.textContent = this.empty ? "•" : "";
 
@@ -870,11 +872,7 @@ class AttachmentWidget extends WidgetType {
       menu.className = "cm-live-attachment-menu";
       menu.style.left = `${event.clientX}px`;
       menu.style.top = `${event.clientY}px`;
-      const close = (closeEvent?: PointerEvent) => {
-        if (closeEvent && menu.contains(closeEvent.target as Node)) return;
-        menu.remove();
-        document.removeEventListener("pointerdown", close);
-      };
+      const close = createMenuCloser(menu);
       const copy = menu.appendChild(document.createElement("button"));
       copy.type = "button";
       copy.textContent = "Copy as image";
@@ -885,11 +883,7 @@ class AttachmentWidget extends WidgetType {
       for (const align of ["left", "center", "right"] as const) {
         const alignButton = menu.appendChild(document.createElement("button"));
         alignButton.type = "button";
-        alignButton.textContent = align === "left"
-          ? "Align left"
-          : align === "center"
-            ? "Align center"
-            : "Align right";
+        alignButton.textContent = alignmentLabel(align);
         alignButton.disabled = align === this.align;
         alignButton.addEventListener("click", () => {
           close();
@@ -994,11 +988,7 @@ class CitationWidget extends WidgetType {
       menu.setAttribute("role", "menu");
       menu.style.left = `${event.clientX}px`;
       menu.style.top = `${event.clientY}px`;
-      const close = (closeEvent?: PointerEvent) => {
-        if (closeEvent && menu.contains(closeEvent.target as Node)) return;
-        menu.remove();
-        document.removeEventListener("pointerdown", close);
-      };
+      const close = createMenuCloser(menu);
       for (const [label, action] of [
         ["Open link", () => Browser.OpenURL(this.url)],
         ["Copy link", () => Clipboard.SetText(this.url)],
@@ -1106,6 +1096,21 @@ class CardReferenceWidget extends WidgetType {
 
 const boardCardMime = "application/x-cipherleaf-board-card";
 
+function boardCardDate(card: CardMetadata, status: CardStatus): string | undefined {
+  switch (status) {
+    case "not-started": return card.createdAt;
+    case "in-progress": return card.startedAt;
+    case "blocked": return card.blockedOn;
+    case "finished": return card.finishedAt;
+  }
+}
+
+function alignmentLabel(align: "left" | "center" | "right"): string {
+  if (align === "left") return "Align left";
+  if (align === "center") return "Align center";
+  return "Align right";
+}
+
 class BoardWidget extends WidgetType {
   constructor(
     readonly boardID: string,
@@ -1120,6 +1125,57 @@ class BoardWidget extends WidgetType {
 
   eq(other: BoardWidget) {
     return other.boardID === this.boardID && other.title === this.title && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
+  }
+
+  private renderColumn(columns: HTMLElement, status: CardStatus, titleQuery: string, requiredTags: string[]) {
+    const column = columns.appendChild(document.createElement("div"));
+    column.className = `cm-live-board-column status-${status}`;
+    column.dataset.status = status;
+    column.setAttribute("role", "group");
+    column.setAttribute("aria-label", BOARD_COLUMN_LABELS[status]);
+    column.addEventListener("dragover", (event) => event.preventDefault());
+    column.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = event.dataTransfer?.getData("text/plain");
+      if (id) this.moveCard(id, status);
+    });
+    const heading = column.appendChild(document.createElement("h4"));
+    heading.textContent = BOARD_COLUMN_LABELS[status];
+    const cards = boardCardsForColumn(this.cards, this.cardIDs, status, titleQuery, requiredTags);
+    if (cards.length === 0) {
+      const empty = column.appendChild(document.createElement("p"));
+      empty.className = "cm-live-board-empty";
+      empty.textContent = "No cards";
+    }
+    for (const card of cards) {
+      const item = column.appendChild(document.createElement("button"));
+      item.type = "button";
+      item.className = "cm-live-board-card";
+      item.draggable = true;
+      item.textContent = card.title || "Untitled";
+      item.title = `Open card “${card.title || "Untitled"}”`;
+      item.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", card.id);
+        event.dataTransfer?.setData(boardCardMime, card.id);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      });
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.openCard(card.id);
+      });
+      item.setAttribute("aria-label", `${card.title || "Untitled"}, ${BOARD_COLUMN_LABELS[status]}`);
+      item.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        const index = BOARD_COLUMNS.indexOf(status);
+        const nextIndex = index + (event.key === "ArrowRight" ? 1 : -1);
+        if (nextIndex < 0 || nextIndex >= BOARD_COLUMNS.length) return;
+        event.preventDefault();
+        this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
+      });
+      const date = boardCardDate(card, status);
+      if (date) item.append(` · ${new Date(date).toLocaleDateString()}`);
+    }
   }
 
   toDOM() {
@@ -1176,59 +1232,7 @@ class BoardWidget extends WidgetType {
       columns.replaceChildren();
       const titleQuery = filter.value.trim().toLocaleLowerCase();
       const requiredTags = tagFilter.value.split(",");
-      for (const status of BOARD_COLUMNS) {
-        const column = columns.appendChild(document.createElement("div"));
-        column.className = `cm-live-board-column status-${status}`;
-        column.dataset.status = status;
-        column.setAttribute("role", "group");
-        column.setAttribute("aria-label", BOARD_COLUMN_LABELS[status]);
-        column.addEventListener("dragover", (event) => event.preventDefault());
-        column.addEventListener("drop", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const id = event.dataTransfer?.getData("text/plain");
-          if (id) this.moveCard(id, status);
-        });
-        const heading = column.appendChild(document.createElement("h4"));
-        heading.textContent = BOARD_COLUMN_LABELS[status];
-        const cards = boardCardsForColumn(this.cards, this.cardIDs, status, titleQuery, requiredTags);
-        if (cards.length === 0) {
-          const empty = column.appendChild(document.createElement("p"));
-          empty.className = "cm-live-board-empty";
-          empty.textContent = "No cards";
-        }
-        for (const card of cards) {
-          const item = column.appendChild(document.createElement("button"));
-          item.type = "button";
-          item.className = "cm-live-board-card";
-          item.draggable = true;
-          item.textContent = card.title || "Untitled";
-          item.title = `Open card “${card.title || "Untitled"}”`;
-          item.addEventListener("dragstart", (event) => {
-            event.dataTransfer?.setData("text/plain", card.id);
-            event.dataTransfer?.setData(boardCardMime, card.id);
-            if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-          });
-          item.addEventListener("click", (event) => {
-            event.stopPropagation();
-            this.openCard(card.id);
-          });
-          item.setAttribute("aria-label", `${card.title || "Untitled"}, ${BOARD_COLUMN_LABELS[status]}`);
-          item.addEventListener("keydown", (event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-            const index = BOARD_COLUMNS.indexOf(status);
-            const nextIndex = index + (event.key === "ArrowRight" ? 1 : -1);
-            if (nextIndex < 0 || nextIndex >= BOARD_COLUMNS.length) return;
-            event.preventDefault();
-            this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
-          });
-          const date = status === "not-started" ? card.createdAt
-            : status === "in-progress" ? card.startedAt
-              : status === "blocked" ? card.blockedOn
-                : card.finishedAt;
-          if (date) item.append(` · ${new Date(date).toLocaleDateString()}`);
-        }
-      }
+      for (const status of BOARD_COLUMNS) this.renderColumn(columns, status, titleQuery, requiredTags);
     };
     filter.addEventListener("input", render);
     tagFilter.addEventListener("input", render);
@@ -1288,84 +1292,80 @@ function hideSyntaxRange(
   addHiddenRange(from, to, decorations, atomicRanges);
 }
 
-function decorateInlineMarkdown(
-  text: string,
-  offset: number,
-  decorations: Range<Decoration>[],
-  atomicRanges: Range<Decoration>[],
-  openWikilink: (title: string) => void,
-  openCard: (id: string) => void,
-  cardTitle: (id: string) => string | null,
-  onError: (reason: unknown) => void,
+function createMenuCloser(menu: HTMLElement) {
+  const close = (event?: PointerEvent) => {
+    if (event && menu.contains(event.target as Node)) return;
+    menu.remove();
+    document.removeEventListener("pointerdown", close);
+  };
+  return close;
+}
+
+type InlineMarkdownContext = {
+  text: string;
+  offset: number;
+  decorations: Range<Decoration>[];
+  atomicRanges: Range<Decoration>[];
+  openWikilink: (title: string) => void;
+  openCard: (id: string) => void;
+  cardTitle: (id: string) => string | null;
+  onError: (reason: unknown) => void;
+};
+
+const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
+const italic = /(?<![\p{L}\p{N}_])_(?=\S)([^\s_]+)_(?![\p{L}\p{N}_])/gu;
+const asteriskItalic = /(?<![\p{L}\p{N}*])\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/gu;
+
+function decorateDelimitedMarkdown(
+  context: InlineMarkdownContext,
+  pattern: RegExp,
+  className: string,
+  markerSize: number,
 ) {
-  const bold = /(\*\*|__)(?=\S)(.+?\S)\1/g;
-  for (const match of text.matchAll(bold)) {
+  const { text, offset, decorations, atomicRanges } = context;
+  for (const match of text.matchAll(pattern)) {
     if (match.index === undefined) continue;
     const start = offset + match.index;
-    const markerSize = match[1].length;
     const end = start + match[0].length;
     decorations.push(
-      Decoration.mark({ class: "cm-live-strong" }).range(start + markerSize, end - markerSize),
+      Decoration.mark({ class: className }).range(start + markerSize, end - markerSize),
     );
     hideSyntaxRange(start, start + markerSize, decorations, atomicRanges);
     hideSyntaxRange(end - markerSize, end, decorations, atomicRanges);
   }
+}
 
-  const italic = /(?<![\p{L}\p{N}_])_(?=\S)([^\s_]+)_(?![\p{L}\p{N}_])/gu;
-  for (const match of text.matchAll(italic)) {
+function decorateInlineMarkdown(context: InlineMarkdownContext) {
+  const { text, offset, decorations, atomicRanges, openWikilink, openCard, cardTitle, onError } = context;
+  decorateDelimitedMarkdown(context, bold, "cm-live-strong", 2);
+  decorateDelimitedMarkdown(
+    context,
+    italic,
+    "cm-live-em",
+    1,
+  );
+  decorateDelimitedMarkdown(
+    context,
+    asteriskItalic,
+    "cm-live-em",
+    1,
+  );
+  decorateDelimitedMarkdown(context, /\x60([^\x60\n]+)\x60/g, "cm-live-code", 1);
+  decorateDelimitedMarkdown(context, /~~(?=\S)(.+?\S)~~/g, "cm-live-strike", 2);
+
+  for (const match of text.matchAll(/\[\[([^\]\n]+)\]\]/g)) {
     if (match.index === undefined) continue;
     const start = offset + match.index;
-    const end = start + match[0].length;
-    decorations.push(Decoration.mark({ class: "cm-live-em" }).range(start + 1, end - 1));
-    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
-    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
-  }
-
-  const asteriskItalic = /(?<![\p{L}\p{N}*])\*(?!\*)(?=\S)(.+?\S)\*(?![\p{L}\p{N}*])/gu;
-  for (const match of text.matchAll(asteriskItalic)) {
-    if (match.index === undefined) continue;
-    const start = offset + match.index;
-    const end = start + match[0].length;
-    decorations.push(Decoration.mark({ class: "cm-live-em" }).range(start + 1, end - 1));
-    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
-    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
-  }
-
-  const inlineCode = /`([^`\n]+)`/g;
-  for (const match of text.matchAll(inlineCode)) {
-    if (match.index === undefined) continue;
-    const start = offset + match.index;
-    const end = start + match[0].length;
-    decorations.push(Decoration.mark({ class: "cm-live-code" }).range(start + 1, end - 1));
-    hideSyntaxRange(start, start + 1, decorations, atomicRanges);
-    hideSyntaxRange(end - 1, end, decorations, atomicRanges);
-  }
-
-  const strike = /~~(?=\S)(.+?\S)~~/g;
-  for (const match of text.matchAll(strike)) {
-    if (match.index === undefined) continue;
-    const start = offset + match.index;
-    const end = start + match[0].length;
-    decorations.push(Decoration.mark({ class: "cm-live-strike" }).range(start + 2, end - 2));
-    hideSyntaxRange(start, start + 2, decorations, atomicRanges);
-    hideSyntaxRange(end - 2, end, decorations, atomicRanges);
-  }
-
-  const wikilinks = /\[\[([^\]\n]+)\]\]/g;
-  for (const match of text.matchAll(wikilinks)) {
-    if (match.index === undefined) continue;
-    const start = offset + match.index;
-    const end = start + match[0].length;
     addHiddenRange(
       start,
-      end,
+      start + match[0].length,
       decorations,
       atomicRanges,
       new WikilinkWidget(match[1], start, openWikilink),
     );
   }
 
-  for (const match of text.matchAll(/(?<!\!)\[card\]\(([a-f0-9]{32})\)/gi)) {
+  for (const match of text.matchAll(/(?<!!)\[card\]\(([a-f0-9]{32})\)/gi)) {
     if (match.index === undefined) continue;
     const title = cardTitle(match[1]);
     if (title === null) continue;
@@ -1500,7 +1500,7 @@ function continuationMarkerWidth(document: ObjectDocument, ownerLineNumber: numb
 
 function toggleLine(document: ObjectDocument, lineNumber: number, text: string): ToggleLine | null {
   const object = document.byLine.get(lineNumber);
-  if (!object || object.lineNumber !== lineNumber || !object.tags.includes("section")) return null;
+  if (object?.lineNumber !== lineNumber || !object?.tags.includes("section")) return null;
   return {
     prefixSize: object.sectionPrefixSize,
     content: text.slice(object.sectionPrefixSize),
@@ -1620,11 +1620,9 @@ function expandToggleTree(
     return;
   }
 
-  const endLineNumber = toggle
-    ? toggleSectionEnd(objectDocument, line.number)
-    : level !== null
-      ? headingSectionEnd(state, line.number, level)
-      : line.number;
+  let endLineNumber = line.number;
+  if (toggle) endLineNumber = toggleSectionEnd(objectDocument, line.number);
+  else if (level !== null) endLineNumber = headingSectionEnd(state, line.number, level);
   for (
     let lineNumber = line.number;
     lineNumber <= endLineNumber;
@@ -1634,454 +1632,541 @@ function expandToggleTree(
   }
 }
 
+type LivePreviewOptions = {
+  openWikilink: (title: string) => void;
+  openCard: (id: string) => void;
+  cardTitle: (id: string) => string | null;
+  cards: ReadonlyMap<string, CardMetadata>;
+  moveCard: (id: string, status: CardStatus) => void;
+  addCard: (boardID: string) => void;
+  changeBoardTitle: (boardID: string, title: string) => void;
+  noteID: string;
+  onError: (reason: unknown) => void;
+  highlightLineNumbers: ReadonlySet<number>;
+  defaultSectionsCollapsed: boolean;
+};
+
+type LivePreviewRenderContext = {
+  state: EditorState;
+  lines: readonly string[];
+  objectDocument: ObjectDocument;
+  nextCollapsed: Set<string>;
+  decorations: Range<Decoration>[];
+  atomicRanges: Range<Decoration>[];
+  depthByLine: ReadonlyMap<number, number>;
+  lineAttributes: (lineNumber: number, className?: string, style?: string) => Record<string, string>;
+  options: LivePreviewOptions;
+};
+
+function decoratePreviewText(
+  context: LivePreviewRenderContext,
+  text: string,
+  offset: number,
+) {
+  const { decorations, atomicRanges, options } = context;
+  decorateInlineMarkdown({
+    text,
+    offset,
+    decorations,
+    atomicRanges,
+    openWikilink: options.openWikilink,
+    openCard: options.openCard,
+    cardTitle: options.cardTitle,
+    onError: options.onError,
+  });
+}
+
+function renderBoardLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const line = context.state.doc.line(lineNumber);
+  const board = parseBoardMarker(line.text);
+  if (board) {
+    const { decorations, atomicRanges, options } = context;
+    decorations.push(
+      Decoration.line({ attributes: { class: "cm-live-board-line" } }).range(line.from),
+      Decoration.widget({
+        widget: new DragHandleWidget(lineNumber),
+        side: -1,
+      }).range(line.from),
+    );
+    addHiddenRange(
+      line.from,
+      line.to,
+      decorations,
+      atomicRanges,
+      new BoardWidget(
+        board.id,
+        board.title,
+        board.cardIDs,
+        options.cards,
+        options.openCard,
+        options.moveCard,
+        options.addCard,
+        options.changeBoardTitle,
+      ),
+    );
+    return lineNumber + 1;
+  }
+  return null;
+}
+
+function renderCodeLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const { state, objectDocument, decorations, atomicRanges, lineAttributes } = context;
+  const line = state.doc.line(lineNumber);
+  const codeObject = objectDocument.byLine.get(lineNumber);
+  if (codeObject?.tag !== "code") return null;
+
+  let edge = "cm-live-code-content";
+  if (lineNumber === codeObject.lineNumber) edge = "cm-live-code-fence-open";
+  else if (lineNumber > codeObject.textLineEnd) edge = "cm-live-code-fence-close";
+  decorations.push(Decoration.line({
+    attributes: lineAttributes(lineNumber, "cm-live-code-block " + edge),
+  }).range(line.from));
+  if (edge !== "cm-live-code-content") {
+    const indentation = line.text.length - line.text.trimStart().length;
+    hideSyntaxRange(line.from, line.from + indentation, decorations, atomicRanges);
+  }
+  if (lineNumber === codeObject.lineNumber) {
+    const languageFrom = line.text.indexOf(codeObject.language ?? "");
+    if (languageFrom >= 0 && codeObject.language) {
+      decorations.push(Decoration.mark({ class: "cm-live-code-language" }).range(
+        line.from + languageFrom,
+        line.from + languageFrom + codeObject.language.length,
+      ));
+    }
+    decorations.push(Decoration.widget({
+      widget: new CopyCodeWidget(codeObject.text),
+      side: 1,
+    }).range(line.to));
+  }
+  return lineNumber + 1;
+}
+
+function renderTableLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const { state, decorations, atomicRanges } = context;
+  const line = state.doc.line(lineNumber);
+  if (
+    lineNumber >= state.doc.lines ||
+    !line.text.includes("|") ||
+    !isTableDivider(state.doc.line(lineNumber + 1).text)
+  ) return null;
+
+  let lastLineNumber = lineNumber + 1;
+  while (
+    lastLineNumber < state.doc.lines &&
+    state.doc.line(lastLineNumber + 1).text.includes("|") &&
+    state.doc.line(lastLineNumber + 1).text.trim() !== ""
+  ) {
+    lastLineNumber++;
+  }
+  const active = state.selection.ranges.some((range) =>
+    range.to >= line.from && range.from <= state.doc.line(lastLineNumber).to,
+  );
+  if (active) return null;
+
+  const rows = [tableCells(line.text)];
+  for (let row = lineNumber + 2; row <= lastLineNumber; row++) {
+    rows.push(tableCells(state.doc.line(row).text));
+  }
+  addHiddenRange(
+    line.from,
+    state.doc.line(lastLineNumber).to,
+    decorations,
+    atomicRanges,
+    new TableWidget(rows),
+  );
+  return lastLineNumber + 1;
+}
+
+function renderAttachmentLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const { state, decorations, atomicRanges, lineAttributes, options } = context;
+  const line = state.doc.line(lineNumber);
+  const attachment = parseAttachmentMarkdown(line.text);
+  if (!attachment) return null;
+  decorations.push(
+    Decoration.line({
+      attributes: lineAttributes(lineNumber, "cm-live-attachment-line"),
+    }).range(line.from),
+  );
+  addHiddenRange(
+    line.from,
+    line.to,
+    decorations,
+    atomicRanges,
+    new AttachmentWidget(
+      options.noteID,
+      attachment.id,
+      attachment.alt,
+      attachment.width,
+      attachment.align,
+      line.from,
+      line.to,
+      options.onError,
+      lineIsActive(state, lineNumber),
+    ),
+  );
+  return lineNumber + 1;
+}
+
+function renderToggleLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const {
+    state,
+    objectDocument,
+    nextCollapsed,
+    decorations,
+    atomicRanges,
+    depthByLine,
+    options,
+  } = context;
+  const line = state.doc.line(lineNumber);
+  const toggle = toggleLine(objectDocument, lineNumber, line.text);
+  if (!toggle) return null;
+  const toggleAttachment = parseAttachmentMarkdown(toggle.content);
+  const sectionEndLineNumber = toggleSectionEnd(objectDocument, lineNumber);
+  const hasChildren = sectionEndLineNumber > lineNumber;
+  const collapseKey = collapseKeyForPosition(state, line.from, objectDocument);
+  const collapsed = hasChildren && nextCollapsed.has(collapseKey);
+  const contentOffset = line.from + toggle.prefixSize;
+  const isTask = !toggleAttachment && decorateObjectTask(
+    toggle.object,
+    contentOffset,
+    decorations,
+    atomicRanges,
+  );
+  let listKind: "unordered" | "ordered" | null = null;
+  if (!toggleAttachment && !isTask) {
+    listKind = decorateObjectListMarker(toggle.object, contentOffset, decorations, atomicRanges);
+  }
+
+  const classes = [
+    "cm-live-toggle-line",
+    hasChildren ? "cm-live-toggle-parent" : "cm-live-toggle-empty",
+    collapsed ? "cm-live-toggle-collapsed" : "",
+    toggleAttachment ? "cm-live-attachment-line" : "",
+    isTask ? "cm-live-task-line" : "",
+    isTask || listKind ? "cm-live-list-line" : "",
+  ].filter(Boolean).join(" ");
+
+  let lineStyle = toggleLineStyle();
+  if (isTask || listKind) lineStyle += " " + listLineStyle();
+  decorations.push(
+    Decoration.line({
+      attributes: objectLineAttributes(
+        lineNumber,
+        classes,
+        lineStyle,
+        depthByLine.get(lineNumber) ?? 0,
+      ),
+    }).range(line.from),
+  );
+
+  addHiddenRange(
+    line.from,
+    contentOffset,
+    decorations,
+    atomicRanges,
+    new QuoteToggleWidget(line.from, collapsed, !hasChildren),
+  );
+
+  if (toggleAttachment) {
+    addHiddenRange(
+      contentOffset,
+      line.to,
+      decorations,
+      atomicRanges,
+      new AttachmentWidget(
+        options.noteID,
+        toggleAttachment.id,
+        toggleAttachment.alt,
+        toggleAttachment.width,
+        toggleAttachment.align,
+        contentOffset,
+        line.to,
+        options.onError,
+        lineIsActive(state, lineNumber),
+      ),
+    );
+  } else {
+    decoratePreviewText(context, toggle.content, contentOffset);
+  }
+
+  if (collapsed) {
+    const lastLine = state.doc.line(sectionEndLineNumber);
+    addHiddenRange(
+      line.to,
+      lastLine.to,
+      decorations,
+      atomicRanges,
+      new FoldedQuoteWidget(sectionEndLineNumber - lineNumber),
+    );
+    return sectionEndLineNumber + 1;
+  }
+  return lineNumber + 1;
+}
+
+function renderHorizontalRuleLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const { state, decorations, atomicRanges, lineAttributes } = context;
+  const line = state.doc.line(lineNumber);
+  if (!isHorizontalRule(line.text)) return null;
+  decorations.push(
+    Decoration.line({
+      attributes: lineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
+    }).range(line.from),
+  );
+  if (!lineIsActive(state, lineNumber)) {
+    addHiddenRange(
+      line.from,
+      line.to,
+      decorations,
+      atomicRanges,
+      new HorizontalRuleWidget(line.from),
+    );
+  }
+  return lineNumber + 1;
+}
+
+function renderHeadingLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const { state, objectDocument, nextCollapsed, decorations, atomicRanges, depthByLine } = context;
+  const line = state.doc.line(lineNumber);
+  const heading = /^(#{1,6})\s+/.exec(line.text);
+  if (!heading) return null;
+  const level = heading[1].length;
+  const sectionEndLineNumber = headingSectionEnd(state, lineNumber, level);
+  const hasChildren = sectionEndLineNumber > lineNumber;
+  const collapseKey = collapseKeyForPosition(state, line.from, objectDocument);
+  const collapsed = hasChildren && nextCollapsed.has(collapseKey);
+  decorations.push(
+    Decoration.line({
+      attributes: objectLineAttributes(
+        lineNumber,
+        [
+          "cm-live-heading",
+          "cm-live-h" + level,
+          hasChildren ? "cm-live-heading-parent" : "",
+          collapsed ? "cm-live-heading-collapsed" : "",
+        ].filter(Boolean).join(" "),
+        undefined,
+        depthByLine.get(lineNumber) ?? 0,
+      ),
+    }).range(line.from),
+  );
+  if (hasChildren) {
+    addHiddenRange(
+      line.from,
+      line.from + heading[0].length,
+      decorations,
+      atomicRanges,
+      new QuoteToggleWidget(line.from, collapsed, false),
+    );
+  } else if (!lineIsActive(state, lineNumber)) {
+    addHiddenRange(
+      line.from,
+      line.from + heading[0].length,
+      decorations,
+      atomicRanges,
+    );
+  }
+
+  decoratePreviewText(context, line.text.slice(heading[0].length), line.from + heading[0].length);
+
+  if (collapsed) {
+    const lastLine = state.doc.line(sectionEndLineNumber);
+    addHiddenRange(
+      line.to,
+      lastLine.to,
+      decorations,
+      atomicRanges,
+      new FoldedQuoteWidget(sectionEndLineNumber - lineNumber),
+    );
+    return sectionEndLineNumber + 1;
+  }
+  return lineNumber + 1;
+}
+
+function renderContinuationLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number | null {
+  const { state, objectDocument, decorations, atomicRanges, depthByLine } = context;
+  const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
+  if (!continuationOwner) return null;
+  const line = state.doc.line(lineNumber);
+  const indent = continuationOwner.contentIndent;
+  const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
+  const markerWidth = continuationMarkerWidth(objectDocument, continuationOwner.lineNumber);
+  decorations.push(
+    Decoration.line({
+      attributes: objectLineAttributes(
+        lineNumber,
+        "cm-live-object-continuation-line",
+        markerWidth ? "--live-continuation-marker-width: " + markerWidth + ";" : "",
+        depthByLine.get(continuationOwner.lineNumber) ?? 0,
+      ),
+    }).range(line.from),
+  );
+  addHiddenRange(
+    line.from,
+    line.from + prefixSize,
+    decorations,
+    atomicRanges,
+    markerWidth ? new InlineSpacerWidget(markerWidth) : undefined,
+  );
+  decoratePreviewText(context, line.text.slice(prefixSize), line.from + prefixSize);
+  return lineNumber + 1;
+}
+
+function renderPlainLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number {
+  const { state, objectDocument, decorations, atomicRanges, depthByLine } = context;
+  const line = state.doc.line(lineNumber);
+  const object = objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber
+    ? objectDocument.byLine.get(lineNumber) ?? null
+    : null;
+  const barePrefixSize = object?.barePrefixSize ?? 0;
+  if (barePrefixSize > 0 && object?.checked === undefined && !object?.listMarker) {
+    addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
+  }
+
+  let task = false;
+  if (object) task = decorateObjectTask(object, line.from, decorations, atomicRanges);
+  let listKind: "unordered" | "ordered" | null = null;
+  if (object && !task) {
+    listKind = decorateObjectListMarker(object, line.from, decorations, atomicRanges);
+  }
+
+  if (task) {
+    decorations.push(Decoration.line({
+      attributes: objectLineAttributes(
+        lineNumber,
+        "cm-live-task-line cm-live-list-line",
+        listLineStyle(),
+        depthByLine.get(lineNumber) ?? 0,
+      ),
+    }).range(line.from));
+  }
+  if (listKind === "unordered" || listKind === "ordered") {
+    decorations.push(Decoration.line({
+      attributes: objectLineAttributes(
+        lineNumber,
+        "cm-live-list-line",
+        listLineStyle(),
+        depthByLine.get(lineNumber) ?? 0,
+      ),
+    }).range(line.from));
+  }
+  if (!task && !listKind) {
+    decorations.push(
+      Decoration.line({
+        attributes: context.lineAttributes(lineNumber),
+      }).range(line.from),
+    );
+  }
+
+  decoratePreviewText(context, line.text.slice(barePrefixSize), line.from + barePrefixSize);
+  return lineNumber + 1;
+}
+
+function renderPreviewLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number {
+  const { state, objectDocument, decorations } = context;
+  let nextLineNumber = renderBoardLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+
+  const line = state.doc.line(lineNumber);
+  const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
+  if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationOwner) {
+    decorations.push(
+      Decoration.widget({
+        widget: new DragHandleWidget(lineNumber),
+        side: -1,
+      }).range(line.from),
+    );
+  }
+
+  nextLineNumber = renderCodeLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  nextLineNumber = renderTableLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  nextLineNumber = renderAttachmentLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  nextLineNumber = renderToggleLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  nextLineNumber = renderHorizontalRuleLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  nextLineNumber = renderHeadingLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  nextLineNumber = renderContinuationLine(context, lineNumber);
+  if (nextLineNumber !== null) return nextLineNumber;
+  return renderPlainLine(context, lineNumber);
+}
+
 function buildLivePreviewState(
   state: EditorState,
   collapsedQuotes: ReadonlySet<string>,
-  openWikilink: (title: string) => void,
-  openCard: (id: string) => void,
-  cardTitle: (id: string) => string | null,
-  cards: ReadonlyMap<string, CardMetadata>,
-  moveCard: (id: string, status: CardStatus) => void,
-  addCard: (boardID: string) => void,
-  changeBoardTitle: (boardID: string, title: string) => void,
-  noteID: string,
-  onError: (reason: unknown) => void,
-  highlightLineNumbers: ReadonlySet<number>,
+  options: LivePreviewOptions,
   context?: ObjectDocumentContext,
 ): LivePreviewState {
   const decorations: Range<Decoration>[] = [];
   const atomicRanges: Range<Decoration>[] = [];
   const nextCollapsed = new Set(collapsedQuotes);
-  const prepared = context ?? (() => {
+  let prepared = context;
+  if (!prepared) {
     const docText = state.doc.toString();
-    return {
+    prepared = {
       lines: docText.split("\n"),
       objectDocument: parseObjectDocument(docText),
     };
-  })();
+  }
   const { lines, objectDocument } = prepared;
   const depthByLine = objectDepthByLine(objectDocument);
   const lineAttributes = (lineNumber: number, className = "", style?: string) =>
     objectLineAttributes(
       lineNumber,
-      [className, highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : ""].filter(Boolean).join(" "),
+      [
+        className,
+        options.highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : "",
+      ].filter(Boolean).join(" "),
       style,
       depthByLine.get(lineNumber) ?? 0,
     );
+  const renderContext: LivePreviewRenderContext = {
+    state,
+    lines,
+    objectDocument,
+    nextCollapsed,
+    decorations,
+    atomicRanges,
+    depthByLine,
+    lineAttributes,
+    options,
+  };
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
-    const line = state.doc.line(lineNumber);
-    const lineObject = objectDocument.byLine.get(lineNumber);
-    const toggle = toggleLine(objectDocument, lineNumber, line.text);
-    const continuationOwner = continuationOwnerObject(objectDocument, lineNumber);
-
-    const board = parseBoardMarker(line.text);
-    if (board) {
-      decorations.push(
-        Decoration.line({ attributes: { class: "cm-live-board-line" } }).range(line.from),
-        Decoration.widget({
-          widget: new DragHandleWidget(lineNumber),
-          side: -1,
-        }).range(line.from),
-      );
-      addHiddenRange(
-        line.from,
-        line.to,
-        decorations,
-        atomicRanges,
-        new BoardWidget(board.id, board.title, board.cardIDs, cards, openCard, moveCard, addCard, changeBoardTitle),
-      );
-      lineNumber++;
-      continue;
-    }
-
-    if (objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber && !continuationOwner) {
-      decorations.push(
-        Decoration.widget({
-          widget: new DragHandleWidget(lineNumber),
-          side: -1,
-        }).range(line.from),
-      );
-    }
-
-    const codeObject = objectDocument.byLine.get(lineNumber);
-    if (codeObject?.tag === "code") {
-      const edge = lineNumber === codeObject.lineNumber
-        ? "cm-live-code-fence-open"
-        : lineNumber > codeObject.textLineEnd
-          ? "cm-live-code-fence-close"
-          : "cm-live-code-content";
-      decorations.push(Decoration.line({
-        attributes: lineAttributes(lineNumber, `cm-live-code-block ${edge}`),
-      }).range(line.from));
-      if (edge !== "cm-live-code-content") {
-        const indentation = line.text.length - line.text.trimStart().length;
-        hideSyntaxRange(line.from, line.from + indentation, decorations, atomicRanges);
-      }
-      if (lineNumber === codeObject.lineNumber) {
-        const languageFrom = line.text.indexOf(codeObject.language ?? "");
-        if (languageFrom >= 0 && codeObject.language) {
-          decorations.push(Decoration.mark({ class: "cm-live-code-language" }).range(
-            line.from + languageFrom,
-            line.from + languageFrom + codeObject.language.length,
-          ));
-        }
-        decorations.push(Decoration.widget({
-          widget: new CopyCodeWidget(codeObject.text),
-          side: 1,
-        }).range(line.to));
-      }
-      lineNumber++;
-      continue;
-    }
-
-    if (
-      lineNumber < state.doc.lines &&
-      line.text.includes("|") &&
-      isTableDivider(state.doc.line(lineNumber + 1).text)
-    ) {
-      let lastLineNumber = lineNumber + 1;
-      while (
-        lastLineNumber < state.doc.lines &&
-        state.doc.line(lastLineNumber + 1).text.includes("|") &&
-        state.doc.line(lastLineNumber + 1).text.trim() !== ""
-      ) {
-        lastLineNumber++;
-      }
-      const active = state.selection.ranges.some((range) =>
-        range.to >= line.from && range.from <= state.doc.line(lastLineNumber).to,
-      );
-      if (!active) {
-        const rows = [tableCells(line.text)];
-        for (let row = lineNumber + 2; row <= lastLineNumber; row++) {
-          rows.push(tableCells(state.doc.line(row).text));
-        }
-        addHiddenRange(
-          line.from,
-          state.doc.line(lastLineNumber).to,
-          decorations,
-          atomicRanges,
-          new TableWidget(rows),
-        );
-        lineNumber = lastLineNumber + 1;
-        continue;
-      }
-    }
-
-    const attachment = parseAttachmentMarkdown(line.text);
-    if (attachment) {
-      decorations.push(
-        Decoration.line({
-          attributes: lineAttributes(lineNumber, "cm-live-attachment-line"),
-        }).range(line.from),
-      );
-      addHiddenRange(
-        line.from,
-        line.to,
-        decorations,
-        atomicRanges,
-        new AttachmentWidget(
-          noteID,
-          attachment.id,
-          attachment.alt,
-          attachment.width,
-          attachment.align,
-          line.from,
-          line.to,
-          onError,
-          lineIsActive(state, lineNumber),
-        ),
-      );
-      lineNumber++;
-      continue;
-    }
-
-    if (toggle) {
-      const toggleAttachment = parseAttachmentMarkdown(toggle.content);
-      const sectionEndLineNumber = toggleSectionEnd(objectDocument, lineNumber);
-
-      const hasChildren = sectionEndLineNumber > lineNumber;
-      const collapseKey = collapseKeyForPosition(state, line.from, objectDocument);
-      const collapsed = hasChildren && nextCollapsed.has(collapseKey);
-      const contentOffset = line.from + toggle.prefixSize;
-
-      const isTask = !toggleAttachment && decorateObjectTask(
-        toggle.object,
-        contentOffset,
-        decorations,
-        atomicRanges,
-      );
-      const listKind = !toggleAttachment && !isTask
-        ? decorateObjectListMarker(toggle.object, contentOffset, decorations, atomicRanges)
-        : null;
-
-      const classes = [
-        "cm-live-toggle-line",
-        hasChildren ? "cm-live-toggle-parent" : "cm-live-toggle-empty",
-        collapsed ? "cm-live-toggle-collapsed" : "",
-        toggleAttachment ? "cm-live-attachment-line" : "",
-        isTask ? "cm-live-task-line" : "",
-        isTask || listKind ? "cm-live-list-line" : "",
-      ].filter(Boolean).join(" ");
-
-      decorations.push(
-        Decoration.line({
-          attributes: objectLineAttributes(
-            lineNumber,
-            classes,
-            isTask || listKind
-              ? `${toggleLineStyle()} ${listLineStyle()}`
-              : toggleLineStyle(),
-            depthByLine.get(lineNumber) ?? 0,
-          ),
-        }).range(line.from),
-      );
-
-      addHiddenRange(
-        line.from,
-        contentOffset,
-        decorations,
-        atomicRanges,
-        new QuoteToggleWidget(line.from, collapsed, !hasChildren),
-      );
-
-      if (toggleAttachment) {
-        addHiddenRange(
-          contentOffset,
-          line.to,
-          decorations,
-          atomicRanges,
-          new AttachmentWidget(
-            noteID,
-            toggleAttachment.id,
-            toggleAttachment.alt,
-            toggleAttachment.width,
-            toggleAttachment.align,
-            contentOffset,
-            line.to,
-            onError,
-            lineIsActive(state, lineNumber),
-          ),
-        );
-      } else {
-        decorateInlineMarkdown(
-          toggle.content,
-          contentOffset,
-          decorations,
-          atomicRanges,
-          openWikilink,
-          openCard,
-          cardTitle,
-          onError,
-        );
-      }
-
-      if (collapsed) {
-        const lastLine = state.doc.line(sectionEndLineNumber);
-
-        addHiddenRange(
-          line.to,
-          lastLine.to,
-          decorations,
-          atomicRanges,
-          new FoldedQuoteWidget(sectionEndLineNumber - lineNumber),
-        );
-
-        lineNumber = sectionEndLineNumber + 1;
-      } else {
-        lineNumber++;
-      }
-
-      continue;
-    }
-
-    if (isHorizontalRule(line.text)) {
-      decorations.push(
-        Decoration.line({
-          attributes: lineAttributes(lineNumber, "cm-live-horizontal-rule-line"),
-        }).range(line.from),
-      );
-      if (!lineIsActive(state, lineNumber)) {
-        addHiddenRange(
-          line.from,
-          line.to,
-          decorations,
-          atomicRanges,
-          new HorizontalRuleWidget(line.from),
-        );
-      }
-      lineNumber++;
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+/.exec(line.text);
-    if (heading) {
-      const level = heading[1].length;
-      const sectionEndLineNumber = headingSectionEnd(state, lineNumber, level);
-      const hasChildren = sectionEndLineNumber > lineNumber;
-      const collapseKey = collapseKeyForPosition(state, line.from, objectDocument);
-      const collapsed = hasChildren && nextCollapsed.has(collapseKey);
-      decorations.push(
-        Decoration.line({
-          attributes: objectLineAttributes(
-            lineNumber,
-            [
-              "cm-live-heading",
-              `cm-live-h${level}`,
-              hasChildren ? "cm-live-heading-parent" : "",
-              collapsed ? "cm-live-heading-collapsed" : "",
-            ].filter(Boolean).join(" "),
-            undefined,
-            depthByLine.get(lineNumber) ?? 0,
-          ),
-        }).range(line.from),
-      );
-      if (hasChildren) {
-        addHiddenRange(
-          line.from,
-          line.from + heading[0].length,
-          decorations,
-          atomicRanges,
-          new QuoteToggleWidget(line.from, collapsed, false),
-        );
-      } else if (!lineIsActive(state, lineNumber)) {
-        addHiddenRange(
-          line.from,
-          line.from + heading[0].length,
-          decorations,
-          atomicRanges,
-        );
-      }
-
-      decorateInlineMarkdown(
-        line.text.slice(heading[0].length),
-        line.from + heading[0].length,
-        decorations,
-        atomicRanges,
-        openWikilink,
-        openCard,
-        cardTitle,
-        onError,
-      );
-
-      if (collapsed) {
-        const lastLine = state.doc.line(sectionEndLineNumber);
-        addHiddenRange(
-          line.to,
-          lastLine.to,
-          decorations,
-          atomicRanges,
-          new FoldedQuoteWidget(sectionEndLineNumber - lineNumber),
-        );
-        lineNumber = sectionEndLineNumber + 1;
-        continue;
-      }
-
-      lineNumber++;
-      continue;
-    }
-
-    if (continuationOwner) {
-      const indent = continuationOwner.contentIndent;
-      const prefixSize = continuationPrefixSizeForIndent(line.text, indent);
-      const markerWidth = continuationMarkerWidth(objectDocument, continuationOwner.lineNumber);
-      decorations.push(
-        Decoration.line({
-          attributes: objectLineAttributes(
-            lineNumber,
-            "cm-live-object-continuation-line",
-            markerWidth ? `--live-continuation-marker-width: ${markerWidth};` : "",
-            depthByLine.get(continuationOwner.lineNumber) ?? 0,
-          ),
-        }).range(line.from),
-      );
-      addHiddenRange(
-        line.from,
-        line.from + prefixSize,
-        decorations,
-        atomicRanges,
-        markerWidth ? new InlineSpacerWidget(markerWidth) : undefined,
-      );
-      decorateInlineMarkdown(
-        line.text.slice(prefixSize),
-        line.from + prefixSize,
-        decorations,
-          atomicRanges,
-          openWikilink,
-          openCard,
-          cardTitle,
-          onError,
-      );
-      lineNumber++;
-      continue;
-    }
-
-    const object = lineObject?.lineNumber === lineNumber ? lineObject : null;
-    const barePrefixSize = object?.barePrefixSize ?? 0;
-    if (barePrefixSize > 0 && object?.checked === undefined && !object?.listMarker) {
-      addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
-    }
-
-    const task = object
-      ? decorateObjectTask(object, line.from, decorations, atomicRanges)
-      : false;
-
-    if (task) {
-      decorations.push(Decoration.line({
-        attributes: objectLineAttributes(
-          lineNumber,
-          "cm-live-task-line cm-live-list-line",
-          listLineStyle(),
-          depthByLine.get(lineNumber) ?? 0,
-        ),
-      }).range(line.from));
-    }
-
-    const listKind = object && !task
-      ? decorateObjectListMarker(object, line.from, decorations, atomicRanges)
-      : null;
-    if (listKind === "unordered") {
-      decorations.push(Decoration.line({
-        attributes: objectLineAttributes(
-          lineNumber,
-          "cm-live-list-line",
-          listLineStyle(),
-          depthByLine.get(lineNumber) ?? 0,
-        ),
-      }).range(line.from));
-    }
-
-    if (listKind === "ordered") {
-      decorations.push(Decoration.line({
-        attributes: objectLineAttributes(
-          lineNumber,
-          "cm-live-list-line",
-          listLineStyle(),
-          depthByLine.get(lineNumber) ?? 0,
-        ),
-      }).range(line.from));
-    }
-
-    if (!task && !listKind) {
-      decorations.push(
-        Decoration.line({
-          attributes: lineAttributes(lineNumber),
-        }).range(line.from),
-      );
-    }
-
-    decorateInlineMarkdown(
-      line.text.slice(barePrefixSize),
-      line.from + barePrefixSize,
-      decorations,
-      atomicRanges,
-      openWikilink,
-      openCard,
-      cardTitle,
-      onError,
-    );
-
-    lineNumber++;
+    lineNumber = renderPreviewLine(renderContext, lineNumber);
   }
 
   return {
@@ -2092,130 +2177,106 @@ function buildLivePreviewState(
     objectDocument,
   };
 }
+function applyCollapseEffect(
+  effect: StateEffect<unknown>,
+  state: EditorState,
+  objectDocument: ObjectDocument,
+  collapsed: Set<string>,
+): boolean {
+  if (effect.is(setAllQuotesCollapsed)) {
+    collapsed.clear();
+    if (effect.value) {
+      for (const position of collapsibleQuotePositions(state, objectDocument)) {
+        collapsed.add(collapseKeyForPosition(state, position, objectDocument));
+      }
+    }
+    return true;
+  }
+  if (effect.is(setQuoteCollapsed)) {
+    const key = collapseKeyForPosition(state, effect.value.position, objectDocument);
+    if (effect.value.collapsed) collapsed.add(key);
+    else expandToggleTree(state, objectDocument, effect.value.position, collapsed);
+    return true;
+  }
+  if (!effect.is(toggleQuote)) return false;
 
-function livePreviewExtension(
-  openWikilink: (title: string) => void,
-  openCard: (id: string) => void,
-  cardTitle: (id: string) => string | null,
-  cards: ReadonlyMap<string, CardMetadata>,
-  moveCard: (id: string, status: CardStatus) => void,
-  addCard: (boardID: string) => void,
-  changeBoardTitle: (boardID: string, title: string) => void,
-  noteID: string,
-  onError: (reason: unknown) => void,
-  highlightLineNumbers: ReadonlySet<number>,
-  defaultSectionsCollapsed: boolean,
-) {
+  const key = collapseKeyForPosition(state, effect.value, objectDocument);
+  if (collapsed.has(key)) expandToggleTree(state, objectDocument, effect.value, collapsed);
+  else collapsed.add(key);
+  return true;
+}
+
+function updateCollapsedQuotes(
+  value: LivePreviewState,
+  transaction: Transaction,
+): {
+  collapsed: Set<string>;
+  cachedContext: ObjectDocumentContext | null;
+  collapseChanged: boolean;
+} {
+  let collapsed = new Set(value.collapsedQuotes);
+  let cachedContext: ObjectDocumentContext | null = null;
+  let collapseChanged = false;
+
+  if (transaction.docChanged) {
+    cachedContext = transaction.state.field(objectDocumentField);
+    collapsed = remapObjectKeysByLine(
+      collapsed,
+      value.objectDocument,
+      cachedContext.objectDocument,
+      (lineNumber) => {
+        const from = transaction.startState.doc.line(lineNumber).from;
+        return transaction.state.doc.lineAt(transaction.changes.mapPos(from, 1)).number;
+      },
+    );
+    collapseChanged = true;
+  }
+
+  for (const effect of transaction.effects) {
+    if (!cachedContext) {
+      cachedContext = transaction.docChanged
+        ? transaction.state.field(objectDocumentField)
+        : { lines: value.lines, objectDocument: value.objectDocument };
+    }
+    if (applyCollapseEffect(effect, transaction.state, cachedContext.objectDocument, collapsed)) {
+      collapseChanged = true;
+    }
+  }
+
+  return { collapsed, cachedContext, collapseChanged };
+}
+
+function livePreviewExtension(options: LivePreviewOptions) {
   const field = StateField.define<LivePreviewState>({
     create(state) {
       const context = state.field(objectDocumentField);
-      const collapsed = savedCollapsedPositions(state, noteID) ?? (defaultSectionsCollapsed
-        ? new Set(collapsibleQuotePositions(state, context.objectDocument).map((position) => collapseKeyForPosition(state, position, context.objectDocument)))
-        : new Set<string>());
-      return buildLivePreviewState(
-        state,
-        collapsed,
-        openWikilink,
-        openCard,
-        cardTitle,
-        cards,
-        moveCard,
-        addCard,
-        changeBoardTitle,
-        noteID,
-        onError,
-        highlightLineNumbers,
-        context,
-      );
+      let collapsed = savedCollapsedPositions(state, options.noteID);
+      if (!collapsed && options.defaultSectionsCollapsed) {
+        collapsed = new Set(
+          collapsibleQuotePositions(state, context.objectDocument).map((position) =>
+            collapseKeyForPosition(state, position, context.objectDocument),
+          ),
+        );
+      }
+      return buildLivePreviewState(state, collapsed ?? new Set<string>(), options, context);
     },
     update(value, transaction) {
-      let collapsed = new Set(value.collapsedQuotes);
-      let cachedContext: ObjectDocumentContext | null = null;
-      const collapseContext = () => {
-        if (!cachedContext) {
-          if (transaction.docChanged) {
-            cachedContext = transaction.state.field(objectDocumentField);
-          } else {
-            cachedContext = {
-              lines: value.lines,
-              objectDocument: value.objectDocument,
-            };
-          }
-        }
-        return cachedContext;
-      };
-      let collapseChanged = false;
-      if (transaction.docChanged) {
-        const { objectDocument } = collapseContext();
-        collapsed = remapObjectKeysByLine(
-          collapsed,
-          value.objectDocument,
-          objectDocument,
-          (lineNumber) => {
-            const from = transaction.startState.doc.line(lineNumber).from;
-            return transaction.state.doc.lineAt(transaction.changes.mapPos(from, 1)).number;
-          },
-        );
-        collapseChanged = true;
-      }
-      for (const effect of transaction.effects) {
-        if (effect.is(setAllQuotesCollapsed)) {
-          const { objectDocument } = collapseContext();
-          collapseChanged = true;
-          collapsed.clear();
-          if (effect.value) {
-            for (const position of collapsibleQuotePositions(transaction.state, objectDocument)) {
-              collapsed.add(collapseKeyForPosition(transaction.state, position, objectDocument));
-            }
-          }
-          continue;
-        }
-        if (effect.is(setQuoteCollapsed)) {
-          const { objectDocument } = collapseContext();
-          collapseChanged = true;
-          const key = collapseKeyForPosition(transaction.state, effect.value.position, objectDocument);
-          if (effect.value.collapsed) collapsed.add(key);
-          else expandToggleTree(
-            transaction.state,
-            objectDocument,
-            effect.value.position,
-            collapsed,
-          );
-          continue;
-        }
-        if (!effect.is(toggleQuote)) continue;
-        const { objectDocument } = collapseContext();
-        collapseChanged = true;
-        const key = collapseKeyForPosition(transaction.state, effect.value, objectDocument);
-        if (collapsed.has(key)) {
-          expandToggleTree(transaction.state, objectDocument, effect.value, collapsed);
-        }
-        else collapsed.add(key);
-      }
-      if (!transaction.docChanged && !collapseChanged &&
-        (!transaction.selection || selectionStaysOnSameLines(transaction.startState, transaction.state))) {
+      const { collapsed, cachedContext, collapseChanged } =
+        updateCollapsedQuotes(value, transaction);
+      if (
+        !transaction.docChanged &&
+        !collapseChanged &&
+        (!transaction.selection || selectionStaysOnSameLines(transaction.startState, transaction.state))
+      ) {
         return value;
       }
-      if (collapseChanged) persistCollapsedPositions(transaction.state, noteID, collapsed);
-      return buildLivePreviewState(
-        transaction.state,
-        collapsed,
-        openWikilink,
-        openCard,
-        cardTitle,
-        cards,
-        moveCard,
-        addCard,
-        changeBoardTitle,
-        noteID,
-        onError,
-        highlightLineNumbers,
-        cachedContext ?? (
-          transaction.docChanged
-            ? undefined
-            : { lines: value.lines, objectDocument: value.objectDocument }
-        ),
+      if (collapseChanged) persistCollapsedPositions(transaction.state, options.noteID, collapsed);
+      const context = cachedContext ?? (
+        transaction.docChanged
+          ? undefined
+          : { lines: value.lines, objectDocument: value.objectDocument }
       );
+      return buildLivePreviewState(transaction.state, collapsed, options, context);
     },
     provide(currentField) {
       return [
@@ -2230,6 +2291,7 @@ function livePreviewExtension(
   return [objectDocumentField, field];
 }
 
+function wrapSelection(view: EditorView, marker: string)
 function wrapSelection(view: EditorView, marker: string) {
   view.dispatch(
     view.state.changeByRange((range) => {
@@ -2359,7 +2421,9 @@ function restoreArrowSubstitution(view: EditorView): boolean {
   const range = view.state.selection.main;
   if (!range.empty || range.head === 0) return false;
   const glyph = view.state.sliceDoc(range.head - 1, range.head);
-  const source = glyph === "→" ? "->" : glyph === "←" ? "<-" : null;
+  let source: string | null = null;
+  if (glyph === "→") source = "->";
+  else if (glyph === "←") source = "<-";
   if (!source) return false;
   view.dispatch({
     changes: { from: range.head - 1, to: range.head, insert: source },
@@ -2431,7 +2495,9 @@ function applySnippetExpansion(
 ) {
   const isRoll = trigger === "rollb" || trigger === "rollf";
   const replacement = isRoll || trigger === "board" ? rollReplacementRange(view, from, to) : { from, to };
-  const create = trigger === "card" ? onCreateCard : trigger === "board" ? onCreateBoard : undefined;
+  let create: (() => Promise<string | null>) | undefined;
+  if (trigger === "card") create = onCreateCard;
+  else if (trigger === "board") create = onCreateBoard;
   if (create) {
     void create().then((expansion) => {
       if (!expansion) return;
@@ -2525,33 +2591,42 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
   return true;
 }
 
-function changeCodeIndent(view: EditorView, direction: 1 | -1) {
-  const document = cachedObjectDocument(view.state);
-  const lineNumbers = new Set<number>();
+type EditorTextChange = { from: number; to?: number; insert: string };
 
+function codeIndentLineNumbers(view: EditorView, objectDocument: ObjectDocument): Set<number> {
+  const lineNumbers = new Set<number>();
   for (const range of view.state.selection.ranges) {
     const first = view.state.doc.lineAt(range.from).number;
     const last = view.state.doc.lineAt(range.to).number;
     for (let lineNumber = first; lineNumber <= last; lineNumber++) {
-      const owner = document.byLine.get(lineNumber);
+      const owner = objectDocument.byLine.get(lineNumber);
       if (owner?.tag === "code" && lineNumber > owner.lineNumber && lineNumber <= owner.textLineEnd) {
         lineNumbers.add(lineNumber);
       }
     }
   }
+  return lineNumbers;
+}
 
+function codeIndentChange(
+  view: EditorView,
+  lineNumber: number,
+  direction: 1 | -1,
+): EditorTextChange | null {
+  const line = view.state.doc.line(lineNumber);
+  if (direction === 1) return { from: line.from, insert: "    " };
+  const spaces = /^ {1,4}/.exec(line.text)?.[0];
+  return spaces ? { from: line.from, to: line.from + spaces.length, insert: "" } : null;
+}
+
+function changeCodeIndent(view: EditorView, direction: 1 | -1) {
+  const lineNumbers = codeIndentLineNumbers(view, cachedObjectDocument(view.state));
   if (lineNumbers.size === 0) return false;
-  const changes: { from: number; to?: number; insert: string }[] = [];
+  const changes: EditorTextChange[] = [];
   for (const lineNumber of lineNumbers) {
-    const line = view.state.doc.line(lineNumber);
-    if (direction === 1) {
-      changes.push({ from: line.from, insert: "    " });
-    } else {
-      const spaces = /^ {1,4}/.exec(line.text)?.[0];
-      if (spaces) changes.push({ from: line.from, to: line.from + spaces.length, insert: "" });
-    }
+    const change = codeIndentChange(view, lineNumber, direction);
+    if (change) changes.push(change);
   }
-
   if (changes.length === 0) return true;
   const changeSet = view.state.changes(changes);
   view.dispatch({
@@ -2574,13 +2649,9 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   if (!isCodeContent && !object) return false;
 
   const atObjectStart = range.head === line.from && object?.tag !== "code";
-  const inserted = atObjectStart
-    ? "\n"
-    : isCodeContent
-    ? `\n${indentation}`
-    : object?.tag === "code"
-    ? "\n"
-    : `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
+  let inserted = "\n";
+  if (isCodeContent) inserted = `\n${indentation}`;
+  else if (!atObjectStart && object?.tag !== "code") inserted = `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
 
   view.dispatch({
     changes: {
@@ -2651,13 +2722,11 @@ function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
   return true;
 }
 
-function currentToggleSectionPosition(state: EditorState): number | null {
-  const objectDocument = cachedObjectDocument(state);
-  const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
-  const currentLine = state.doc.line(currentLineNumber);
-  const currentHeadingLevel = headingLevel(currentLine.text);
-
-  let object = objectDocument.byLine.get(currentLineNumber);
+function parentSectionLine(
+  objectDocument: ObjectDocument,
+  lineNumber: number,
+): number {
+  let object = objectDocument.byLine.get(lineNumber);
   let sectionLineNumber = 0;
   while (object) {
     if (object.tags.includes("section") && object.children.length > 0) {
@@ -2666,7 +2735,14 @@ function currentToggleSectionPosition(state: EditorState): number | null {
     }
     object = object.parentId ? objectDocument.byId.get(object.parentId) : undefined;
   }
+  return sectionLineNumber;
+}
 
+function containingHeadingLine(
+  state: EditorState,
+  currentLineNumber: number,
+  currentHeadingLevel: number | null,
+): number {
   let headingLineNumber = 0;
   if (currentHeadingLevel !== null && headingHasChildren(state, currentLineNumber, currentHeadingLevel)) {
     headingLineNumber = currentLineNumber;
@@ -2682,7 +2758,15 @@ function currentToggleSectionPosition(state: EditorState): number | null {
       headingLineNumber = lineNumber;
     }
   }
+  return headingLineNumber;
+}
 
+function currentToggleSectionPosition(state: EditorState): number | null {
+  const objectDocument = cachedObjectDocument(state);
+  const currentLineNumber = state.doc.lineAt(state.selection.main.head).number;
+  const currentHeadingLevel = headingLevel(state.doc.line(currentLineNumber).text);
+  const sectionLineNumber = parentSectionLine(objectDocument, currentLineNumber);
+  const headingLineNumber = containingHeadingLine(state, currentLineNumber, currentHeadingLevel);
   const lineNumber = Math.max(sectionLineNumber, headingLineNumber);
   return lineNumber > 0 ? state.doc.line(lineNumber).from : null;
 }
@@ -2728,11 +2812,7 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
   menu.setAttribute("role", "menu");
   menu.style.left = `${event.clientX}px`;
   menu.style.top = `${event.clientY}px`;
-  const close = (closeEvent?: PointerEvent) => {
-    if (closeEvent && menu.contains(closeEvent.target as Node)) return;
-    menu.remove();
-    document.removeEventListener("pointerdown", close);
-  };
+      const close = createMenuCloser(menu);
   const remove = menu.appendChild(document.createElement("button"));
   remove.type = "button";
   remove.role = "menuitem";
@@ -2844,6 +2924,88 @@ function moveObjectBlock(
   });
   view.focus();
   return true;
+}
+
+function completeTypedEditorInput(
+  view: EditorView,
+  from: number,
+  to: number,
+  text: string,
+): boolean {
+  if (text.includes("\n")) return false;
+  const line = view.state.doc.lineAt(from);
+  if (to > line.to) return false;
+  const relativeFrom = from - line.from;
+  const prospective = line.text.slice(0, relativeFrom) + text + line.text.slice(to - line.from);
+  const previousLine = line.number > 1 ? view.state.doc.line(line.number - 1).text : undefined;
+  const fence = completeCodeFenceElement(prospective);
+  const owner = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (fence && owner?.lineNumber === line.number && owner.tag !== "code") {
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: fence },
+      selection: EditorSelection.cursor(line.from + fence.indexOf("\n") + 1),
+    });
+    return true;
+  }
+  const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
+  if (normalizedPrefix === prospective) return false;
+  const prefixLength = /^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/.exec(normalizedPrefix)?.[0].length ?? 0;
+  view.dispatch({
+    changes: { from: line.from, to: line.to, insert: normalizedPrefix },
+    selection: EditorSelection.cursor(line.from + prefixLength),
+  });
+  return true;
+}
+
+type NormalizedEditorInput = {
+  from: number;
+  to: number;
+  text: string;
+};
+
+function normalizeEditorInput(
+  view: EditorView,
+  from: number,
+  to: number,
+  text: string,
+): NormalizedEditorInput | null {
+  let changeFrom = from;
+  let changeTo = to;
+  let inserted = text;
+  if (
+    changeFrom > 0 &&
+    view.state.sliceDoc(changeFrom - 1, changeFrom) === "-" &&
+    inserted.startsWith(">")
+  ) {
+    changeFrom--;
+    inserted = "-" + inserted;
+  }
+  if (
+    changeFrom > 0 &&
+    view.state.sliceDoc(changeFrom - 1, changeFrom) === "<" &&
+    inserted.startsWith("-")
+  ) {
+    changeFrom--;
+    inserted = "<" + inserted;
+  }
+  if (
+    changeTo < view.state.doc.length &&
+    inserted.endsWith("-") &&
+    view.state.sliceDoc(changeTo, changeTo + 1) === ">"
+  ) {
+    changeTo++;
+    inserted += ">";
+  }
+  if (
+    changeTo < view.state.doc.length &&
+    inserted.endsWith("<") &&
+    view.state.sliceDoc(changeTo, changeTo + 1) === "-"
+  ) {
+    changeTo++;
+    inserted += "-";
+  }
+  const normalized = normalizeArrowText(inserted);
+  return normalized === inserted ? null : { from: changeFrom, to: changeTo, text: normalized };
 }
 
 export default function LiveMarkdownEditor({
@@ -3115,82 +3277,12 @@ export default function LiveMarkdownEditor({
           EditorView.inputHandler.of((inputView, from, to, text) => {
             if (readOnly) return false;
             if (rangeTouchesBoard(inputView.state, from, to)) return true;
-            let changeFrom = from;
-            let changeTo = to;
-            let inserted = text;
-
-            if (!inserted.includes("\n")) {
-              const line = inputView.state.doc.lineAt(changeFrom);
-              if (changeTo <= line.to) {
-                const relativeFrom = changeFrom - line.from;
-                const prospective = `${line.text.slice(0, relativeFrom)}${inserted}${line.text.slice(changeTo - line.from)}`;
-                const previousLine = line.number > 1
-                  ? inputView.state.doc.line(line.number - 1).text
-                  : undefined;
-                const fence = completeCodeFenceElement(prospective);
-                const owner = cachedObjectDocument(inputView.state).byLine.get(line.number);
-                if (fence && owner?.lineNumber === line.number && owner.tag !== "code") {
-                  inputView.dispatch({
-                    changes: { from: line.from, to: line.to, insert: fence },
-                    selection: EditorSelection.cursor(line.from + fence.indexOf("\n") + 1),
-                  });
-                  return true;
-                }
-                const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
-                if (normalizedPrefix !== prospective) {
-                  const prefixLength = /^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/.exec(normalizedPrefix)?.[0].length ?? 0;
-                  inputView.dispatch({
-                    changes: { from: line.from, to: line.to, insert: normalizedPrefix },
-                    selection: EditorSelection.cursor(line.from + prefixLength),
-                  });
-                  return true;
-                }
-              }
-            }
-
-            if (
-              changeFrom > 0 &&
-              inputView.state.sliceDoc(changeFrom - 1, changeFrom) === "-" &&
-              inserted.startsWith(">")
-            ) {
-              changeFrom--;
-              inserted = `-${inserted}`;
-            }
-            if (
-              changeFrom > 0 &&
-              inputView.state.sliceDoc(changeFrom - 1, changeFrom) === "<" &&
-              inserted.startsWith("-")
-            ) {
-              changeFrom--;
-              inserted = `<${inserted}`;
-            }
-            if (
-              changeTo < inputView.state.doc.length &&
-              inserted.endsWith("-") &&
-              inputView.state.sliceDoc(changeTo, changeTo + 1) === ">"
-            ) {
-              changeTo++;
-              inserted += ">";
-            }
-            if (
-              changeTo < inputView.state.doc.length &&
-              inserted.endsWith("<") &&
-              inputView.state.sliceDoc(changeTo, changeTo + 1) === "-"
-            ) {
-              changeTo++;
-              inserted += "-";
-            }
-
-            const normalized = normalizeArrowText(inserted);
-            if (normalized === inserted) return false;
-
+            if (completeTypedEditorInput(inputView, from, to, text)) return true;
+            const input = normalizeEditorInput(inputView, from, to, text);
+            if (!input) return false;
             inputView.dispatch({
-              changes: {
-                from: changeFrom,
-                to: changeTo,
-                insert: normalized,
-              },
-              selection: EditorSelection.cursor(changeFrom + normalized.length),
+              changes: { from: input.from, to: input.to, insert: input.text },
+              selection: EditorSelection.cursor(input.from + input.text.length),
             });
             return true;
           }),
@@ -3347,19 +3439,19 @@ export default function LiveMarkdownEditor({
             },
           }),
           placeholder("Begin writing…"),
-          livePreviewExtension(
-            (title) => onOpenWikilinkRef.current(title),
-            (id) => onOpenCardRef.current?.(id),
-            (id) => cardTitlesRef.current.get(id) ?? null,
-            cardDataRef.current,
-            (id, status) => onMoveCardRef.current?.(id, status),
-            (boardID) => onAddCardToBoardRef.current?.(boardID),
-            (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
+          livePreviewExtension({
+            openWikilink: (title) => onOpenWikilinkRef.current(title),
+            openCard: (id) => onOpenCardRef.current?.(id),
+            cardTitle: (id) => cardTitlesRef.current.get(id) ?? null,
+            cards: cardDataRef.current,
+            moveCard: (id, status) => onMoveCardRef.current?.(id, status),
+            addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
+            changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
             noteID,
-            (reason) => onErrorRef.current(reason),
+            onError: (reason) => onErrorRef.current(reason),
             highlightLineNumbers,
             defaultSectionsCollapsed,
-          ),
+          }),
           searchHighlightField,
           EditorView.updateListener.of((update) => {
             if (
