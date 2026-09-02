@@ -6224,14 +6224,14 @@ function App() {
   const renderCalendar = () => (
     <>
       {calendarOpen && (
-        <div
+        <dialog open aria-modal="true" aria-labelledby="calendar-title"
           className="modal-backdrop calendar-backdrop"
           style={{ zIndex: windowLayers.calendar }}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setCalendarOpen(false);
           }}
         >
-          <dialog open className="vault-modal calendar-modal" aria-modal="true" aria-labelledby="calendar-title">
+          <div className="vault-modal calendar-modal">
             <button type="button" className="icon-button modal-close" aria-label="Close calendar" onClick={() => setCalendarOpen(false)}>
               <Icon name="x" />
             </button>
@@ -6319,8 +6319,8 @@ function App() {
                 Today
               </button>
             </div>
-          </dialog>
-        </div>
+          </div>
+        </dialog>
       )}
 
     </>
