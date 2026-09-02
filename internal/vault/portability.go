@@ -48,18 +48,8 @@ func uniquePortablePath(directory, name, extension string, used map[string]struc
 func (s *Store) ExportMarkdown(parent string) (PortabilityResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if err := s.requireUnlocked(); err != nil {
+	if err := s.validateExportAccessLocked(); err != nil {
 		return PortabilityResult{}, err
-	}
-	for _, folder := range s.manifest.Folders {
-		if err := s.requireFolderAccessibleLocked(folder.ID); err != nil {
-			return PortabilityResult{}, err
-		}
-	}
-	for _, note := range s.manifest.Notes {
-		if err := s.requireNoteAccessibleLocked(note); err != nil {
-			return PortabilityResult{}, err
-		}
 	}
 	parent, err := filepath.Abs(strings.TrimSpace(parent))
 	if err != nil {
@@ -86,6 +76,42 @@ func (s *Store) ExportMarkdown(parent string) (PortabilityResult, error) {
 			_ = os.RemoveAll(destination)
 		}
 	}()
+	folderPaths, err := s.exportMarkdownFoldersLocked(destination, &result)
+	if err != nil {
+		return PortabilityResult{}, err
+	}
+	usedFiles := make(map[string]struct{})
+	usedAttachments := make(map[string]struct{})
+	for _, summary := range s.manifest.Notes {
+		attachments, err := s.exportMarkdownNoteLocked(summary, folderPaths[summary.FolderID], usedFiles, usedAttachments)
+		if err != nil {
+			return PortabilityResult{}, err
+		}
+		result.Attachments += attachments
+		result.Notes++
+	}
+	failed = false
+	return result, nil
+}
+
+func (s *Store) validateExportAccessLocked() error {
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	for _, folder := range s.manifest.Folders {
+		if err := s.requireFolderAccessibleLocked(folder.ID); err != nil {
+			return err
+		}
+	}
+	for _, note := range s.manifest.Notes {
+		if err := s.requireNoteAccessibleLocked(note); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) exportMarkdownFoldersLocked(destination string, result *PortabilityResult) (map[string]string, error) {
 	folderPaths := map[string]string{"": destination}
 	remaining := slices.Clone(s.manifest.Folders)
 	usedDirectories := make(map[string]struct{})
@@ -100,7 +126,7 @@ func (s *Store) ExportMarkdown(parent string) (PortabilityResult, error) {
 			}
 			path := uniquePortablePath(parentPath, folder.Name, "", usedDirectories)
 			if err := os.MkdirAll(path, 0o700); err != nil {
-				return PortabilityResult{}, err
+				return nil, err
 			}
 			folderPaths[folder.ID] = path
 			result.Folders++
@@ -108,57 +134,63 @@ func (s *Store) ExportMarkdown(parent string) (PortabilityResult, error) {
 			progress = true
 		}
 		if !progress {
-			return PortabilityResult{}, errors.New("folder hierarchy cannot be exported")
+			return nil, errors.New("folder hierarchy cannot be exported")
 		}
 	}
-	usedFiles := make(map[string]struct{})
-	usedAttachments := make(map[string]struct{})
-	for _, summary := range s.manifest.Notes {
-		note, err := s.readNoteLocked(summary.ID)
+	return folderPaths, nil
+}
+
+func (s *Store) exportMarkdownNoteLocked(summary NoteSummary, directory string, usedFiles, usedAttachments map[string]struct{}) (int, error) {
+	note, err := s.readNoteLocked(summary.ID)
+	if err != nil {
+		return 0, err
+	}
+	content := derivedMarkdownContent(note.Content)
+	attachmentDirectory := filepath.Join(directory, "attachments")
+	attachments := 0
+	for _, id := range summary.AttachmentIDs {
+		data, name, err := s.exportMarkdownAttachmentLocked(id, attachmentDirectory, usedAttachments)
 		if err != nil {
-			return PortabilityResult{}, err
+			return 0, err
 		}
-		directory := folderPaths[summary.FolderID]
-		content := derivedMarkdownContent(note.Content)
-		attachmentDirectory := filepath.Join(directory, "attachments")
-		for _, id := range summary.AttachmentIDs {
-			data, err := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), "attachment", sharedAttachmentAAD(id))
-			name := id + ".webp"
-			if err != nil {
-				payload, fileErr := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), "file-attachment", sharedAttachmentAAD(id))
-				if fileErr != nil {
-					return PortabilityResult{}, err
-				}
-				info, fileData, fileErr := decodeFileAttachment(payload)
-				if fileErr != nil {
-					return PortabilityResult{}, fileErr
-				}
-				data, name = fileData, portableName(info.Filename, id)
-				if portableImageFilename.MatchString(name) {
-					name = "attachment_" + name
-				}
-				extension := filepath.Ext(name)
-				name = filepath.Base(uniquePortablePath(attachmentDirectory, strings.TrimSuffix(name, extension), extension, usedAttachments))
-			} else {
-				usedAttachments[strings.ToLower(filepath.Join(attachmentDirectory, name))] = struct{}{}
-			}
-			if err := os.MkdirAll(attachmentDirectory, 0o700); err != nil {
-				return PortabilityResult{}, err
-			}
-			if err := os.WriteFile(filepath.Join(attachmentDirectory, name), data, 0o600); err != nil {
-				return PortabilityResult{}, err
-			}
-			content = strings.ReplaceAll(content, attachmentLinkPrefix+id, "attachments/"+url.PathEscape(name))
-			result.Attachments++
+		if err := os.MkdirAll(attachmentDirectory, 0o700); err != nil {
+			return 0, err
 		}
-		path := uniquePortablePath(directory, note.Title, ".md", usedFiles)
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			return PortabilityResult{}, err
+		if err := os.WriteFile(filepath.Join(attachmentDirectory, name), data, 0o600); err != nil {
+			return 0, err
 		}
-		result.Notes++
+		content = strings.ReplaceAll(content, attachmentLinkPrefix+id, "attachments/"+url.PathEscape(name))
+		attachments++
 	}
-	failed = false
-	return result, nil
+	path := uniquePortablePath(directory, note.Title, ".md", usedFiles)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return 0, err
+	}
+	return attachments, nil
+}
+
+func (s *Store) exportMarkdownAttachmentLocked(id, directory string, used map[string]struct{}) ([]byte, string, error) {
+	data, err := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), "attachment", sharedAttachmentAAD(id))
+	name := id + ".webp"
+	if err != nil {
+		payload, fileErr := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), "file-attachment", sharedAttachmentAAD(id))
+		if fileErr != nil {
+			return nil, "", err
+		}
+		info, fileData, fileErr := decodeFileAttachment(payload)
+		if fileErr != nil {
+			return nil, "", fileErr
+		}
+		data, name = fileData, portableName(info.Filename, id)
+		if portableImageFilename.MatchString(name) {
+			name = "attachment_" + name
+		}
+		extension := filepath.Ext(name)
+		name = filepath.Base(uniquePortablePath(directory, strings.TrimSuffix(name, extension), extension, used))
+	} else {
+		used[strings.ToLower(filepath.Join(directory, name))] = struct{}{}
+	}
+	return data, name, nil
 }
 
 type markdownImportFile struct {
@@ -189,9 +221,35 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 	if err != nil {
 		return PortabilityResult{}, err
 	}
+	files, folders, err := collectMarkdownImportFiles(source)
+	if err != nil {
+		return PortabilityResult{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.requireUnlocked(); err != nil {
+		return PortabilityResult{}, err
+	}
+
+	result := PortabilityResult{Path: source}
+	folderIDs, plannedFolders, err := s.planMarkdownImportFoldersLocked(folders, &result)
+	if err != nil {
+		return result, err
+	}
+	plannedNotes, err := planMarkdownImportNotes(files, folderIDs, s.manifest.Notes, &result)
+	if err != nil {
+		return result, err
+	}
+	if err := s.writeMarkdownImportLocked(plannedFolders, plannedNotes); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func collectMarkdownImportFiles(source string) ([]markdownImportFile, map[string]struct{}, error) {
 	files := make([]markdownImportFile, 0)
 	folders := make(map[string]struct{})
-	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -222,11 +280,15 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		return nil
 	})
 	if err != nil {
-		return PortabilityResult{}, err
+		return nil, nil, err
 	}
 	if len(files) == 0 {
-		return PortabilityResult{}, errors.New("selected folder contains no Markdown files")
+		return nil, nil, errors.New("selected folder contains no Markdown files")
 	}
+	return files, folders, nil
+}
+
+func (s *Store) planMarkdownImportFoldersLocked(folders map[string]struct{}, result *PortabilityResult) (map[string]string, []Folder, error) {
 	folderNames := make([]string, 0, len(folders))
 	for folder := range folders {
 		folderNames = append(folderNames, folder)
@@ -238,13 +300,6 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		}
 		return strings.Compare(left, right)
 	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.requireUnlocked(); err != nil {
-		return PortabilityResult{}, err
-	}
-
-	result := PortabilityResult{Path: source}
 	folderIDs := map[string]string{".": ""}
 	plannedFolders := make([]Folder, 0, len(folderNames))
 	folderKeys := make(map[string]struct{}, len(s.manifest.Folders)+len(folderNames))
@@ -257,15 +312,15 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		parentID := folderIDs[filepath.Dir(relative)]
 		name, err := normalizeFolderName(filepath.Base(relative))
 		if err != nil {
-			return result, fmt.Errorf("import folder %s: %w", relative, err)
+			return nil, nil, fmt.Errorf("import folder %s: %w", relative, err)
 		}
 		key := parentID + "\x00" + strings.ToLower(name)
 		if _, exists := folderKeys[key]; exists {
-			return result, fmt.Errorf("import folder %s: a folder with this name already exists", relative)
+			return nil, nil, fmt.Errorf("import folder %s: a folder with this name already exists", relative)
 		}
 		id, err := randomID(16)
 		if err != nil {
-			return result, err
+			return nil, nil, err
 		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		folder := Folder{ID: id, Name: name, ParentID: parentID, Order: nextFolderOrder[parentID], SortMode: "manual", CreatedAt: now, UpdatedAt: now}
@@ -275,103 +330,139 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		plannedFolders = append(plannedFolders, folder)
 		result.Folders++
 	}
+	return folderIDs, plannedFolders, nil
+}
 
+func planMarkdownImportNotes(files []markdownImportFile, folderIDs map[string]string, existing []NoteSummary, result *PortabilityResult) ([]markdownImportNote, error) {
 	nextNoteOrder := make(map[string]int)
-	for _, note := range s.manifest.Notes {
+	for _, note := range existing {
 		nextNoteOrder[note.FolderID] = max(nextNoteOrder[note.FolderID], note.Order+1)
 	}
 	plannedNotes := make([]markdownImportNote, 0, len(files))
 	for _, file := range files {
-		title, err := normalizeTitle(strings.TrimSuffix(filepath.Base(file.relative), filepath.Ext(file.relative)))
+		planned, err := planMarkdownImportNote(file, folderIDs, nextNoteOrder, result)
 		if err != nil {
-			return result, err
+			return nil, err
 		}
-		noteID, err := randomID(16)
-		if err != nil {
-			return result, err
-		}
-		content := file.content
-		attachments := make([]markdownImportAttachment, 0)
-		replaced := make(map[string]string)
-		for _, match := range portableAttachmentLink.FindAllStringSubmatch(file.content, -1) {
-			if replacement, exists := replaced[match[0]]; exists {
-				content = strings.ReplaceAll(content, match[0], replacement)
-				continue
-			}
-			data, err := os.ReadFile(filepath.Join(filepath.Dir(file.path), "attachments", match[1]+".webp"))
-			if err != nil {
-				return result, fmt.Errorf("import attachment %s: %w", match[1], err)
-			}
-			if len(data) == 0 || len(data) > maxAttachmentBytes || len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
-				return result, fmt.Errorf("import attachment %s: image is not valid WebP data", match[1])
-			}
-			attachmentID, err := randomID(16)
-			if err != nil {
-				return result, err
-			}
-			replacement := attachmentLinkPrefix + attachmentID
-			replaced[match[0]] = replacement
-			content = strings.ReplaceAll(content, match[0], replacement)
-			attachments = append(attachments, markdownImportAttachment{id: attachmentID, objectType: "attachment", payload: data})
-			result.Attachments++
-		}
-		for _, match := range portableFileLink.FindAllStringSubmatch(content, -1) {
-			if replacement, exists := replaced[match[0]]; exists {
-				content = strings.ReplaceAll(content, match[0], replacement)
-				continue
-			}
-			name, err := url.PathUnescape(match[1])
-			if err != nil {
-				return result, errors.New("imported attachment path is invalid")
-			}
-			if name == "" || name == "." || name == ".." || filepath.IsAbs(name) || filepath.Base(name) != name {
-				return result, errors.New("imported attachment path is unsafe")
-			}
-			path := filepath.Join(filepath.Dir(file.path), "attachments", name)
-			info, err := os.Lstat(path)
-			if err != nil || !info.Mode().IsRegular() {
-				return result, errors.New("attachment source is not a regular file")
-			}
-			if info.Size() <= 0 || info.Size() > maxFileAttachmentBytes {
-				return result, errors.New("attachment must be between 1 byte and 64 MiB")
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return result, err
-			}
-			attachmentID, err := randomID(16)
-			if err != nil {
-				return result, err
-			}
-			attachment := AttachmentInfo{ID: attachmentID, Filename: name, MIMEType: mime.TypeByExtension(filepath.Ext(name)), Size: int64(len(data))}
-			if attachment.MIMEType == "" {
-				attachment.MIMEType = "application/octet-stream"
-			}
-			payload, err := encodeFileAttachment(attachment, data)
-			if err != nil {
-				return result, err
-			}
-			replacement := attachmentLinkPrefix + attachmentID
-			replaced[match[0]] = replacement
-			content = strings.ReplaceAll(content, match[0], replacement)
-			attachments = append(attachments, markdownImportAttachment{id: attachmentID, objectType: "file-attachment", payload: payload})
-			result.Attachments++
-		}
-		storedContent := canonicalizeNoteContent(content)
-		if len(storedContent) > maxNoteBytes {
-			return result, errors.New("note exceeds the 10 MiB limit")
-		}
-		folderID := folderIDs[file.folderPath]
-		now := time.Now().UTC()
-		note := Note{
-			ID: noteID, Title: title, FolderID: folderID, Order: nextNoteOrder[folderID], Content: storedContent,
-			CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano), ModifiedAt: now.Unix(), Revision: 1,
-		}
-		nextNoteOrder[folderID]++
-		plannedNotes = append(plannedNotes, markdownImportNote{note: note, attachments: attachments})
-		result.Notes++
+		plannedNotes = append(plannedNotes, planned)
 	}
+	return plannedNotes, nil
+}
 
+func planMarkdownImportNote(file markdownImportFile, folderIDs map[string]string, nextNoteOrder map[string]int, result *PortabilityResult) (markdownImportNote, error) {
+	title, err := normalizeTitle(strings.TrimSuffix(filepath.Base(file.relative), filepath.Ext(file.relative)))
+	if err != nil {
+		return markdownImportNote{}, err
+	}
+	noteID, err := randomID(16)
+	if err != nil {
+		return markdownImportNote{}, err
+	}
+	content, attachments, err := importMarkdownContent(file, result)
+	if err != nil {
+		return markdownImportNote{}, err
+	}
+	storedContent := canonicalizeNoteContent(content)
+	if len(storedContent) > maxNoteBytes {
+		return markdownImportNote{}, errors.New("note exceeds the 10 MiB limit")
+	}
+	folderID := folderIDs[file.folderPath]
+	now := time.Now().UTC()
+	note := Note{
+		ID: noteID, Title: title, FolderID: folderID, Order: nextNoteOrder[folderID], Content: storedContent,
+		CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano), ModifiedAt: now.Unix(), Revision: 1,
+	}
+	nextNoteOrder[folderID]++
+	result.Notes++
+	return markdownImportNote{note: note, attachments: attachments}, nil
+}
+
+func importMarkdownContent(file markdownImportFile, result *PortabilityResult) (string, []markdownImportAttachment, error) {
+	content := file.content
+	attachments := make([]markdownImportAttachment, 0)
+	replaced := make(map[string]string)
+	for _, match := range portableAttachmentLink.FindAllStringSubmatch(file.content, -1) {
+		if replacement, exists := replaced[match[0]]; exists {
+			content = strings.ReplaceAll(content, match[0], replacement)
+			continue
+		}
+		attachment, replacement, err := importMarkdownImageAttachment(file, match[1])
+		if err != nil {
+			return "", nil, err
+		}
+		replaced[match[0]] = replacement
+		content = strings.ReplaceAll(content, match[0], replacement)
+		attachments = append(attachments, attachment)
+		result.Attachments++
+	}
+	for _, match := range portableFileLink.FindAllStringSubmatch(content, -1) {
+		if replacement, exists := replaced[match[0]]; exists {
+			content = strings.ReplaceAll(content, match[0], replacement)
+			continue
+		}
+		attachment, replacement, err := importMarkdownFileAttachment(file, match[1])
+		if err != nil {
+			return "", nil, err
+		}
+		replaced[match[0]] = replacement
+		content = strings.ReplaceAll(content, match[0], replacement)
+		attachments = append(attachments, attachment)
+		result.Attachments++
+	}
+	return content, attachments, nil
+}
+
+func importMarkdownImageAttachment(file markdownImportFile, id string) (markdownImportAttachment, string, error) {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file.path), "attachments", id+".webp"))
+	if err != nil {
+		return markdownImportAttachment{}, "", fmt.Errorf("import attachment %s: %w", id, err)
+	}
+	if len(data) == 0 || len(data) > maxAttachmentBytes || len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return markdownImportAttachment{}, "", fmt.Errorf("import attachment %s: image is not valid WebP data", id)
+	}
+	attachmentID, err := randomID(16)
+	if err != nil {
+		return markdownImportAttachment{}, "", err
+	}
+	return markdownImportAttachment{id: attachmentID, objectType: "attachment", payload: data}, attachmentLinkPrefix + attachmentID, nil
+}
+
+func importMarkdownFileAttachment(file markdownImportFile, encodedName string) (markdownImportAttachment, string, error) {
+	name, err := url.PathUnescape(encodedName)
+	if err != nil {
+		return markdownImportAttachment{}, "", errors.New("imported attachment path is invalid")
+	}
+	if name == "" || name == "." || name == ".." || filepath.IsAbs(name) || filepath.Base(name) != name {
+		return markdownImportAttachment{}, "", errors.New("imported attachment path is unsafe")
+	}
+	path := filepath.Join(filepath.Dir(file.path), "attachments", name)
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return markdownImportAttachment{}, "", errors.New("attachment source is not a regular file")
+	}
+	if info.Size() <= 0 || info.Size() > maxFileAttachmentBytes {
+		return markdownImportAttachment{}, "", errors.New("attachment must be between 1 byte and 64 MiB")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return markdownImportAttachment{}, "", err
+	}
+	attachmentID, err := randomID(16)
+	if err != nil {
+		return markdownImportAttachment{}, "", err
+	}
+	attachment := AttachmentInfo{ID: attachmentID, Filename: name, MIMEType: mime.TypeByExtension(filepath.Ext(name)), Size: int64(len(data))}
+	if attachment.MIMEType == "" {
+		attachment.MIMEType = "application/octet-stream"
+	}
+	payload, err := encodeFileAttachment(attachment, data)
+	if err != nil {
+		return markdownImportAttachment{}, "", err
+	}
+	return markdownImportAttachment{id: attachmentID, objectType: "file-attachment", payload: payload}, attachmentLinkPrefix + attachmentID, nil
+}
+
+func (s *Store) writeMarkdownImportLocked(plannedFolders []Folder, plannedNotes []markdownImportNote) error {
 	written := make([]string, 0)
 	cleanup := func() {
 		for _, path := range written {
@@ -379,7 +470,7 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(s.root, "attachments", sharedAttachmentFolder), 0o700); err != nil {
-		return result, err
+		return err
 	}
 	for _, planned := range plannedNotes {
 		for _, attachment := range planned.attachments {
@@ -387,7 +478,7 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 			written = append(written, path)
 			if err := s.writeEnvelopeLocked(path, attachment.objectType, sharedAttachmentAAD(attachment.id), attachment.payload); err != nil {
 				cleanup()
-				return result, err
+				return err
 			}
 		}
 	}
@@ -398,7 +489,7 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		hash, err := s.writeNoteLocked(planned.note)
 		if err != nil {
 			cleanup()
-			return result, err
+			return err
 		}
 		summary := summaryFromNote(planned.note)
 		summary.CiphertextHash = hash
@@ -412,7 +503,7 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 		s.hasSavedManifestHash = false
 		restoreErr := s.saveManifestLocked()
 		cleanup()
-		return result, errors.Join(err, restoreErr)
+		return errors.Join(err, restoreErr)
 	}
 	s.noteIndexes = nil
 	s.folderIndexes = nil
@@ -421,5 +512,5 @@ func (s *Store) ImportMarkdown(source string) (PortabilityResult, error) {
 	for _, planned := range plannedNotes {
 		s.updateSearchIndexLocked(planned.note.ID, derivedMarkdownContent(planned.note.Content))
 	}
-	return result, nil
+	return nil
 }
