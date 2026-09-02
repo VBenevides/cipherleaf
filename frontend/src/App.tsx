@@ -3119,9 +3119,9 @@ function App() {
     return sortNotesForMode(items, mode);
   }, [folderByID, sortNotesForMode, unfiledSortMode]);
 
-  let currentSortMode = globalSortMode;
-  if (selectedFolderID === "") currentSortMode = unfiledSortMode;
-  else if (selectedFolderID !== "all") currentSortMode = folderByID.get(selectedFolderID)?.sortMode || "manual";
+  const currentSortMode = new Map([["all", globalSortMode], ["", unfiledSortMode]]).get(selectedFolderID)
+    ?? folderByID.get(selectedFolderID)?.sortMode
+    ?? "manual";
 
   const setCurrentSortMode = (mode: string) => {
     if (selectedFolderID === "all") {
@@ -4344,43 +4344,45 @@ function App() {
     dropTarget === `note:${noteID}:before` ? "drag-over-before" : "",
     dropTarget === `note:${noteID}:after` ? "drag-over-after" : "",
   ].filter(Boolean).join(" ");
-  let notesHeading = "Notes";
-  if (selectedFolderID === "") notesHeading = "Unfiled";
-  else if (selectedFolderID !== "all") notesHeading = folders.find((folder) => folder.id === selectedFolderID)?.name ?? "Notes";
-
-  let syncMenuTitle = "Pull then push the vault to GitHub";
-  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
-  else if (syncing) syncMenuTitle = "Syncing…";
-
-  let saveStatusLabel = "Saved locally";
-  if (dirty) saveStatusLabel = "Unsaved";
-  if (saveState === "error") saveStatusLabel = "Save failed";
-  if (saveState === "saving") saveStatusLabel = "Encrypting…";
-
-  let saveFileTitle = "Save this note (Ctrl + S)";
-  if (!note) saveFileTitle = "No note open";
-  if (conflictResolution) saveFileTitle = "Save the merged conflict result";
-  let saveFileLabel = "Save file";
-  if (conflictResolution) saveFileLabel = "Save merged file";
-  if (saveState === "saving") saveFileLabel = "Encrypting…";
+  const notesHeading = new Map([["all", "Notes"], ["", "Unfiled"]]).get(selectedFolderID)
+    ?? folders.find((folder) => folder.id === selectedFolderID)?.name
+    ?? "Notes";
+  const syncMenuTitle = !syncLinked
+    ? "Link this vault in Vault Settings first"
+    : syncing
+      ? "Syncing…"
+      : "Pull then push the vault to GitHub";
+  const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
+    ?? (dirty ? "Unsaved" : "Saved locally");
+  const saveFileTitle = conflictResolution
+    ? "Save the merged conflict result"
+    : !note
+      ? "No note open"
+      : "Save this note (Ctrl + S)";
+  const saveFileLabel = saveState === "saving"
+    ? "Encrypting…"
+    : conflictResolution
+      ? "Save merged file"
+      : "Save file";
   const saveFileAction = () => {
     if (conflictResolution) void saveResolvedConflict();
     else persistCurrentInBackground();
   };
 
-  let syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
-  if (!syncLinked) syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
-  if (!note) syncButtonTitle = "No note open";
+  const syncButtonTitle = !note
+    ? "No note open"
+    : syncLinked
+      ? "Save and sync to GitHub (Ctrl + Shift + S)"
+      : "Link this vault to GitHub in Vault Settings first";
   const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
-  let settingsSubmitLabel = "Link vault";
-  if (syncSettings?.linked) settingsSubmitLabel = "Verify link";
-  if (settingsBusy) settingsSubmitLabel = "Linking…";
-  let breadcrumbItems: NoteCrumb[] = noteTrail;
-  if (!noteTrail.length) {
-    breadcrumbItems = [{ id: "", title: folderName(session.path) }];
-    if (currentFolder) breadcrumbItems.push({ id: "", title: currentFolder.name });
-    if (note) breadcrumbItems.push({ id: note.id, title: note.title || "Untitled" });
-  }
+  const settingsSubmitLabel = settingsBusy ? "Linking…" : syncSettings?.linked ? "Verify link" : "Link vault";
+  const breadcrumbItems: NoteCrumb[] = noteTrail.length
+    ? noteTrail
+    : [
+        { id: "", title: folderName(session.path) },
+        ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
+        ...(note ? [{ id: note.id, title: note.title || "Untitled" }] : []),
+      ];
 
   const renderWorkspaceHeader = () => (
       <header className="app-menubar">
