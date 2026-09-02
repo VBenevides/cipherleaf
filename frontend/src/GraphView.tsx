@@ -48,7 +48,7 @@ function GraphNoteIcon() {
   return <path d="M-4-7h5l4 4v10H-5V-7ZM1-7v4h4M-2 1h4M-2 4h4" />;
 }
 
-function EmptyGraph({ mode }: { mode: "links" | "folders" }) {
+function EmptyGraph({ mode }: { readonly mode: "links" | "folders" }) {
   return (
     <div className="graph-empty-state">
       <p>{mode === "links" ? "Create notes and connect them with [[wikilinks]] to see their relationships." : "Create a folder to see the vault hierarchy."}</p>
@@ -56,7 +56,7 @@ function EmptyGraph({ mode }: { mode: "links" | "folders" }) {
   );
 }
 
-function RelationshipGraph({ notes, zoom, onSelectNote }: { notes: NoteSummary[]; zoom: number; onSelectNote: (id: string) => void }) {
+function RelationshipGraph({ notes, zoom, onSelectNote }: { readonly notes: NoteSummary[]; readonly zoom: number; readonly onSelectNote: (id: string) => void }) {
   const width = 900;
   const height = 620;
   const centerX = width / 2;
@@ -108,10 +108,10 @@ export function GraphView({
   onSelectFolder,
   onSelectNote,
 }: {
-  folders: Folder[];
-  notes: NoteSummary[];
-  onSelectFolder: (folder: Folder) => void;
-  onSelectNote: (noteID: string) => void;
+  readonly folders: Folder[];
+  readonly notes: NoteSummary[];
+  readonly onSelectFolder: (folder: Folder) => void;
+  readonly onSelectNote: (noteID: string) => void;
 }) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [mode, setMode] = useState<"links" | "folders">("links");
