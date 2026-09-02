@@ -296,11 +296,6 @@
   pointer-events: none;
 }
 
-.live-markdown-editor .cm-content {
-  position: relative;
-  z-index: 1;
-}
-
 .cm-journal-rule {
   position: absolute;
   left: var(--editor-content-left);
@@ -1034,15 +1029,11 @@ a:focus-visible {
 .app-dialog-actions .danger-button {
   width: auto;
   margin-top: 0;
+  min-width: 128px;
 }
 
 .app-dialog-actions .secondary-button {
   min-width: 96px;
-}
-
-.app-dialog-actions .primary-button,
-.app-dialog-actions .danger-button {
-  min-width: 128px;
 }
 
 .remember-secret-row {
@@ -2063,8 +2054,8 @@ a:focus-visible {
   border-radius: 7px;
   color: var(--muted);
   background: transparent;
-  cursor: pointer;
   text-align: left;
+  cursor: grab;
 }
 
 .note-list-item:hover {
@@ -2075,10 +2066,6 @@ a:focus-visible {
   color: var(--green-dark);
   background: color-mix(in srgb, var(--modal-control-surface) 80%, transparent);
   border-left: 3px solid var(--green);
-}
-
-.note-list-item {
-  cursor: grab;
 }
 
 .note-list-item:active {
@@ -2902,9 +2889,8 @@ a:focus-visible {
 .time-calendar-navigation { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
 .time-calendar-navigation strong { margin-right: auto; color: var(--ink); font-family: Georgia, "Times New Roman", serif; }
 .time-week-grid { display: grid; grid-template-columns: repeat(7, minmax(105px, 1fr)); gap: 7px; margin-bottom: 24px; overflow-x: auto; }
-.time-week-grid > section { min-height: 150px; display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: 8px; background: color-mix(in srgb, var(--modal-control-surface) 28%, transparent); }
+.time-week-grid > section { min-height: 150px; display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: 8px; background: color-mix(in srgb, var(--modal-control-surface) 28%, transparent); cursor: pointer; outline: none; }
 .time-week-grid > section.today { border-color: var(--green); }
-.time-week-grid > section { cursor: pointer; outline: none; }
 .time-week-grid > section:hover, .time-week-grid > section:focus-visible, .time-week-grid > section.selected { border-color: var(--green-dark); }
 .time-week-grid header, .time-week-grid footer { display: flex; justify-content: space-between; padding: 8px; color: var(--muted); font-size: 10px; }
 .time-week-grid > section > div { flex: 1; display: grid; align-content: start; gap: 5px; padding: 3px 8px; }
@@ -3833,6 +3819,8 @@ a:focus-visible {
   padding: 34px var(--editor-content-right) 76px var(--editor-content-left);
   caret-color: var(--green-dark);
   font-style: normal;
+  position: relative;
+  z-index: 1;
 }
 
 .live-markdown-editor .cm-line {
