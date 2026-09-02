@@ -2269,7 +2269,7 @@ function App() {
   const renameCurrentVault = async () => {
     setTitlebarMenu(null);
     if (!session || session.locked) return;
-    const currentName = session.path.split(/[\\/]/).filter(Boolean).pop() ?? "";
+    const currentName = session.path.split(/[\\/]/).reverse().find((part) => part.length > 0) ?? "";
     const newName = await requestAppPrompt({
       kind: "prompt",
       eyebrow: "Vault",
