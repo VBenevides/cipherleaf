@@ -60,8 +60,9 @@ function renderObjectBlock(node: ObjectLine, type: EditableObjectTag, text: stri
     ].join("\n");
   }
 
+  const sectionCheckmark = node.checked === undefined ? "" : `[${node.checked ? "x" : " "}] `;
   const marker = type === "section"
-    ? `> ${node.checked === undefined ? "" : `[${node.checked ? "x" : " "}] `}`
+    ? `> ${sectionCheckmark}`
     : type === "checkbox"
       ? `- [${node.checked ? "x" : " "}] `
       : type === "bulletpoint"
