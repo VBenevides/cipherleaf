@@ -1094,6 +1094,7 @@ class CardReferenceWidget extends WidgetType {
       this.open(this.id);
     };
     link.addEventListener("mousedown", activate);
+    link.addEventListener("click", (event) => event.stopPropagation());
     link.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") activate(event);
     });
@@ -1168,7 +1169,10 @@ class BoardWidget extends WidgetType {
           item.textContent = card.title || "Untitled";
           item.title = `Open card “${card.title || "Untitled"}”`;
           item.addEventListener("dragstart", (event) => event.dataTransfer?.setData("text/plain", card.id));
-          item.addEventListener("click", () => this.openCard(card.id));
+          item.addEventListener("click", (event) => {
+            event.stopPropagation();
+            this.openCard(card.id);
+          });
           const date = status === "not-started" ? card.createdAt
             : status === "in-progress" ? card.startedAt
               : status === "blocked" ? card.blockedOn

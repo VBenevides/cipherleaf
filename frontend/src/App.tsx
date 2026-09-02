@@ -58,6 +58,8 @@ import {
   cardReference,
   normalizeCardTags,
   parseCardDocument,
+  parseTemplateDocument,
+  serializeTemplateDocument,
   serializeCardDocument,
   transitionCard,
   type CardMetadata,
@@ -566,6 +568,7 @@ function App() {
   const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
   const [cardPanel, setCardPanel] = useState<CardPanelState | null>(null);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
+  const [selectedTemplateID, setSelectedTemplateID] = useState("");
   const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
@@ -3079,6 +3082,14 @@ function App() {
     () => new Map([...cardMetadata].map(([id, metadata]) => [id, metadata.title])),
     [cardMetadata],
   );
+  const cardTemplates = useMemo(
+    () => notes.filter((summary) => summary.properties?.["cipherleaf-card-template"] === true || summary.properties?.["cipherleaf-card-template"] === "true"),
+    [notes],
+  );
+  const cardSignature = useMemo(
+    () => [...cardMetadata.values()].map((item) => `${item.id}:${item.title}:${item.status}:${item.columnEnteredAt ?? ""}`).join("|")
+    , [cardMetadata],
+  );
 
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
@@ -3153,6 +3164,7 @@ function App() {
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) throw new Error("This reference is not a card.");
+      setSelectedTemplateID("");
       setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
     } catch (reason) {
       setError(errorText(reason));
@@ -3165,6 +3177,7 @@ function App() {
       const metadata = newCardMetadata(created.id, new Date(created.createdAt));
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
       updateSummary(saved.summary);
+      setSelectedTemplateID("");
       setCardPanel({ note: saved.note, metadata, body: "" });
       return cardReference(created.id);
     } catch (reason) {
@@ -3198,6 +3211,51 @@ function App() {
       setError(errorText(reason));
     } finally {
       setCardPanelSaving(false);
+    }
+  };
+
+  const saveCardAsTemplate = async () => {
+    if (!cardPanel) return;
+    try {
+      const template = await VaultService.CreateNote(`Template: ${cardPanel.metadata.title || "Untitled"}`);
+      const saved = await VaultService.SaveNote(template.id, template.title, serializeTemplateDocument({
+        id: template.id,
+        name: cardPanel.metadata.title || "Untitled",
+        status: cardPanel.metadata.status,
+        tags: cardPanel.metadata.tags,
+        body: cardPanel.body,
+      }));
+      updateSummary(saved.summary);
+      setSelectedTemplateID(template.id);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const applyCardTemplate = async (id: string) => {
+    if (!cardPanel || !id) return;
+    try {
+      const template = await VaultService.GetNote(id);
+      const parsed = parseTemplateDocument(template.content, id);
+      if (!parsed) return;
+      setCardPanel((current) => current ? {
+        ...current,
+        metadata: { ...current.metadata, status: parsed.template.status, tags: parsed.template.tags },
+        body: parsed.template.body,
+      } : current);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const deleteCardTemplate = async () => {
+    if (!selectedTemplateID) return;
+    try {
+      await VaultService.DeleteNote(selectedTemplateID);
+      setNotes((current) => current.filter((summary) => summary.id !== selectedTemplateID));
+      setSelectedTemplateID("");
+    } catch (reason) {
+      setError(errorText(reason));
     }
   };
 
@@ -4820,7 +4878,7 @@ function App() {
                 {view === "live" && (
                   <div className="editor-view-pane active">
                     <LiveMarkdownEditor
-                      key={`${note.id}:${sectionDefault}`}
+                      key={`${note.id}:${sectionDefault}:${cardSignature}`}
                       noteID={note.id}
                       value={noteMarkdown}
                       onChange={(content) => editNote({ content })}
@@ -4937,6 +4995,12 @@ function App() {
               {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
             </select></label>
             <label>Tags<input value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+            {cardTemplates.length > 0 && (
+              <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
+                <option value="">Choose a template</option>
+                {cardTemplates.map((template) => <option value={template.id} key={template.id}>{String(template.properties?.["cipherleaf-card-template-name"] ?? template.title)}</option>)}
+              </select></label>
+            )}
             <div className="card-sidebar-dates" aria-label="Card dates">
               <span>Created: {new Date(cardPanel.metadata.createdAt).toLocaleString()}</span>
               {cardPanel.metadata.startedAt && <span>Started: {new Date(cardPanel.metadata.startedAt).toLocaleString()}</span>}
@@ -4944,7 +5008,11 @@ function App() {
               {cardPanel.metadata.finishedAt && <span>Finished: {new Date(cardPanel.metadata.finishedAt).toLocaleString()}</span>}
             </div>
             <label className="card-sidebar-notes">Notes<textarea value={cardPanel.body} onChange={(event) => setCardPanel((current) => current ? { ...current, body: event.target.value } : current)} /></label>
-            <button type="button" className="primary-button" disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
+            <div className="card-sidebar-actions">
+              <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>
+              {selectedTemplateID && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
+              <button type="button" className="primary-button" disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
+            </div>
           </aside>
         )}
       </section>
