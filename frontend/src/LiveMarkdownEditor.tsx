@@ -3136,6 +3136,9 @@ export default function LiveMarkdownEditor({
             },
             pointerdown(event, pointerView) {
               if (readOnly || event.button !== 0) return false;
+              if (!(event.target instanceof Element && event.target.closest(".cm-live-attachment"))) {
+                document.querySelectorAll<HTMLElement>(".cm-live-attachment.is-selected").forEach((item) => item.classList.remove("is-selected"));
+              }
               const handle = objectHandleElement(event.target);
               const sourceLine = Number(handle?.dataset.objectLine);
               if (!handle || !Number.isFinite(sourceLine)) return false;
