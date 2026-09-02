@@ -44,6 +44,11 @@ type LabelAction = {
 
 type TimeLabel = TimeClient | TimeProject | TimeTag;
 
+type TimeTrackingViewProps = {
+  readonly now: Date;
+  readonly onActiveEntryChange?: (entry: TimeEntry | null) => void;
+};
+
 function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals: TimeDashboardDay[]): CalendarDay[] {
   const totalsByDate = new Map(totals.map((day) => [day.localDate, day.totalSeconds]));
   const entryRanges = entries.map((item) => ({ item, start: new Date(item.entry.startedAtUtc).getTime(), end: new Date(item.entry.endedAtUtc ?? "").getTime() }));
@@ -55,7 +60,7 @@ function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals:
   });
 }
 
-export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Date; onActiveEntryChange?: (entry: TimeEntry | null) => void }) {
+export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrackingViewProps) {
   const [tab, setTab] = useState<TimeTrackingTab>("week");
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
