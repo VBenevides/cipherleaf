@@ -55,6 +55,8 @@
   --modal-control-surface: #ffffff;
   --notebook-gutter: 70px;
   --notebook-margin: 60px;
+  --editor-content-left: 5%;
+  --editor-content-right: 15%;
 }
 
 :root[data-theme="dark"] {
@@ -224,7 +226,7 @@
 }
 
 :root[data-theme="archivist"] .live-markdown-editor .cm-content {
-  padding: 34px var(--notebook-gutter) 76px;
+  padding: 34px var(--editor-content-right) 76px var(--editor-content-left);
   font-style: normal;
 }
 
@@ -233,7 +235,8 @@
 }
 
 :root[data-theme="archivist"] .document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line {
-  width: min(100%, 1040px);
+  width: 100%;
+  max-width: none;
 }
 
 :root[data-theme="archivist"] .live-markdown-editor .cm-live-heading {
@@ -300,7 +303,8 @@
 
 .cm-journal-rule {
   position: absolute;
-  right: 30px;
+  left: var(--editor-content-left);
+  right: var(--editor-content-right);
   border-color: color-mix(in srgb, var(--line) 62%, transparent);
   opacity: 0.6;
 }
@@ -3825,7 +3829,7 @@ a:focus-visible {
 
 .live-markdown-editor .cm-content {
   min-height: 100%;
-  padding: 34px var(--notebook-gutter) 76px;
+  padding: 34px var(--editor-content-right) 76px var(--editor-content-left);
   caret-color: var(--green-dark);
   font-style: normal;
 }
@@ -3835,7 +3839,8 @@ a:focus-visible {
 }
 
 .document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line {
-  width: min(100%, 1040px);
+  width: 100%;
+  max-width: none;
 }
 
 .live-markdown-editor .cm-gutters,
@@ -4631,8 +4636,8 @@ a:focus-visible {
   }
 
   .live-markdown-editor .cm-content {
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: var(--editor-content-left);
+    padding-right: var(--editor-content-right);
   }
 
   .markdown-toolbar {

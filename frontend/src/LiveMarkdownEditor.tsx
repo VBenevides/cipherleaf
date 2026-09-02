@@ -292,7 +292,7 @@ function installJournalRules(editor: EditorView) {
     if (!enabled()) return;
 
     const scrollerRect = scroller.getBoundingClientRect();
-    const positions: { top: number; left: number }[] = [];
+    const positions: { top: number }[] = [];
     for (const line of editor.dom.querySelectorAll<HTMLElement>(
       ".cm-line:not(.cm-live-attachment-line):not(.cm-live-code-block):not(.cm-live-board-line)",
     )) {
@@ -323,12 +323,9 @@ function installJournalRules(editor: EditorView) {
       }
       if (rows.length === 0) rows.push({ top: lineRect.top, bottom: lineRect.bottom });
 
-      const handleRect = line.querySelector<HTMLElement>(".cm-live-object-handle")?.getBoundingClientRect();
-      const left = (handleRect?.right ?? lineRect.left) - scrollerRect.left + scroller.scrollLeft + 6;
       for (const row of rows) {
         positions.push({
           top: row.bottom - scrollerRect.top + scroller.scrollTop,
-          left,
         });
       }
     }
@@ -338,7 +335,6 @@ function installJournalRules(editor: EditorView) {
       const rule = document.createElement("span");
       rule.className = "cm-journal-rule";
       rule.style.top = `${position.top}px`;
-      rule.style.left = `${position.left}px`;
       fragment.appendChild(rule);
     }
     layer.replaceChildren(fragment);

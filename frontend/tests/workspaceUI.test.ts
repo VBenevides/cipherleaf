@@ -142,8 +142,12 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
 test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /cm-live-board-line/);
   assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
+  assert.doesNotMatch(liveEditor, /rule\.style\.left/);
   assert.match(liveEditor, /cm-live-board-title[\s\S]*Kanban Board/);
+  assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
+  assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 18px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-journal-rule \{[\s\S]*left: var\(--editor-content-left\)[\s\S]*right: var\(--editor-content-right\)/);
   assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*width: 100% !important[\s\S]*max-width: none[\s\S]*padding: 0 !important/);
 });
