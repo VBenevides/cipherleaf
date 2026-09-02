@@ -41,8 +41,8 @@ function uuidV4(): string {
     throw new Error("Secure random UUID generation is unavailable");
   }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
-    const random = (crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 * 16) | 0;
-    const value = char === "x" ? random : (random & 0x3) | 0x8;
+    const random = Math.trunc(crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 * 16);
+    const value = char === "x" ? random : (random % 4) + 0x8;
     return value.toString(16);
   });
 }
