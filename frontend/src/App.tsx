@@ -1721,33 +1721,19 @@ function App() {
       const target = event.target as HTMLElement | null;
       if (target?.closest("dialog, [role=dialog]")) return;
       const key = event.key.toLowerCase();
-      if (event.shiftKey && key === "t") {
-        event.preventDefault(); openStartTimerDialog(); return;
-      }
-      if (event.shiftKey && key === "e") {
-        event.preventDefault(); setTimerError(""); setTimerDialog("finish"); return;
-      }
-      if (!event.shiftKey && key === "b") {
-        event.preventDefault();
-        setSidebarCollapsed((current) => !current);
-        return;
-      }
-      if (target?.closest("input, textarea, select")) return;
-      if (key === "s") {
-        event.preventDefault();
-        if (event.shiftKey) void saveAndSync();
-        else persistCurrentInBackground();
-        return;
-      }
-      if (event.shiftKey && key === "r") {
-        event.preventDefault();
-        void syncNow();
-        return;
-      }
-      if (key === "n") {
-        event.preventDefault();
-        void createNote();
-      }
+      const shortcut = `${event.shiftKey ? "shift+" : ""}${key}`;
+      const action = new Map<string, () => void>([
+        ["shift+t", () => openStartTimerDialog()],
+        ["shift+e", () => { setTimerError(""); setTimerDialog("finish"); }],
+        ["b", () => setSidebarCollapsed((current) => !current)],
+        ["s", () => persistCurrentInBackground()],
+        ["shift+s", () => void saveAndSync()],
+        ["shift+r", () => void syncNow()],
+        ["n", () => void createNote()],
+      ]).get(shortcut);
+      if (!action || (target?.closest("input, textarea, select") && !new Set(["shift+t", "shift+e", "b"]).has(shortcut))) return;
+      event.preventDefault();
+      action();
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);

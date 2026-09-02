@@ -34,8 +34,8 @@ test("tracking conflicts require an explicit accessible dialog choice", () => {
 });
 
 test("timer and calendar modals use native dialog surfaces", () => {
-  assert.match(app, /event\.preventDefault\(\); openStartTimerDialog\(\); return;/);
-  assert.match(app, /setTimerDialog\("finish"\); return;/);
+  assert.match(app, /\["shift\+t", \(\) => openStartTimerDialog\(\)\]/);
+  assert.match(app, /\["shift\+e", \(\) => \{ setTimerError\(""\); setTimerDialog\("finish"\); \}\]/);
   assert.match(app, /<dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title" onMouseDown=/);
   assert.match(app, /<div className="vault-modal timer-modal">/);
   assert.match(app, /<dialog open aria-modal="true" aria-labelledby="calendar-title"\n          className="modal-backdrop calendar-backdrop"/);
