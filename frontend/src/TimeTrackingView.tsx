@@ -36,6 +36,14 @@ type CalendarDay = {
   total: number;
 };
 
+type LabelAction = {
+  kind: "client" | "project" | "tag";
+  id: string;
+  action: "archive" | "restore" | "delete";
+};
+
+type TimeLabel = TimeClient | TimeProject | TimeTag;
+
 function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals: TimeDashboardDay[]): CalendarDay[] {
   const totalsByDate = new Map(totals.map((day) => [day.localDate, day.totalSeconds]));
   const entryRanges = entries.map((item) => ({ item, start: new Date(item.entry.startedAtUtc).getTime(), end: new Date(item.entry.endedAtUtc ?? "").getTime() }));
@@ -77,7 +85,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
   const [labelName, setLabelName] = useState("");
   const [labelClientID, setLabelClientID] = useState("");
   const [renamingLabelID, setRenamingLabelID] = useState("");
-  const [labelAction, setLabelAction] = useState<{ kind: "client" | "project" | "tag"; id: string; action: "archive" | "restore" | "delete" } | null>(null);
+  const [labelAction, setLabelAction] = useState<LabelAction | null>(null);
   const [dashboard, setDashboard] = useState<TimeDashboard | null>(null);
   const [dashboardPreset, setDashboardPreset] = useState<DashboardPreset>("current-week");
   const [customStart, setCustomStart] = useState(localDateKey(new Date()));
@@ -253,8 +261,8 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
   };
 
   const labelManager = (kind: "client" | "project" | "tag") => {
-    const values: (TimeClient | TimeProject | TimeTag)[] = kind === "client" ? catalog?.clients ?? [] : kind === "project" ? catalog?.projects ?? [] : catalog?.tags ?? [];
-    const projectClientID = (item: TimeClient | TimeProject | TimeTag) => kind === "project" ? (item as TimeProject).clientId ?? "" : "";
+    const values: TimeLabel[] = kind === "client" ? catalog?.clients ?? [] : kind === "project" ? catalog?.projects ?? [] : catalog?.tags ?? [];
+    const projectClientID = (item: TimeLabel) => kind === "project" ? (item as TimeProject).clientId ?? "" : "";
     const beginRename = (item: TimeClient | TimeProject | TimeTag) => { setRenamingLabelID(item.id); setLabelName(item.name); setLabelClientID(projectClientID(item)); };
     return <div className="time-label-manager"><form onSubmit={(event) => { event.preventDefault(); void saveLabel(kind); }}><input aria-label={`${kind} name`} value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder={`New ${kind} name`} />{kind === "project" && <ClientSelect clients={clients} selected={labelClientID} onChange={setLabelClientID} />}<button type="submit" className="primary-button" disabled={busy}>{renamingLabelID ? "Save changes" : `Create ${kind}`}</button>{renamingLabelID && <button type="button" className="secondary-button" onClick={() => { setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>Cancel</button>}</form><section><h3>Active</h3>{values.filter((item) => !item.archivedAtUtc).map((item) => <article key={item.id}><span><strong>{item.name}</strong>{projectClientID(item) && <small>{(catalog?.clients ?? []).find((client) => client.id === projectClientID(item))?.name}</small>}</span><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "archive" })}>Archive</button></div></article>)}</section><section><h3>Archived</h3>{values.filter((item) => item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "restore" })}>Restore</button><button className="secondary-button danger-button" onClick={() => setLabelAction({ kind, id: item.id, action: "delete" })}>Delete</button></div></article>)}</section></div>;
   };
