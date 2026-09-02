@@ -2697,11 +2697,11 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
     });
     view.focus();
   });
-  const copy = menu.insertBefore(document.createElement("button"), remove);
-  copy.type = "button";
-  copy.role = "menuitem";
-  copy.textContent = "Copy";
-  copy.addEventListener("click", () => {
+  const duplicate = menu.insertBefore(document.createElement("button"), remove);
+  duplicate.type = "button";
+  duplicate.role = "menuitem";
+  duplicate.textContent = "Duplicate";
+  duplicate.addEventListener("click", () => {
     const lines = view.state.doc.toString().split("\n");
     if (lineNumber < 1 || lineNumber > lines.length) return;
     logicalObjectClipboard = lines.slice(lineNumber - 1, objectBlockEnd(lines, lineNumber)).join("\n");

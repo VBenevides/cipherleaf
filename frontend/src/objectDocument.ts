@@ -583,7 +583,7 @@ export function deleteObjectInMarkdown(markdown: string, lineNumber: number): st
 
 export function insertLogicalObjectAfterCaret(markdown: string, pasted: string, offset: number): string {
   const source = pasted.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
-  if (!source || classifyObjectLine(source.split("\n", 1)[0] ?? "").tag === "text") return markdown;
+  if (!source) return markdown;
   const lines = markdown.split("\n");
   const position = Math.max(0, Math.min(offset, markdown.length));
   let lineNumber = 1;

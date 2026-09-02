@@ -11,6 +11,6 @@ test("logical object paste inserts the complete object after its target", () => 
   );
 });
 
-test("plain text paste keeps the normal editor path", () => {
-  assert.equal(insertLogicalObjectAfterCaret("Plain", "text", 2), "Plain");
+test("logical text duplication inserts the complete object after its target", () => {
+  assert.equal(insertLogicalObjectAfterCaret("Plain\nNext", "Plain", 2), "Plain\nPlain\nNext");
 });
