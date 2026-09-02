@@ -502,7 +502,6 @@ export function objectBlockEnd(lines: readonly string[], startLineNumber: number
     if (raw.trim() !== "" && object.indent <= startIndent) break;
     if (object.tag === "code") {
       endLineNumber = objectBlockEnd(lines, lineNumber);
-      lineNumber = endLineNumber;
       continue;
     }
     endLineNumber = lineNumber;
