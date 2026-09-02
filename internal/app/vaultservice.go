@@ -44,6 +44,14 @@ type syncJobResult struct {
 	err    error
 }
 
+const (
+	clipboardWayland = "wl-paste"
+	clipboardXclip   = "xclip"
+	clipboardPNG     = "image/png"
+	clipboardWebP    = "image/webp"
+	clipboardJPEG    = "image/jpeg"
+)
+
 // RememberTTL is the default duration a vault secret stays in the OS keychain
 // when the user enables "Don't ask again".
 const RememberTTL = 7 * 24 * time.Hour
@@ -771,9 +779,9 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 	}
 	var output []byte
 	var mimeType string
-	if _, err := exec.LookPath("wl-paste"); err == nil {
-		candidates := []string{"image/png", "image/webp", "image/jpeg"}
-		types, listErr := runClipboardCommand("wl-paste", "--list-types")
+	if _, err := exec.LookPath(clipboardWayland); err == nil {
+		candidates := []string{clipboardPNG, clipboardWebP, clipboardJPEG}
+		types, listErr := runClipboardCommand(clipboardWayland, "--list-types")
 		if listErr == nil {
 			mimeType = selectClipboardImageType(string(types))
 		}
@@ -782,7 +790,7 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 		}
 		for _, candidate := range candidates {
 			value, readErr := runClipboardCommand(
-				"wl-paste", "--no-newline", "--type", candidate,
+				clipboardWayland, "--no-newline", "--type", candidate,
 			)
 			if readErr == nil && len(value) > 0 {
 				output = value
@@ -792,12 +800,12 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 		}
 	}
 	if len(output) == 0 {
-		for _, candidate := range []string{"image/png", "image/webp", "image/jpeg"} {
-			if _, err := exec.LookPath("xclip"); err != nil {
+		for _, candidate := range []string{clipboardPNG, clipboardWebP, clipboardJPEG} {
+			if _, err := exec.LookPath(clipboardXclip); err != nil {
 				break
 			}
 			value, err := runClipboardCommand(
-				"xclip", "-selection", "clipboard", "-t", candidate, "-o",
+				clipboardXclip, "-selection", "clipboard", "-t", candidate, "-o",
 			)
 			if err == nil && len(value) > 0 {
 				output = value
@@ -849,7 +857,7 @@ func selectClipboardImageType(value string) string {
 	for _, item := range strings.Fields(value) {
 		available[strings.ToLower(item)] = true
 	}
-	for _, candidate := range []string{"image/png", "image/webp", "image/jpeg"} {
+	for _, candidate := range []string{clipboardPNG, clipboardWebP, clipboardJPEG} {
 		if available[candidate] {
 			return candidate
 		}
