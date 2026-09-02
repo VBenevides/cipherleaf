@@ -265,6 +265,46 @@ function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
   return metadata;
 }
 
+function CardStatusPicker({ value, onChange }: { value: CardStatus; onChange: (value: CardStatus) => void }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const choose = (next: CardStatus) => {
+    onChange(next);
+    if (details.current) details.current.open = false;
+  };
+  return <details ref={details} className="tag-multi-select card-status-picker">
+    <summary aria-label="Status">{CARD_STATUS_LABELS[value]}</summary>
+    <div className="tag-multi-select-options" role="listbox" aria-label="Status">
+      {BOARD_COLUMNS.map((status) => <button type="button" role="option" aria-selected={value === status} key={status} onClick={() => choose(status)}>{CARD_STATUS_LABELS[status]}</button>)}
+    </div>
+  </details>;
+}
+
+function CardTagsEditor({ tags, suggestions, onChange }: { tags: string[]; suggestions: string[]; onChange: (tags: string[]) => void }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const [draft, setDraft] = useState("");
+  const add = (value = draft) => {
+    const tag = value.trim();
+    if (!tag) return;
+    onChange(normalizeCardTags([...tags, tag]));
+    setDraft("");
+    if (details.current) details.current.open = false;
+  };
+  const available = suggestions.filter((tag) => !tags.some((selected) => selected.toLocaleLowerCase() === tag.toLocaleLowerCase()));
+  return <div className="card-tags-editor">
+    <div className="card-tag-list" aria-label="Selected tags">
+      {tags.map((tag) => <span className="card-tag-chip" key={tag}>{tag}<button type="button" aria-label={`Remove tag ${tag}`} onClick={() => onChange(tags.filter((selected) => selected !== tag))}>×</button></span>)}
+    </div>
+    <details ref={details} className="tag-multi-select card-tag-picker">
+      <summary>Add tag</summary>
+      <div className="tag-multi-select-options" role="group" aria-label="Add tag">
+        <input aria-label="New tag" value={draft} placeholder="New tag" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }} />
+        <button type="button" onClick={() => add()}>Add tag</button>
+        {available.map((tag) => <button type="button" key={tag} onClick={() => add(tag)}>{tag}</button>)}
+      </div>
+    </details>
+  </div>;
+}
+
 function isStructuredSummary(summary: NoteSummary): boolean {
   const properties = summary.properties ?? {};
   return properties["cipherleaf-card"] === true || properties["cipherleaf-card"] === "true" ||
@@ -5082,12 +5122,9 @@ function App() {
               Created At: {new Date(cardPanel.metadata.createdAt).toLocaleString()} | Started At: {cardPanel.metadata.startedAt ? new Date(cardPanel.metadata.startedAt).toLocaleString() : "-"} | Blocked on: {cardPanel.metadata.blockedOn ? new Date(cardPanel.metadata.blockedOn).toLocaleString() : "-"} | Finished At: {cardPanel.metadata.finishedAt ? new Date(cardPanel.metadata.finishedAt).toLocaleString() : "-"}
             </div>
             <div className="card-sidebar-properties">
-              <label>Status<select value={cardPanel.metadata.status} onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, event.target.value as CardStatus) } : current)}>
-                {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
-              </select></label>
-              <label>Tags<input list="card-tag-suggestions" value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+              <div className="card-sidebar-field"><span>Status</span><CardStatusPicker value={cardPanel.metadata.status} onChange={(status) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, status) } : current)} /></div>
+              <div className="card-sidebar-field"><span>Tags</span><CardTagsEditor tags={cardPanel.metadata.tags} suggestions={cardTagSuggestions} onChange={(tags) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags } } : current)} /></div>
             </div>
-            <datalist id="card-tag-suggestions">{cardTagSuggestions.map((tag) => <option value={tag} key={tag} />)}</datalist>
             {cardTemplates.length > 0 && (
               <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
                 <option value="">Choose a template</option>

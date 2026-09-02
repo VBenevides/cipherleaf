@@ -4045,11 +4045,22 @@ a:focus-visible {
   font-weight: 600;
 }
 .card-sidebar-title:focus { outline: 0; }
-.card-sidebar label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.card-sidebar label, .card-sidebar-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .card-sidebar input, .card-sidebar select { width: 100%; box-sizing: border-box; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: var(--editor-bg); }
 .card-sidebar input.card-sidebar-title { padding: 0; border: 0; background: transparent; }
 .card-sidebar input:not(.card-sidebar-title), .card-sidebar select { min-height: 32px; padding: 0 8px; }
 .card-sidebar-properties { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 10px; flex: 0 0 auto; }
+.card-sidebar .tag-multi-select { min-width: 0; font-size: inherit; }
+.card-sidebar .tag-multi-select summary { min-height: 32px; padding: 0 28px 0 8px; color: var(--ink); border-color: var(--line); border-radius: 6px; background: var(--editor-bg); }
+.card-sidebar .tag-multi-select-options { background: var(--editor-bg); }
+.card-tags-editor { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.card-tag-list { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.card-tag-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 5px 4px 8px; overflow-wrap: anywhere; color: var(--ink); border-radius: 999px; background: var(--green-pale); font-size: 10px; font-weight: 600; }
+.card-tag-chip button { padding: 0 2px; color: inherit; border: 0; background: transparent; cursor: pointer; font-size: 14px; line-height: 1; }
+.card-tag-picker { flex: 0 0 auto; }
+.card-tag-picker summary { min-height: 24px !important; padding: 0 24px 0 8px !important; border-style: dashed !important; font-size: 10px; }
+.card-tag-picker .tag-multi-select-options { min-width: 190px; left: auto; right: 0; }
+.card-tag-picker .tag-multi-select-options input { min-height: 30px; padding: 0 7px; }
 .card-sidebar-dates { flex: 0 0 auto; color: var(--muted); font-size: .78em; line-height: 1.5; }
 .card-sidebar-divider { width: 100%; flex: 0 0 auto; margin: 2px 0 0; border: 0; border-top: 1px solid var(--line); }
 .card-sidebar-notes { min-height: 0; flex: 1; display: flex; flex-direction: column; }
