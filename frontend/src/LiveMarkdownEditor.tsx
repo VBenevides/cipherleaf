@@ -1549,7 +1549,7 @@ function toggleHasChildren(toggle: ToggleLine): boolean {
 }
 
 function headingLevel(text: string): number | null {
-  const match = text.match(/^(#{1,6})\s+/);
+  const match = /^(#{1,6})\s+/.exec(text);
   return match ? match[1].length : null;
 }
 
@@ -1915,7 +1915,7 @@ function buildLivePreviewState(
       continue;
     }
 
-    const heading = line.text.match(/^(#{1,6})\s+/);
+    const heading = /^(#{1,6})\s+/.exec(line.text);
     if (heading) {
       const level = heading[1].length;
       const sectionEndLineNumber = headingSectionEnd(state, lineNumber, level);
@@ -2346,7 +2346,7 @@ function removeBareTaskPrefix(view: EditorView): boolean {
   if (!range.empty) return false;
   const line = view.state.doc.lineAt(range.head);
   const prefix = view.state.sliceDoc(line.from, range.head);
-  const match = prefix.match(/^([ \t]*)<[ \t]?$/);
+  const match = /^([ \t]*)<[ \t]?$/.exec(prefix);
   if (!match) return false;
   const from = line.from + match[1].length;
   view.dispatch({
@@ -2477,7 +2477,7 @@ function expandSnippetBeforeCursor(
   if (!range.empty) return false;
 
   const before = view.state.sliceDoc(0, range.head);
-  const match = before.match(/\/([A-Za-z][A-Za-z_]*)$/);
+  const match = /\/([A-Za-z][A-Za-z_]*)$/.exec(before);
   if (!match) return false;
 
   const from = range.head - match[0].length;
@@ -2508,7 +2508,7 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
       continue;
     }
 
-    const removable = line.text.match(/^ {1,2}|\t/)?.[0];
+    const removable = /(?:^ {1,2}|\t)/.exec(line.text)?.[0];
     if (!removable) continue;
 
     changes.push({
@@ -2548,7 +2548,7 @@ function changeCodeIndent(view: EditorView, direction: 1 | -1) {
     if (direction === 1) {
       changes.push({ from: line.from, insert: "    " });
     } else {
-      const spaces = line.text.match(/^ {1,4}/)?.[0];
+      const spaces = /^ {1,4}/.exec(line.text)?.[0];
       if (spaces) changes.push({ from: line.from, to: line.from + spaces.length, insert: "" });
     }
   }
@@ -3139,7 +3139,7 @@ export default function LiveMarkdownEditor({
                 }
                 const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
                 if (normalizedPrefix !== prospective) {
-                  const prefixLength = normalizedPrefix.match(/^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/)?.[0].length ?? 0;
+                  const prefixLength = /^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/.exec(normalizedPrefix)?.[0].length ?? 0;
                   inputView.dispatch({
                     changes: { from: line.from, to: line.to, insert: normalizedPrefix },
                     selection: EditorSelection.cursor(line.from + prefixLength),
