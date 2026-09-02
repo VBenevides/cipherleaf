@@ -3064,6 +3064,25 @@ func validateRemoteInventoryObject(item remoteSyncObject) error {
 	return nil
 }
 
+func validateRemoteDeletedSnapshotObject(item remoteSyncObject) error {
+	if item.CiphertextHash != "" {
+		return errors.New("remote deleted object unexpectedly contains a hash")
+	}
+	return nil
+}
+
+func (s *Store) cachedRemoteSnapshotNoteLocked(item remoteSyncObject) (*NoteSummary, bool) {
+	localIndex, found := s.findNoteLocked(item.ID)
+	if !found {
+		return nil, false
+	}
+	local := s.manifest.Notes[localIndex]
+	if local.CiphertextHash != item.CiphertextHash || local.Revision != item.Revision || local.ModifiedAt != item.ModifiedAt {
+		return nil, false
+	}
+	return &local, true
+}
+
 func (s *Store) readRemoteSnapshotObjectLocked(
 	source string,
 	item remoteSyncObject,
@@ -3075,8 +3094,8 @@ func (s *Store) readRemoteSnapshotObjectLocked(
 		return remoteSyncObject{}, nil, false, err
 	}
 	if item.Deleted {
-		if item.CiphertextHash != "" {
-			return remoteSyncObject{}, nil, false, errors.New("remote deleted object unexpectedly contains a hash")
+		if err := validateRemoteDeletedSnapshotObject(item); err != nil {
+			return remoteSyncObject{}, nil, false, err
 		}
 		return item, nil, false, nil
 	}
@@ -3087,11 +3106,8 @@ func (s *Store) readRemoteSnapshotObjectLocked(
 		return remoteSyncObject{}, nil, false, errors.New("remote sync inventory contains an invalid object hash")
 	}
 	if !verifyAllObjects {
-		if localIndex, found := s.findNoteLocked(item.ID); found {
-			local := s.manifest.Notes[localIndex]
-			if local.CiphertextHash == item.CiphertextHash && local.Revision == item.Revision && local.ModifiedAt == item.ModifiedAt {
-				return item, &local, true, nil
-			}
+		if local, found := s.cachedRemoteSnapshotNoteLocked(item); found {
+			return item, local, true, nil
 		}
 	}
 	path := filepath.Join(source, "objects", item.ID[:2], item.ID+".enc")
