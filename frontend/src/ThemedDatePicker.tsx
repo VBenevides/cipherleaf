@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 type ThemedDatePickerProps = {
-  ariaLabel: string;
-  value: string;
-  onChange: (value: string) => void;
+  readonly ariaLabel: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
 };
 
 function dateValue(date: Date): string {
