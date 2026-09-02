@@ -640,7 +640,7 @@ func TestGitHubSSHProviderInitializesAndReopensEncryptedRepository(t *testing.T)
 	tree := runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
 	assertEncryptedRepositoryTree(t, remote, tree, note.ID)
 	assertProviderDownloadCanBeRestored(t, provider, settings, store, session, note, result.LastCommit)
-	assertProviderPushAfterDelete(t, provider, settings, store, note.ID, result.LastCommit, remote, transport)
+	assertProviderPushAfterDelete(t, provider, settings, store, note.ID, result.LastCommit, transport)
 	assertProviderRejectsOtherVault(t, provider, settings)
 }
 
@@ -713,7 +713,7 @@ func assertProviderDownloadCanBeRestored(t *testing.T, provider *GitHubSSHProvid
 	restoredStore.Lock()
 }
 
-func assertProviderPushAfterDelete(t *testing.T, provider *GitHubSSHProvider, settings SyncSettings, store *vault.Store, noteID, previousCommit, remote string, transport *countingGitTransport) {
+func assertProviderPushAfterDelete(t *testing.T, provider *GitHubSSHProvider, settings SyncSettings, store *vault.Store, noteID, previousCommit string, transport *countingGitTransport) {
 	t.Helper()
 	reopened, err := provider.Link(context.Background(), settings, store)
 	if err != nil {
@@ -748,7 +748,7 @@ func assertProviderPushAfterDelete(t *testing.T, provider *GitHubSSHProvider, se
 	if cacheRemoteTip != deleted.LastCommit {
 		t.Fatalf("cached remote tip = %q, want pushed commit %q", cacheRemoteTip, deleted.LastCommit)
 	}
-	tree := runGitTestCommand(t, "", "--git-dir="+remote, "ls-tree", "-r", "--name-only", "main")
+	tree := runGitTestCommand(t, "", "--git-dir="+settings.RepositorySSH, "ls-tree", "-r", "--name-only", "main")
 	if strings.Contains(tree, noteID+".enc") {
 		t.Fatalf("repository retained deleted final note:\n%s", tree)
 	}
