@@ -3775,42 +3775,57 @@ func validateManifestNotes(result manifest) error {
 	return nil
 }
 
+func validateManifestTombstoneSet(
+	live map[string]struct{},
+	deleted []Tombstone,
+	requireRevision bool,
+	invalidMessage string,
+	liveMessage string,
+	duplicateMessage string,
+) error {
+	seen := make(map[string]struct{}, len(deleted))
+	for _, item := range deleted {
+		if !validID(item.ID) || (requireRevision && item.Revision == 0) || item.ModifiedAt < 0 {
+			return errors.New(invalidMessage)
+		}
+		if _, exists := live[item.ID]; exists {
+			return errors.New(liveMessage)
+		}
+		if _, duplicate := seen[item.ID]; duplicate {
+			return errors.New(duplicateMessage)
+		}
+		seen[item.ID] = struct{}{}
+	}
+	return nil
+}
+
 func validateManifestTombstones(result manifest) error {
 	liveNotes := make(map[string]struct{}, len(result.Notes))
 	for _, item := range result.Notes {
 		liveNotes[item.ID] = struct{}{}
 	}
-	seenDeletedNotes := make(map[string]struct{}, len(result.DeletedNotes))
-	for _, item := range result.DeletedNotes {
-		if !validID(item.ID) || item.Revision == 0 || item.ModifiedAt < 0 {
-			return errors.New("manifest contains an invalid note tombstone")
-		}
-		if _, live := liveNotes[item.ID]; live {
-			return errors.New("manifest note is both live and deleted")
-		}
-		if _, duplicate := seenDeletedNotes[item.ID]; duplicate {
-			return errors.New("manifest contains a duplicate note tombstone")
-		}
-		seenDeletedNotes[item.ID] = struct{}{}
+	if err := validateManifestTombstoneSet(
+		liveNotes,
+		result.DeletedNotes,
+		true,
+		"manifest contains an invalid note tombstone",
+		"manifest note is both live and deleted",
+		"manifest contains a duplicate note tombstone",
+	); err != nil {
+		return err
 	}
 	liveFolders := make(map[string]struct{}, len(result.Folders))
 	for _, item := range result.Folders {
 		liveFolders[item.ID] = struct{}{}
 	}
-	seenDeletedFolders := make(map[string]struct{}, len(result.DeletedFolders))
-	for _, item := range result.DeletedFolders {
-		if !validID(item.ID) || item.ModifiedAt < 0 {
-			return errors.New("manifest contains an invalid folder tombstone")
-		}
-		if _, live := liveFolders[item.ID]; live {
-			return errors.New("manifest folder is both live and deleted")
-		}
-		if _, duplicate := seenDeletedFolders[item.ID]; duplicate {
-			return errors.New("manifest contains a duplicate folder tombstone")
-		}
-		seenDeletedFolders[item.ID] = struct{}{}
-	}
-	return nil
+	return validateManifestTombstoneSet(
+		liveFolders,
+		result.DeletedFolders,
+		false,
+		"manifest contains an invalid folder tombstone",
+		"manifest folder is both live and deleted",
+		"manifest contains a duplicate folder tombstone",
+	)
 }
 
 func (s *Store) writeEnvelopeLocked(path, objectType, objectID string, plaintext []byte) error {
