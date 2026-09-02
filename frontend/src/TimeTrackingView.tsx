@@ -238,7 +238,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
           const value = labelAction.action === "restore" ? await VaultService.RestoreProject(labelAction.id) : await VaultService.ArchiveProject(labelAction.id);
           setCatalog((current) => current && ({ ...current, projects: [...(current.projects ?? []).filter((item) => item.id !== value.id), value] }));
         }
-      } else {
+      } else if (labelAction.kind === "tag") {
         if (labelAction.action === "delete") {
           await VaultService.DeleteTag(labelAction.id);
           setCatalog((current) => current && ({ ...current, tags: (current.tags ?? []).filter((item) => item.id !== labelAction.id) }));
