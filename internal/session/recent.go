@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -172,45 +173,7 @@ func (s *RecentVaultStore) read() (recentVault, error) {
 	if err := json.Unmarshal(data, &recent); err != nil {
 		return recentVault{}, fmt.Errorf("decode recent vault file: %w", err)
 	}
-	opened := recent.LastOpened
-	if opened == nil {
-		opened = make(map[string]int64)
-	}
-	now := time.Now().Unix()
-	paths := make([]string, 0, maxRecentVaults)
-	lastOpened := make(map[string]int64)
-	candidates := append([]string(nil), recent.Paths...)
-	if len(candidates) == 0 && strings.TrimSpace(recent.Path) != "" {
-		candidates = append(candidates, recent.Path)
-	}
-	for _, path := range candidates {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
-		cleaned := filepath.Clean(path)
-		if _, err := os.Stat(cleaned); errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		openedAt, ok := opened[cleaned]
-		if !ok {
-			openedAt = now
-		}
-		if now-openedAt > int64(maxRecentAge/time.Second) {
-			continue
-		}
-		duplicate := false
-		for _, existing := range paths {
-			if existing == cleaned {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			paths = append(paths, cleaned)
-			lastOpened[cleaned] = openedAt
-		}
-	}
+	paths, lastOpened := recentPaths(recent, time.Now().Unix())
 	if len(paths) > maxRecentVaults {
 		paths = paths[len(paths)-maxRecentVaults:]
 	}
@@ -222,6 +185,47 @@ func (s *RecentVaultStore) read() (recentVault, error) {
 	}
 	recent.Theme = NormalizeTheme(recent.Theme)
 	return recent, nil
+}
+
+func recentPaths(recent recentVault, now int64) ([]string, map[string]int64) {
+	opened := recent.LastOpened
+	if opened == nil {
+		opened = make(map[string]int64)
+	}
+	candidates := append([]string(nil), recent.Paths...)
+	if len(candidates) == 0 && strings.TrimSpace(recent.Path) != "" {
+		candidates = append(candidates, recent.Path)
+	}
+	paths := make([]string, 0, maxRecentVaults)
+	lastOpened := make(map[string]int64)
+	for _, candidate := range candidates {
+		path, openedAt, ok := validRecentPath(candidate, opened, now)
+		if !ok || slices.Contains(paths, path) {
+			continue
+		}
+		paths = append(paths, path)
+		lastOpened[path] = openedAt
+	}
+	return paths, lastOpened
+}
+
+func validRecentPath(value string, opened map[string]int64, now int64) (string, int64, bool) {
+	path := strings.TrimSpace(value)
+	if path == "" {
+		return "", 0, false
+	}
+	path = filepath.Clean(path)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return "", 0, false
+	}
+	openedAt, ok := opened[path]
+	if !ok {
+		openedAt = now
+	}
+	if now-openedAt > int64(maxRecentAge/time.Second) {
+		return "", 0, false
+	}
+	return path, openedAt, true
 }
 
 func (s *RecentVaultStore) write(recent recentVault) error {
