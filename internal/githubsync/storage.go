@@ -47,7 +47,11 @@ func NewFileSettingsStore(root string) *FileSettingsStore {
 func DefaultConfigRoot() string {
 	root, err := os.UserConfigDir()
 	if err != nil || strings.TrimSpace(root) == "" {
-		root = filepath.Join(os.TempDir(), "cipherleaf-config")
+		root, err = os.UserHomeDir()
+		if err != nil || strings.TrimSpace(root) == "" {
+			return ""
+		}
+		root = filepath.Join(root, ".config")
 	}
 	return filepath.Join(root, "Cipherleaf", "github-sync")
 }
