@@ -122,3 +122,13 @@ test("editor chrome stays compact", () => {
   assert.match(style, /\.editor-topbar \{[\s\S]*min-height: 33px/);
   assert.match(style, /\.sidebar \{[\s\S]*inset: 28px auto 0 0/);
 });
+
+test("card panel keeps metadata compact and notes in the themed editor", () => {
+  assert.match(app, /className="card-sidebar-title"/);
+  assert.match(app, /Created At: \{new Date\(cardPanel\.metadata\.createdAt\)/);
+  assert.match(app, /className="card-sidebar-properties"/);
+  assert.match(app, /className="card-sidebar-divider"/);
+  assert.match(app, /className="card-sidebar-notes"[\s\S]*<LiveMarkdownEditor/);
+  assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
+  assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
+});

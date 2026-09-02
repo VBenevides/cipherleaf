@@ -3105,8 +3105,11 @@ function App() {
     return [...tags].sort((left, right) => left.localeCompare(right));
   }, [cardMetadata, cardPanel?.metadata.boardID]);
   const cardSignature = useMemo(
-    () => [...cardMetadata.values()].map((item) => `${item.id}:${item.title}:${item.status}:${item.columnEnteredAt ?? ""}`).join("|")
-    , [cardMetadata],
+    () => notes.map((summary) => {
+      const item = cardMetadataFromSummary(summary);
+      return item ? `${item.id}:${item.title}:${item.status}:${item.columnEnteredAt ?? ""}` : "";
+    }).filter(Boolean).join("|")
+    , [notes],
   );
 
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
@@ -5064,19 +5067,26 @@ function App() {
         {cardPanel && (
           <aside className="card-sidebar" aria-label="Card details" onClick={(event) => event.stopPropagation()}>
             <header className="card-sidebar-header">
-              <div>
-                <p className="eyebrow">Card</p>
-                <h2>{cardPanel.metadata.title || "Untitled"}</h2>
-              </div>
-              <button type="button" autoFocus className="icon-button" aria-label="Close card" title="Close card" onClick={closeCardPanel}>
+              <input
+                className="card-sidebar-title"
+                aria-label="Title"
+                value={cardPanel.metadata.title}
+                placeholder="Untitled"
+                onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, title: event.target.value }, note: { ...current.note, title: event.target.value } } : current)}
+              />
+              <button type="button" className="icon-button" aria-label="Close card" title="Close card" onClick={closeCardPanel}>
                 <Icon name="x" size={16} />
               </button>
             </header>
-            <label>Title<input value={cardPanel.metadata.title} placeholder="Untitled" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, title: event.target.value }, note: { ...current.note, title: event.target.value } } : current)} /></label>
-            <label>Status<select value={cardPanel.metadata.status} onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, event.target.value as CardStatus) } : current)}>
-              {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
-            </select></label>
-            <label>Tags<input list="card-tag-suggestions" value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+            <div className="card-sidebar-dates" aria-label="Card dates">
+              Created At: {new Date(cardPanel.metadata.createdAt).toLocaleString()} | Started At: {cardPanel.metadata.startedAt ? new Date(cardPanel.metadata.startedAt).toLocaleString() : "-"} | Blocked on: {cardPanel.metadata.blockedOn ? new Date(cardPanel.metadata.blockedOn).toLocaleString() : "-"} | Finished At: {cardPanel.metadata.finishedAt ? new Date(cardPanel.metadata.finishedAt).toLocaleString() : "-"}
+            </div>
+            <div className="card-sidebar-properties">
+              <label>Status<select value={cardPanel.metadata.status} onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, event.target.value as CardStatus) } : current)}>
+                {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
+              </select></label>
+              <label>Tags<input list="card-tag-suggestions" value={cardPanel.metadata.tags.join(", ")} placeholder="Add tags" onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags: event.target.value.split(",") } } : current)} /></label>
+            </div>
             <datalist id="card-tag-suggestions">{cardTagSuggestions.map((tag) => <option value={tag} key={tag} />)}</datalist>
             {cardTemplates.length > 0 && (
               <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
@@ -5084,13 +5094,31 @@ function App() {
                 {cardTemplates.map((template) => <option value={template.id} key={template.id}>{String(template.properties?.["cipherleaf-card-template-name"] ?? template.title)}</option>)}
               </select></label>
             )}
-            <div className="card-sidebar-dates" aria-label="Card dates">
-              <span>Created: {new Date(cardPanel.metadata.createdAt).toLocaleString()}</span>
-              {cardPanel.metadata.startedAt && <span>Started: {new Date(cardPanel.metadata.startedAt).toLocaleString()}</span>}
-              {cardPanel.metadata.blockedOn && <span>Blocked: {new Date(cardPanel.metadata.blockedOn).toLocaleString()}</span>}
-              {cardPanel.metadata.finishedAt && <span>Finished: {new Date(cardPanel.metadata.finishedAt).toLocaleString()}</span>}
-            </div>
-            <label className="card-sidebar-notes">Notes<textarea value={cardPanel.body} onChange={(event) => setCardPanel((current) => current ? { ...current, body: event.target.value } : current)} /></label>
+            <hr className="card-sidebar-divider" />
+            <section className="card-sidebar-notes" aria-label="Card notes">
+              <Suspense fallback={<EditorLoading />}>
+                <LiveMarkdownEditor
+                  key={`${cardPanel.note.id}:card`}
+                  noteID={cardPanel.note.id}
+                  value={cardPanel.body}
+                  onChange={(body) => setCardPanel((current) => current ? { ...current, body } : current)}
+                  onSave={() => void saveCardPanel()}
+                  onError={(reason) => setError(errorText(reason))}
+                  onOpenWikilink={(title) => void openWikilinkTitle(title)}
+                  onOpenCard={openCard}
+                  cardTitles={cardTitles}
+                  cardData={cardMetadata}
+                  onCreateCard={createCard}
+                  onCreateBoard={createBoard}
+                  onMoveCard={moveCard}
+                  onAddCardToBoard={addCardToBoard}
+                  onDecreaseFontSize={decreaseEditorFontSize}
+                  onIncreaseFontSize={increaseEditorFontSize}
+                  showToolbar={false}
+                  defaultSectionsCollapsed={sectionDefault === "collapsed"}
+                />
+              </Suspense>
+            </section>
             <div className="card-sidebar-actions">
               <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>
               {selectedTemplateID && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
