@@ -39,17 +39,25 @@ export function normalizeArrowText(text: string): string {
 }
 
 export function markdownCitations(text: string) {
-  return [...text.matchAll(/(?<!\!)\[[^\]\n]*\]\([^\)\n]*\)/gi)]
-    .map((match) => {
-      const separator = match[0].indexOf("](");
-      return {
-        label: match[0].slice(1, separator),
-        url: match[0].slice(separator + 2, -1),
-        index: match.index,
-        length: match[0].length,
-      };
-    })
-    .filter((match) => match.label && isMarkdownLinkTarget(match.url));
+  const citations: { label: string; url: string; index: number; length: number }[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf("[", cursor);
+    if (start < 0) break;
+    const separator = text.indexOf("](", start + 1);
+    if (separator < 0) { cursor = start + 1; continue; }
+    const end = text.indexOf(")", separator + 2);
+    if (end < 0) { cursor = start + 1; continue; }
+    const label = text.slice(start + 1, separator);
+    const url = text.slice(separator + 2, end);
+    if (start === 0 || text[start - 1] !== "!") {
+      if (label && !label.includes("\n") && !url.includes("\n") && isMarkdownLinkTarget(url)) {
+        citations.push({ label, url, index: start, length: end + 1 - start });
+      }
+    }
+    cursor = end + 1;
+  }
+  return citations;
 }
 
 export function markdownCitation(label: string, url: string): string | null {
