@@ -128,13 +128,23 @@ function exclusiveObjectPrefix(text: string): ExclusiveObjectPrefix | null {
     };
   }
 
-  const list = /^([ \t]*)(?:(\d+)([.)])[ \t]+(.*)|([-*])(?:[ \t]+(.*)|([^-*].*))?)$/.exec(text);
-  if (!list) return null;
+  const numbered = /^([ \t]*)(\d+)([.)])[ \t]+([^\r\n]*)$/.exec(text);
+  if (numbered) {
+    return {
+      indent: visualIndent(numbered[1]),
+      kind: "numbering",
+      marker: `${numbered[2]}${numbered[3]} `,
+      rest: numbered[4],
+    };
+  }
+
+  const bullet = /^([ \t]*)([-*])(?:[ \t]+([^\r\n]*)|([^-*\r\n][^\r\n]*))?$/.exec(text);
+  if (!bullet) return null;
   return {
-    indent: visualIndent(list[1]),
-    kind: list[2] ? "numbering" : "bulletpoint",
-    marker: list[2] ? `${list[2]}${list[3]} ` : `${list[5]} `,
-    rest: list[2] ? list[4] : list[6] ?? list[7] ?? "",
+    indent: visualIndent(bullet[1]),
+    kind: "bulletpoint",
+    marker: `${bullet[2]} `,
+    rest: bullet[3] ?? bullet[4] ?? "",
   };
 }
 
@@ -167,7 +177,8 @@ function stripObjectPrefixes(text: string): StrippedObjectPrefix {
       continue;
     }
 
-    const prefix = /^(?:#{1,6}[ \t]+|<[ \t]?|\d+[.)][ \t]+|[-*+](?:[ \t]+|(?=[^-*+\s])|$)|\[[ xX]?\][ \t]*)/.exec(rest);
+    const prefix = /^(?:#{1,6}[ \t]+|<[ \t]?|\d+[.)][ \t]+|\[[ xX]?\][ \t]*)/.exec(rest) ??
+      /^[-*+](?:[ \t]+|(?=[^-*+\s]|$))/.exec(rest);
     if (!prefix) break;
     rest = rest.slice(prefix[0].length);
   }
@@ -199,7 +210,7 @@ export function replaceExclusiveObjectPrefix(
 
 export function normalizeStackedExclusiveObjectPrefix(line: string, previousLine?: string): string {
   line = line.replace(
-    /^([ \t]*(?:(?:>+|<)[ \t]?|(?:[-*]|\d+[.)])[ \t]+)?)([-*]|\d+[.)])(?=\[[ xX]\])/,
+    /^([ \t]*(?:>+[ \t]?|<[ \t]?|(?:[-*]|\d+[.)])[ \t]+)?)([-*]|\d+[.)])(?=\[[ xX]\])/,
     "$1$2 ",
   );
   const current = exclusiveObjectPrefix(line);
