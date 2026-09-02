@@ -21,6 +21,7 @@ const (
 	trackingBucketObjectType     = "tracking-bucket"
 	trackingCatalogObjectID      = "catalog"
 	timeTrackingBucketCacheLimit = 4
+	timeTrackingMonthLayout      = "2006-01"
 )
 
 func (s *Store) loadTimeTrackingCatalogLocked() error {
@@ -325,8 +326,8 @@ func cloneTimeTrackingBucket(bucket timeTrackingBucket) timeTrackingBucket {
 }
 
 func timeTrackingBucketIntersects(summary timeTrackingBucketSummary, start, end time.Time) (bool, error) {
-	month, err := time.Parse("2006-01", summary.MonthUTC)
-	if err != nil || month.Format("2006-01") != summary.MonthUTC {
+	month, err := time.Parse(timeTrackingMonthLayout, summary.MonthUTC)
+	if err != nil || month.Format(timeTrackingMonthLayout) != summary.MonthUTC {
 		return false, errors.New("tracking catalog contains an invalid bucket month")
 	}
 	monthEnd := month.AddDate(0, 1, 0)
@@ -358,7 +359,7 @@ func timeEntryMonthUTC(entry TimeEntry) (string, error) {
 	if err != nil || utcOffset(started) != 0 {
 		return "", errors.New("tracking entry start must be UTC RFC 3339")
 	}
-	return started.Format("2006-01"), nil
+	return started.Format(timeTrackingMonthLayout), nil
 }
 
 func utcOffset(value time.Time) int {
