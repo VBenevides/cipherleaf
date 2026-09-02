@@ -72,6 +72,36 @@ func TestExportRemoteSnapshotIncludesEncryptedTrackingIncrementally(t *testing.T
 	if err := store.ExportRemoteSnapshot(remote); err != nil {
 		t.Fatal(err)
 	}
+	_, bucketPath := assertTrackingInventory(t, store, remote)
+
+	paths := []string{filepath.Join(remote, trackingDirectory, trackingCatalogFilename), bucketPath, filepath.Join(remote, syncDirectory, syncTrackingFile)}
+	assertTrackingSnapshotIsIncremental(t, store, remote, paths)
+
+	staleID := strings.Repeat("d", 32)
+	stalePath := filepath.Join(remote, trackingDirectory, trackingObjectsDirectory, staleID[:2], staleID+".enc")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	localCiphertext := refreshTrackingBucket(t, store, entry.ID, bucketPath)
+	if err := store.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(bucketPath)
+	if !bytes.Equal(after, localCiphertext) {
+		t.Fatal("forced ciphertext change was not exported")
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatal("stale remote tracking object was not removed")
+	}
+
+	assertEncryptedTrackingSnapshot(t, remote)
+}
+
+func assertTrackingInventory(t *testing.T, store *Store, remote string) (string, string) {
+	t.Helper()
 	store.mu.Lock()
 	inventoryPlaintext, err := store.readEnvelopeFileLocked(filepath.Join(remote, syncDirectory, syncTrackingFile), "sync-tracking", "sync-tracking")
 	if err != nil {
@@ -98,8 +128,11 @@ func TestExportRemoteSnapshotIncludesEncryptedTrackingIncrementally(t *testing.T
 		t.Fatal(err)
 	}
 	store.mu.Unlock()
+	return bucketID, bucketPath
+}
 
-	paths := []string{filepath.Join(remote, trackingDirectory, trackingCatalogFilename), bucketPath, filepath.Join(remote, syncDirectory, syncTrackingFile)}
+func assertTrackingSnapshotIsIncremental(t *testing.T, store *Store, remote string, paths []string) {
+	t.Helper()
 	modTimes := make(map[string]time.Time, len(paths))
 	for _, path := range paths {
 		info, err := os.Stat(path)
@@ -117,17 +150,12 @@ func TestExportRemoteSnapshotIncludesEncryptedTrackingIncrementally(t *testing.T
 			t.Fatalf("unchanged tracking object was rewritten: %s", path)
 		}
 	}
+}
 
-	staleID := strings.Repeat("d", 32)
-	stalePath := filepath.Join(remote, trackingDirectory, trackingObjectsDirectory, staleID[:2], staleID+".enc")
-	if err := os.MkdirAll(filepath.Dir(stalePath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(stalePath, []byte("stale"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+func refreshTrackingBucket(t *testing.T, store *Store, entryID, bucketPath string) []byte {
+	t.Helper()
 	store.mu.Lock()
-	localBucket, _, err := store.findTimeTrackingEntryLocked(entry.ID)
+	localBucket, _, err := store.findTimeTrackingEntryLocked(entryID)
 	if err != nil {
 		store.mu.Unlock()
 		t.Fatal(err)
@@ -143,17 +171,11 @@ func TestExportRemoteSnapshotIncludesEncryptedTrackingIncrementally(t *testing.T
 	if bytes.Equal(before, localCiphertext) {
 		t.Fatal("forced local ciphertext refresh did not change the envelope")
 	}
-	if err := store.ExportRemoteSnapshot(remote); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.ReadFile(bucketPath)
-	if !bytes.Equal(after, localCiphertext) {
-		t.Fatal("forced ciphertext change was not exported")
-	}
-	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
-		t.Fatal("stale remote tracking object was not removed")
-	}
+	return localCiphertext
+}
 
+func assertEncryptedTrackingSnapshot(t *testing.T, remote string) {
+	t.Helper()
 	if err := filepath.WalkDir(remote, func(path string, item os.DirEntry, walkErr error) error {
 		if walkErr != nil || item.IsDir() {
 			return walkErr
