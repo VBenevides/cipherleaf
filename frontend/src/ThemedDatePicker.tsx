@@ -48,7 +48,7 @@ export function ThemedDatePicker({ ariaLabel, value, onChange }: ThemedDatePicke
 
   return <div ref={picker} className="themed-date-picker">
     <button type="button" className="themed-date-picker-trigger" aria-label={ariaLabel} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((current) => !current)}>{displayDate(value)}</button>
-    {open && <div className="themed-date-picker-popover" role="dialog" aria-label={ariaLabel}>
+    {open && <dialog open className="themed-date-picker-popover" aria-label={ariaLabel}>
       <div className="themed-date-picker-header">
         <button type="button" aria-label="Previous month" onClick={() => setMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}>‹</button>
         <strong>{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
@@ -56,6 +56,6 @@ export function ThemedDatePicker({ ariaLabel, value, onChange }: ThemedDatePicke
       </div>
       <div className="themed-date-picker-weekdays" aria-hidden="true">{Array.from({ length: 7 }, (_, day) => <span key={day}>{new Date(2023, 0, day + 1).toLocaleDateString(undefined, { weekday: "narrow" })}</span>)}</div>
       <div className="themed-date-picker-days">{days.map((date) => <button type="button" key={dateValue(date)} className={`${date.getMonth() === month.getMonth() ? "" : "outside"} ${selected && dateValue(date) === dateValue(selected) ? "selected" : ""}`} aria-label={date.toLocaleDateString(undefined, { dateStyle: "full" })} onClick={() => selectDate(date)}>{date.getDate()}</button>)}</div>
-    </div>}
+    </dialog>}
   </div>;
 }
