@@ -41,6 +41,13 @@
 
 ## Bug Fixes
 
+- [x] Restore the Wails CLI for release builds
+  - Importance Level: High
+  - Description: Install the pinned Wails CLI on the Linux and Windows release runners and invoke `wails3` directly so nested Wails Taskfile commands can resolve the executable.
+  - Test Description: Validate the workflow YAML and confirm the platform jobs install the pinned CLI before running `wails3 build`.
+  - Test Result: Workflow YAML parsed successfully; `git diff --check` passed; both platform jobs install `v3.0.0-alpha2.112` before building.
+  - Commit Hash: 3fef6fc2c7ea7f9b75209cef9d4cee5d0e38aa03
+
 - [x] Reduce App cognitive complexity at line 578
   - Importance Level: High
   - Description: Address Sonar `typescript:S3776` in `frontend/src/App.tsx:578` by reducing cognitive complexity from 24 to 15 or less while preserving application behavior. Issue: `AaBkCDnhRwqCsS3Ptsa5`.
