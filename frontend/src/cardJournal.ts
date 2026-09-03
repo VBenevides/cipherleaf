@@ -16,7 +16,7 @@ const journalBlock = new RegExp(
 );
 
 const journalMarkers = new RegExp(
-  `${escapeRegExp(CARD_JOURNAL_START)}\\n|${escapeRegExp(CARD_JOURNAL_END)}(?=\\n|$)`,
+  String.raw`${escapeRegExp(CARD_JOURNAL_START)}\n|${escapeRegExp(CARD_JOURNAL_END)}(?=\n|$)`,
   "g",
 );
 
