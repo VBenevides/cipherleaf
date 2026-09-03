@@ -513,6 +513,19 @@ function folderName(path: string): string {
   return parts[parts.length - 1] ?? "Encrypted vault";
 }
 
+function buildBreadcrumbItems(
+  noteTrail: NoteCrumb[],
+  vaultPath: string,
+  currentFolder: Folder | undefined,
+  note: Note | null,
+): NoteCrumb[] {
+  if (noteTrail.length) return noteTrail;
+  const items: NoteCrumb[] = [{ id: "", title: folderName(vaultPath) }];
+  if (currentFolder) items.push({ id: "", title: currentFolder.name });
+  if (note) items.push({ id: note.id, title: note.title || "Untitled" });
+  return items;
+}
+
 function folderLineage(folderID: string, folderByID: ReadonlyMap<string, Folder>): Folder[] {
   const result: Folder[] = [];
   const seen = new Set<string>();
@@ -4374,13 +4387,7 @@ function App() {
   let settingsSubmitLabel = "Link vault";
   if (syncSettings?.linked) settingsSubmitLabel = "Verify link";
   if (settingsBusy) settingsSubmitLabel = "Linking…";
-  const breadcrumbItems: NoteCrumb[] = noteTrail.length
-    ? noteTrail
-    : [
-        { id: "", title: folderName(session.path) },
-        ...(currentFolder ? [{ id: "", title: currentFolder.name }] : []),
-        ...(note ? [{ id: note.id, title: note.title || "Untitled" }] : []),
-      ];
+  const breadcrumbItems = buildBreadcrumbItems(noteTrail, session.path, currentFolder, note);
 
   const renderWorkspaceHeader = () => (
       <header className="app-menubar">
