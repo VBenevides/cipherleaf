@@ -487,8 +487,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
     </div>;
   };
 
-  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
-    week: () => <WeekView
+  const weekView = <WeekView
       now={now}
       busy={busy}
       activeEntry={activeEntry}
@@ -515,7 +514,9 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
       onResume={resumeEntry}
       onBeginEdit={beginEdit}
       onDeleteRequest={(entry) => { setDeleting(entry); setConfirmAction("delete"); }}
-    />,
+    />;
+  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
+    week: () => weekView,
     month: () => <MonthView
       busy={busy}
       monthAnchor={monthAnchor}
