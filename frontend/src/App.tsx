@@ -4356,11 +4356,9 @@ function App() {
   if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
   const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
     ?? (dirty ? "Unsaved" : "Saved locally");
-  const saveFileTitle = conflictResolution
-    ? "Save the merged conflict result"
-    : !note
-      ? "No note open"
-      : "Save this note (Ctrl + S)";
+  let saveFileTitle = "Save this note (Ctrl + S)";
+  if (!note) saveFileTitle = "No note open";
+  if (conflictResolution) saveFileTitle = "Save the merged conflict result";
   const saveFileLabel = saveState === "saving"
     ? "Encrypting…"
     : conflictResolution
