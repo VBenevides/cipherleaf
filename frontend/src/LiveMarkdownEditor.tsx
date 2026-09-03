@@ -1448,8 +1448,11 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
     const id = parseCardReference(match[0]);
     if (!id) continue;
     const start = offset + match.index;
-    const trailingTitle = /^[ \t]+(.+)$/.exec(text.slice(start - offset + match[0].length));
-    const title = cardTitle(id) ?? trailingTitle?.[1].trim() ?? "Untitled";
+    const trailingText = text.slice(start - offset + match[0].length);
+    const trailingTitle = trailingText.length > 1 && (trailingText[0] === " " || trailingText[0] === "\t")
+      ? trailingText
+      : undefined;
+    const title = cardTitle(id) ?? trailingTitle?.trim() ?? "Untitled";
     addHiddenRange(
       start,
       start + match[0].length + (trailingTitle?.[0].length ?? 0),
