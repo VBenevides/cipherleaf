@@ -25,14 +25,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Generate Go coverage
-        shell: bash
-        run: |
-          mkdir -p coverage
-          GOCACHE="$RUNNER_TEMP/cipherleaf-go-cache" go test -coverpkg=./... -covermode=atomic -coverprofile=coverage/go.out ./...
-          coverage=$(GOCACHE="$RUNNER_TEMP/cipherleaf-go-cache" go tool cover -func=coverage/go.out | awk '/^total:/ {gsub("%", "", $NF); print $NF}')
-          awk -v coverage="$coverage" 'BEGIN { if (coverage < 80) { printf "Go line coverage %.1f%% is below 80%%\n", coverage; exit 1 } }'
-
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -45,6 +37,14 @@ jobs:
 
       - name: Build frontend
         run: npm ci --ignore-scripts --prefix frontend && npm run build --prefix frontend
+
+      - name: Generate Go coverage
+        shell: bash
+        run: |
+          mkdir -p coverage
+          GOCACHE="$RUNNER_TEMP/cipherleaf-go-cache" go test -coverpkg=./... -covermode=atomic -coverprofile=coverage/go.out ./...
+          coverage=$(GOCACHE="$RUNNER_TEMP/cipherleaf-go-cache" go tool cover -func=coverage/go.out | awk '/^total:/ {gsub("%", "", $NF); print $NF}')
+          awk -v coverage="$coverage" 'BEGIN { if (coverage < 80) { printf "Go line coverage %.1f%% is below 80%%\n", coverage; exit 1 } }'
 
       - name: Generate frontend coverage
         working-directory: frontend
