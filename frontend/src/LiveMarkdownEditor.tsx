@@ -1109,10 +1109,20 @@ function boardCardDate(card: CardMetadata, status: CardStatus): string | undefin
 }
 
 function fitBoardCardText(text: HTMLElement) {
-  text.style.fontSize = "";
   if (!text.clientWidth || text.scrollWidth <= text.clientWidth) return;
   const size = Number.parseFloat(getComputedStyle(text).fontSize) || 14;
-  text.style.fontSize = `${Math.max(size * 0.65, size * text.clientWidth / text.scrollWidth)}px`;
+  return `${Math.max(size * 0.65, size * text.clientWidth / text.scrollWidth)}px`;
+}
+
+function fitBoardCardTexts(board: HTMLElement) {
+  const texts = [...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title, .cm-live-board-card-date")];
+  for (const text of texts) {
+    if (text.style.fontSize) text.style.fontSize = "";
+  }
+  const sizes = texts.map(fitBoardCardText);
+  for (const [index, size] of sizes.entries()) {
+    if (size) texts[index].style.fontSize = size;
+  }
 }
 
 function alignmentLabel(align: "left" | "center" | "right"): string {
@@ -1277,7 +1287,7 @@ class BoardWidget extends WidgetType {
     });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
-    const fitTitles = () => board.querySelectorAll<HTMLElement>(".cm-live-board-card-title, .cm-live-board-card-date").forEach(fitBoardCardText);
+    const fitTitles = () => fitBoardCardTexts(board);
     const allCards = boardCardsForColumns(this.cards, this.cardIDs);
     const columnElements = new Map<CardStatus, ReturnType<BoardWidget["renderColumn"]>>();
     for (const status of BOARD_COLUMNS) {
@@ -1317,11 +1327,11 @@ class BoardWidget extends WidgetType {
         for (const { card, item } of column.cards) item.hidden = !visible.has(card.id);
         column.empty.hidden = visible.size > 0;
       }
-      fitTitles();
     };
     filter.addEventListener("input", updateFilter);
     tagFilter.addEventListener("input", updateFilter);
     updateFilter();
+    fitTitles();
     updateMinimizedState();
     if (typeof ResizeObserver === "function") {
       this.titleResizeObserver = new ResizeObserver(fitTitles);
