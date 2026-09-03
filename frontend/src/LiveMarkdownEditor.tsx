@@ -1153,7 +1153,9 @@ class BoardWidget extends WidgetType {
       item.type = "button";
       item.className = "cm-live-board-card";
       item.draggable = true;
-      item.textContent = card.title || "Untitled";
+      const cardTitle = item.appendChild(document.createElement("span"));
+      cardTitle.className = "cm-live-board-card-title";
+      cardTitle.textContent = card.title || "Untitled";
       item.title = `Open card “${card.title || "Untitled"}”`;
       item.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", card.id);
@@ -1174,7 +1176,12 @@ class BoardWidget extends WidgetType {
         this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
       });
       const date = boardCardDate(card, status);
-      if (date) item.append(` · ${new Date(date).toLocaleDateString()}`);
+      if (date) {
+        const cardDate = item.appendChild(document.createElement("time"));
+        cardDate.className = "cm-live-board-card-date";
+        cardDate.dateTime = date;
+        cardDate.textContent = new Date(date).toLocaleDateString();
+      }
     }
   }
 

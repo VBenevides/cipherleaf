@@ -134,8 +134,18 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /Remove tag \$\{tag\}/);
   assert.match(app, /className="card-sidebar-divider"/);
   assert.match(app, /className="card-sidebar-notes"[\s\S]*<LiveMarkdownEditor/);
+  assert.match(app, /const deleteCard = async/);
+  assert.match(app, /Delete card/);
+  assert.match(app, /cardPanelDirty \? "primary-button is-dirty" : "secondary-button"/);
+  assert.match(app, /onKeyDown=\{\(event\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "s"/);
+  assert.match(liveEditor, /key: "Mod-s"[\s\S]*onSaveRef\.current\(\)/);
+  assert.match(liveEditor, /cm-live-board-card-title/);
+  assert.match(liveEditor, /cm-live-board-card-date/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
+  assert.match(style, /\.cm-live-board-card \{[\s\S]*display: flex[\s\S]*justify-content: space-between/);
+  assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
+  assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #2588d8/);
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
 });
 

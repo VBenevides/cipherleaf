@@ -680,6 +680,7 @@ function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncConflicts, setSyncConflicts] = useState<MergeConflict[]>([]);
   const [cardPanel, setCardPanel] = useState<CardPanelState | null>(null);
+  const [cardPanelDirty, setCardPanelDirty] = useState(false);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
@@ -1749,6 +1750,7 @@ function App() {
       if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("dialog, [role=dialog]")) return;
+      if (target?.closest(".card-sidebar")) return;
       const key = event.key.toLowerCase();
       const shortcut = `${event.shiftKey ? "shift+" : ""}${key}`;
       const action = new Map<string, () => void>([
@@ -2797,20 +2799,21 @@ function App() {
     return () => window.removeEventListener("keydown", handleTabs);
   }, [session?.locked]);
 
-  const deleteNote = async (id = note?.id, title = note?.title) => {
-    if (!id) return;
+  const deleteNote = async (id = note?.id, title = note?.title, itemType: "note" | "card" = "note") => {
+    if (!id) return false;
+    const label = itemType === "card" ? "card" : "note";
     if (
       !(await requestAppConfirm({
         kind: "confirm",
-        eyebrow: "Delete note",
-        title: "Delete note",
+        eyebrow: `Delete ${label}`,
+        title: `Delete ${label}`,
         message: `Move “${title || "Untitled"}” to Trash?`,
-        confirmLabel: "Delete note",
+        confirmLabel: `Delete ${label}`,
         danger: true,
         icon: "trash",
       }))
     ) {
-      return;
+      return false;
     }
     try {
       if (noteRef.current?.id !== id) await persistCurrent();
@@ -2830,8 +2833,10 @@ function App() {
           ) ?? remaining[0];
         applyLoadedNote(next ? await VaultService.GetNote(next.id) : null);
       }
+      return true;
     } catch (reason) {
       setError(errorText(reason));
+      return false;
     }
   };
 
@@ -3299,6 +3304,7 @@ function App() {
       if (!parsed) throw new Error("This reference is not a card.");
       setSelectedTemplateID("");
       setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
+      setCardPanelDirty(false);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -3312,6 +3318,7 @@ function App() {
     }
     cardOriginRef.current = null;
     setCardPanel(null);
+    setCardPanelDirty(false);
   };
 
   useEffect(() => {
@@ -3349,6 +3356,7 @@ function App() {
       updateSummary(saved.summary);
       setSelectedTemplateID("");
       setCardPanel({ note: saved.note, metadata, body: "" });
+      setCardPanelDirty(false);
       return cardReference(created.id);
     } catch (reason) {
       if (createdID) await VaultService.DeleteNote(createdID).catch(() => {});
@@ -3384,6 +3392,7 @@ function App() {
       const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
       setCardPanel({ note: saved.note, metadata, body: parsed.body });
+      setCardPanelDirty(false);
       const source = markdownForEditing(current.content);
       const content = replaceBoardMarker(source, boardID, (board) => ({
         ...board,
@@ -3409,6 +3418,7 @@ function App() {
   };
 
   const changeCardBoardTitle = (boardID: string, title: string) => {
+    if (cardPanel) setCardPanelDirty(true);
     setCardPanel((current) => {
       if (!current) return current;
       const source = markdownForEditing(current.body);
@@ -3430,11 +3440,16 @@ function App() {
       );
       updateSummary(saved.summary);
       setCardPanel({ note: saved.note, metadata, body: cardPanel.body });
+      setCardPanelDirty(false);
     } catch (reason) {
       setError(errorText(reason));
     } finally {
       setCardPanelSaving(false);
     }
+  };
+
+  const deleteCard = async () => {
+    if (cardPanel && await deleteNote(cardPanel.note.id, cardPanel.metadata.title, "card")) closeCardPanel();
   };
 
   const saveCardAsTemplate = async () => {
@@ -3461,6 +3476,7 @@ function App() {
       const template = await VaultService.GetNote(id);
       const parsed = parseTemplateDocument(template.content, id);
       if (!parsed) return;
+      setCardPanelDirty(true);
       setCardPanel((current) => current ? {
         ...current,
         metadata: { ...current.metadata, status: parsed.template.status, tags: parsed.template.tags },
@@ -3493,7 +3509,10 @@ function App() {
       const metadata = transitionCard(parsed.metadata, status);
       const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
-      if (cardPanel?.note.id === id) setCardPanel({ note: saved.note, metadata, body: parsed.body });
+      if (cardPanel?.note.id === id) {
+        setCardPanel({ note: saved.note, metadata, body: parsed.body });
+        setCardPanelDirty(false);
+      }
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -5258,14 +5277,27 @@ function App() {
   const renderCardPanel = () => {
     if (!cardPanel) return null;
     return (
-          <aside className="card-sidebar" aria-label="Card details">
+          <aside
+            className="card-sidebar"
+            aria-label="Card details"
+            onKeyDown={(event) => {
+              if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+              if ((event.target as HTMLElement | null)?.closest(".cm-editor")) return;
+              event.preventDefault();
+              event.stopPropagation();
+              void saveCardPanel();
+            }}
+          >
             <header className="card-sidebar-header">
               <input
                 className="card-sidebar-title"
                 aria-label="Title"
                 value={cardPanel.metadata.title}
                 placeholder="Untitled"
-                onChange={(event) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, title: event.target.value }, note: { ...current.note, title: event.target.value } } : current)}
+                onChange={(event) => {
+                  setCardPanelDirty(true);
+                  setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, title: event.target.value }, note: { ...current.note, title: event.target.value } } : current);
+                }}
               />
               <button type="button" className="icon-button" aria-label="Close card" title="Close card" onClick={closeCardPanel}>
                 <Icon name="x" size={16} />
@@ -5275,8 +5307,8 @@ function App() {
               Created At: {new Date(cardPanel.metadata.createdAt).toLocaleString()} | Started At: {cardPanel.metadata.startedAt ? new Date(cardPanel.metadata.startedAt).toLocaleString() : "-"} | Blocked on: {cardPanel.metadata.blockedOn ? new Date(cardPanel.metadata.blockedOn).toLocaleString() : "-"} | Finished At: {cardPanel.metadata.finishedAt ? new Date(cardPanel.metadata.finishedAt).toLocaleString() : "-"}
             </div>
             <div className="card-sidebar-properties">
-              <div className="card-sidebar-field"><span>Status</span><CardStatusPicker value={cardPanel.metadata.status} onChange={(status) => setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, status) } : current)} /></div>
-              <div className="card-sidebar-field"><span>Tags</span><CardTagsEditor tags={cardPanel.metadata.tags} suggestions={cardTagSuggestions} onChange={(tags) => setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags } } : current)} /></div>
+              <div className="card-sidebar-field"><span>Status</span><CardStatusPicker value={cardPanel.metadata.status} onChange={(status) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, status) } : current); }} /></div>
+              <div className="card-sidebar-field"><span>Tags</span><CardTagsEditor tags={cardPanel.metadata.tags} suggestions={cardTagSuggestions} onChange={(tags) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags } } : current); }} /></div>
             </div>
             {cardTemplates.length > 0 && (
               <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
@@ -5291,7 +5323,7 @@ function App() {
                   key={`${cardPanel.note.id}:card`}
                   noteID={cardPanel.note.id}
                   value={cardPanel.body}
-                  onChange={(body) => setCardPanel((current) => current ? { ...current, body } : current)}
+                  onChange={(body) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, body } : current); }}
                   onSave={() => void saveCardPanel()}
                   onError={(reason) => setError(errorText(reason))}
                   onOpenWikilink={(title) => void openWikilinkTitle(title)}
@@ -5311,9 +5343,10 @@ function App() {
               </Suspense>
             </section>
             <div className="card-sidebar-actions">
+              <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>
               <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>
               {selectedTemplateID && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
-              <button type="button" className="primary-button" disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
+              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
             </div>
           </aside>
     );

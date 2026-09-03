@@ -4043,7 +4043,9 @@ dialog.modal-backdrop {
 .cm-live-board-column.status-blocked { background: color-mix(in srgb, #d84c4c 18%, transparent); }
 .cm-live-board-column.status-finished { background: color-mix(in srgb, #2ca36b 18%, transparent); }
 .cm-live-board-column h4 { margin: 0 0 8px; font-size: .85em; }
-.cm-live-board-card { display: block; width: 100%; margin: 5px 0; padding: 7px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: grab; }
+.cm-live-board-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin: 5px 0; padding: 7px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: grab; }
+.cm-live-board-card-title { min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.cm-live-board-card-date { flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; }
 .cm-live-board-empty { margin: 8px 0; color: var(--muted-foreground); font-size: .85em; }
 
 .card-sidebar {
@@ -4097,7 +4099,9 @@ dialog.modal-backdrop {
 .card-sidebar-notes .live-editor-frame { min-height: 0; }
 .card-sidebar-notes .live-markdown-editor .cm-content { padding: 16px 0 40px; }
 .card-sidebar-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; }
-.card-sidebar-actions .primary-button { margin-left: auto; }
+.card-sidebar-actions .card-save-button { margin-left: auto; }
+.card-save-button.is-dirty { color: #fff; border-color: #2588d8; background: #2588d8; }
+.card-save-button.is-dirty:hover { background: #1e73b5; }
 
 @media (max-width: 900px) {
   .card-sidebar { inset: 0 0 0 10%; padding: 18px; }
