@@ -26,7 +26,7 @@ type ObjectEntry = {
 };
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 function objectOwnKey(object: ObjectLine): unknown[] {
