@@ -6123,7 +6123,7 @@ function App() {
   const renderTimerDialog = () => (
     <>
       {timerDialog && (
-        <dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setTimerDialog(null); }}>
+        <dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title">
           <div className="vault-modal timer-modal">
             <button type="button" className="icon-button modal-close" aria-label="Close timer dialog" onClick={() => setTimerDialog(null)}><Icon name="x" /></button>
             <p className="eyebrow">Time tracking</p>
