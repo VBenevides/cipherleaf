@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +153,327 @@ func TestCoverageValidationAndMetadataHelpers(t *testing.T) {
 	}
 }
 
+func TestCoverageAdvancedSearchBranches(t *testing.T) {
+	query, advanced, err := parseAdvancedQuery("title:Plan tag:#work folder:Docs property:priority=high case:true re:Plan.* unknown:value text")
+	if err != nil || !advanced || !query.caseSensitive || query.title != "Plan" || query.tag != "work" || query.folder != "Docs" || query.property != "priority" || query.propertyValue != "high" || query.text != "unknown:value text" {
+		t.Fatalf("advanced query = %#v, %v, %v", query, advanced, err)
+	}
+	if _, _, err := parseAdvancedQuery("re:["); err == nil {
+		t.Fatal("invalid advanced expression accepted")
+	}
+	if query, advanced, err := parseAdvancedQuery("property:flag"); err != nil || !advanced || query.property != "flag" || query.propertyValue != "" {
+		t.Fatalf("property query = %#v, %v, %v", query, advanced, err)
+	}
+	if matches := literalMatches("Alpha alpha", compileLiteralForCoverage("alpha"), false, 1); len(matches) != 1 {
+		t.Fatalf("literal matches = %#v", matches)
+	}
+	if offset, length, found := advancedContentMatch("Plan details", advancedQuery{text: "details"}, map[string]*regexp.Regexp{"details": regexp.MustCompile("details")}, SearchOptions{}, 4); !found || offset != 5 || length != 7 {
+		t.Fatalf("literal advanced match = %d, %d, %v", offset, length, found)
+	}
+	if offset, length, found := advancedContentMatch("Plan details", advancedQuery{pattern: regexp.MustCompile("Plan")}, nil, SearchOptions{}, 4); !found || offset != 0 || length != 4 {
+		t.Fatalf("pattern advanced match = %d, %d, %v", offset, length, found)
+	}
+	if offset, length, found := advancedContentMatch("Plan details", advancedQuery{}, nil, SearchOptions{}, 4); !found || offset != 0 || length != 4 {
+		t.Fatalf("metadata advanced match = %d, %d, %v", offset, length, found)
+	}
+	if _, _, found := advancedContentMatch("Plan details", advancedQuery{pattern: regexp.MustCompile("missing")}, nil, SearchOptions{}, 4); found {
+		t.Fatal("missing pattern matched")
+	}
+}
+
+func TestCoverageUnlockedValidationErrors(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF = secure.KDFParams{Time: 1, Memory: 8 * 1024, Threads: 2}
+	t.Cleanup(func() { defaultKDF = previous })
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "validation secret"); err != nil {
+		t.Fatal(err)
+	}
+	expectErr := func(err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("invalid operation unexpectedly succeeded")
+		}
+	}
+	_, err := store.CreateFolder("", "")
+	expectErr(err)
+	_, err = store.CreateFolder("Folder", "missing")
+	expectErr(err)
+	_, err = store.RenameFolder("missing", "Folder")
+	expectErr(err)
+	expectErr(store.DeleteFolder("missing"))
+	expectErr(store.ReorderFolders([]string{"missing"}))
+	_, err = store.MoveFolder("missing", "")
+	expectErr(err)
+	_, err = store.SetFolderHidden("missing", true)
+	expectErr(err)
+	_, err = store.LockFolder("missing", "password")
+	expectErr(err)
+	_, err = store.UnlockFolder("missing", "password")
+	expectErr(err)
+	expectErr(store.CheckFolderPassword("missing", "password"))
+	expectErr(store.LockFolderSession("missing"))
+	_, err = store.SetFolderSortMode("missing", "title")
+	expectErr(err)
+
+	_, err = store.CreateNote(strings.Repeat("x", maxTitleRunes+1))
+	expectErr(err)
+	_, err = store.CreateNoteInFolder("Note", "missing")
+	expectErr(err)
+	_, err = store.MoveNote("missing", "")
+	expectErr(err)
+	expectErr(store.ReorderNotes("missing", []string{"missing"}))
+	_, err = store.GetNote("missing")
+	expectErr(err)
+	_, err = store.SaveNote("missing", "Title", "content")
+	expectErr(err)
+	_, err = store.SaveAttachment("missing", []byte("bad"))
+	expectErr(err)
+	_, err = store.GetAttachment("missing", "missing")
+	expectErr(err)
+	expectErr(store.DeleteNote("missing"))
+	_, err = store.ListTrash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectErr(store.RestoreTrashItem("note", "missing"))
+	expectErr(store.PermanentlyDeleteTrashItem("note", "missing"))
+	_, err = store.ListNoteVersions("missing")
+	expectErr(err)
+	_, err = store.RestoreNoteVersion("missing", 1)
+	expectErr(err)
+	_, err = store.ImportMarkdown(filepath.Join(t.TempDir(), "missing.md"))
+	expectErr(err)
+	_, err = store.ExportMarkdown(filepath.Join(t.TempDir(), "missing", "export"))
+	expectErr(err)
+	_, err = store.ResolveNoteReference("missing")
+	expectErr(err)
+	_, err = store.ListBacklinks("missing")
+	expectErr(err)
+	_, err = store.ListUnlinkedMentions("missing")
+	expectErr(err)
+	_, err = store.FindInNotesWithOptions("re:[", 1, SearchOptions{})
+	expectErr(err)
+	_, err = store.ReplaceAcrossNotesWithOptions("", "replace", []string{"missing"}, SearchOptions{})
+	expectErr(err)
+
+	_, err = store.CreateClient("")
+	expectErr(err)
+	_, err = store.RenameClient("missing", "Client")
+	expectErr(err)
+	_, err = store.ArchiveClient("missing")
+	expectErr(err)
+	_, err = store.RestoreClient("missing")
+	expectErr(err)
+	expectErr(store.DeleteClient("missing"))
+	_, err = store.CreateProject("")
+	expectErr(err)
+	_, err = store.RenameProject("missing", "Project")
+	expectErr(err)
+	_, err = store.ArchiveProject("missing")
+	expectErr(err)
+	_, err = store.RestoreProject("missing")
+	expectErr(err)
+	expectErr(store.DeleteProject("missing"))
+	_, err = store.CreateTag("")
+	expectErr(err)
+	_, err = store.RenameTag("missing", "Tag")
+	expectErr(err)
+	_, err = store.ArchiveTag("missing")
+	expectErr(err)
+	_, err = store.RestoreTag("missing")
+	expectErr(err)
+	expectErr(store.DeleteTag("missing"))
+	_, err = store.StartTimeEntry("", "", nil)
+	expectErr(err)
+	_, err = store.StartTimeEntryForClient("", "", "", nil)
+	expectErr(err)
+	_, err = store.UpdateTimeEntry("missing", "Entry", "", nil, "", "")
+	expectErr(err)
+	_, err = store.UpdateTimeEntryForClient("missing", "Entry", "", "", nil, "", "")
+	expectErr(err)
+	expectErr(store.DeleteTimeEntry("missing"))
+	_, err = store.ListTimeEntries("bad", "bad", TimeEntryFilters{})
+	expectErr(err)
+	_, err = store.GetTimeDashboard("bad", "bad", TimeEntryFilters{})
+	expectErr(err)
+	_, err = store.ListTimeDashboardGroupEntries("missing", "bad", "bad", TimeEntryFilters{})
+	expectErr(err)
+	_, err = store.ListTimeTrackingConflicts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectErr(store.ResolveTimeTrackingConflict("missing"))
+}
+
+func TestCoverageStoreCreationAndSnapshotEdges(t *testing.T) {
+	if _, err := (&Store{}).SnapshotRevision(); !errors.Is(err, ErrLocked) {
+		t.Fatalf("locked snapshot revision = %v", err)
+	}
+	if _, err := ReadVaultID(t.TempDir()); err == nil {
+		t.Fatal("missing vault configuration accepted")
+	}
+	configRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configRoot, configFilename), []byte(`{"vault_id":""}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadVaultID(configRoot); err == nil {
+		t.Fatal("empty vault identity accepted")
+	}
+	rootFile := filepath.Join(t.TempDir(), "root")
+	if err := os.WriteFile(rootFile, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore()
+	if _, err := store.Create(rootFile, "long enough secret"); err == nil {
+		t.Fatal("file root accepted")
+	}
+	if _, err := store.CreateIn(t.TempDir(), "", "long enough secret"); err == nil {
+		t.Fatal("invalid vault name accepted")
+	}
+	if _, err := store.Create(t.TempDir(), "short"); err == nil {
+		t.Fatal("short vault secret accepted")
+	}
+	root := t.TempDir()
+	if _, err := store.Create(root, "long enough secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(root, "long enough secret"); !errors.Is(err, ErrVaultAlreadyExists) {
+		t.Fatalf("duplicate vault = %v", err)
+	}
+	store.Lock()
+	if _, err := store.Open(root, "wrong secret"); err == nil {
+		t.Fatal("wrong vault secret accepted")
+	}
+	if err := store.ExportRemoteSnapshot(t.TempDir()); !errors.Is(err, ErrLocked) {
+		t.Fatalf("locked remote export = %v", err)
+	}
+	if _, err := store.ValidateRemoteSnapshot(t.TempDir()); !errors.Is(err, ErrLocked) {
+		t.Fatalf("locked remote validation = %v", err)
+	}
+	if _, err := store.MergeRemoteSnapshot(t.TempDir()); !errors.Is(err, ErrLocked) {
+		t.Fatalf("locked remote merge = %v", err)
+	}
+	if settings := normalizeVaultSettings(VaultSettings{}); settings.AutoLockMinutes != 15 || settings.SectionDefault != "collapsed" {
+		t.Fatalf("default settings = %#v", settings)
+	}
+	if settings := normalizeVaultSettings(VaultSettings{FileHistoryLimit: 100, SectionDefault: "bad"}); settings.FileHistoryLimit != 50 || settings.SectionDefault != "collapsed" {
+		t.Fatalf("clamped settings = %#v", settings)
+	}
+}
+
+func TestCoverageManifestWriteRollbackBranches(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore()
+	if _, err := store.Create(root, "long enough secret"); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := store.CreateFolder("Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := store.CreateFolder("Empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNoteInFolder("Note", folder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNote("Recover note"); err != nil {
+		t.Fatal(err)
+	}
+	recoverNote, err := store.CreateNote("Restorable note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteNote(recoverNote.ID); err != nil {
+		t.Fatal(err)
+	}
+	recoverFolder, err := store.CreateFolder("Restorable folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteFolder(recoverFolder.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LockFolder(empty.ID, "folder password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UnlockFolder(empty.ID, "folder password"); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := store.CreateFolder("Locked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LockFolder(locked.ID, "locked password"); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(root, manifestFilename)
+	if err := os.Remove(manifestPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(manifestPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	expectErr := func(err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("manifest write unexpectedly succeeded")
+		}
+	}
+	_, err = store.CreateFolder("Rejected")
+	expectErr(err)
+	_, err = store.RenameFolder(folder.ID, "Renamed")
+	expectErr(err)
+	_, err = store.SetFolderHidden(folder.ID, true)
+	expectErr(err)
+	_, err = store.SetFolderSortMode(folder.ID, "title")
+	expectErr(err)
+	_, err = store.LockFolder(folder.ID, "folder password")
+	expectErr(err)
+	_, err = store.MoveFolder(empty.ID, folder.ID)
+	expectErr(err)
+	_, err = store.UnlockFolder(empty.ID, "folder password")
+	expectErr(err)
+	_, err = store.UnlockFolder(locked.ID, "locked password")
+	expectErr(err)
+	_, err = store.CreateNote("Loose")
+	expectErr(err)
+	_, err = store.SaveNote(note.ID, "Changed", "content")
+	expectErr(err)
+	expectErr(store.ReorderNotes(folder.ID, []string{note.ID}))
+	_, err = store.MoveNote(note.ID, "")
+	expectErr(err)
+	expectErr(store.DeleteNote(note.ID))
+	expectErr(store.DeleteFolder(empty.ID))
+	expectErr(store.ReorderFolders([]string{empty.ID, folder.ID}))
+	err = store.RestoreTrashItem("note", recoverNote.ID)
+	expectErr(err)
+	err = store.RestoreTrashItem("folder", recoverFolder.ID)
+	expectErr(err)
+	result := PortabilityResult{}
+	_, err = (&Store{manifest: manifest{Folders: []Folder{{ID: folder.ID, Name: "Missing", ParentID: "unknown"}}}}).exportMarkdownFoldersLocked(t.TempDir(), &result)
+	expectErr(err)
+	planned := markdownImportNote{note: Note{ID: strings.Repeat("c", 32), Title: "Imported", Content: "content"}}
+	expectErr(store.writeMarkdownImportLocked(nil, []markdownImportNote{planned}))
+	expectErr(store.ensureTimeTrackingEnabledLocked())
+	badRoot := filepath.Join(t.TempDir(), "root-file")
+	if err := os.WriteFile(badRoot, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expectErr((&Store{root: badRoot, vaultID: "vault"}).ensureTimeTrackingEnabledLocked())
+}
+
+func compileLiteralForCoverage(value string) *regexp.Regexp {
+	pattern, err := compileLiteralPattern(value, SearchOptions{})
+	if err != nil {
+		panic(err)
+	}
+	return pattern
+}
+
 func TestCoverageContentReferenceHelpers(t *testing.T) {
 	ids := strings.Repeat("a", 32)
 	otherID := strings.Repeat("b", 32)
@@ -279,6 +603,293 @@ func TestCoverageRemoteValidationAndKeyHelpers(t *testing.T) {
 		if _, err := unwrapMasterKey(invalid, "test passphrase"); err == nil {
 			t.Fatal("invalid wrapped key data accepted")
 		}
+	}
+	shortKeyConfig, err := buildConfig(id, []byte("short"), "test passphrase", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unwrapMasterKey(shortKeyConfig, "test passphrase"); err == nil {
+		t.Fatal("short wrapped vault key accepted")
+	}
+}
+
+func TestCoverageRemoteObjectAndSearchEdges(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	folderID := strings.Repeat("b", 32)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	store := &Store{manifest: manifest{Folders: []Folder{{ID: folderID, Name: "Docs"}}}}
+	item := NoteSummary{ID: id, Title: "Plan", FolderID: folderID, Tags: []string{"work"}, Properties: map[string]any{"priority": "high"}}
+	patterns := map[string]*regexp.Regexp{
+		"Plan":     regexp.MustCompile(`(?i)plan`),
+		"missing":  regexp.MustCompile(`(?i)missing`),
+		"work":     regexp.MustCompile(`(?i)work`),
+		"Docs":     regexp.MustCompile(`(?i)docs`),
+		"priority": regexp.MustCompile(`(?i)priority`),
+		"high":     regexp.MustCompile(`(?i)high`),
+	}
+	for _, test := range []struct {
+		query advancedQuery
+		want  bool
+	}{
+		{advancedQuery{title: "missing"}, false},
+		{advancedQuery{title: "Plan", tag: "missing"}, false},
+		{advancedQuery{title: "Plan", folder: "missing"}, false},
+		{advancedQuery{title: "Plan", folder: "Docs", property: "missing"}, false},
+		{advancedQuery{title: "Plan", folder: "Docs", property: "priority", propertyValue: "missing"}, false},
+		{advancedQuery{title: "Plan", tag: "work", folder: "Docs", property: "priority", propertyValue: "high"}, true},
+	} {
+		if got := store.advancedMetadataMatches(item, test.query, patterns, SearchOptions{}); got != test.want {
+			t.Fatalf("metadata query %#v = %v, want %v", test.query, got, test.want)
+		}
+	}
+	if got := store.advancedMetadataMatches(item, advancedQuery{property: "priority"}, patterns, SearchOptions{}); !got {
+		t.Fatal("property existence query did not match")
+	}
+
+	objects := filepath.Join(t.TempDir(), "objects")
+	if err := validateRemoteObjectsDirectoryLocked(filepath.Join(objects, "missing"), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRemoteObjectsDirectoryLocked(filepath.Join(objects, "missing-live"), nil, 1); err == nil {
+		t.Fatal("missing live objects folder accepted")
+	}
+	if err := os.MkdirAll(filepath.Join(objects, id[:2]), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	remoteNotes := map[string]remoteSyncObject{id: {ID: id, Revision: 1}}
+	if err := os.WriteFile(filepath.Join(objects, id[:2], id+".enc"), []byte("ciphertext"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRemoteObjectsDirectoryLocked(objects, remoteNotes, 1); err != nil {
+		t.Fatal(err)
+	}
+	otherID := strings.Repeat("c", 32)
+	for _, invalid := range []struct {
+		directory string
+		name      string
+		message   string
+	}{{id[:2], "extra.txt", "unknown file"}, {otherID[:2], otherID + ".enc", "absent"}} {
+		if err := os.MkdirAll(filepath.Join(objects, invalid.directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(objects, invalid.directory, invalid.name)
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateRemoteObjectsDirectoryLocked(objects, remoteNotes, 1); err == nil || !strings.Contains(err.Error(), invalid.message) {
+			t.Fatalf("invalid remote object %q error = %v", invalid.name, err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(objects, "ac", id+".enc"), []byte("x"), 0o600); err != nil {
+		if err := os.MkdirAll(filepath.Join(objects, "ac"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(objects, "ac", id+".enc"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := validateRemoteObjectsDirectoryLocked(objects, remoteNotes, 1); err == nil {
+		t.Fatal("remote object in the wrong folder accepted")
+	}
+	if err := validateRemoteObjectEntry(objects, filepath.Join(objects, "bad"), nil, errors.New("walk failed"), remoteNotes); err == nil {
+		t.Fatal("walk error was ignored")
+	}
+
+	previous := defaultKDF
+	defaultKDF = secure.KDFParams{Time: 1, Memory: 8 * 1024, Threads: 2}
+	t.Cleanup(func() { defaultKDF = previous })
+	vaultStore := NewStore()
+	if _, err := vaultStore.Create(t.TempDir(), "remote object secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := vaultStore.CreateNote("Remote object")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := t.TempDir()
+	if err := vaultStore.ExportRemoteSnapshot(remote); err != nil {
+		t.Fatal(err)
+	}
+	vaultStore.mu.RLock()
+	inventoryData, err := vaultStore.readEnvelopeFileLocked(filepath.Join(remote, syncDirectory, syncManifestFile), syncManifestObjectType, syncManifestObjectType)
+	vaultStore.mu.RUnlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inventory remoteSyncManifest
+	if err := json.Unmarshal(inventoryData, &inventory); err != nil || len(inventory.Objects) != 1 {
+		t.Fatalf("remote inventory = %#v, %v", inventory, err)
+	}
+	vaultStore.mu.RLock()
+	_, summary, live, err := vaultStore.readRemoteSnapshotObjectLocked(remote, inventory.Objects[0], nil, true, true)
+	vaultStore.mu.RUnlock()
+	if err != nil || !live || summary == nil || summary.ID != note.ID {
+		t.Fatalf("remote object = %#v, %v, %v", summary, live, err)
+	}
+	if _, _, live, err := vaultStore.readRemoteSnapshotObjectLocked(remote, remoteSyncObject{ID: note.ID, Revision: 1, ModifiedAt: 1, Deleted: true}, nil, true, true); err != nil || live {
+		t.Fatalf("deleted remote object = live %v, err %v", live, err)
+	}
+	if _, _, _, err := vaultStore.readRemoteSnapshotObjectLocked(remote, remoteSyncObject{ID: note.ID, Revision: 1, ModifiedAt: 1, CiphertextHash: "bad"}, nil, true, true); err == nil {
+		t.Fatal("invalid remote object hash accepted")
+	}
+	legacyNote := Note{ID: note.ID, Title: "Legacy remote", Content: "legacy", CreatedAt: now, UpdatedAt: now, Revision: 1, ModifiedAt: 1}
+	legacyData, err := json.Marshal(legacyNote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(remote, "objects", note.ID[:2], note.ID+".enc")
+	vaultStore.mu.Lock()
+	err = vaultStore.writeEnvelopeLocked(legacyPath, "note", note.ID, legacyData)
+	vaultStore.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyCiphertext, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyHash := sha256.Sum256(legacyCiphertext)
+	vaultStore.mu.RLock()
+	_, summary, live, err = vaultStore.readRemoteSnapshotObjectLocked(remote, remoteSyncObject{ID: note.ID, Revision: 1, ModifiedAt: 1, CiphertextHash: hex.EncodeToString(legacyHash[:])}, nil, true, false)
+	vaultStore.mu.RUnlock()
+	if err != nil || !live || summary == nil || summary.Title != legacyNote.Title {
+		t.Fatalf("legacy remote object = %#v, %v, %v", summary, live, err)
+	}
+	cachedStore := &Store{manifest: manifest{Notes: []NoteSummary{{ID: note.ID, Revision: 1, ModifiedAt: 1, CiphertextHash: "hash"}}}}
+	if cached, ok := cachedStore.cachedRemoteSnapshotNoteLocked(remoteSyncObject{ID: note.ID, Revision: 1, ModifiedAt: 1, CiphertextHash: "hash"}); !ok || cached == nil {
+		t.Fatal("matching remote note was not cached")
+	}
+	if _, ok := cachedStore.cachedRemoteSnapshotNoteLocked(remoteSyncObject{ID: note.ID, Revision: 2, ModifiedAt: 1, CiphertextHash: "hash"}); ok {
+		t.Fatal("stale remote note was returned from cache")
+	}
+	advancedStore := &Store{root: filepath.Join(t.TempDir(), "missing"), key: bytes.Repeat([]byte("k"), secure.KeySize), manifest: manifest{Notes: []NoteSummary{{ID: note.ID, Title: "Plan"}}}}
+	if _, _, err := advancedStore.advancedNoteMatchLocked(advancedStore.manifest.Notes[0], advancedQuery{text: "Plan"}, map[string]*regexp.Regexp{"Plan": regexp.MustCompile("Plan")}, SearchOptions{}); err == nil {
+		t.Fatal("missing advanced-search note unexpectedly succeeded")
+	}
+	attachmentRoot := t.TempDir()
+	missingNoteID := strings.Repeat("d", 32)
+	missingAttachmentPath := filepath.Join(attachmentRoot, missingNoteID, missingNoteID+".enc")
+	if err := os.MkdirAll(filepath.Dir(missingAttachmentPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(missingAttachmentPath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(missingAttachmentPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Store{}).validateRemoteAttachmentEntryLocked(attachmentRoot, missingAttachmentPath, entries[0], nil, nil); err == nil {
+		t.Fatal("attachment for a missing note accepted")
+	}
+	sharedPath := filepath.Join(attachmentRoot, sharedAttachmentFolder, "bad.enc")
+	if err := os.MkdirAll(filepath.Dir(sharedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sharedPath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = os.ReadDir(filepath.Dir(sharedPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Store{}).validateRemoteAttachmentEntryLocked(attachmentRoot, sharedPath, entries[0], nil, nil); err == nil {
+		t.Fatal("invalid shared attachment accepted")
+	}
+
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	if _, err := writer.Write([]byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := decompressPayload(compressed.Bytes(), 20, "tracking"); err != nil || string(got) != "payload" {
+		t.Fatalf("decompressed tracking payload = %q, %v", got, err)
+	}
+	if _, err := decompressPayload([]byte("bad"), 20, "tracking"); err == nil {
+		t.Fatal("damaged tracking payload accepted")
+	}
+	if _, err := decompressPayload(compressed.Bytes(), 3, "tracking"); err == nil {
+		t.Fatal("oversized tracking payload accepted")
+	}
+	privateDir := filepath.Join(t.TempDir(), "private")
+	if err := ensurePrivateDirectory(privateDir); err != nil {
+		t.Fatal(err)
+	}
+	privateFile := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(privateFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensurePrivateDirectory(privateFile); err == nil {
+		t.Fatal("file accepted as private directory")
+	}
+	trackingStore := &Store{root: t.TempDir()}
+	if path, err := trackingStore.timeTrackingBucketPathLocked(id); err != nil || !strings.HasSuffix(path, id+".enc") {
+		t.Fatalf("tracking bucket path = %q, %v", path, err)
+	}
+	if _, err := trackingStore.timeTrackingBucketPathLocked("bad"); err == nil {
+		t.Fatal("invalid tracking bucket ID accepted")
+	}
+}
+
+func TestCoverageMergeHelpers(t *testing.T) {
+	clientLocal := TimeClient{ID: "client", Name: "local", Revision: 1, ModifiedAt: 1}
+	clientRemote := clientLocal
+	clientRemote.Name = "remote"
+	clients, clientConflicts := mergeTimeClients(
+		[]TimeClient{clientLocal},
+		[]TimeClient{clientRemote, {ID: "new-client", Name: "new", Revision: 2}}, nil, nil,
+	)
+	if len(clients) != 2 || len(clientConflicts) != 1 {
+		t.Fatalf("merged clients = %#v, conflicts = %#v", clients, clientConflicts)
+	}
+
+	projectLocal := TimeProject{ID: "project", Name: "local", Revision: 1, ModifiedAt: 1}
+	projectRemote := projectLocal
+	projectRemote.Name = "remote"
+	projects, projectConflicts := mergeTimeProjects(
+		[]TimeProject{projectLocal},
+		[]TimeProject{projectRemote, {ID: "new-project", Name: "new", Revision: 2}}, nil, nil,
+	)
+	if len(projects) != 2 || len(projectConflicts) != 1 {
+		t.Fatalf("merged projects = %#v, conflicts = %#v", projects, projectConflicts)
+	}
+
+	tagLocal := TimeTag{ID: "tag", Name: "local", Revision: 1, ModifiedAt: 1}
+	tagRemote := tagLocal
+	tagRemote.Name = "remote"
+	tags, tagConflicts := mergeTimeTags(
+		[]TimeTag{tagLocal},
+		[]TimeTag{tagRemote, {ID: "new-tag", Name: "new", Revision: 2}}, nil, nil,
+	)
+	if len(tags) != 2 || len(tagConflicts) != 1 {
+		t.Fatalf("merged tags = %#v, conflicts = %#v", tags, tagConflicts)
+	}
+
+	entry := TimeEntry{ID: "entry", Name: "task", StartedAtUTC: "2026-01-01T00:00:00Z", CreatedAtUTC: "2026-01-01T00:00:00Z", UpdatedAtUTC: "2026-01-01T00:00:00Z", Revision: 1}
+	merged := newTimeTrackingCatalog("vault")
+	buckets, err := buildMergedTimeTrackingBuckets(timeTrackingCatalog{}, timeTrackingCatalog{}, map[string]TimeEntry{entry.ID: entry}, &merged)
+	if err != nil || len(buckets) != 1 || merged.ActiveEntry == nil {
+		t.Fatalf("merged tracking buckets = %#v, catalog = %#v, err = %v", buckets, merged, err)
+	}
+
+	existingID := strings.Repeat("a", 32)
+	updated, deleted := mergeRemoteFolderUpdates(
+		[]Folder{{ID: existingID, Name: "remote", UpdatedAt: "2026-01-02T00:00:00Z"}, {ID: "new", Name: "new"}},
+		[]Folder{{ID: existingID, Name: "local", UpdatedAt: "2026-01-01T00:00:00Z"}},
+		[]Tombstone{{ID: existingID, ModifiedAt: 0}},
+		&MergeResult{},
+	)
+	if len(updated) != 2 || len(deleted) != 0 {
+		t.Fatalf("merged folders = %#v, deleted = %#v", updated, deleted)
+	}
+	if err := (&Store{root: t.TempDir()}).rollbackTimeTrackingMergeLocked(timeTrackingCatalog{}, nil, map[string]timeTrackingBucket{"bad": {ID: "bad"}}, false); err == nil {
+		t.Fatal("invalid tracking bucket rollback unexpectedly succeeded")
 	}
 }
 
@@ -432,6 +1043,16 @@ func TestCoverageFilesystemAndCompressionHelpers(t *testing.T) {
 	if err := readJSON(jsonPath, 1024, &decoded); err == nil {
 		t.Fatal("invalid primary and backup JSON unexpectedly accepted")
 	}
+	jsonDirectory := filepath.Join(root, "json-directory")
+	if err := os.Mkdir(jsonDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONAtomic(jsonDirectory, map[string]string{"value": "bad"}); err == nil {
+		t.Fatal("JSON directory unexpectedly replaced")
+	}
+	if err := writeJSONAtomic(filepath.Join(root, "unsupported.json"), func() {}); err == nil {
+		t.Fatal("unsupported JSON value unexpectedly encoded")
+	}
 
 	cleanupRoot := filepath.Join(root, "cleanup")
 	if err := os.MkdirAll(filepath.Join(cleanupRoot, "objects"), 0o700); err != nil {
@@ -457,6 +1078,16 @@ func TestCoverageFilesystemAndCompressionHelpers(t *testing.T) {
 	}
 	if err := copyFileIfChangedFast(source, target); err != nil {
 		t.Fatal(err)
+	}
+	if err := copyFileAtomic(filepath.Join(root, "missing"), target); err == nil {
+		t.Fatal("missing source unexpectedly copied")
+	}
+	badTargetParent := filepath.Join(root, "target-parent")
+	if err := os.WriteFile(badTargetParent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFileAtomic(source, filepath.Join(badTargetParent, "target")); err == nil {
+		t.Fatal("file parent unexpectedly accepted")
 	}
 	if err := os.WriteFile(source, []byte("two"), 0o600); err != nil {
 		t.Fatal(err)
@@ -484,10 +1115,20 @@ func TestCoverageFilesystemAndCompressionHelpers(t *testing.T) {
 	if err := removeUnexpectedSnapshotObjects(objects, map[string]struct{}{keep: {}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := removeUnexpectedSnapshotObjects(filepath.Join(root, "missing-objects"), nil); err == nil {
+		t.Fatal("missing objects directory unexpectedly accepted")
+	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale object still exists: %v", err)
 	}
 	if err := removeUnexpectedSyncFiles(root); err != nil {
+		t.Fatal(err)
+	}
+	attachmentTarget := filepath.Join(root, "attachments-target")
+	if err := os.MkdirAll(filepath.Join(attachmentTarget, "stale"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileRemoteAttachmentDirectory(filepath.Join(root, "missing-attachments"), attachmentTarget); err != nil {
 		t.Fatal(err)
 	}
 
@@ -539,6 +1180,99 @@ func TestCoverageFilesystemAndCompressionHelpers(t *testing.T) {
 	}
 }
 
+func TestCoveragePortabilityHelpers(t *testing.T) {
+	root := t.TempDir()
+	result := PortabilityResult{}
+	parentID := strings.Repeat("a", 32)
+	childID := strings.Repeat("b", 32)
+	folders := &Store{manifest: manifest{Folders: []Folder{
+		{ID: childID, Name: "Child", ParentID: parentID},
+		{ID: parentID, Name: "Parent"},
+	}}}
+	paths, err := folders.exportMarkdownFoldersLocked(root, &result)
+	if err != nil || len(paths) != 3 || result.Folders != 2 {
+		t.Fatalf("portable folders = %#v, %v", paths, err)
+	}
+
+	plannedResult := PortabilityResult{}
+	plannedStore := &Store{manifest: manifest{Folders: []Folder{{Name: "Existing", ParentID: ""}}}}
+	if _, planned, err := plannedStore.planMarkdownImportFoldersLocked(map[string]struct{}{"A/B": {}, "A": {}}, &plannedResult); err != nil || len(planned) != 2 {
+		t.Fatalf("planned folders = %#v, %v", planned, err)
+	}
+	if _, _, err := plannedStore.planMarkdownImportFoldersLocked(map[string]struct{}{"Existing": {}}, &plannedResult); err == nil {
+		t.Fatal("duplicate imported folder unexpectedly accepted")
+	}
+
+	notePath := filepath.Join(root, "note.md")
+	attachments := filepath.Join(root, "attachments")
+	if err := os.MkdirAll(attachments, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	imageID := strings.Repeat("c", 32)
+	if err := os.WriteFile(filepath.Join(attachments, imageID+".webp"), []byte("RIFF1234WEBP"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(attachments, "file.bin"), []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := markdownImportFile{path: notePath, content: "![one](attachments/" + imageID + ".webp) ![two](attachments/" + imageID + ".webp) [file](attachments/file.bin) [again](attachments/file.bin)"}
+	importResult := PortabilityResult{}
+	content, imported, err := importMarkdownContent(file, &importResult)
+	if err != nil || len(imported) != 2 || importResult.Attachments != 2 || !strings.Contains(content, "attachment:") {
+		t.Fatalf("imported content = %q, attachments = %#v, result = %#v, err = %v", content, imported, importResult, err)
+	}
+	if _, _, err := importMarkdownImageAttachment(file, imageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := importMarkdownFileAttachment(file, "../unsafe"); err == nil {
+		t.Fatal("unsafe imported attachment path accepted")
+	}
+}
+
+func TestCoverageAdditionalErrorBranches(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF = secure.KDFParams{}
+	t.Cleanup(func() { defaultKDF = previous })
+	parent := t.TempDir()
+	if _, err := NewStore().CreateIn(parent, "cleanup", "long enough secret"); err == nil {
+		t.Fatal("invalid KDF unexpectedly created a vault")
+	}
+	if _, err := os.Stat(filepath.Join(parent, "cleanup")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed vault folder was not cleaned up: %v", err)
+	}
+
+	defaultKDF = secure.KDFParams{Time: 1, Memory: 8 * 1024, Threads: 2}
+	searchStore := &Store{root: filepath.Join(t.TempDir(), "missing"), key: bytes.Repeat([]byte("k"), secure.KeySize), manifest: manifest{Notes: []NoteSummary{
+		{ID: strings.Repeat("a", 32), Title: "Target"},
+		{ID: strings.Repeat("b", 32), Title: "Note title"},
+	}}}
+	if _, err := searchStore.Search("body"); err == nil {
+		t.Fatal("missing note content unexpectedly searched")
+	}
+	if _, err := searchStore.ListUnlinkedMentions(strings.Repeat("a", 32)); err == nil {
+		t.Fatal("missing note content unexpectedly scanned for mentions")
+	}
+	if _, err := searchStore.FindInNotes("body", 1); err == nil {
+		t.Fatal("missing note content unexpectedly searched by literal query")
+	}
+	if _, err := searchStore.readNoteFromSummaryAtLocked(searchStore.root, NoteSummary{ID: "bad"}); err == nil {
+		t.Fatal("invalid note ID unexpectedly read")
+	}
+	if _, err := searchStore.readTimeTrackingCatalogLocked(); err == nil {
+		t.Fatal("missing tracking catalog unexpectedly read")
+	}
+
+	badRoot := filepath.Join(t.TempDir(), "root-file")
+	if err := os.WriteFile(badRoot, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id := strings.Repeat("a", 32)
+	badStore := &Store{root: badRoot, key: bytes.Repeat([]byte("k"), secure.KeySize)}
+	if err := badStore.rollbackNoteWritesLocked(manifest{}, map[string]Note{id: {ID: id, Title: "Note"}}, errors.New("save failed")); err == nil {
+		t.Fatal("failed note rollback unexpectedly succeeded")
+	}
+}
+
 func TestCoverageFolderAndNoteOperations(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF = secure.KDFParams{Time: 1, Memory: 8 * 1024, Threads: 2}
@@ -574,6 +1308,11 @@ func TestCoverageFolderAndNoteOperations(t *testing.T) {
 	if err := store.ReorderFolders([]string{sibling.ID, root.ID, child.ID}); err != nil {
 		t.Fatal(err)
 	}
+	store.manifestWriteHook = func() error { return errors.New("manifest write failed") }
+	if err := store.ReorderFolders([]string{sibling.ID, root.ID, child.ID}); err == nil {
+		t.Fatal("folder reorder unexpectedly ignored manifest failure")
+	}
+	store.manifestWriteHook = nil
 	if _, err := store.MoveFolder(root.ID, root.ID); err == nil {
 		t.Fatal("folder moved into itself")
 	}
@@ -778,6 +1517,10 @@ func TestCoverageAttachmentPruningBranches(t *testing.T) {
 	}
 	store.manifest.Notes[0].AttachmentIDs = nil
 	ids, err := store.attachmentIDsForSummaryLocked(store.manifest.Notes[0])
+	if err := store.pruneStaleAttachmentsLocked(); err != nil {
+		store.mu.Unlock()
+		t.Fatal(err)
+	}
 	store.mu.Unlock()
 	if err != nil || len(ids) != 0 {
 		t.Fatalf("derived attachment IDs = %v, %v", ids, err)
@@ -969,6 +1712,14 @@ func TestCoverageTrackingSnapshotHashes(t *testing.T) {
 	if _, err := store.Create(t.TempDir(), "tracking snapshot secret"); err != nil {
 		t.Fatal(err)
 	}
+	store.timeTrackingWriteHook = func(string, string) error { return errors.New("tracking write failed") }
+	store.mu.Lock()
+	if err := store.ensureTimeTrackingEnabledLocked(); err == nil {
+		store.mu.Unlock()
+		t.Fatal("tracking enable unexpectedly ignored catalog failure")
+	}
+	store.mu.Unlock()
+	store.timeTrackingWriteHook = nil
 	bucketID := strings.Repeat("a", 32)
 	catalogData := []byte("catalog ciphertext")
 	bucketData := []byte("bucket ciphertext")

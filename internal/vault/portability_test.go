@@ -151,3 +151,61 @@ func TestMarkdownImportFailureLeavesVaultUnchanged(t *testing.T) {
 		t.Fatalf("folders after failed import = %#v, %v", folders, err)
 	}
 }
+
+func TestPortabilityHelperValidation(t *testing.T) {
+	if portableName("  report:/  ", "fallback") != "report__" || portableName("...", "fallback") != "fallback" {
+		t.Fatal("portableName normalization failed")
+	}
+	used := map[string]struct{}{}
+	first := uniquePortablePath(t.TempDir(), "Report", ".md", used)
+	second := uniquePortablePath(filepath.Dir(first), "Report", ".md", used)
+	if filepath.Base(first) != "Report.md" || filepath.Base(second) != "Report (2).md" {
+		t.Fatalf("unique paths = %q, %q", first, second)
+	}
+
+	noMarkdown := t.TempDir()
+	if err := os.WriteFile(filepath.Join(noMarkdown, "notes.txt"), []byte("text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := collectMarkdownImportFiles(noMarkdown); err == nil {
+		t.Fatal("folder without Markdown was accepted")
+	}
+	source := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(source, "attachments"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "note.md"), []byte("note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "ignored.txt"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, folders, err := collectMarkdownImportFiles(source)
+	if err != nil || len(files) != 1 || len(folders) != 0 {
+		t.Fatalf("collected Markdown = %#v, %#v, %v", files, folders, err)
+	}
+
+	file := markdownImportFile{path: filepath.Join(source, "note.md")}
+	if _, _, err := importMarkdownImageAttachment(file, strings.Repeat("a", 32)); err == nil {
+		t.Fatal("missing image attachment was accepted")
+	}
+	imageID := strings.Repeat("a", 32)
+	if err := os.WriteFile(filepath.Join(source, "attachments", imageID+".webp"), []byte("bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := importMarkdownImageAttachment(file, imageID); err == nil {
+		t.Fatal("invalid image attachment was accepted")
+	}
+	for _, name := range []string{"../escape.txt", "/absolute.txt", ""} {
+		if _, _, err := importMarkdownFileAttachment(file, name); err == nil {
+			t.Fatalf("unsafe file attachment %q was accepted", name)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(source, "attachments", "plain.txt"), []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attachment, replacement, err := importMarkdownFileAttachment(file, "plain.txt")
+	if err != nil || attachment.objectType != "file-attachment" || !strings.HasPrefix(replacement, attachmentLinkPrefix) {
+		t.Fatalf("file attachment = %#v, %q, %v", attachment, replacement, err)
+	}
+}

@@ -29,6 +29,6 @@ jobs:
           mkdir -p coverage
           go test -coverpkg=./... -covermode=atomic -coverprofile=coverage/go.out ./...
           coverage=$(go tool cover -func=coverage/go.out | awk '/^total:/ {gsub("%", "", $NF); print $NF}')
-          awk -v coverage="$coverage" 'BEGIN { if (coverage < 80) { printf "Go line coverage %.1f%% is below 80%%\n", coverage; exit 1 } }'
+          awk -v coverage="$coverage" 'BEGIN { if (coverage < 85) { printf "Go line coverage %.1f%% is below 85%%\n", coverage; exit 1 } }'
       - name: Run frontend coverage
         run: npm run coverage --prefix frontend

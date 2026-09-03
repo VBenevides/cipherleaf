@@ -19,3 +19,4 @@ await Promise.all([
   import("./workspaceUI.test.ts"),
 ]);
 await import("./componentCoverage.tsx");
+await import("./domCoverage.tsx");

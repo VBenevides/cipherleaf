@@ -1,7 +1,9 @@
 package githubsync
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -217,5 +219,290 @@ func TestCoverageManagerUnlinkedPaths(t *testing.T) {
 	}
 	if err := manager.RemoveSettings(vaultID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type coverageGitRunner struct {
+	connectionOutput []byte
+	err              error
+	calls            int
+}
+
+type sequenceGitRunner struct {
+	outputs [][]byte
+	errors  []error
+	calls   int
+}
+
+func (r *sequenceGitRunner) Run(_ context.Context, _ string, _ []string, _ []string) ([]byte, error) {
+	index := r.calls
+	r.calls++
+	var output []byte
+	if index < len(r.outputs) {
+		output = r.outputs[index]
+	}
+	var err error
+	if index < len(r.errors) {
+		err = r.errors[index]
+	}
+	return output, err
+}
+
+func (r *coverageGitRunner) Run(_ context.Context, _ string, args []string, _ []string) ([]byte, error) {
+	r.calls++
+	if len(args) > 0 && args[0] == gitLsRemoteCommand {
+		return r.connectionOutput, r.err
+	}
+	return nil, r.err
+}
+
+func TestCoverageGitConnectionAndPrefetch(t *testing.T) {
+	settings := DefaultSettings(strings.Repeat("a", 32))
+	settings.RepositorySSH = "git@github.com:owner/repository.git"
+	settings.PrivateKeyPath = filepath.Join(t.TempDir(), "id_cipherleaf")
+	settings.RepositoryPrivate = true
+
+	connection := &GitConnectionTester{runtimeDir: t.TempDir(), timeout: time.Second, runner: &coverageGitRunner{
+		connectionOutput: []byte("ref: refs/heads/main\tHEAD\n"),
+	}}
+	result, err := connection.TestConnection(context.Background(), settings)
+	if err != nil || !result.Success || result.Branch != settings.Branch {
+		t.Fatalf("connection result = %#v, %v", result, err)
+	}
+
+	provider := &GitHubSSHProvider{
+		runner:     &coverageGitRunner{},
+		runtimeDir: t.TempDir(),
+		cacheRoot:  t.TempDir(),
+		timeout:    time.Second,
+		prefetched: make(map[string]time.Time),
+	}
+	cachePath := provider.cacheRepositoryPath(settings)
+	if err := os.MkdirAll(filepath.Join(cachePath, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Prefetch(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := provider.prefetched[cachePath]; !ok {
+		t.Fatal("prefetch timestamp was not recorded")
+	}
+	if got := provider.GitWorkingDirectory(settings); got != cachePath {
+		t.Fatalf("Git working directory = %q, want %q", got, cachePath)
+	}
+
+	failed := &GitConnectionTester{runtimeDir: t.TempDir(), timeout: time.Second, runner: &coverageGitRunner{
+		connectionOutput: []byte("repository not found"), err: errors.New("exit status 1"),
+	}}
+	if _, err := failed.TestConnection(context.Background(), settings); err == nil {
+		t.Fatal("failed Git connection unexpectedly succeeded")
+	}
+}
+
+func TestCoverageGitProviderErrorBranches(t *testing.T) {
+	badRuntime := filepath.Join(t.TempDir(), "runtime")
+	if err := os.WriteFile(badRuntime, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := prepareSSHFiles(badRuntime); err == nil {
+		t.Fatal("file accepted as SSH runtime directory")
+	}
+
+	badCacheRoot := filepath.Join(t.TempDir(), "cache")
+	if err := os.WriteFile(badCacheRoot, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider := &GitHubSSHProvider{cacheRoot: badCacheRoot, runner: &coverageGitRunner{}}
+	if _, err := provider.ensureLinkedCache(context.Background(), DefaultSettings("vault"), nil); err == nil {
+		t.Fatal("file accepted as Git cache root")
+	}
+	provider = &GitHubSSHProvider{cacheRoot: t.TempDir(), runner: &coverageGitRunner{err: errors.New("clone failed")}}
+	if _, err := provider.ensureLinkedCache(context.Background(), DefaultSettings("vault"), nil); err == nil {
+		t.Fatal("failed cache clone unexpectedly succeeded")
+	}
+	provider.runner = &coverageGitRunner{err: errors.New("git failed")}
+	if err := provider.recordPushedTip(context.Background(), t.TempDir(), DefaultSettings("vault")); err == nil {
+		t.Fatal("failed Git reference update unexpectedly succeeded")
+	}
+
+	workingTree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workingTree, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"vault.json", "sync/manifest.enc", "sync/folders.enc"} {
+		fullPath := filepath.Join(workingTree, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := (&GitHubSSHProvider{runner: &coverageGitRunner{err: errors.New("git failed")}}).initializeEmptyRepository(
+		context.Background(), DefaultSettings("vault"), &revisionSnapshot{}, workingTree, t.TempDir(), nil,
+	); err == nil {
+		t.Fatal("failed branch creation unexpectedly succeeded")
+	}
+	if _, err := (&GitHubSSHProvider{runner: &sequenceGitRunner{errors: []error{nil, errors.New("stage failed")}}}).initializeEmptyRepository(
+		context.Background(), DefaultSettings("vault"), &revisionSnapshot{}, workingTree, t.TempDir(), nil,
+	); err == nil {
+		t.Fatal("failed snapshot staging unexpectedly succeeded")
+	}
+	if _, err := (&GitHubSSHProvider{runner: &sequenceGitRunner{errors: []error{nil, nil, errors.New("commit failed")}}}).initializeEmptyRepository(
+		context.Background(), DefaultSettings("vault"), &revisionSnapshot{}, workingTree, t.TempDir(), nil,
+	); err == nil {
+		t.Fatal("failed snapshot commit unexpectedly succeeded")
+	}
+	if _, err := (&GitHubSSHProvider{runner: &sequenceGitRunner{errors: []error{nil, nil, nil, errors.New("push failed")}}}).initializeEmptyRepository(
+		context.Background(), DefaultSettings("vault"), &revisionSnapshot{}, workingTree, t.TempDir(), nil,
+	); err == nil {
+		t.Fatal("failed snapshot push unexpectedly succeeded")
+	}
+
+	validPaths := []byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00")
+	if err := (&GitHubSSHProvider{runner: &sequenceGitRunner{outputs: [][]byte{validPaths}, errors: []error{nil, errors.New("checkout failed")}}}).materializeExistingRepository(context.Background(), workingTree, "refs/remotes/origin/main"); err == nil {
+		t.Fatal("failed repository checkout unexpectedly succeeded")
+	}
+	if _, err := (&GitHubSSHProvider{runner: &coverageGitRunner{err: errors.New("ls-tree failed")}}).changedRemotePaths(context.Background(), workingTree, "old", "new"); err == nil {
+		t.Fatal("failed remote path inspection unexpectedly succeeded")
+	}
+	if _, err := (&GitHubSSHProvider{runner: &sequenceGitRunner{outputs: [][]byte{validPaths}, errors: []error{nil, errors.New("diff failed")}}}).changedRemotePaths(context.Background(), workingTree, "old", "new"); err == nil {
+		t.Fatal("failed remote diff inspection unexpectedly succeeded")
+	}
+	if err := (&GitHubSSHProvider{runner: &coverageGitRunner{err: errors.New("checkout failed")}}).materializeChangedRepository(
+		context.Background(), workingTree, "refs/remotes/origin/main", []changedRemotePath{{path: "vault.json"}},
+	); err == nil {
+		t.Fatal("failed changed repository checkout unexpectedly succeeded")
+	}
+	if err := (&GitHubSSHProvider{runner: &sequenceGitRunner{errors: []error{errors.New("cache failed")}}}).prepareExistingCache(context.Background(), workingTree, "main", "refs/remotes/origin/main"); err == nil {
+		t.Fatal("failed cache preparation unexpectedly succeeded")
+	}
+}
+
+type coverageSyncProvider struct{}
+
+func (coverageSyncProvider) Link(context.Context, SyncSettings, RemoteSnapshotStore) (LinkResult, error) {
+	return LinkResult{Linked: true, LastCommit: strings.Repeat("c", 40), Branch: "main"}, nil
+}
+
+func (coverageSyncProvider) Download(context.Context, SyncSettings) (DownloadedVault, error) {
+	return DownloadedVault{}, errors.New("not used")
+}
+
+func (coverageSyncProvider) Push(context.Context, SyncSettings, RemoteSnapshotStore) (PushResult, error) {
+	return PushResult{}, errors.New("not used")
+}
+
+func (coverageSyncProvider) Pull(context.Context, SyncSettings) (PullResult, error) {
+	return PullResult{}, errors.New("not used")
+}
+
+func TestCoverageManagerLinkVault(t *testing.T) {
+	vaultID := strings.Repeat("d", 32)
+	store := NewFileSettingsStore(t.TempDir())
+	manager := NewManager(store, &successfulConnectionTester{})
+	manager.provider = coverageSyncProvider{}
+	keyPath := filepath.Join(t.TempDir(), "id_cipherleaf")
+	if err := os.WriteFile(keyPath, []byte("test key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultSettings(vaultID)
+	settings.RepositorySSH = "git@github.com:owner/repository.git"
+	settings.PrivateKeyPath = keyPath
+	settings.RepositoryPrivate = true
+	result, err := manager.LinkVault(context.Background(), vaultID, settings, &revisionSnapshot{revision: "revision"})
+	if err != nil || !result.Linked || result.LastCommit == "" {
+		t.Fatalf("link result = %#v, %v", result, err)
+	}
+	saved, err := store.Load(vaultID)
+	if err != nil || !saved.Linked || saved.LastSnapshotRev != "revision" {
+		t.Fatalf("saved settings = %#v, %v", saved, err)
+	}
+}
+
+func TestCoverageGitLayoutIdentityAndCacheHelpers(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	for _, test := range []struct {
+		path string
+		want bool
+	}{
+		{"vault.json", true},
+		{"sync/manifest.enc", true},
+		{"objects/aa/" + id + ".enc", true},
+		{"objects/bb/" + id + ".enc", false},
+		{"objects/aa/bad.enc", false},
+		{"unsafe.txt", false},
+	} {
+		if got := validRemotePath(test.path); got != test.want {
+			t.Fatalf("validRemotePath(%q) = %v, want %v", test.path, got, test.want)
+		}
+	}
+	if branch := findRemoteBranch([]byte("deadbeef\trefs/heads/main\n"), "main"); branch != "refs/heads/main" {
+		t.Fatalf("findRemoteBranch() = %q", branch)
+	}
+	if findRemoteBranch([]byte("deadbeef refs/heads/main\n"), "main") != "" {
+		t.Fatal("malformed branch reference accepted")
+	}
+
+	root := t.TempDir()
+	validConfig, err := json.Marshal(map[string]any{
+		"format_version": FormatVersion, "vault_id": id, "algorithm": "XChaCha20-Poly1305",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, gitVaultConfigPath), validConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readRemoteVaultID(root); err != nil || got != id {
+		t.Fatalf("readRemoteVaultID() = %q, %v", got, err)
+	}
+	for _, data := range [][]byte{[]byte("{"), []byte(`{"format_version":99}`), bytes.Repeat([]byte("x"), 1024*1024+1)} {
+		if err := os.WriteFile(filepath.Join(root, gitVaultConfigPath), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readRemoteVaultID(root); err == nil {
+			t.Fatal("invalid remote vault identity accepted")
+		}
+	}
+
+	layout := t.TempDir()
+	if err := os.Mkdir(filepath.Join(layout, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout, gitVaultConfigPath), validConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWorkingTreeLayout(layout); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout, "unsafe.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWorkingTreeLayout(layout); err == nil {
+		t.Fatal("unsafe working tree layout accepted")
+	}
+
+	source := filepath.Join(t.TempDir(), "source")
+	destination := filepath.Join(t.TempDir(), "cache")
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installCache(source, destination); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installCache(source, destination); err != nil {
+		t.Fatal(err)
+	}
+	if err := installCache(filepath.Join(t.TempDir(), "missing"), destination); err == nil {
+		t.Fatal("missing cache source accepted")
+	}
+
+	buffer := &limitedBuffer{limit: 3}
+	if written, err := buffer.Write([]byte("12345")); err != nil || written != 5 || string(buffer.Bytes()) != "123" {
+		t.Fatalf("limited buffer = %q, %d, %v", buffer.Bytes(), written, err)
 	}
 }

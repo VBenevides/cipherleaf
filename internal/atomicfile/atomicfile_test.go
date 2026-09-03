@@ -19,3 +19,17 @@ func TestWriteReplacesFile(t *testing.T) {
 		t.Fatalf("ReadFile() = %q, %v", data, err)
 	}
 }
+
+func TestWriteWithoutDirectorySyncAndMissingParent(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "value")
+	if err := Write(path, []byte("no directory sync"), false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(filepath.Join(root, "missing", "value"), []byte("data"), false); err == nil {
+		t.Fatal("expected missing parent error")
+	}
+}

@@ -192,7 +192,7 @@ type CloneVaultSubmission = {
   repositoryPrivate: boolean;
 };
 
-function vaultSubmissionError(
+export function vaultSubmissionError(
   action: VaultAction,
   vaultName: string,
   vaultSecret: string,
@@ -245,7 +245,7 @@ function LastSyncLabel({ timestamp }: { readonly timestamp: number }) {
   return <span className="last-sync-label" title="Time of the last successful sync">{label}</span>;
 }
 
-function RunningTimerText({ startedAtUtc }: { startedAtUtc: string }) {
+export function RunningTimerText({ startedAtUtc }: { startedAtUtc: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 60_000);
@@ -269,7 +269,7 @@ type StoredEditorFont = {
   data: ArrayBuffer;
 };
 
-function noteForEditing(note: Note): { note: Note; migrated: boolean } {
+export function noteForEditing(note: Note): { note: Note; migrated: boolean } {
   const prepared = prepareNoteContent(note.content);
   return {
     note: { ...note, content: prepared.canonicalText },
@@ -277,12 +277,12 @@ function noteForEditing(note: Note): { note: Note; migrated: boolean } {
   };
 }
 
-function markdownForEditing(content: string): string {
+export function markdownForEditing(content: string): string {
   const canonical = parseCanonicalObjectDocumentText(content);
   return canonical ? markdownFromCanonicalObjectDocument(canonical) : content;
 }
 
-function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
+export function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
   const properties = summary.properties ?? {};
   if (properties["cipherleaf-card"] !== true && properties["cipherleaf-card"] !== "true") return null;
   const status = String(properties["cipherleaf-card-status"] ?? "not-started") as CardStatus;
@@ -350,13 +350,13 @@ function CardTagsEditor({ tags, suggestions, onChange }: { readonly tags: string
   </div>;
 }
 
-function isStructuredSummary(summary: NoteSummary): boolean {
+export function isStructuredSummary(summary: NoteSummary): boolean {
   const properties = summary.properties ?? {};
   return properties["cipherleaf-card"] === true || properties["cipherleaf-card"] === "true" ||
     properties["cipherleaf-card-template"] === true || properties["cipherleaf-card-template"] === "true";
 }
 
-function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
+export function changedLineNumbers(left: string, right: string): ReadonlySet<number> {
   const leftLines = left.split("\n");
   const rightLines = right.split("\n");
   const changed = new Set<number>();
@@ -418,7 +418,7 @@ async function removeStoredEditorFont(): Promise<void> {
   });
 }
 
-function Icon({
+export function Icon({
   name,
   size = 18,
 }: {
@@ -508,12 +508,12 @@ function Icon({
   );
 }
 
-function folderName(path: string): string {
+export function folderName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? "Encrypted vault";
 }
 
-function buildBreadcrumbItems(
+export function buildBreadcrumbItems(
   noteTrail: NoteCrumb[],
   vaultPath: string,
   currentFolder: Folder | undefined,
@@ -526,7 +526,7 @@ function buildBreadcrumbItems(
   return items;
 }
 
-function folderLineage(folderID: string, folderByID: ReadonlyMap<string, Folder>): Folder[] {
+export function folderLineage(folderID: string, folderByID: ReadonlyMap<string, Folder>): Folder[] {
   const result: Folder[] = [];
   const seen = new Set<string>();
   for (let id = folderID; id; ) {
@@ -540,7 +540,7 @@ function folderLineage(folderID: string, folderByID: ReadonlyMap<string, Folder>
   return result;
 }
 
-function folderIsLocked(
+export function folderIsLocked(
   folderID: string,
   folderByID: ReadonlyMap<string, Folder>,
   unlockedFolderIDs: ReadonlySet<string>,
@@ -550,21 +550,21 @@ function folderIsLocked(
   );
 }
 
-function folderIsHidden(folderID: string, folderByID: ReadonlyMap<string, Folder>): boolean {
+export function folderIsHidden(folderID: string, folderByID: ReadonlyMap<string, Folder>): boolean {
   return folderLineage(folderID, folderByID).some((folder) => folder.hidden);
 }
 
-function startOfMonth(date: Date): Date {
+export function startOfMonth(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
-function isSameDay(left: Date, right: Date): boolean {
+export function isSameDay(left: Date, right: Date): boolean {
   return left.getFullYear() === right.getFullYear() &&
     left.getMonth() === right.getMonth() &&
     left.getDate() === right.getDate();
 }
 
-function formatStorageSize(bytes: number): string {
+export function formatStorageSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1024;
@@ -576,7 +576,7 @@ function formatStorageSize(bytes: number): string {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
 }
 
-function VaultStatisticsGrid({ statistics }: { readonly statistics: VaultStatistics | null }) {
+export function VaultStatisticsGrid({ statistics }: { readonly statistics: VaultStatistics | null }) {
   const items = [
     ["Notes", statistics?.notesBytes],
     ["Attachments", statistics?.attachmentsBytes],

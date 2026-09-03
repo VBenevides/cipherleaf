@@ -66,3 +66,14 @@ func TestConvertImageDataURLRejectsUnsupportedFormats(t *testing.T) {
 		t.Fatal("SVG input unexpectedly accepted")
 	}
 }
+
+func TestResizeImage(t *testing.T) {
+	source := image.NewNRGBA(image.Rect(0, 0, 4, 2))
+	if got := resizeImage(source, 10); got != source {
+		t.Fatal("image larger than the limit should not be resized")
+	}
+	resized := resizeImage(source, 2)
+	if resized.Bounds().Dx() != 2 || resized.Bounds().Dy() != 1 {
+		t.Fatalf("resized bounds = %v", resized.Bounds())
+	}
+}
