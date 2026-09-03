@@ -4359,11 +4359,9 @@ function App() {
   let saveFileTitle = "Save this note (Ctrl + S)";
   if (!note) saveFileTitle = "No note open";
   if (conflictResolution) saveFileTitle = "Save the merged conflict result";
-  const saveFileLabel = saveState === "saving"
-    ? "Encrypting…"
-    : conflictResolution
-      ? "Save merged file"
-      : "Save file";
+  let saveFileLabel = "Save file";
+  if (conflictResolution) saveFileLabel = "Save merged file";
+  if (saveState === "saving") saveFileLabel = "Encrypting…";
   const saveFileAction = () => {
     if (conflictResolution) void saveResolvedConflict();
     else persistCurrentInBackground();
