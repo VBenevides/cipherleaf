@@ -4351,11 +4351,9 @@ function App() {
   const notesHeading = new Map([["all", "Notes"], ["", "Unfiled"]]).get(selectedFolderID)
     ?? folders.find((folder) => folder.id === selectedFolderID)?.name
     ?? "Notes";
-  const syncMenuTitle = !syncLinked
-    ? "Link this vault in Vault Settings first"
-    : syncing
-      ? "Syncing…"
-      : "Pull then push the vault to GitHub";
+  let syncMenuTitle = "Pull then push the vault to GitHub";
+  if (syncing) syncMenuTitle = "Syncing…";
+  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
   const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
     ?? (dirty ? "Unsaved" : "Saved locally");
   const saveFileTitle = conflictResolution
