@@ -46,16 +46,6 @@ are enforced by `frontend/tests/bundle.bench.mjs`.
 
 ## Profiles
 
-The debug app exposes `net/http/pprof` when built with the `debug` tag and
-`CIPHERLEAF_PPROF_ADDR=127.0.0.1:6060`. Capture CPU and heap profiles while
-unlocking, searching, autosaving, and syncing:
-
-```sh
-go tool pprof -proto http://127.0.0.1:6060/debug/pprof/profile?seconds=30 > cpu.pprof
-go tool pprof -proto http://127.0.0.1:6060/debug/pprof/heap > heap.pprof
-go tool pprof -proto http://127.0.0.1:6060/debug/pprof/mutex > mutex.pprof
-```
-
-Benchmark profiles can also be captured with `-cpuprofile`, `-memprofile`, and
+Benchmark profiles can be captured with `-cpuprofile`, `-memprofile`, and
 `-mutexprofile`. Keep profiles local because they can contain plaintext note
 content.
