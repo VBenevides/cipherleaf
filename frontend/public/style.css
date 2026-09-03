@@ -244,7 +244,7 @@
   font-style: italic;
 }
 
-:root[data-theme="archivist"] .cm-journal-rule {
+:root[data-theme="archivist"] .cm-journal-rules {
   right: 30px;
   border-color: color-mix(in srgb, var(--line) 62%, transparent);
 }
@@ -292,14 +292,14 @@
 .cm-journal-rules {
   position: absolute;
   z-index: 0;
-  inset: 0;
+  inset: 0 var(--editor-content-right) 0 var(--editor-content-left);
   pointer-events: none;
 }
 
 .cm-journal-rule {
   position: absolute;
-  left: var(--editor-content-left);
-  right: var(--editor-content-right);
+  left: 0;
+  right: 0;
   border-color: color-mix(in srgb, var(--line) 62%, transparent);
   opacity: 0.6;
 }
@@ -4002,7 +4002,7 @@ dialog.modal-backdrop {
 .cm-live-board {
   display: block;
   width: 100%;
-  margin: 18px 0;
+  margin: 6px 0;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -4021,6 +4021,12 @@ dialog.modal-backdrop {
   font-size: 1.05em;
   font-weight: 700;
 }
+.cm-live-board-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.cm-live-board-header .cm-live-board-title { min-width: 0; flex: 1 1 auto; width: auto; margin: 0; }
+.cm-live-board-minimize { flex: 0 0 auto; }
+.cm-live-board-minimized { min-width: 0; flex: 1 1 auto; overflow: hidden; color: var(--ink); font: inherit; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.cm-live-board [hidden] { display: none !important; }
+.cm-live-board-minimized[hidden] { display: none; }
 .cm-live-board-title:focus { outline: 1px solid var(--accent); outline-offset: 2px; }
 
 .live-markdown-editor .cm-line.cm-live-board-line {
@@ -4044,8 +4050,10 @@ dialog.modal-backdrop {
 .cm-live-board-column.status-finished { background: color-mix(in srgb, #2ca36b 18%, transparent); }
 .cm-live-board-column h4 { margin: 0 0 8px; font-size: .85em; }
 .cm-live-board-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin: 5px 0; padding: 7px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: grab; }
-.cm-live-board-card-title { min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.cm-live-board-card-date { flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; }
+.cm-live-board-card-summary { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; overflow: hidden; }
+.cm-live-board-card-title { min-width: 0; max-width: 100%; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.cm-live-board-card-tags { min-width: 0; max-width: 100%; overflow: hidden; color: var(--muted); font-size: .75em; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.cm-live-board-card-date { min-width: 0; max-width: 45%; flex: 0 1 auto; margin-left: auto; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .cm-live-board-empty { margin: 8px 0; color: var(--muted-foreground); font-size: .85em; }
 
 .card-sidebar {

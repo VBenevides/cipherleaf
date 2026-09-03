@@ -17,6 +17,20 @@ Object.defineProperties(dom.window.Range.prototype, {
   getClientRects: { value: () => [], configurable: true },
   getBoundingClientRect: { value: () => new dom.window.DOMRect(), configurable: true },
 });
+Object.defineProperties(dom.window.HTMLElement.prototype, {
+  clientWidth: {
+    configurable: true,
+    get() { return this.classList.contains("cm-live-board-card-title") ? 100 : 0; },
+  },
+  scrollWidth: {
+    configurable: true,
+    get() {
+      return this.classList.contains("cm-live-board-card-title")
+        ? Math.max(100, (this.textContent?.length ?? 0) * 10)
+        : 0;
+    },
+  },
+});
 class ResizeObserverStub {
   observe() {}
   disconnect() {}
@@ -143,15 +157,30 @@ live.body.querySelector<HTMLButtonElement>(".cm-live-link-menu button")?.click()
 
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
+assert.ok(board.querySelector(".cm-live-board-card-tags"));
+const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
+minimizeBoard.click();
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, true);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, true);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1");
+assert.equal(minimizeBoard.textContent, "Maximize");
+minimizeBoard.click();
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, false);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, false);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, false);
+assert.equal(minimizeBoard.textContent, "Minimize");
 const boardTitle = board.querySelector<HTMLInputElement>(".cm-live-board-title")!;
 boardTitle.value = "Updated board";
+boardTitle.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 boardTitle.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 const filter = board.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")!;
 filter.value = "card";
 filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.click();
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-board.querySelector<HTMLButtonElement>(".secondary-button")?.click();
+board.querySelector<HTMLButtonElement>(".cm-live-board-controls .secondary-button")?.click();
 board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
   input.value = "";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
