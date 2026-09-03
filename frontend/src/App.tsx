@@ -4371,7 +4371,9 @@ function App() {
   if (syncLinked) syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
   if (!note) syncButtonTitle = "No note open";
   const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
-  const settingsSubmitLabel = settingsBusy ? "Linking…" : syncSettings?.linked ? "Verify link" : "Link vault";
+  let settingsSubmitLabel = "Link vault";
+  if (syncSettings?.linked) settingsSubmitLabel = "Verify link";
+  if (settingsBusy) settingsSubmitLabel = "Linking…";
   const breadcrumbItems: NoteCrumb[] = noteTrail.length
     ? noteTrail
     : [
