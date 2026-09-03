@@ -11,7 +11,7 @@ export const CARD_JOURNAL_START = "<!-- cipherleaf-card-journal:start -->";
 export const CARD_JOURNAL_END = "<!-- cipherleaf-card-journal:end -->";
 
 const journalBlock = new RegExp(
-  `(?:^|\\n)${escapeRegExp(CARD_JOURNAL_START)}\\n[\\s\\S]*?\\n${escapeRegExp(CARD_JOURNAL_END)}(?=\\n|$)`,
+  String.raw`(?:^|\n)${escapeRegExp(CARD_JOURNAL_START)}\n[\s\S]*?\n${escapeRegExp(CARD_JOURNAL_END)}(?=\n|$)`,
   "g",
 );
 
