@@ -4367,11 +4367,9 @@ function App() {
     else persistCurrentInBackground();
   };
 
-  const syncButtonTitle = !note
-    ? "No note open"
-    : syncLinked
-      ? "Save and sync to GitHub (Ctrl + Shift + S)"
-      : "Link this vault to GitHub in Vault Settings first";
+  let syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
+  if (syncLinked) syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
+  if (!note) syncButtonTitle = "No note open";
   const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
   const settingsSubmitLabel = settingsBusy ? "Linking…" : syncSettings?.linked ? "Verify link" : "Link vault";
   const breadcrumbItems: NoteCrumb[] = noteTrail.length
