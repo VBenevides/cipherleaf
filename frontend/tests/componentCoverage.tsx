@@ -346,6 +346,17 @@ await act(async () => { await liveEditor.props.onOpenCard("card"); await new Pro
 assert.ok(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length);
 const cardTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Title")[0];
 await act(async () => { cardTitle?.props.onChange({ target: { value: "Updated card" } }); });
+await act(async () => {
+  dispatchWindow("keydown", {
+    ctrlKey: true,
+    metaKey: false,
+    key: "s",
+    target: { closest: (selector: string) => selector === ".card-sidebar" ? {} : null },
+    preventDefault: onChange,
+    stopPropagation: onChange,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 const cardStatus = appRenderer?.root.findAll((node) => node.type === "button" && node.props.role === "option")[0];
 await act(async () => { cardStatus?.props.onClick(); });
 const cardTagInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "New tag")[0];

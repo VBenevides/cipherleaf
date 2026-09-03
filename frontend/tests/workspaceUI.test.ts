@@ -137,7 +137,8 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /const deleteCard = async/);
   assert.match(app, /Delete card/);
   assert.match(app, /cardPanelDirty \? "primary-button is-dirty" : "secondary-button"/);
-  assert.match(app, /onKeyDown=\{\(event\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "s"/);
+  assert.match(app, /const saveOnShortcut = \(event: KeyboardEvent\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "s"/);
+  assert.match(app, /window\.addEventListener\("keydown", saveOnShortcut\)/);
   assert.match(liveEditor, /key: "Mod-s"[\s\S]*onSaveRef\.current\(\)/);
   assert.match(liveEditor, /cm-live-board-card-title/);
   assert.match(liveEditor, /cm-live-board-card-date/);

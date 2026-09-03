@@ -524,14 +524,15 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
       onCurrent={() => setMonthAnchor(new Date())}
       onNext={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}
     />;
-  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
-    week: () => weekView,
-    month: () => monthView,
-    dashboard: dashboardView,
-    clients: () => labelManager("client"),
-    projects: () => labelManager("project"),
-    tags: () => labelManager("tag"),
-  };
+  let activeView: ReactNode;
+  switch (tab) {
+    case "week": activeView = weekView; break;
+    case "month": activeView = monthView; break;
+    case "dashboard": activeView = dashboardView(); break;
+    case "clients": activeView = labelManager("client"); break;
+    case "projects": activeView = labelManager("project"); break;
+    case "tags": activeView = labelManager("tag"); break;
+  }
 
   return (
     <section className="time-tracking-view">
@@ -545,7 +546,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
       <div className="time-tracking-panel" role="tabpanel">
         {loading ? <output className="settings-loading">Loading time tracking...</output> : <>
           {error && <div className="time-tracking-error" role="alert">{error}</div>}
-          {tabRenderers[tab]()}
+          {activeView}
         </>}
       </div>
       {editing && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3>{error && <div className="time-tracking-error" role="alert">{error}</div>}<label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><ClientSelect clients={catalog?.clients ?? []} selected={editClientID} onChange={(id) => { setEditClientID(id); if (editProjectID && (catalog?.projects ?? []).find((project) => project.id === editProjectID)?.clientId !== id) setEditProjectID(""); }} /><ProjectSelect projects={(catalog?.projects ?? []).filter((project) => !editClientID || project.clientId === editClientID)} selected={editProjectID} onChange={(id) => { setEditProjectID(id); if (!editClientID) setEditClientID((catalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} /><TagMultiSelect tags={catalog?.tags ?? []} selected={editTagIDs} onChange={setEditTagIDs} /><div className="time-tracking-date-time"><label>Started date<ThemedDatePicker ariaLabel="Started date" value={editStartedAt.slice(0, 10)} onChange={(date) => setEditStartedAt(`${date}T${editStartedAt.slice(11, 16)}`)} /></label><label>Started time<input aria-label="Started time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editStartedAt.slice(11, 16)} onChange={(event) => setEditStartedAt(`${editStartedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="time-tracking-date-time"><label>Ended date<ThemedDatePicker ariaLabel="Ended date" value={editEndedAt.slice(0, 10)} onChange={(date) => setEditEndedAt(`${date}T${editEndedAt.slice(11, 16)}`)} /></label><label>Ended time<input aria-label="Ended time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editEndedAt.slice(11, 16)} onChange={(event) => setEditEndedAt(`${editEndedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setEditing(null); setError(""); }}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>Save correction</button></div></form></dialog>}
