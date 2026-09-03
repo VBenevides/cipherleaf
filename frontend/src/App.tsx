@@ -49,6 +49,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
+import { appendCardContentJournal } from "./cardJournal";
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 import {
@@ -3434,13 +3435,15 @@ function App() {
     try {
       const title = cardPanel.metadata.title.trim() || "Untitled";
       const metadata = { ...cardPanel.metadata, title, tags: normalizeCardTags(cardPanel.metadata.tags) };
+      const previousBody = parseCardDocument(cardPanel.note.content, cardPanel.note.id, cardPanel.note.title)?.body ?? cardPanel.body;
+      const body = appendCardContentJournal(previousBody, cardPanel.body, metadata) ?? cardPanel.body;
       const saved = await VaultService.SaveNote(
         cardPanel.note.id,
         title,
-        serializeCardDocument(metadata, cardPanel.body),
+        serializeCardDocument(metadata, body),
       );
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata, body: cardPanel.body });
+      setCardPanel({ note: saved.note, metadata, body });
       setCardPanelDirty(false);
     } catch (reason) {
       setError(errorText(reason));
