@@ -608,7 +608,7 @@ test("recognizes spaced and empty bare checkboxes", () => {
     { checked: false, text: "Bare", textFrom: 24 },
   ]);
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
-  assert.match(editor, /this\.checked \? " " : this\.empty \? "x\]" : "x"/);
+  assert.match(editor, /let insert = "x";[\s\S]*if \(this\.checked\) insert = " ";[\s\S]*else if \(this\.empty\) insert = "x\]";/);
 });
 
 test("stabilizes empty checkbox shorthand through canonical round trips", () => {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
 
 test("note tabs expose navigation, close, new-tab, and idle unloading", () => {
@@ -114,10 +115,62 @@ test("note titles can be collapsed and restored", () => {
   assert.match(style, /\.document-heading-toolbar > \.view-tabs/);
   assert.match(style, /\.document-heading-toolbar \{[\s\S]*margin-top: 8px/);
   assert.match(style, /:root\[data-theme="archivist"\] \.document-heading-toolbar > \.view-tabs/);
+  assert.match(style, /\.disclosure-chevron::before,[\s\S]*width: \.45em[\s\S]*height: \.45em[\s\S]*vertical-align: middle/);
 });
 
 test("editor chrome stays compact", () => {
   assert.match(style, /\.workspace \{[\s\S]*grid-template-rows: 28px minmax\(0, 1fr\)/);
   assert.match(style, /\.editor-topbar \{[\s\S]*min-height: 33px/);
   assert.match(style, /\.sidebar \{[\s\S]*inset: 28px auto 0 0/);
+});
+
+test("card panel keeps metadata compact and notes in the themed editor", () => {
+  assert.match(app, /className="card-sidebar-title"/);
+  assert.match(app, /Created At: \{new Date\(cardPanel\.metadata\.createdAt\)/);
+  assert.match(app, /className="card-sidebar-properties"/);
+  assert.match(app, /className="tag-multi-select card-status-picker"/);
+  assert.match(app, /className="card-tags-editor"/);
+  assert.match(app, /Add tag/);
+  assert.match(app, /Remove tag \$\{tag\}/);
+  assert.match(app, /className="card-sidebar-divider"/);
+  assert.match(app, /className="card-sidebar-notes"[\s\S]*<LiveMarkdownEditor/);
+  assert.match(app, /const deleteCard = async/);
+  assert.match(app, /Delete card/);
+  assert.match(app, /cardPanelDirty \? "primary-button is-dirty" : "secondary-button"/);
+  assert.match(app, /onKeyDown=\{\(event\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "s"/);
+  assert.match(liveEditor, /key: "Mod-s"[\s\S]*onSaveRef\.current\(\)/);
+  assert.match(liveEditor, /cm-live-board-card-title/);
+  assert.match(liveEditor, /cm-live-board-card-date/);
+  assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
+  assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
+  assert.match(style, /\.cm-live-board-card \{[\s\S]*display: flex[\s\S]*justify-content: space-between/);
+  assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
+  assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #2588d8/);
+  assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
+});
+
+test("embedded boards fill the usable editor line with equal columns", () => {
+  assert.match(liveEditor, /cm-live-board-line/);
+  assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
+  assert.doesNotMatch(liveEditor, /rule\.style\.left/);
+  assert.match(liveEditor, /cm-live-board-title[\s\S]*value = this\.title \|\| DEFAULT_BOARD_TITLE/);
+  assert.match(liveEditor, /onChangeBoardTitle/);
+  assert.match(liveEditor, /setData\(boardCardMime, card\.id\)/);
+  assert.match(liveEditor, /drop\(event\)[\s\S]*includes\(boardCardMime\)/);
+  assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
+  assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
+  assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 18px 0/);
+  assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-journal-rule \{[\s\S]*left: var\(--editor-content-left\)[\s\S]*right: var\(--editor-content-right\)/);
+  assert.match(style, /\.cm-line\.cm-live-board-line \{[\s\S]*position: relative[\s\S]*width: 100% !important[\s\S]*max-width: none[\s\S]*padding: 0 !important/);
+  assert.match(style, /\.cm-selectionLayer \{[\s\S]*clip-path: inset\(0 var\(--editor-content-right\) 0 var\(--editor-content-left\)\)/);
+});
+
+test("board handles expose delete-only menus and block keyboard deletion", () => {
+  assert.match(liveEditor, /if \(board\) \{[\s\S]*new DragHandleWidget\(lineNumber\)/);
+  assert.match(liveEditor, /showObjectHandleMenu\([\s\S]*parseBoardMarker\(contextView\.state\.doc\.line\(sourceLine\)\.text\)/);
+  assert.match(liveEditor, /if \(!board\) \{[\s\S]*textContent = "Duplicate"/);
+  assert.match(liveEditor, /boardMarkerAtDeletionBoundary\(view\)/);
+  assert.match(liveEditor, /key: "Delete"[\s\S]*run: handleBoardDelete/);
+  assert.match(style, /cm-live-board-line:hover \.cm-live-object-handle/);
 });

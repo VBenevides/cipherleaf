@@ -16,14 +16,14 @@ cp "${DESKTOP_FILE}" "${APP_DIR}/"
 
 if [[ $(uname -m) == *x86_64* ]]; then
     # Download linuxdeploy and make it executable
-    wget -q -4 -N https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+    wget -q -4 -N --https-only --max-redirect=5 https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
     chmod +x linuxdeploy-x86_64.AppImage
 
     # Run linuxdeploy to bundle the application
     ./linuxdeploy-x86_64.AppImage --appdir "${APP_DIR}" --output appimage
 else
     # Download linuxdeploy and make it executable (arm64)
-    wget -q -4 -N https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage
+    wget -q -4 -N --https-only --max-redirect=5 https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage
     chmod +x linuxdeploy-aarch64.AppImage
 
     # Run linuxdeploy to bundle the application (arm64)
@@ -32,4 +32,3 @@ fi
 
 # Rename the generated AppImage
 mv "${APP_NAME}*.AppImage" "${APP_NAME}.AppImage"
-

@@ -28,21 +28,26 @@ import (
 )
 
 const (
-	configFilename               = "vault.json"
-	manifestFilename             = "manifest.enc"
-	syncDirectory                = "sync"
-	syncManifestFile             = "manifest.enc"
-	syncFoldersFile              = "folders.enc"
-	syncTrackingFile             = "tracking.enc"
-	maxNoteBytes                 = 10 * 1024 * 1024
-	maxAttachmentBytes           = 10 * 1024 * 1024
-	maxFileAttachmentBytes       = 64 * 1024 * 1024
-	maxTimeTrackingBytes         = 32 * 1024 * 1024
-	maxEnvelopeBytes             = 96 * 1024 * 1024
-	maxTitleRunes                = 200
-	maxFolderRunes               = 120
-	folderPasswordSaltBytes      = 16
-	folderPasswordVerifierPrefix = "argon2id-v1:"
+	configFilename                = "vault.json"
+	manifestFilename              = "manifest.enc"
+	syncDirectory                 = "sync"
+	syncManifestFile              = "manifest.enc"
+	syncFoldersFile               = "folders.enc"
+	syncTrackingFile              = "tracking.enc"
+	syncManifestObjectType        = "sync-manifest"
+	syncFoldersObjectType         = "sync-folders"
+	noteContentObjectType         = "note-content"
+	canonicalObjectDocumentFormat = "cipherleaf.object-document"
+	encryptedBackupSuffix         = ".enc.bak"
+	maxNoteBytes                  = 10 * 1024 * 1024
+	maxAttachmentBytes            = 10 * 1024 * 1024
+	maxFileAttachmentBytes        = 64 * 1024 * 1024
+	maxTimeTrackingBytes          = 32 * 1024 * 1024
+	maxEnvelopeBytes              = 96 * 1024 * 1024
+	maxTitleRunes                 = 200
+	maxFolderRunes                = 120
+	folderPasswordSaltBytes       = 16
+	folderPasswordVerifierPrefix  = "argon2id-v1:"
 )
 
 var (
@@ -1144,7 +1149,7 @@ func (s *Store) pruneSharedAttachmentsLocked() error {
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".enc") &&
-			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			!strings.HasSuffix(entry.Name(), encryptedBackupSuffix) {
 			return errors.New("shared attachments folder contains an invalid path")
 		}
 		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
@@ -1243,11 +1248,22 @@ func (s *Store) pruneSharedAttachmentsByIDLocked(candidates map[string]struct{})
 	if len(candidates) == 0 {
 		return nil
 	}
+	referenced, err := s.referencedSharedAttachmentsLocked(candidates)
+	if err != nil {
+		return err
+	}
+	if len(referenced) == len(candidates) {
+		return nil
+	}
+	return s.removeUnreferencedSharedAttachmentsLocked(candidates, referenced)
+}
+
+func (s *Store) referencedSharedAttachmentsLocked(candidates map[string]struct{}) (map[string]struct{}, error) {
 	referenced := make(map[string]struct{}, len(candidates))
 	for _, summary := range s.manifest.Notes {
 		ids, err := s.attachmentIDsForSummaryLocked(summary)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, id := range ids {
 			if _, ok := candidates[id]; ok {
@@ -1255,9 +1271,15 @@ func (s *Store) pruneSharedAttachmentsByIDLocked(candidates map[string]struct{})
 			}
 		}
 		if len(referenced) == len(candidates) {
-			return nil
+			break
 		}
 	}
+	return referenced, nil
+}
+
+func (s *Store) removeUnreferencedSharedAttachmentsLocked(
+	candidates, referenced map[string]struct{},
+) error {
 	for id := range candidates {
 		if _, found := referenced[id]; found {
 			continue
@@ -1296,7 +1318,7 @@ func (s *Store) sharedAttachmentIDsLocked() (map[string]struct{}, error) {
 	ids := make(map[string]struct{})
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".enc") &&
-			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			!strings.HasSuffix(entry.Name(), encryptedBackupSuffix) {
 			return nil, errors.New("shared attachments folder contains an invalid path")
 		}
 		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
@@ -1327,7 +1349,7 @@ func (s *Store) pruneNoteAttachmentsByIDLocked(noteID string, ids []string) erro
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".enc") &&
-			!strings.HasSuffix(entry.Name(), ".enc.bak") {
+			!strings.HasSuffix(entry.Name(), encryptedBackupSuffix) {
 			return errors.New("note attachments folder contains an invalid path")
 		}
 		name := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".bak"), ".enc")
@@ -1447,12 +1469,26 @@ func (s *Store) ResolveNoteReference(reference string) (NoteSummary, error) {
 		return NoteSummary{}, err
 	}
 	reference = strings.TrimSpace(reference)
+	if summary, fallback, resolved, err := s.resolveExplicitNoteReferenceLocked(reference); err != nil {
+		return NoteSummary{}, err
+	} else if resolved {
+		return summary, nil
+	} else {
+		reference = fallback
+	}
+	if summary, found := s.findNoteByReferenceTitleLocked(strings.ToLower(reference)); found {
+		return summary, nil
+	}
+	return NoteSummary{}, errors.New("note reference not found")
+}
+
+func (s *Store) resolveExplicitNoteReferenceLocked(reference string) (NoteSummary, string, bool, error) {
 	if label, id, ok := parseNoteReference(reference); ok {
 		if index, found := s.findNoteLocked(id); found {
 			if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
-				return NoteSummary{}, err
+				return NoteSummary{}, "", false, err
 			}
-			return s.manifest.Notes[index], nil
+			return s.manifest.Notes[index], "", true, nil
 		}
 		reference = label
 	}
@@ -1460,28 +1496,31 @@ func (s *Store) ResolveNoteReference(reference string) (NoteSummary, error) {
 		id := strings.TrimPrefix(reference, "note:")
 		if index, found := s.findNoteLocked(id); found {
 			if err := s.requireNoteAccessibleLocked(s.manifest.Notes[index]); err != nil {
-				return NoteSummary{}, err
+				return NoteSummary{}, "", false, err
 			}
-			return s.manifest.Notes[index], nil
+			return s.manifest.Notes[index], "", true, nil
 		}
-		return NoteSummary{}, errors.New("note reference not found")
+		return NoteSummary{}, "", false, errors.New("note reference not found")
 	}
-	normalized := strings.ToLower(reference)
+	return NoteSummary{}, reference, false, nil
+}
+
+func (s *Store) findNoteByReferenceTitleLocked(normalized string) (NoteSummary, bool) {
 	for _, item := range s.manifest.Notes {
 		if s.requireNoteAccessibleLocked(item) != nil {
 			continue
 		}
 		if strings.ToLower(item.Title) == normalized {
-			return item, nil
+			return item, true
 		}
 		if item.FolderID != "" {
 			if folder, found := s.folderByIDLocked(item.FolderID); found &&
 				strings.ToLower(folder.Name+"/"+item.Title) == normalized {
-				return item, nil
+				return item, true
 			}
 		}
 	}
-	return NoteSummary{}, errors.New("note reference not found")
+	return NoteSummary{}, false
 }
 
 func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
@@ -1498,6 +1537,25 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 	if err := s.requireNoteAccessibleLocked(target); err != nil {
 		return nil, err
 	}
+	aliases := s.backlinkAliasesLocked(target)
+	var matches []FindMatch
+	for _, summary := range s.manifest.Notes {
+		if summary.ID == noteID {
+			continue
+		}
+		if s.requireNoteAccessibleLocked(summary) != nil {
+			continue
+		}
+		found, err := s.backlinksForSummaryLocked(summary, target.ID, aliases)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, found...)
+	}
+	return matches, nil
+}
+
+func (s *Store) backlinkAliasesLocked(target NoteSummary) map[string]struct{} {
 	aliases := map[string]struct{}{
 		strings.ToLower(target.Title): {},
 		"note:" + target.ID:           {},
@@ -1507,46 +1565,42 @@ func (s *Store) ListBacklinks(noteID string) ([]FindMatch, error) {
 			aliases[strings.ToLower(folder.Name+"/"+target.Title)] = struct{}{}
 		}
 	}
-	var matches []FindMatch
-	for _, summary := range s.manifest.Notes {
-		if summary.ID == noteID {
-			continue
-		}
-		if s.requireNoteAccessibleLocked(summary) != nil {
-			continue
-		}
-		if summary.OutgoingLinks != nil {
-			for _, link := range summary.OutgoingLinks {
-				if outgoingLinkMatches(link, target.ID, aliases) {
-					matches = append(matches, backlinkMetadataMatch(summary, link))
-					break
-				}
+	return aliases
+}
+
+func (s *Store) backlinksForSummaryLocked(
+	summary NoteSummary,
+	targetID string,
+	aliases map[string]struct{},
+) ([]FindMatch, error) {
+	if summary.OutgoingLinks != nil {
+		for _, link := range summary.OutgoingLinks {
+			if outgoingLinkMatches(link, targetID, aliases) {
+				return []FindMatch{backlinkMetadataMatch(summary, link)}, nil
 			}
-			continue
 		}
-		note, err := s.readNoteLocked(summary.ID)
-		if err != nil {
-			return nil, err
+		return nil, nil
+	}
+	note, err := s.readNoteLocked(summary.ID)
+	if err != nil {
+		return nil, err
+	}
+	content := derivedMarkdownContent(note.Content)
+	for _, match := range wikilinkPattern.FindAllStringSubmatchIndex(content, -1) {
+		raw := content[match[2]:match[3]]
+		label, id, hasID := parseNoteReference(raw)
+		key := strings.ToLower(strings.TrimSpace(raw))
+		if hasID {
+			if id == targetID {
+				return []FindMatch{backlinkMatch(summary, content, match[0], match[1], raw)}, nil
+			}
+			key = strings.ToLower(label)
 		}
-		content := derivedMarkdownContent(note.Content)
-		for _, match := range wikilinkPattern.FindAllStringSubmatchIndex(content, -1) {
-			raw := content[match[2]:match[3]]
-			label, id, hasID := parseNoteReference(raw)
-			key := strings.ToLower(strings.TrimSpace(raw))
-			if hasID {
-				if id == target.ID {
-					matches = append(matches, backlinkMatch(summary, content, match[0], match[1], raw))
-					break
-				}
-				key = strings.ToLower(label)
-			}
-			if _, ok := aliases[key]; ok {
-				matches = append(matches, backlinkMatch(summary, content, match[0], match[1], raw))
-				break
-			}
+		if _, ok := aliases[key]; ok {
+			return []FindMatch{backlinkMatch(summary, content, match[0], match[1], raw)}, nil
 		}
 	}
-	return matches, nil
+	return nil, nil
 }
 
 func (s *Store) ListUnlinkedMentions(noteID string) ([]FindMatch, error) {
@@ -1569,34 +1623,44 @@ func (s *Store) ListUnlinkedMentions(noteID string) ([]FindMatch, error) {
 		if summary.ID == noteID || s.requireNoteAccessibleLocked(summary) != nil {
 			continue
 		}
-		content := s.searchIndex[summary.ID]
-		if content == "" {
-			note, err := s.readNoteLocked(summary.ID)
-			if err != nil {
-				return nil, err
-			}
-			content = derivedMarkdownContent(note.Content)
+		mentions, err := s.unlinkedMentionsForSummaryLocked(summary, needle)
+		if err != nil {
+			return nil, err
 		}
-		lower := strings.ToLower(content)
-		linkedRanges := wikilinkPattern.FindAllStringIndex(content, -1)
-		for offset := 0; offset < len(lower); {
-			at := strings.Index(lower[offset:], needle)
-			if at < 0 {
+		result = append(result, mentions...)
+	}
+	return result, nil
+}
+
+func (s *Store) unlinkedMentionsForSummaryLocked(summary NoteSummary, needle string) ([]FindMatch, error) {
+	content := s.searchIndex[summary.ID]
+	if content == "" {
+		note, err := s.readNoteLocked(summary.ID)
+		if err != nil {
+			return nil, err
+		}
+		content = derivedMarkdownContent(note.Content)
+	}
+	lower := strings.ToLower(content)
+	linkedRanges := wikilinkPattern.FindAllStringIndex(content, -1)
+	result := make([]FindMatch, 0)
+	for offset := 0; offset < len(lower); {
+		at := strings.Index(lower[offset:], needle)
+		if at < 0 {
+			break
+		}
+		at += offset
+		linked := false
+		for _, span := range linkedRanges {
+			if at >= span[0] && at < span[1] {
+				linked = true
 				break
 			}
-			at += offset
-			linked := false
-			for _, span := range linkedRanges {
-				if at >= span[0] && at < span[1] {
-					linked = true
-					break
-				}
-			}
-			if !linked {
-				result = append(result, withUTF16Range(FindMatch{NoteID: summary.ID, Title: summary.Title, FolderID: summary.FolderID, Field: "content", Snippet: makeSnippet(content, at, len(needle)), Offset: at, MatchLength: len(needle)}, content))
-			}
-			offset = at + len(needle)
 		}
+		if !linked {
+			result = append(result, withUTF16Range(FindMatch{NoteID: summary.ID, Title: summary.Title, FolderID: summary.FolderID, Field: "content", Snippet: makeSnippet(content, at, len(needle)), Offset: at, MatchLength: len(needle)}, content))
+		}
+		offset = at + len(needle)
 	}
 	return result, nil
 }
@@ -1715,18 +1779,7 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 	if err := s.requireUnlocked(); err != nil {
 		return ReplaceResult{}, err
 	}
-	if find == "" {
-		return ReplaceResult{}, errors.New("search text is required")
-	}
-	if strings.Contains(find, "\n") {
-		return ReplaceResult{}, errors.New("search text cannot contain line breaks")
-	}
-	if _, advanced, err := parseAdvancedQuery(strings.TrimSpace(find)); err != nil {
-		return ReplaceResult{}, err
-	} else if advanced {
-		return ReplaceResult{}, errors.New("advanced search queries cannot be replaced")
-	}
-	pattern, err := compileLiteralPattern(find, options)
+	pattern, err := compileReplacementPattern(find, options)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
@@ -1754,52 +1807,16 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 			}
 			continue
 		}
-		note, err := s.readNoteLocked(item.ID)
+		replacements, changed, err := s.replaceNoteLocked(
+			index, item, pattern, replace, options, originals, indexedContent,
+		)
 		if err != nil {
 			return rollback(err)
 		}
-		titleChanged := false
-		newTitle := note.Title
-		titleMatches := literalMatches(note.Title, pattern, options.WholeWord, -1)
-		if len(titleMatches) > 0 {
-			newTitle = replaceLiteralMatches(note.Title, titleMatches, replace)
-			titleChanged = newTitle != note.Title
+		if changed {
+			result.Replacements += replacements
+			result.ReplacedNotes++
 		}
-		content := derivedMarkdownContent(note.Content)
-		newContent := note.Content
-		contentMatches := literalMatches(content, pattern, options.WholeWord, -1)
-		count := len(contentMatches)
-		if count > 0 {
-			newContent = canonicalizeNoteContent(replaceLiteralMatches(content, contentMatches, replace))
-		}
-		if !titleChanged && count == 0 {
-			continue
-		}
-		titleCount := len(titleMatches)
-		now := time.Now().UTC()
-		updated := Note{
-			ID:         note.ID,
-			Title:      newTitle,
-			FolderID:   note.FolderID,
-			Order:      note.Order,
-			Content:    newContent,
-			CreatedAt:  note.CreatedAt,
-			UpdatedAt:  now.Format(time.RFC3339Nano),
-			ModifiedAt: nextModifiedAt(note.ModifiedAt),
-			Revision:   note.Revision + 1,
-		}
-		hash, err := s.writeNoteLocked(updated)
-		if err != nil {
-			return rollback(err)
-		}
-		originals[note.ID] = note
-		s.manifest.Notes[index] = summaryFromNote(updated)
-		s.manifest.Notes[index].CiphertextHash = hash
-		if count > 0 {
-			indexedContent[updated.ID] = derivedMarkdownContent(updated.Content)
-		}
-		result.Replacements += count + titleCount
-		result.ReplacedNotes++
 	}
 	if result.ReplacedNotes > 0 {
 		if err := s.saveManifestLocked(); err != nil {
@@ -1810,6 +1827,72 @@ func (s *Store) ReplaceAcrossNotesWithOptions(find, replace string, noteIDs []st
 		}
 	}
 	return result, nil
+}
+
+func compileReplacementPattern(find string, options SearchOptions) (*regexp.Regexp, error) {
+	if find == "" {
+		return nil, errors.New("search text is required")
+	}
+	if strings.Contains(find, "\n") {
+		return nil, errors.New("search text cannot contain line breaks")
+	}
+	if _, advanced, err := parseAdvancedQuery(strings.TrimSpace(find)); err != nil {
+		return nil, err
+	} else if advanced {
+		return nil, errors.New("advanced search queries cannot be replaced")
+	}
+	return compileLiteralPattern(find, options)
+}
+
+func (s *Store) replaceNoteLocked(
+	index int,
+	item NoteSummary,
+	pattern *regexp.Regexp,
+	replace string,
+	options SearchOptions,
+	originals map[string]Note,
+	indexedContent map[string]string,
+) (int, bool, error) {
+	note, err := s.readNoteLocked(item.ID)
+	if err != nil {
+		return 0, false, err
+	}
+	titleMatches := literalMatches(note.Title, pattern, options.WholeWord, -1)
+	newTitle := note.Title
+	if len(titleMatches) > 0 {
+		newTitle = replaceLiteralMatches(note.Title, titleMatches, replace)
+	}
+	content := derivedMarkdownContent(note.Content)
+	contentMatches := literalMatches(content, pattern, options.WholeWord, -1)
+	if newTitle == note.Title && len(contentMatches) == 0 {
+		return 0, false, nil
+	}
+	newContent := note.Content
+	if len(contentMatches) > 0 {
+		newContent = canonicalizeNoteContent(replaceLiteralMatches(content, contentMatches, replace))
+	}
+	updated := Note{
+		ID:         note.ID,
+		Title:      newTitle,
+		FolderID:   note.FolderID,
+		Order:      note.Order,
+		Content:    newContent,
+		CreatedAt:  note.CreatedAt,
+		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		ModifiedAt: nextModifiedAt(note.ModifiedAt),
+		Revision:   note.Revision + 1,
+	}
+	hash, err := s.writeNoteLocked(updated)
+	if err != nil {
+		return 0, false, err
+	}
+	originals[note.ID] = note
+	s.manifest.Notes[index] = summaryFromNote(updated)
+	s.manifest.Notes[index].CiphertextHash = hash
+	if len(contentMatches) > 0 {
+		indexedContent[updated.ID] = derivedMarkdownContent(updated.Content)
+	}
+	return len(titleMatches) + len(contentMatches), true, nil
 }
 
 func compileLiteralPattern(query string, options SearchOptions) (*regexp.Regexp, error) {
@@ -1979,7 +2062,7 @@ func (s *Store) rollbackNoteWritesLocked(original manifest, notes map[string]Not
 	return errors.Join(cause, rollbackErr)
 }
 
-func (s *Store) exportRemoteSnapshot(destination string) error {
+func (s *Store) prepareRemoteSnapshotDestinationLocked(destination string) error {
 	if strings.TrimSpace(destination) == "" {
 		return errors.New("remote snapshot destination is required")
 	}
@@ -2001,10 +2084,14 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	if err := os.MkdirAll(filepath.Join(destination, "objects"), 0o700); err != nil {
 		return fmt.Errorf("create remote objects folder: %w", err)
 	}
+	return nil
+}
 
-	items := slices.Clone(s.manifest.Notes)
-	sortSummaries(items)
-	existingObjects := s.readExistingRemoteInventoryLocked(destination)
+func (s *Store) exportRemoteNotesLocked(
+	destination string,
+	items []NoteSummary,
+	existingObjects map[string]remoteSyncObject,
+) (remoteSyncManifest, error) {
 	inventory := remoteSyncManifest{
 		FormatVersion: FormatVersion,
 		VaultID:       s.vaultID,
@@ -2012,63 +2099,77 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	}
 	expectedObjects := make(map[string]struct{}, len(items))
 	for _, item := range items {
-		source := s.notePathLocked(item.ID)
-		target := filepath.Join(destination, "objects", item.ID[:2], item.ID+".enc")
-		_, dirty := s.exportDirty[item.ID]
-		if existing, found := existingObjects[item.ID]; found &&
-			item.CiphertextHash != "" &&
-			existing.CiphertextHash == item.CiphertextHash &&
-			existing.Revision == item.Revision &&
-			existing.ModifiedAt == item.ModifiedAt &&
-			existing.Summary != nil &&
-			!existing.Deleted &&
-			((s.exportIncremental && !dirty) || (!s.exportIncremental && sameRegularFileSize(source, target))) {
-			expectedObjects[filepath.Clean(target)] = struct{}{}
-			existing.Summary = cloneNoteSummary(item)
-			inventory.Objects = append(inventory.Objects, existing)
-			continue
-		}
-		data, err := os.ReadFile(source)
+		object, path, err := s.exportRemoteNoteLocked(destination, item, existingObjects[item.ID])
 		if err != nil {
-			return fmt.Errorf("read encrypted note %s for remote snapshot: %w", item.ID, err)
+			return remoteSyncManifest{}, err
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return fmt.Errorf("create remote note object folder: %w", err)
-		}
-		if err := writeBytesIfChangedFast(target, data); err != nil {
-			return fmt.Errorf("stage encrypted remote note %s: %w", item.ID, err)
-		}
-		expectedObjects[filepath.Clean(target)] = struct{}{}
-		hash := sha256.Sum256(data)
-		hashText := hex.EncodeToString(hash[:])
-		if item.CiphertextHash != hashText {
-			if index, found := s.findNoteLocked(item.ID); found {
-				s.manifest.Notes[index].CiphertextHash = hashText
-			}
-		}
-		inventory.Objects = append(inventory.Objects, remoteSyncObject{
-			ID:             item.ID,
-			CiphertextHash: hashText,
-			Revision:       item.Revision,
-			ModifiedAt:     item.ModifiedAt,
-			Summary:        cloneNoteSummary(item),
-		})
+		expectedObjects[path] = struct{}{}
+		inventory.Objects = append(inventory.Objects, object)
 	}
 	for _, deleted := range s.manifest.DeletedNotes {
 		inventory.Objects = append(inventory.Objects, remoteSyncObject{
-			ID:         deleted.ID,
-			Revision:   deleted.Revision,
-			ModifiedAt: deleted.ModifiedAt,
-			Deleted:    true,
+			ID: deleted.ID, Revision: deleted.Revision, ModifiedAt: deleted.ModifiedAt, Deleted: true,
 		})
 	}
 	slices.SortFunc(inventory.Objects, func(left, right remoteSyncObject) int {
 		return strings.Compare(left.ID, right.ID)
 	})
-	if err := removeUnexpectedSnapshotObjects(
-		filepath.Join(destination, "objects"),
-		expectedObjects,
-	); err != nil {
+	if err := removeUnexpectedSnapshotObjects(filepath.Join(destination, "objects"), expectedObjects); err != nil {
+		return remoteSyncManifest{}, err
+	}
+	return inventory, nil
+}
+
+func (s *Store) exportRemoteNoteLocked(
+	destination string,
+	item NoteSummary,
+	existing remoteSyncObject,
+) (remoteSyncObject, string, error) {
+	source := s.notePathLocked(item.ID)
+	target := filepath.Join(destination, "objects", item.ID[:2], item.ID+".enc")
+	_, dirty := s.exportDirty[item.ID]
+	if existing.ID != "" && item.CiphertextHash != "" &&
+		existing.CiphertextHash == item.CiphertextHash &&
+		existing.Revision == item.Revision &&
+		existing.ModifiedAt == item.ModifiedAt &&
+		existing.Summary != nil && !existing.Deleted &&
+		((s.exportIncremental && !dirty) || (!s.exportIncremental && sameRegularFileSize(source, target))) {
+		existing.Summary = cloneNoteSummary(item)
+		return existing, filepath.Clean(target), nil
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return remoteSyncObject{}, "", fmt.Errorf("read encrypted note %s for remote snapshot: %w", item.ID, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return remoteSyncObject{}, "", fmt.Errorf("create remote note object folder: %w", err)
+	}
+	if err := writeBytesIfChangedFast(target, data); err != nil {
+		return remoteSyncObject{}, "", fmt.Errorf("stage encrypted remote note %s: %w", item.ID, err)
+	}
+	hash := sha256.Sum256(data)
+	hashText := hex.EncodeToString(hash[:])
+	if item.CiphertextHash != hashText {
+		if index, found := s.findNoteLocked(item.ID); found {
+			s.manifest.Notes[index].CiphertextHash = hashText
+		}
+	}
+	return remoteSyncObject{
+		ID: item.ID, CiphertextHash: hashText, Revision: item.Revision,
+		ModifiedAt: item.ModifiedAt, Summary: cloneNoteSummary(item),
+	}, filepath.Clean(target), nil
+}
+
+func (s *Store) exportRemoteSnapshot(destination string) error {
+	if err := s.prepareRemoteSnapshotDestinationLocked(destination); err != nil {
+		return err
+	}
+
+	items := slices.Clone(s.manifest.Notes)
+	sortSummaries(items)
+	existingObjects := s.readExistingRemoteInventoryLocked(destination)
+	inventory, err := s.exportRemoteNotesLocked(destination, items, existingObjects)
+	if err != nil {
 		return err
 	}
 	if err := s.exportAttachmentsLocked(destination); err != nil {
@@ -2077,6 +2178,13 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	if err := s.exportTimeTrackingLocked(destination); err != nil {
 		return err
 	}
+	return s.writeRemoteSnapshotMetadataLocked(destination, inventory)
+}
+
+func (s *Store) writeRemoteSnapshotMetadataLocked(
+	destination string,
+	inventory remoteSyncManifest,
+) error {
 	inventoryPlaintext, err := json.Marshal(inventory)
 	if err != nil {
 		return fmt.Errorf("encode remote sync inventory: %w", err)
@@ -2084,8 +2192,8 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	inventoryPath := filepath.Join(destination, syncDirectory, syncManifestFile)
 	if err := s.writeRemoteEnvelopeIfChangedLocked(
 		inventoryPath,
-		"sync-manifest",
-		"sync-manifest",
+		syncManifestObjectType,
+		syncManifestObjectType,
 		inventoryPlaintext,
 	); err != nil {
 		return fmt.Errorf("encrypt remote sync inventory: %w", err)
@@ -2110,8 +2218,8 @@ func (s *Store) exportRemoteSnapshot(destination string) error {
 	foldersPath := filepath.Join(destination, syncDirectory, syncFoldersFile)
 	if err := s.writeRemoteEnvelopeIfChangedLocked(
 		foldersPath,
-		"sync-folders",
-		"sync-folders",
+		syncFoldersObjectType,
+		syncFoldersObjectType,
 		folderPlaintext,
 	); err != nil {
 		return fmt.Errorf("encrypt remote folders: %w", err)
@@ -2151,48 +2259,9 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	localFolders := slices.Clone(local.manifest.Folders)
-	sortFolders(localFolders)
-	localDeletedFolders := slices.Clone(local.manifest.DeletedFolders)
-	sortTombstones(localDeletedFolders)
-	localDeletedNotes := slices.Clone(local.manifest.DeletedNotes)
-	sortTombstones(localDeletedNotes)
-	matches := slices.Equal(remote.Manifest.Folders, localFolders) &&
-		slices.Equal(remote.Manifest.DeletedFolders, localDeletedFolders) &&
-		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
-		remote.Manifest.Settings == local.manifest.Settings &&
-		len(remote.Objects) == len(local.manifest.Notes)+len(localDeletedNotes)
-	trackingMatches, err := local.timeTrackingSnapshotMatchesLocked(remote.Tracking)
+	matches, err := local.remoteSnapshotMatchesLocked(remote)
 	if err != nil {
 		return false, err
-	}
-	matches = matches && trackingMatches
-	if matches {
-		for _, note := range local.manifest.Notes {
-			remoteObject, exists := remote.Objects[note.ID]
-			if !exists || remoteObject.Revision != note.Revision {
-				matches = false
-				break
-			}
-			data, err := os.ReadFile(local.notePathLocked(note.ID))
-			if err != nil {
-				return false, fmt.Errorf("read local encrypted note %s: %w", note.ID, err)
-			}
-			hash := sha256.Sum256(data)
-			if hex.EncodeToString(hash[:]) != remoteObject.CiphertextHash {
-				matches = false
-				break
-			}
-		}
-		for _, deleted := range localDeletedNotes {
-			remoteObject, exists := remote.Objects[deleted.ID]
-			if !exists || !remoteObject.Deleted ||
-				remoteObject.Revision != deleted.Revision ||
-				remoteObject.ModifiedAt != deleted.ModifiedAt {
-				matches = false
-				break
-			}
-		}
 	}
 	current, err := s.SnapshotRevision()
 	if err != nil {
@@ -2204,13 +2273,57 @@ func (s *Store) ValidateRemoteSnapshot(source string) (bool, error) {
 	return matches, nil
 }
 
+func (s *Store) remoteSnapshotMatchesLocked(remote authenticatedRemoteSnapshot) (bool, error) {
+	localFolders := slices.Clone(s.manifest.Folders)
+	sortFolders(localFolders)
+	localDeletedFolders := slices.Clone(s.manifest.DeletedFolders)
+	sortTombstones(localDeletedFolders)
+	localDeletedNotes := slices.Clone(s.manifest.DeletedNotes)
+	sortTombstones(localDeletedNotes)
+	matches := slices.Equal(remote.Manifest.Folders, localFolders) &&
+		slices.Equal(remote.Manifest.DeletedFolders, localDeletedFolders) &&
+		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
+		remote.Manifest.Settings == s.manifest.Settings &&
+		len(remote.Objects) == len(s.manifest.Notes)+len(localDeletedNotes)
+	trackingMatches, err := s.timeTrackingSnapshotMatchesLocked(remote.Tracking)
+	if err != nil {
+		return false, err
+	}
+	if !matches || !trackingMatches {
+		return false, nil
+	}
+	for _, note := range s.manifest.Notes {
+		remoteObject, exists := remote.Objects[note.ID]
+		if !exists || remoteObject.Revision != note.Revision {
+			return false, nil
+		}
+		data, err := os.ReadFile(s.notePathLocked(note.ID))
+		if err != nil {
+			return false, fmt.Errorf("read local encrypted note %s: %w", note.ID, err)
+		}
+		hash := sha256.Sum256(data)
+		if hex.EncodeToString(hash[:]) != remoteObject.CiphertextHash {
+			return false, nil
+		}
+	}
+	for _, deleted := range localDeletedNotes {
+		remoteObject, exists := remote.Objects[deleted.ID]
+		if !exists || !remoteObject.Deleted ||
+			remoteObject.Revision != deleted.Revision ||
+			remoteObject.ModifiedAt != deleted.ModifiedAt {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (s *Store) readExistingRemoteInventoryLocked(
 	root string,
 ) map[string]remoteSyncObject {
 	plaintext, err := s.readEnvelopeFileLocked(
 		filepath.Join(root, syncDirectory, syncManifestFile),
-		"sync-manifest",
-		"sync-manifest",
+		syncManifestObjectType,
+		syncManifestObjectType,
 	)
 	if err != nil {
 		return nil
@@ -2270,24 +2383,47 @@ func (s *Store) MergeRemoteSnapshot(source string) (MergeResult, error) {
 	return MergeResult{}, errors.New("vault changed repeatedly while planning its remote merge")
 }
 
-func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRemoteSnapshot) (MergeResult, error) {
-	result := MergeResult{UpToDate: true}
-	if err := reconcileRemoteAttachmentDirectory(
-		filepath.Join(source, "attachments", sharedAttachmentFolder),
-		filepath.Join(s.root, "attachments", sharedAttachmentFolder),
-	); err != nil {
-		return MergeResult{}, fmt.Errorf("reconcile shared attachments: %w", err)
-	}
+func (s *Store) mergeRemoteNotesLocked(
+	source string,
+	remote authenticatedRemoteSnapshot,
+	result *MergeResult,
+) ([]NoteSummary, []Tombstone, error) {
 	mergedNotes := make([]NoteSummary, 0, len(s.manifest.Notes)+len(remote.Manifest.Notes))
 	mergedNotes = append(mergedNotes, s.manifest.Notes...)
 	mergedDeletedNotes := slices.Clone(s.manifest.DeletedNotes)
+	mergedNotes, mergedDeletedNotes = s.mergeRemoteDeletedNotesLocked(
+		mergedNotes, mergedDeletedNotes, remote.Manifest.DeletedNotes, result,
+	)
+
+	noteIndexes := make(map[string]int, len(mergedNotes))
+	for index, note := range mergedNotes {
+		noteIndexes[note.ID] = index
+	}
+	for _, remoteNote := range remote.Manifest.Notes {
+		var err error
+		mergedNotes, mergedDeletedNotes, err = s.mergeRemoteNoteLocked(
+			source, remoteNote, mergedNotes, mergedDeletedNotes, noteIndexes, result,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	sortSummaries(mergedNotes)
+	return mergedNotes, mergedDeletedNotes, nil
+}
+
+func (s *Store) mergeRemoteDeletedNotesLocked(
+	mergedNotes []NoteSummary,
+	mergedDeletedNotes []Tombstone,
+	deletedNotes []Tombstone,
+	result *MergeResult,
+) ([]NoteSummary, []Tombstone) {
 	localNotes := make(map[string]NoteSummary, len(mergedNotes))
 	for _, note := range mergedNotes {
 		localNotes[note.ID] = note
 	}
 	deletedNoteIDs := make(map[string]struct{})
-
-	for _, deleted := range remote.Manifest.DeletedNotes {
+	for _, deleted := range deletedNotes {
 		local, found := localNotes[deleted.ID]
 		var localModified int64
 		var localRevision uint64
@@ -2302,117 +2438,135 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 				result.UpToDate = false
 			}
 		}
-		if !found || versionIsNewer(
-			deleted.Revision,
-			deleted.ModifiedAt,
-			localRevision,
-			localModified,
-		) {
+		if !found || versionIsNewer(deleted.Revision, deleted.ModifiedAt, localRevision, localModified) {
 			mergedDeletedNotes = upsertTombstone(mergedDeletedNotes, deleted)
 		}
 	}
-	if len(deletedNoteIDs) > 0 {
-		kept := mergedNotes[:0]
-		for _, note := range mergedNotes {
-			if _, deleted := deletedNoteIDs[note.ID]; !deleted {
-				kept = append(kept, note)
-			}
-		}
-		mergedNotes = kept
+	if len(deletedNoteIDs) == 0 {
+		return mergedNotes, mergedDeletedNotes
 	}
+	kept := mergedNotes[:0]
+	for _, note := range mergedNotes {
+		if _, deleted := deletedNoteIDs[note.ID]; !deleted {
+			kept = append(kept, note)
+		}
+	}
+	return kept, mergedDeletedNotes
+}
 
-	noteIndexes := make(map[string]int, len(mergedNotes))
-	for index, note := range mergedNotes {
-		noteIndexes[note.ID] = index
+func (s *Store) mergeRemoteNoteLocked(
+	source string,
+	remoteNote NoteSummary,
+	mergedNotes []NoteSummary,
+	mergedDeletedNotes []Tombstone,
+	noteIndexes map[string]int,
+	result *MergeResult,
+) ([]NoteSummary, []Tombstone, error) {
+	if deleted, found := findTombstone(mergedDeletedNotes, remoteNote.ID); found &&
+		!versionIsNewer(remoteNote.Revision, remoteNote.ModifiedAt, deleted.Revision, deleted.ModifiedAt) {
+		return mergedNotes, mergedDeletedNotes, nil
 	}
-	for _, remoteNote := range remote.Manifest.Notes {
-		if deleted, found := findTombstone(mergedDeletedNotes, remoteNote.ID); found &&
-			!versionIsNewer(
-				remoteNote.Revision,
-				remoteNote.ModifiedAt,
-				deleted.Revision,
-				deleted.ModifiedAt,
-			) {
-			continue
-		}
-		mergedDeletedNotes = removeTombstone(mergedDeletedNotes, remoteNote.ID)
-		localIndex, found := noteIndexes[remoteNote.ID]
-		if !found {
-			localIndex = -1
-		}
-		if localIndex < 0 {
-			if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
-				return MergeResult{}, err
-			}
-			if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
-				return MergeResult{}, err
-			}
-			mergedNotes = append(mergedNotes, remoteNote)
-			noteIndexes[remoteNote.ID] = len(mergedNotes) - 1
-			result.PulledNotes++
-			result.UpToDate = false
-			continue
-		}
-		local := mergedNotes[localIndex]
-		if remoteNote.Revision == local.Revision &&
-			remoteNote.CiphertextHash != "" &&
-			local.CiphertextHash != "" &&
-			remoteNote.CiphertextHash != local.CiphertextHash {
-			localNote, err := s.readNoteFromSummaryAtLocked(s.root, local)
-			if err != nil {
-				return MergeResult{}, err
-			}
-			remote, err := s.readNoteFromSummaryAtLocked(source, remoteNote)
-			if err != nil {
-				return MergeResult{}, err
-			}
-			result.Conflicts = append(result.Conflicts, MergeConflict{
-				LocalNoteID:   local.ID,
-				RemoteNoteID:  remoteNote.ID,
-				Title:         local.Title,
-				Message:       "Local and remote edits conflicted. Resolve the final version before syncing.",
-				LocalContent:  derivedMarkdownContent(localNote.Content),
-				RemoteContent: derivedMarkdownContent(remote.Content),
-			})
-			result.UpToDate = false
-		} else if versionIsNewer(
-			remoteNote.Revision,
-			remoteNote.ModifiedAt,
-			local.Revision,
-			local.ModifiedAt,
-		) {
-			if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
-				return MergeResult{}, err
-			}
-			if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
-				return MergeResult{}, err
-			}
-			mergedNotes[localIndex] = remoteNote
-			result.UpdatedNotes++
-			result.UpToDate = false
-		} else if !versionIsNewer(
-			local.Revision,
-			local.ModifiedAt,
-			remoteNote.Revision,
-			remoteNote.ModifiedAt,
-		) {
-			// Equal note versions must also converge their attachment files.
-			// This repairs interrupted or older syncs that copied the note
-			// reference without copying its encrypted attachment.
-			if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
-				return MergeResult{}, err
-			}
-		}
+	mergedDeletedNotes = removeTombstone(mergedDeletedNotes, remoteNote.ID)
+	localIndex, found := noteIndexes[remoteNote.ID]
+	if !found {
+		localIndex = -1
 	}
-	sortSummaries(mergedNotes)
+	if localIndex < 0 {
+		if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
+			return nil, nil, err
+		}
+		if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
+			return nil, nil, err
+		}
+		mergedNotes = append(mergedNotes, remoteNote)
+		noteIndexes[remoteNote.ID] = len(mergedNotes) - 1
+		result.PulledNotes++
+		result.UpToDate = false
+		return mergedNotes, mergedDeletedNotes, nil
+	}
+	return s.mergeExistingRemoteNoteLocked(
+		source, remoteNote, mergedNotes, mergedDeletedNotes, localIndex, result,
+	)
+}
 
+func (s *Store) mergeExistingRemoteNoteLocked(
+	source string,
+	remoteNote NoteSummary,
+	mergedNotes []NoteSummary,
+	mergedDeletedNotes []Tombstone,
+	localIndex int,
+	result *MergeResult,
+) ([]NoteSummary, []Tombstone, error) {
+	local := mergedNotes[localIndex]
+	if remoteNote.Revision == local.Revision && remoteNote.CiphertextHash != "" &&
+		local.CiphertextHash != "" && remoteNote.CiphertextHash != local.CiphertextHash {
+		localNote, err := s.readNoteFromSummaryAtLocked(s.root, local)
+		if err != nil {
+			return nil, nil, err
+		}
+		remoteNoteData, err := s.readNoteFromSummaryAtLocked(source, remoteNote)
+		if err != nil {
+			return nil, nil, err
+		}
+		result.Conflicts = append(result.Conflicts, MergeConflict{
+			LocalNoteID: local.ID, RemoteNoteID: remoteNote.ID, Title: local.Title,
+			Message:      "Local and remote edits conflicted. Resolve the final version before syncing.",
+			LocalContent: derivedMarkdownContent(localNote.Content), RemoteContent: derivedMarkdownContent(remoteNoteData.Content),
+		})
+		result.UpToDate = false
+		return mergedNotes, mergedDeletedNotes, nil
+	}
+	if versionIsNewer(remoteNote.Revision, remoteNote.ModifiedAt, local.Revision, local.ModifiedAt) {
+		if err := copyRemoteNoteObject(source, s.root, remoteNote.ID); err != nil {
+			return nil, nil, err
+		}
+		if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
+			return nil, nil, err
+		}
+		mergedNotes[localIndex] = remoteNote
+		result.UpdatedNotes++
+		result.UpToDate = false
+		return mergedNotes, mergedDeletedNotes, nil
+	}
+	if !versionIsNewer(local.Revision, local.ModifiedAt, remoteNote.Revision, remoteNote.ModifiedAt) {
+		if err := replaceRemoteAttachments(source, s.root, remoteNote.ID); err != nil {
+			return nil, nil, err
+		}
+	}
+	return mergedNotes, mergedDeletedNotes, nil
+}
+
+func (s *Store) mergeRemoteFoldersLocked(
+	remote authenticatedRemoteSnapshot,
+	mergedNotes []NoteSummary,
+	result *MergeResult,
+) ([]Folder, []Tombstone, error) {
 	mergedFolders := slices.Clone(s.manifest.Folders)
 	mergedDeletedFolders := slices.Clone(s.manifest.DeletedFolders)
+	mergedFolders, mergedDeletedFolders = mergeRemoteFolderUpdates(
+		remote.Manifest.Folders, mergedFolders, mergedDeletedFolders, result,
+	)
+	mergedFolders, mergedDeletedFolders = mergeRemoteFolderDeletions(
+		remote.Manifest.DeletedFolders, mergedFolders, mergedDeletedFolders, mergedNotes, result,
+	)
+	sortFolders(mergedFolders)
+	if err := validateFolderHierarchy(mergedFolders); err != nil {
+		return nil, nil, fmt.Errorf("merged folder hierarchy %w", err)
+	}
+	return mergedFolders, mergedDeletedFolders, nil
+}
+
+func mergeRemoteFolderUpdates(
+	remoteFolders []Folder,
+	mergedFolders []Folder,
+	mergedDeletedFolders []Tombstone,
+	result *MergeResult,
+) ([]Folder, []Tombstone) {
 	folderIndexes := make(map[string]int, len(mergedFolders))
 	for index, folder := range mergedFolders {
 		folderIndexes[folder.ID] = index
 	}
-	for _, remoteFolder := range remote.Manifest.Folders {
+	for _, remoteFolder := range remoteFolders {
 		if deleted, found := findTombstone(mergedDeletedFolders, remoteFolder.ID); found {
 			updated, _ := time.Parse(time.RFC3339Nano, remoteFolder.UpdatedAt)
 			if deleted.ModifiedAt >= updated.Unix() {
@@ -2436,6 +2590,47 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 			result.UpToDate = false
 		}
 	}
+	return mergedFolders, mergedDeletedFolders
+}
+
+func mergeRemoteFolderDeletion(
+	deleted Tombstone,
+	folderByID map[string]Folder,
+	childCounts map[string]int,
+	noteFolderRefs map[string]struct{},
+	deletedFolderIDs map[string]struct{},
+	mergedDeletedFolders []Tombstone,
+	result *MergeResult,
+) []Tombstone {
+	local, found := folderByID[deleted.ID]
+	if found {
+		updated, _ := time.Parse(time.RFC3339Nano, local.UpdatedAt)
+		_, referenced := noteFolderRefs[deleted.ID]
+		if deleted.ModifiedAt <= updated.Unix() || referenced || childCounts[deleted.ID] > 0 {
+			return mergedDeletedFolders
+		}
+		deletedFolderIDs[deleted.ID] = struct{}{}
+		if local.ParentID != "" && childCounts[local.ParentID] > 0 {
+			childCounts[local.ParentID]--
+		}
+		result.DeletedFolders++
+		result.UpToDate = false
+	}
+	before, existed := findTombstone(mergedDeletedFolders, deleted.ID)
+	mergedDeletedFolders = upsertTombstone(mergedDeletedFolders, deleted)
+	if !found && (!existed || deleted.ModifiedAt > before.ModifiedAt) {
+		result.UpToDate = false
+	}
+	return mergedDeletedFolders
+}
+
+func mergeRemoteFolderDeletions(
+	deletedFolders []Tombstone,
+	mergedFolders []Folder,
+	mergedDeletedFolders []Tombstone,
+	mergedNotes []NoteSummary,
+	result *MergeResult,
+) ([]Folder, []Tombstone) {
 	folderByID := make(map[string]Folder, len(mergedFolders))
 	childCounts := make(map[string]int)
 	noteFolderRefs := make(map[string]struct{})
@@ -2451,30 +2646,8 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 		}
 	}
 	deletedFolderIDs := make(map[string]struct{})
-	for _, deleted := range remote.Manifest.DeletedFolders {
-		local, found := folderByID[deleted.ID]
-		acceptTombstone := true
-		if found {
-			updated, _ := time.Parse(time.RFC3339Nano, local.UpdatedAt)
-			_, referenced := noteFolderRefs[deleted.ID]
-			if deleted.ModifiedAt <= updated.Unix() || referenced || childCounts[deleted.ID] > 0 {
-				acceptTombstone = false
-			} else {
-				deletedFolderIDs[deleted.ID] = struct{}{}
-				if local.ParentID != "" && childCounts[local.ParentID] > 0 {
-					childCounts[local.ParentID]--
-				}
-				result.DeletedFolders++
-				result.UpToDate = false
-			}
-		}
-		if acceptTombstone {
-			before, existed := findTombstone(mergedDeletedFolders, deleted.ID)
-			mergedDeletedFolders = upsertTombstone(mergedDeletedFolders, deleted)
-			if !found && (!existed || deleted.ModifiedAt > before.ModifiedAt) {
-				result.UpToDate = false
-			}
-		}
+	for _, deleted := range deletedFolders {
+		mergedDeletedFolders = mergeRemoteFolderDeletion(deleted, folderByID, childCounts, noteFolderRefs, deletedFolderIDs, mergedDeletedFolders, result)
 	}
 	if len(deletedFolderIDs) > 0 {
 		kept := mergedFolders[:0]
@@ -2485,9 +2658,25 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 		}
 		mergedFolders = kept
 	}
-	sortFolders(mergedFolders)
-	if err := validateFolderHierarchy(mergedFolders); err != nil {
-		return MergeResult{}, fmt.Errorf("merged folder hierarchy %w", err)
+	return mergedFolders, mergedDeletedFolders
+}
+
+func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRemoteSnapshot) (MergeResult, error) {
+	result := MergeResult{UpToDate: true}
+	if err := reconcileRemoteAttachmentDirectory(
+		filepath.Join(source, "attachments", sharedAttachmentFolder),
+		filepath.Join(s.root, "attachments", sharedAttachmentFolder),
+	); err != nil {
+		return MergeResult{}, fmt.Errorf("reconcile shared attachments: %w", err)
+	}
+	mergedNotes, mergedDeletedNotes, err := s.mergeRemoteNotesLocked(source, remote, &result)
+	if err != nil {
+		return MergeResult{}, err
+	}
+
+	mergedFolders, mergedDeletedFolders, err := s.mergeRemoteFoldersLocked(remote, mergedNotes, &result)
+	if err != nil {
+		return MergeResult{}, err
 	}
 	mergedSettings := s.manifest.Settings
 	if settingsVersionIsNewer(remote.Manifest.Settings, mergedSettings) {
@@ -2609,41 +2798,50 @@ func (s *Store) exportAttachmentsLocked(destination string) error {
 		return fmt.Errorf("create remote attachments folder: %w", err)
 	}
 	err := filepath.WalkDir(sourceRoot, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
-			return walkErr
-		}
-		relative, err := filepath.Rel(sourceRoot, path)
-		if err != nil {
-			return err
-		}
-		parts := strings.Split(filepath.ToSlash(relative), "/")
-		if len(parts) == 2 && strings.HasSuffix(parts[1], ".enc.bak") {
-			return nil
-		}
-		if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
-			!strings.HasSuffix(parts[1], ".enc") ||
-			!validID(strings.TrimSuffix(parts[1], ".enc")) {
-			return errors.New("local attachments folder contains an invalid path")
-		}
-		if parts[0] != sharedAttachmentFolder {
-			if _, found := s.findNoteLocked(parts[0]); !found {
-				return errors.New("local attachment belongs to a missing note")
-			}
-		}
-		target := filepath.Join(targetRoot, relative)
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return err
-		}
-		if err := copyFileIfChangedFast(path, target); err != nil {
-			return fmt.Errorf("stage encrypted attachment: %w", err)
-		}
-		expected[filepath.Clean(target)] = struct{}{}
-		return nil
+		return s.exportAttachmentEntryLocked(sourceRoot, targetRoot, path, entry, walkErr, expected)
 	})
 	if err != nil {
 		return err
 	}
 	return removeUnexpectedSnapshotObjects(targetRoot, expected)
+}
+
+func (s *Store) exportAttachmentEntryLocked(
+	sourceRoot, targetRoot, path string,
+	entry os.DirEntry,
+	walkErr error,
+	expected map[string]struct{},
+) error {
+	if walkErr != nil || entry.IsDir() {
+		return walkErr
+	}
+	relative, err := filepath.Rel(sourceRoot, path)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) == 2 && strings.HasSuffix(parts[1], encryptedBackupSuffix) {
+		return nil
+	}
+	if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
+		!strings.HasSuffix(parts[1], ".enc") ||
+		!validID(strings.TrimSuffix(parts[1], ".enc")) {
+		return errors.New("local attachments folder contains an invalid path")
+	}
+	if parts[0] != sharedAttachmentFolder {
+		if _, found := s.findNoteLocked(parts[0]); !found {
+			return errors.New("local attachment belongs to a missing note")
+		}
+	}
+	target := filepath.Join(targetRoot, relative)
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return err
+	}
+	if err := copyFileIfChangedFast(path, target); err != nil {
+		return fmt.Errorf("stage encrypted attachment: %w", err)
+	}
+	expected[filepath.Clean(target)] = struct{}{}
+	return nil
 }
 
 func (s *Store) validateRemoteAttachmentsLocked(
@@ -2657,46 +2855,342 @@ func (s *Store) validateRemoteAttachmentsLocked(
 		return fmt.Errorf("inspect remote attachments: %w", err)
 	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
-			return walkErr
+		return s.validateRemoteAttachmentEntryLocked(root, path, entry, walkErr, remoteNotes)
+	})
+}
+
+func (s *Store) validateRemoteAttachmentEntryLocked(
+	root, path string,
+	entry os.DirEntry,
+	walkErr error,
+	remoteNotes map[string]remoteSyncObject,
+) error {
+	if walkErr != nil || entry.IsDir() {
+		return walkErr
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
+		!strings.HasSuffix(parts[1], ".enc") {
+		return errors.New("remote attachments folder contains an invalid path")
+	}
+	id := strings.TrimSuffix(parts[1], ".enc")
+	objectID := sharedAttachmentAAD(id)
+	if parts[0] != sharedAttachmentFolder {
+		note, found := remoteNotes[parts[0]]
+		if !found || note.Deleted || !validID(id) {
+			return errors.New("remote attachment belongs to a missing note")
 		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
+		objectID = parts[0] + ":" + id
+	} else if !validID(id) {
+		return errors.New("remote attachments folder contains an invalid path")
+	}
+	data, err := s.readEnvelopeFileLocked(path, "attachment", objectID)
+	if err != nil {
+		payload, fileErr := s.readEnvelopeFileLocked(path, "file-attachment", objectID)
+		if fileErr != nil {
+			return fmt.Errorf("authenticate remote attachment: %w", err)
 		}
-		parts := strings.Split(filepath.ToSlash(relative), "/")
-		if len(parts) != 2 || (parts[0] != sharedAttachmentFolder && !validID(parts[0])) ||
-			!strings.HasSuffix(parts[1], ".enc") {
-			return errors.New("remote attachments folder contains an invalid path")
-		}
-		id := strings.TrimSuffix(parts[1], ".enc")
-		objectID := sharedAttachmentAAD(id)
-		if parts[0] != sharedAttachmentFolder {
-			note, found := remoteNotes[parts[0]]
-			if !found || note.Deleted || !validID(id) {
-				return errors.New("remote attachment belongs to a missing note")
-			}
-			objectID = parts[0] + ":" + id
-		} else if !validID(id) {
-			return errors.New("remote attachments folder contains an invalid path")
-		}
-		data, err := s.readEnvelopeFileLocked(path, "attachment", objectID)
-		if err != nil {
-			payload, fileErr := s.readEnvelopeFileLocked(path, "file-attachment", objectID)
-			if fileErr != nil {
-				return fmt.Errorf("authenticate remote attachment: %w", err)
-			}
-			if _, _, fileErr = decodeFileAttachment(payload); fileErr != nil {
-				return fileErr
-			}
-			return nil
-		}
-		if len(data) == 0 || len(data) > maxAttachmentBytes ||
-			len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
-			return errors.New("remote attachment contains invalid WebP data")
+		if _, _, fileErr = decodeFileAttachment(payload); fileErr != nil {
+			return fileErr
 		}
 		return nil
+	}
+	if len(data) == 0 || len(data) > maxAttachmentBytes ||
+		len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return errors.New("remote attachment contains invalid WebP data")
+	}
+	return nil
+}
+
+type remoteSnapshotMetadata struct {
+	Config         vaultConfig
+	Inventory      remoteSyncManifest
+	Folders        []Folder
+	DeletedFolders []Tombstone
+	Settings       VaultSettings
+}
+
+func (s *Store) readRemoteSnapshotMetadataLocked(source string) (remoteSnapshotMetadata, error) {
+	var metadata remoteSnapshotMetadata
+	if err := readJSONFile(filepath.Join(source, configFilename), 1024*1024, &metadata.Config); err != nil {
+		return remoteSnapshotMetadata{}, fmt.Errorf("read remote vault configuration: %w", err)
+	}
+	if err := validateConfig(metadata.Config); err != nil {
+		return remoteSnapshotMetadata{}, fmt.Errorf("validate remote vault configuration: %w", err)
+	}
+	if metadata.Config.VaultID != s.vaultID {
+		return remoteSnapshotMetadata{}, errors.New("remote repository belongs to another vault")
+	}
+	inventoryPlaintext, err := s.readEnvelopeFileLocked(
+		filepath.Join(source, syncDirectory, syncManifestFile),
+		syncManifestObjectType,
+		syncManifestObjectType,
+	)
+	if err != nil {
+		return remoteSnapshotMetadata{}, fmt.Errorf("authenticate remote sync inventory: %w", err)
+	}
+	if err := json.Unmarshal(inventoryPlaintext, &metadata.Inventory); err != nil {
+		return remoteSnapshotMetadata{}, errors.New("remote sync inventory is damaged")
+	}
+	if metadata.Inventory.FormatVersion != FormatVersion || metadata.Inventory.VaultID != s.vaultID {
+		return remoteSnapshotMetadata{}, errors.New("remote sync inventory belongs to another vault or format")
+	}
+	folderPlaintext, err := s.readEnvelopeFileLocked(
+		filepath.Join(source, syncDirectory, syncFoldersFile),
+		syncFoldersObjectType,
+		syncFoldersObjectType,
+	)
+	if err != nil {
+		return remoteSnapshotMetadata{}, fmt.Errorf("authenticate remote folder metadata: %w", err)
+	}
+	var folderManifest remoteFolderManifest
+	if err := json.Unmarshal(folderPlaintext, &folderManifest); err != nil {
+		return remoteSnapshotMetadata{}, errors.New("remote folder metadata is damaged")
+	}
+	if folderManifest.FormatVersion != FormatVersion || folderManifest.VaultID != s.vaultID {
+		return remoteSnapshotMetadata{}, errors.New("remote folder metadata belongs to another vault or format")
+	}
+	metadata.Settings = normalizeVaultSettings(folderManifest.Settings)
+	if metadata.Settings.ModifiedAt < 0 ||
+		(folderManifest.Settings.ModifiedAt != 0 && metadata.Settings != folderManifest.Settings) {
+		return remoteSnapshotMetadata{}, errors.New("remote settings contain invalid data")
+	}
+	metadata.Folders = slices.Clone(folderManifest.Folders)
+	sortFolders(metadata.Folders)
+	metadata.DeletedFolders, err = validateRemoteFolderMetadata(metadata.Folders, folderManifest.Deleted)
+	if err != nil {
+		return remoteSnapshotMetadata{}, err
+	}
+	return metadata, nil
+}
+
+func validateRemoteFolderMetadataItem(folder Folder, seen map[string]struct{}) error {
+	if !validID(folder.ID) {
+		return errors.New("remote folder metadata contains an invalid folder ID")
+	}
+	normalizedName, err := normalizeFolderName(folder.Name)
+	if err != nil || normalizedName != folder.Name {
+		return errors.New("remote folder metadata contains an invalid folder name")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, folder.CreatedAt); err != nil {
+		return errors.New("remote folder metadata contains an invalid creation time")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, folder.UpdatedAt); err != nil {
+		return errors.New("remote folder metadata contains an invalid update time")
+	}
+	if _, duplicate := seen[folder.ID]; duplicate {
+		return errors.New("remote folder metadata contains a duplicate folder")
+	}
+	seen[folder.ID] = struct{}{}
+	return nil
+}
+
+func validateRemoteFolderTombstone(item Tombstone, seen map[string]struct{}) error {
+	if !validID(item.ID) || item.ModifiedAt < 0 {
+		return errors.New("remote folder metadata contains an invalid tombstone")
+	}
+	if _, live := seen[item.ID]; live {
+		return errors.New("remote folder is both live and deleted")
+	}
+	if _, duplicate := seen[item.ID]; duplicate {
+		return errors.New("remote folder metadata contains a duplicate tombstone")
+	}
+	seen[item.ID] = struct{}{}
+	return nil
+}
+
+func validateRemoteFolderMetadata(folders []Folder, deleted []Tombstone) ([]Tombstone, error) {
+	seen := make(map[string]struct{}, len(folders)+len(deleted))
+	for _, folder := range folders {
+		if err := validateRemoteFolderMetadataItem(folder, seen); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateFolderHierarchy(folders); err != nil {
+		return nil, fmt.Errorf("remote folder metadata %w", err)
+	}
+	result := slices.Clone(deleted)
+	sortTombstones(result)
+	for _, item := range result {
+		if err := validateRemoteFolderTombstone(item, seen); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) readRemoteSnapshotObjectsLocked(
+	source string,
+	inventory remoteSyncManifest,
+	remoteFolders []Folder,
+	verifyAllObjects bool,
+	validateDerivedMetadata bool,
+) (map[string]remoteSyncObject, []NoteSummary, int, error) {
+	seen := make(map[string]struct{}, len(inventory.Objects))
+	remoteNotes := make(map[string]remoteSyncObject, len(inventory.Objects))
+	noteSummaries := make([]NoteSummary, 0, len(inventory.Objects))
+	liveObjectCount := 0
+	for _, item := range inventory.Objects {
+		if err := validateRemoteInventoryObject(item); err != nil {
+			return nil, nil, 0, err
+		}
+		if _, duplicate := seen[item.ID]; duplicate {
+			return nil, nil, 0, errors.New("remote sync inventory contains a duplicate object")
+		}
+		seen[item.ID] = struct{}{}
+		object, summary, live, err := s.readRemoteSnapshotObjectLocked(
+			source, item, remoteFolders, verifyAllObjects, validateDerivedMetadata,
+		)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		remoteNotes[item.ID] = object
+		if live {
+			liveObjectCount++
+			noteSummaries = append(noteSummaries, *summary)
+		}
+	}
+	return remoteNotes, noteSummaries, liveObjectCount, nil
+}
+
+func validateRemoteInventoryObject(item remoteSyncObject) error {
+	if !validID(item.ID) || item.Revision == 0 || item.ModifiedAt < 0 {
+		return errors.New("remote sync inventory contains an invalid object")
+	}
+	return nil
+}
+
+func validateRemoteDeletedSnapshotObject(item remoteSyncObject) error {
+	if item.CiphertextHash != "" {
+		return errors.New("remote deleted object unexpectedly contains a hash")
+	}
+	return nil
+}
+
+func (s *Store) cachedRemoteSnapshotNoteLocked(item remoteSyncObject) (*NoteSummary, bool) {
+	localIndex, found := s.findNoteLocked(item.ID)
+	if !found {
+		return nil, false
+	}
+	local := s.manifest.Notes[localIndex]
+	if local.CiphertextHash != item.CiphertextHash || local.Revision != item.Revision || local.ModifiedAt != item.ModifiedAt {
+		return nil, false
+	}
+	return &local, true
+}
+
+func (s *Store) readRemoteSnapshotObjectLocked(
+	source string,
+	item remoteSyncObject,
+	remoteFolders []Folder,
+	verifyAllObjects bool,
+	validateDerivedMetadata bool,
+) (remoteSyncObject, *NoteSummary, bool, error) {
+	if err := validateRemoteInventoryObject(item); err != nil {
+		return remoteSyncObject{}, nil, false, err
+	}
+	if item.Deleted {
+		if err := validateRemoteDeletedSnapshotObject(item); err != nil {
+			return remoteSyncObject{}, nil, false, err
+		}
+		return item, nil, false, nil
+	}
+	if len(item.CiphertextHash) != sha256.Size*2 {
+		return remoteSyncObject{}, nil, false, errors.New("remote sync inventory contains an invalid object hash")
+	}
+	if _, err := hex.DecodeString(item.CiphertextHash); err != nil {
+		return remoteSyncObject{}, nil, false, errors.New("remote sync inventory contains an invalid object hash")
+	}
+	if !verifyAllObjects {
+		if local, found := s.cachedRemoteSnapshotNoteLocked(item); found {
+			return item, local, true, nil
+		}
+	}
+	path := filepath.Join(source, "objects", item.ID[:2], item.ID+".enc")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return remoteSyncObject{}, nil, false, fmt.Errorf("read remote encrypted note %s: %w", item.ID, err)
+	}
+	hash := sha256.Sum256(data)
+	if hex.EncodeToString(hash[:]) != item.CiphertextHash {
+		return remoteSyncObject{}, nil, false, fmt.Errorf("remote encrypted note %s does not match its inventory hash", item.ID)
+	}
+	var summary NoteSummary
+	var note Note
+	if item.Summary != nil {
+		summary = *cloneNoteSummary(*item.Summary)
+		if summary.ID != item.ID {
+			return remoteSyncObject{}, nil, false, fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
+		}
+		note, err = s.readNoteFromSummaryAtLocked(source, summary)
+	} else {
+		note, err = s.readLegacyNoteAtLocked(source, item.ID)
+		summary = summaryFromNote(note)
+	}
+	if err != nil {
+		return remoteSyncObject{}, nil, false, fmt.Errorf("authenticate remote encrypted note %s: %w", item.ID, err)
+	}
+	if err := validateRemoteNote(note, item, remoteFolders, validateDerivedMetadata); err != nil {
+		return remoteSyncObject{}, nil, false, err
+	}
+	if !validateDerivedMetadata {
+		derived := summaryFromNote(note)
+		summary.Tags = derived.Tags
+		summary.AttachmentIDs = derived.AttachmentIDs
+		summary.OutgoingLinks = derived.OutgoingLinks
+	}
+	summary.CiphertextHash = item.CiphertextHash
+	return item, &summary, true, nil
+}
+
+func validateRemoteObjectsDirectoryLocked(
+	objectsRoot string,
+	remoteNotes map[string]remoteSyncObject,
+	liveObjectCount int,
+) error {
+	if _, err := os.Stat(objectsRoot); errors.Is(err, os.ErrNotExist) && liveObjectCount == 0 {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect remote objects folder: %w", err)
+	}
+	return filepath.WalkDir(objectsRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		return validateRemoteObjectEntry(objectsRoot, path, entry, walkErr, remoteNotes)
 	})
+}
+
+func validateRemoteObjectEntry(
+	objectsRoot, path string,
+	entry os.DirEntry,
+	walkErr error,
+	remoteNotes map[string]remoteSyncObject,
+) error {
+	if walkErr != nil {
+		return walkErr
+	}
+	if entry.IsDir() {
+		return nil
+	}
+	relative, err := filepath.Rel(objectsRoot, path)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) != 2 || !strings.HasSuffix(parts[1], ".enc") {
+		return errors.New("remote objects folder contains an unknown file")
+	}
+	id := strings.TrimSuffix(parts[1], ".enc")
+	if !validID(id) || parts[0] != id[:2] {
+		return errors.New("remote objects folder contains an invalid path")
+	}
+	item, expected := remoteNotes[id]
+	if !expected || item.Deleted {
+		return errors.New("remote objects folder contains an object absent from its inventory")
+	}
+	return nil
 }
 
 func (s *Store) readRemoteSnapshotLocked(
@@ -2704,210 +3198,25 @@ func (s *Store) readRemoteSnapshotLocked(
 	verifyAllObjects bool,
 	validateDerivedMetadata bool,
 ) (authenticatedRemoteSnapshot, error) {
-	var remoteConfig vaultConfig
-	if err := readJSONFile(
-		filepath.Join(source, configFilename),
-		1024*1024,
-		&remoteConfig,
-	); err != nil {
-		return authenticatedRemoteSnapshot{}, fmt.Errorf("read remote vault configuration: %w", err)
+	metadata, err := s.readRemoteSnapshotMetadataLocked(source)
+	if err != nil {
+		return authenticatedRemoteSnapshot{}, err
 	}
-	if err := validateConfig(remoteConfig); err != nil {
-		return authenticatedRemoteSnapshot{}, fmt.Errorf("validate remote vault configuration: %w", err)
-	}
-	if remoteConfig.VaultID != s.vaultID {
-		return authenticatedRemoteSnapshot{}, errors.New("remote repository belongs to another vault")
-	}
+	remoteConfig := metadata.Config
+	inventory := metadata.Inventory
+	remoteFolders := metadata.Folders
+	remoteDeletedFolders := metadata.DeletedFolders
+	remoteSettings := metadata.Settings
 
-	inventoryPlaintext, err := s.readEnvelopeFileLocked(
-		filepath.Join(source, syncDirectory, syncManifestFile),
-		"sync-manifest",
-		"sync-manifest",
+	remoteNotes, noteSummaries, liveObjectCount, err := s.readRemoteSnapshotObjectsLocked(
+		source, inventory, remoteFolders, verifyAllObjects, validateDerivedMetadata,
 	)
 	if err != nil {
-		return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote sync inventory: %w", err)
-	}
-	var inventory remoteSyncManifest
-	if err := json.Unmarshal(inventoryPlaintext, &inventory); err != nil {
-		return authenticatedRemoteSnapshot{}, errors.New("remote sync inventory is damaged")
-	}
-	if inventory.FormatVersion != FormatVersion || inventory.VaultID != s.vaultID {
-		return authenticatedRemoteSnapshot{}, errors.New("remote sync inventory belongs to another vault or format")
-	}
-
-	folderPlaintext, err := s.readEnvelopeFileLocked(
-		filepath.Join(source, syncDirectory, syncFoldersFile),
-		"sync-folders",
-		"sync-folders",
-	)
-	if err != nil {
-		return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote folder metadata: %w", err)
-	}
-	var folderManifest remoteFolderManifest
-	if err := json.Unmarshal(folderPlaintext, &folderManifest); err != nil {
-		return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata is damaged")
-	}
-	if folderManifest.FormatVersion != FormatVersion || folderManifest.VaultID != s.vaultID {
-		return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata belongs to another vault or format")
-	}
-	remoteSettings := normalizeVaultSettings(folderManifest.Settings)
-	if remoteSettings.ModifiedAt < 0 ||
-		(folderManifest.Settings.ModifiedAt != 0 && remoteSettings != folderManifest.Settings) {
-		return authenticatedRemoteSnapshot{}, errors.New("remote settings contain invalid data")
-	}
-	remoteFolders := slices.Clone(folderManifest.Folders)
-	sortFolders(remoteFolders)
-	seenFolders := make(map[string]struct{}, len(remoteFolders))
-	for _, folder := range remoteFolders {
-		if !validID(folder.ID) {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains an invalid folder ID")
-		}
-		normalizedName, err := normalizeFolderName(folder.Name)
-		if err != nil || normalizedName != folder.Name {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains an invalid folder name")
-		}
-		if _, err := time.Parse(time.RFC3339Nano, folder.CreatedAt); err != nil {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains an invalid creation time")
-		}
-		if _, err := time.Parse(time.RFC3339Nano, folder.UpdatedAt); err != nil {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains an invalid update time")
-		}
-		if _, duplicate := seenFolders[folder.ID]; duplicate {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains a duplicate folder")
-		}
-		seenFolders[folder.ID] = struct{}{}
-	}
-	if err := validateFolderHierarchy(remoteFolders); err != nil {
-		return authenticatedRemoteSnapshot{}, fmt.Errorf("remote folder metadata %w", err)
-	}
-	remoteDeletedFolders := slices.Clone(folderManifest.Deleted)
-	sortTombstones(remoteDeletedFolders)
-	for _, deleted := range remoteDeletedFolders {
-		if !validID(deleted.ID) || deleted.ModifiedAt < 0 {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains an invalid tombstone")
-		}
-		if _, live := seenFolders[deleted.ID]; live {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder is both live and deleted")
-		}
-		if _, duplicate := seenFolders[deleted.ID]; duplicate {
-			return authenticatedRemoteSnapshot{}, errors.New("remote folder metadata contains a duplicate tombstone")
-		}
-		seenFolders[deleted.ID] = struct{}{}
-	}
-
-	seen := make(map[string]struct{}, len(inventory.Objects))
-	remoteNotes := make(map[string]remoteSyncObject, len(inventory.Objects))
-	noteSummaries := make([]NoteSummary, 0, len(inventory.Objects))
-	liveObjectCount := 0
-	for _, item := range inventory.Objects {
-		if !validID(item.ID) || item.Revision == 0 || item.ModifiedAt < 0 {
-			return authenticatedRemoteSnapshot{}, errors.New("remote sync inventory contains an invalid object")
-		}
-		if _, duplicate := seen[item.ID]; duplicate {
-			return authenticatedRemoteSnapshot{}, errors.New("remote sync inventory contains a duplicate object")
-		}
-		seen[item.ID] = struct{}{}
-		if item.Deleted {
-			if item.CiphertextHash != "" {
-				return authenticatedRemoteSnapshot{}, errors.New("remote deleted object unexpectedly contains a hash")
-			}
-			remoteNotes[item.ID] = item
-			continue
-		}
-		liveObjectCount++
-		if len(item.CiphertextHash) != sha256.Size*2 {
-			return authenticatedRemoteSnapshot{}, errors.New("remote sync inventory contains an invalid object hash")
-		}
-		if _, err := hex.DecodeString(item.CiphertextHash); err != nil {
-			return authenticatedRemoteSnapshot{}, errors.New("remote sync inventory contains an invalid object hash")
-		}
-		if !verifyAllObjects {
-			localIndex, found := s.findNoteLocked(item.ID)
-			if found {
-				local := s.manifest.Notes[localIndex]
-				if local.CiphertextHash == item.CiphertextHash &&
-					local.Revision == item.Revision &&
-					local.ModifiedAt == item.ModifiedAt {
-					remoteNotes[item.ID] = item
-					noteSummaries = append(noteSummaries, local)
-					continue
-				}
-			}
-		}
-		path := filepath.Join(source, "objects", item.ID[:2], item.ID+".enc")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("read remote encrypted note %s: %w", item.ID, err)
-		}
-		hash := sha256.Sum256(data)
-		if hex.EncodeToString(hash[:]) != item.CiphertextHash {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s does not match its inventory hash", item.ID)
-		}
-		var summary NoteSummary
-		var note Note
-		if item.Summary != nil {
-			summary = *cloneNoteSummary(*item.Summary)
-			if summary.ID != item.ID {
-				return authenticatedRemoteSnapshot{}, fmt.Errorf("remote encrypted note %s metadata is inconsistent", item.ID)
-			}
-			note, err = s.readNoteFromSummaryAtLocked(source, summary)
-		} else {
-			note, err = s.readLegacyNoteAtLocked(source, item.ID)
-			summary = summaryFromNote(note)
-		}
-		if err != nil {
-			return authenticatedRemoteSnapshot{}, fmt.Errorf("authenticate remote encrypted note %s: %w", item.ID, err)
-		}
-		if err := validateRemoteNote(note, item, remoteFolders, validateDerivedMetadata); err != nil {
-			return authenticatedRemoteSnapshot{}, err
-		}
-		if !validateDerivedMetadata {
-			derived := summaryFromNote(note)
-			summary.Tags = derived.Tags
-			summary.AttachmentIDs = derived.AttachmentIDs
-			summary.OutgoingLinks = derived.OutgoingLinks
-		}
-		remoteNotes[item.ID] = item
-		summary.CiphertextHash = item.CiphertextHash
-		noteSummaries = append(noteSummaries, summary)
+		return authenticatedRemoteSnapshot{}, err
 	}
 	objectsRoot := filepath.Join(source, "objects")
-	if _, err := os.Stat(objectsRoot); errors.Is(err, os.ErrNotExist) && liveObjectCount == 0 {
-		// Git does not track the empty objects directory for a vault with no notes.
-	} else if err != nil {
-		return authenticatedRemoteSnapshot{}, fmt.Errorf("inspect remote objects folder: %w", err)
-	} else {
-		if err := filepath.WalkDir(objectsRoot, func(
-			path string,
-			entry os.DirEntry,
-			walkErr error,
-		) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			relative, err := filepath.Rel(objectsRoot, path)
-			if err != nil {
-				return err
-			}
-			parts := strings.Split(filepath.ToSlash(relative), "/")
-			if len(parts) != 2 || !strings.HasSuffix(parts[1], ".enc") {
-				return errors.New("remote objects folder contains an unknown file")
-			}
-			id := strings.TrimSuffix(parts[1], ".enc")
-			if !validID(id) || parts[0] != id[:2] {
-				return errors.New("remote objects folder contains an invalid path")
-			}
-			item, expected := remoteNotes[id]
-			if !expected || item.Deleted {
-				return errors.New("remote objects folder contains an object absent from its inventory")
-			}
-			return nil
-		}); err != nil {
-			return authenticatedRemoteSnapshot{}, err
-		}
+	if err := validateRemoteObjectsDirectoryLocked(objectsRoot, remoteNotes, liveObjectCount); err != nil {
+		return authenticatedRemoteSnapshot{}, err
 	}
 	if err := s.validateRemoteAttachmentsLocked(source, remoteNotes); err != nil {
 		return authenticatedRemoteSnapshot{}, err
@@ -3026,7 +3335,7 @@ func (s *Store) RestoreRemoteSnapshot(
 		}
 		for _, target := range []string{
 			filepath.Join(directory, item.ID+".enc"),
-			filepath.Join(directory, item.ID+".enc.bak"),
+			filepath.Join(directory, item.ID+encryptedBackupSuffix),
 		} {
 			if err := writeBytesAtomic(target, data); err != nil {
 				return Session{}, fmt.Errorf("stage restored encrypted note %s: %w", item.ID, err)
@@ -3268,7 +3577,7 @@ func (s *Store) writeNoteLocked(note Note) (string, error) {
 		return "", err
 	}
 	if err := s.writeEnvelopePayloadLocked(
-		path, "note-content", note.ID, payload, compression,
+		path, noteContentObjectType, note.ID, payload, compression,
 	); err != nil {
 		return "", err
 	}
@@ -3323,9 +3632,9 @@ func (s *Store) readNoteContentAtLocked(root, id string) (string, *Note, error) 
 	var err error
 	legacyEnvelope := false
 	if root == s.root {
-		plaintext, err = s.readEnvelopeLocked(path, "note-content", id)
+		plaintext, err = s.readEnvelopeLocked(path, noteContentObjectType, id)
 	} else {
-		plaintext, err = s.readEnvelopeFileLocked(path, "note-content", id)
+		plaintext, err = s.readEnvelopeFileLocked(path, noteContentObjectType, id)
 	}
 	if err != nil {
 		legacyEnvelope = true
@@ -3398,14 +3707,7 @@ func (s *Store) loadManifestLocked() error {
 }
 
 func (s *Store) readManifestAtLocked(root string) (manifest, error) {
-	path := filepath.Join(root, manifestFilename)
-	var plaintext []byte
-	var err error
-	if root == s.root {
-		plaintext, err = s.readEnvelopeLocked(path, "manifest", "manifest")
-	} else {
-		plaintext, err = s.readEnvelopeFileLocked(path, "manifest", "manifest")
-	}
+	plaintext, err := s.readManifestPlaintextLocked(root)
 	if err != nil {
 		return manifest{}, err
 	}
@@ -3420,66 +3722,110 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 		return manifest{}, err
 	}
 	result.Settings = normalizeVaultSettings(result.Settings)
+	if err := validateManifestFolders(&result); err != nil {
+		return manifest{}, err
+	}
+	if err := validateManifestNotes(result); err != nil {
+		return manifest{}, err
+	}
+	if err := validateManifestTombstones(result); err != nil {
+		return manifest{}, err
+	}
+	sortTombstones(result.DeletedNotes)
+	sortTombstones(result.DeletedFolders)
+	return result, nil
+}
+
+func (s *Store) readManifestPlaintextLocked(root string) ([]byte, error) {
+	path := filepath.Join(root, manifestFilename)
+	if root == s.root {
+		return s.readEnvelopeLocked(path, "manifest", "manifest")
+	}
+	return s.readEnvelopeFileLocked(path, "manifest", "manifest")
+}
+
+func validateManifestFolders(result *manifest) error {
 	for index, folder := range result.Folders {
 		if !validID(folder.ID) {
-			return manifest{}, errors.New("manifest contains an invalid folder ID")
+			return errors.New("manifest contains an invalid folder ID")
 		}
 		if _, err := normalizeFolderName(folder.Name); err != nil {
-			return manifest{}, errors.New("manifest contains an invalid folder name")
+			return errors.New("manifest contains an invalid folder name")
 		}
 		result.Folders[index].SortMode = normalizeSortMode(folder.SortMode)
 		if folder.Locked && folder.LockPasswordHash == "" {
-			return manifest{}, errors.New("manifest contains a locked folder without a verifier")
+			return errors.New("manifest contains a locked folder without a verifier")
 		}
 	}
 	if err := validateFolderHierarchy(result.Folders); err != nil {
-		return manifest{}, fmt.Errorf("manifest %w", err)
+		return fmt.Errorf("manifest %w", err)
 	}
+	return nil
+}
+
+func validateManifestNotes(result manifest) error {
 	for _, item := range result.Notes {
 		if !validID(item.ID) {
-			return manifest{}, errors.New("manifest contains an invalid note ID")
+			return errors.New("manifest contains an invalid note ID")
 		}
 		if item.FolderID != "" && !folderIDExists(result.Folders, item.FolderID) {
-			return manifest{}, errors.New("manifest references a folder that does not exist")
+			return errors.New("manifest references a folder that does not exist")
 		}
 	}
+	return nil
+}
+
+func validateManifestTombstoneSet(
+	live map[string]struct{},
+	deleted []Tombstone,
+	requireRevision bool,
+	invalidMessage string,
+	liveMessage string,
+	duplicateMessage string,
+) error {
+	seen := make(map[string]struct{}, len(deleted))
+	for _, item := range deleted {
+		if !validID(item.ID) || (requireRevision && item.Revision == 0) || item.ModifiedAt < 0 {
+			return errors.New(invalidMessage)
+		}
+		if _, exists := live[item.ID]; exists {
+			return errors.New(liveMessage)
+		}
+		if _, duplicate := seen[item.ID]; duplicate {
+			return errors.New(duplicateMessage)
+		}
+		seen[item.ID] = struct{}{}
+	}
+	return nil
+}
+
+func validateManifestTombstones(result manifest) error {
 	liveNotes := make(map[string]struct{}, len(result.Notes))
 	for _, item := range result.Notes {
 		liveNotes[item.ID] = struct{}{}
 	}
-	seenDeletedNotes := make(map[string]struct{}, len(result.DeletedNotes))
-	for _, item := range result.DeletedNotes {
-		if !validID(item.ID) || item.Revision == 0 || item.ModifiedAt < 0 {
-			return manifest{}, errors.New("manifest contains an invalid note tombstone")
-		}
-		if _, live := liveNotes[item.ID]; live {
-			return manifest{}, errors.New("manifest note is both live and deleted")
-		}
-		if _, duplicate := seenDeletedNotes[item.ID]; duplicate {
-			return manifest{}, errors.New("manifest contains a duplicate note tombstone")
-		}
-		seenDeletedNotes[item.ID] = struct{}{}
+	if err := validateManifestTombstoneSet(
+		liveNotes,
+		result.DeletedNotes,
+		true,
+		"manifest contains an invalid note tombstone",
+		"manifest note is both live and deleted",
+		"manifest contains a duplicate note tombstone",
+	); err != nil {
+		return err
 	}
 	liveFolders := make(map[string]struct{}, len(result.Folders))
 	for _, item := range result.Folders {
 		liveFolders[item.ID] = struct{}{}
 	}
-	seenDeletedFolders := make(map[string]struct{}, len(result.DeletedFolders))
-	for _, item := range result.DeletedFolders {
-		if !validID(item.ID) || item.ModifiedAt < 0 {
-			return manifest{}, errors.New("manifest contains an invalid folder tombstone")
-		}
-		if _, live := liveFolders[item.ID]; live {
-			return manifest{}, errors.New("manifest folder is both live and deleted")
-		}
-		if _, duplicate := seenDeletedFolders[item.ID]; duplicate {
-			return manifest{}, errors.New("manifest contains a duplicate folder tombstone")
-		}
-		seenDeletedFolders[item.ID] = struct{}{}
-	}
-	sortTombstones(result.DeletedNotes)
-	sortTombstones(result.DeletedFolders)
-	return result, nil
+	return validateManifestTombstoneSet(
+		liveFolders,
+		result.DeletedFolders,
+		false,
+		"manifest contains an invalid folder tombstone",
+		"manifest folder is both live and deleted",
+		"manifest contains a duplicate folder tombstone",
+	)
 }
 
 func (s *Store) writeEnvelopeLocked(path, objectType, objectID string, plaintext []byte) error {
@@ -3561,7 +3907,7 @@ func (s *Store) readEnvelopeFileLocked(path, objectType, objectID string) ([]byt
 	}
 	if value.Compression != "" &&
 		(value.Compression != "gzip" ||
-			(objectType != "note" && objectType != "note-content" && objectType != trackingBucketObjectType)) {
+			(objectType != "note" && objectType != noteContentObjectType && objectType != trackingBucketObjectType)) {
 		return nil, errors.New("encrypted object compression is invalid")
 	}
 	nonce, err := base64.RawURLEncoding.DecodeString(value.Nonce)
@@ -4229,118 +4575,144 @@ func canonicalizeNoteContent(content string) string {
 func isCanonicalObjectDocument(content string) bool {
 	var document canonicalObjectDocument
 	return json.Unmarshal([]byte(content), &document) == nil &&
-		document.Format == "cipherleaf.object-document" &&
+		document.Format == canonicalObjectDocumentFormat &&
 		document.Version == 1
 }
 
 func canonicalObjectDocumentFromMarkdown(content string) canonicalObjectDocument {
-	lines := strings.Split(content, "\n")
-	var objectPointers []*canonicalObjectNode
-	var stack []*canonicalObjectNode
-	var sectionStack []*canonicalObjectNode
-	parsedByID := map[string]parsedCanonicalLine{}
-	var activeCode *canonicalObjectNode
-	var activeCodeLines []string
+	parser := canonicalMarkdownParser{lines: strings.Split(content, "\n"), parsedByID: map[string]parsedCanonicalLine{}}
+	objects := parser.parse()
+	return canonicalObjectDocument{Format: canonicalObjectDocumentFormat, Version: 1, Objects: objects}
+}
 
-	for index, raw := range lines {
-		lineNumber := index + 1
-		if activeCode != nil {
-			if canonicalCodeFenceEnd.MatchString(raw) {
-				closed := true
-				activeCode.Closed = &closed
-				activeCode = nil
-				activeCodeLines = nil
-			} else {
-				activeCodeLines = append(activeCodeLines, raw)
-				activeCode.Text = strings.Join(activeCodeLines, "\n")
-			}
+type canonicalMarkdownParser struct {
+	lines        []string
+	objects      []*canonicalObjectNode
+	stack        []*canonicalObjectNode
+	sectionStack []*canonicalObjectNode
+	parsedByID   map[string]parsedCanonicalLine
+	activeCode   *canonicalObjectNode
+	activeLines  []string
+}
+
+func (p *canonicalMarkdownParser) parse() []canonicalObjectNode {
+	for index, raw := range p.lines {
+		if p.consumeCodeLine(raw) || p.consumeBlankLine(index, raw) {
 			continue
 		}
-		if raw != "" && strings.TrimSpace(raw) == "" {
-			usedAsContinuation := false
-			if len(stack) > 0 {
-				previous := stack[len(stack)-1]
-				previousParsed := parsedByID[previous.ID]
-				next := ""
-				if index+1 < len(lines) {
-					next = lines[index+1]
-				}
-				if strings.TrimSpace(next) != "" && startsWithWhitespace(next) && !lineStartsExplicitCanonicalObject(next) && lineVisualIndent(next) >= previousParsed.contentIndent {
-					previous.Text += "\n"
-					usedAsContinuation = true
-				}
-			}
-			if raw != "" || usedAsContinuation {
-				continue
-			}
-		}
 		parsed := classifyCanonicalMarkdownLine(raw)
-		previous := (*canonicalObjectNode)(nil)
-		if len(stack) > 0 {
-			previous = stack[len(stack)-1]
+		if p.consumeContinuation(raw, parsed) {
+			continue
 		}
-		if previous != nil {
-			previousParsed := parsedByID[previous.ID]
-			if previous.Text != "" && startsWithWhitespace(raw) && !lineStartsExplicitCanonicalObject(raw) && parsed.indent >= previousParsed.contentIndent {
-				previous.Text += "\n" + canonicalContinuationText(raw, previousParsed.contentIndent)
-				continue
-			}
-		}
-		for len(stack) > 0 && stack[len(stack)-1].Indent >= parsed.indent {
-			stack = stack[:len(stack)-1]
-		}
-		for len(sectionStack) > 0 && sectionStack[len(sectionStack)-1].Indent >= parsed.indent {
-			sectionStack = sectionStack[:len(sectionStack)-1]
-		}
-		parent := (*canonicalObjectNode)(nil)
-		if len(stack) > 0 {
-			parent = stack[len(stack)-1]
-		}
-		parentSection := (*canonicalObjectNode)(nil)
-		if len(sectionStack) > 0 {
-			parentSection = sectionStack[len(sectionStack)-1]
-		}
-		parentPath := ""
-		if parent != nil {
-			parentPath = parent.ID + "/"
-		}
-		id := stableCanonicalObjectID(fmt.Sprintf("%s%s:%d:%s:%d", parentPath, parsed.tag, parsed.indent, parsed.text, lineNumber))
-		object := canonicalObjectNode{
-			ID: id, Tag: parsed.tag, Tags: slices.Clone(parsed.tags), Text: parsed.text, Checked: parsed.checked,
-			Indent: parsed.indent, ContentIndent: parsed.contentIndent, ChildrenIDs: []string{}, SourcePrefix: parsed.sourcePrefix,
-			Language:     parsed.language,
-			AttachmentID: parsed.attachmentID, AttachmentKind: parsed.attachmentKind,
-		}
-		if object.Tag == "code" {
-			closed := false
-			object.Closed = &closed
-		}
-		if parent != nil {
-			parentID := parent.ID
-			object.ParentID = &parentID
-			parent.ChildrenIDs = append(parent.ChildrenIDs, id)
-		}
-		if parentSection != nil {
-			parentSectionID := parentSection.ID
-			object.ParentSectionID = &parentSectionID
-		}
-		objectPointer := &object
-		objectPointers = append(objectPointers, objectPointer)
-		stack = append(stack, objectPointer)
-		parsedByID[id] = parsed
-		if object.Tag == "section" {
-			sectionStack = append(sectionStack, objectPointer)
-		}
-		if object.Tag == "code" {
-			activeCode = objectPointer
-			activeCodeLines = nil
-		}
+		p.appendObject(index+1, parsed)
 	}
-	objects := make([]canonicalObjectNode, 0, len(objectPointers))
-	for _, object := range objectPointers {
+	objects := make([]canonicalObjectNode, 0, len(p.objects))
+	for _, object := range p.objects {
 		objects = append(objects, *object)
 	}
-	return canonicalObjectDocument{Format: "cipherleaf.object-document", Version: 1, Objects: objects}
+	return objects
+}
+
+func (p *canonicalMarkdownParser) consumeCodeLine(raw string) bool {
+	if p.activeCode == nil {
+		return false
+	}
+	if canonicalCodeFenceEnd.MatchString(raw) {
+		closed := true
+		p.activeCode.Closed = &closed
+		p.activeCode = nil
+		p.activeLines = nil
+	} else {
+		p.activeLines = append(p.activeLines, raw)
+		p.activeCode.Text = strings.Join(p.activeLines, "\n")
+	}
+	return true
+}
+
+func (p *canonicalMarkdownParser) consumeBlankLine(index int, raw string) bool {
+	if raw == "" || strings.TrimSpace(raw) != "" {
+		return false
+	}
+	usedAsContinuation := false
+	if len(p.stack) > 0 {
+		previous := p.stack[len(p.stack)-1]
+		previousParsed := p.parsedByID[previous.ID]
+		next := ""
+		if index+1 < len(p.lines) {
+			next = p.lines[index+1]
+		}
+		if strings.TrimSpace(next) != "" && startsWithWhitespace(next) &&
+			!lineStartsExplicitCanonicalObject(next) && lineVisualIndent(next) >= previousParsed.contentIndent {
+			previous.Text += "\n"
+			usedAsContinuation = true
+		}
+	}
+	return raw != "" || usedAsContinuation
+}
+
+func (p *canonicalMarkdownParser) consumeContinuation(raw string, parsed parsedCanonicalLine) bool {
+	if len(p.stack) == 0 {
+		return false
+	}
+	previous := p.stack[len(p.stack)-1]
+	previousParsed := p.parsedByID[previous.ID]
+	if previous.Text == "" || !startsWithWhitespace(raw) || lineStartsExplicitCanonicalObject(raw) ||
+		parsed.indent < previousParsed.contentIndent {
+		return false
+	}
+	previous.Text += "\n" + canonicalContinuationText(raw, previousParsed.contentIndent)
+	return true
+}
+
+func (p *canonicalMarkdownParser) appendObject(lineNumber int, parsed parsedCanonicalLine) {
+	for len(p.stack) > 0 && p.stack[len(p.stack)-1].Indent >= parsed.indent {
+		p.stack = p.stack[:len(p.stack)-1]
+	}
+	for len(p.sectionStack) > 0 && p.sectionStack[len(p.sectionStack)-1].Indent >= parsed.indent {
+		p.sectionStack = p.sectionStack[:len(p.sectionStack)-1]
+	}
+	parent := (*canonicalObjectNode)(nil)
+	if len(p.stack) > 0 {
+		parent = p.stack[len(p.stack)-1]
+	}
+	parentSection := (*canonicalObjectNode)(nil)
+	if len(p.sectionStack) > 0 {
+		parentSection = p.sectionStack[len(p.sectionStack)-1]
+	}
+	parentPath := ""
+	if parent != nil {
+		parentPath = parent.ID + "/"
+	}
+	id := stableCanonicalObjectID(fmt.Sprintf("%s%s:%d:%s:%d", parentPath, parsed.tag, parsed.indent, parsed.text, lineNumber))
+	object := canonicalObjectNode{
+		ID: id, Tag: parsed.tag, Tags: slices.Clone(parsed.tags), Text: parsed.text, Checked: parsed.checked,
+		Indent: parsed.indent, ContentIndent: parsed.contentIndent, ChildrenIDs: []string{}, SourcePrefix: parsed.sourcePrefix,
+		Language: parsed.language, AttachmentID: parsed.attachmentID, AttachmentKind: parsed.attachmentKind,
+	}
+	if object.Tag == "code" {
+		closed := false
+		object.Closed = &closed
+	}
+	if parent != nil {
+		parentID := parent.ID
+		object.ParentID = &parentID
+		parent.ChildrenIDs = append(parent.ChildrenIDs, id)
+	}
+	if parentSection != nil {
+		parentSectionID := parentSection.ID
+		object.ParentSectionID = &parentSectionID
+	}
+	objectPointer := &object
+	p.objects = append(p.objects, objectPointer)
+	p.stack = append(p.stack, objectPointer)
+	p.parsedByID[id] = parsed
+	if object.Tag == "section" {
+		p.sectionStack = append(p.sectionStack, objectPointer)
+	}
+	if object.Tag == "code" {
+		p.activeCode = objectPointer
+		p.activeLines = nil
+	}
 }
 
 func stableCanonicalObjectID(input string) string {
@@ -4351,30 +4723,54 @@ func stableCanonicalObjectID(input string) string {
 
 func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 	if fence := canonicalCodeFence.FindStringSubmatch(raw); fence != nil {
-		indent := visualIndent(fence[1])
-		return parsedCanonicalLine{
-			tag: "code", tags: []string{"code"}, indent: indent, contentIndent: indent,
-			sourcePrefix: fence[1] + "```" + fence[2], language: fence[2],
-		}
+		return canonicalCodeLine(fence)
 	}
+	context := canonicalLineContextFor(raw)
+	if parsed, ok := context.attachmentLine(); ok {
+		return parsed
+	}
+	if parsed, ok := context.listLine(); ok {
+		return parsed
+	}
+	return context.textLine()
+}
+
+func canonicalCodeLine(fence []string) parsedCanonicalLine {
+	indent := visualIndent(fence[1])
+	return parsedCanonicalLine{
+		tag: "code", tags: []string{"code"}, indent: indent, contentIndent: indent,
+		sourcePrefix: fence[1] + "```" + fence[2], language: fence[2],
+	}
+}
+
+type canonicalLineContext struct {
+	raw           string
+	source        string
+	tags          []string
+	indent        int
+	contentIndent int
+	outline       bool
+	sourcePrefix  func(string) string
+}
+
+func canonicalLineContextFor(raw string) canonicalLineContext {
 	outline := canonicalOutline.FindStringSubmatch(raw)
 	bare := canonicalBare.FindStringSubmatch(raw)
 	if outline != nil {
 		bare = nil
 	}
-	source := strings.TrimLeft(raw, " \t")
-	tags := []string{}
-	indent := lineVisualIndent(raw)
-	contentIndent := indent
+	context := canonicalLineContext{raw: raw, source: strings.TrimLeft(raw, " \t"), tags: []string{}, indent: lineVisualIndent(raw)}
+	context.contentIndent = context.indent
 	if outline != nil {
-		source = outline[4]
-		tags = append(tags, "section")
-		indent = visualIndent(outline[1]) + (len(outline[2])-1)*2
-		contentIndent = visualIndent(outline[1]) + len(outline[2]) + visualIndent(outline[3])
+		context.source = outline[4]
+		context.tags = append(context.tags, "section")
+		context.outline = true
+		context.indent = visualIndent(outline[1]) + (len(outline[2])-1)*2
+		context.contentIndent = visualIndent(outline[1]) + len(outline[2]) + visualIndent(outline[3])
 	} else if bare != nil {
-		source = bare[3]
+		context.source = bare[3]
 	}
-	sourcePrefix := func(text string) string {
+	context.sourcePrefix = func(text string) string {
 		if text == "" {
 			return raw
 		}
@@ -4382,72 +4778,105 @@ func classifyCanonicalMarkdownLine(raw string) parsedCanonicalLine {
 		if index >= 0 {
 			return raw[:index]
 		}
-		if contentIndent > len(raw) {
+		if context.contentIndent > len(raw) {
 			return raw
 		}
-		return raw[:contentIndent]
+		return raw[:context.contentIndent]
 	}
-	attachment := canonicalAttachment.FindStringSubmatch(source)
-	if canonicalImage.MatchString(strings.TrimSpace(source)) && (attachment == nil || attachment[1] == "!") {
-		text := strings.TrimSpace(source)
+	return context
+}
+
+func (context canonicalLineContext) attachmentLine() (parsedCanonicalLine, bool) {
+	attachment := canonicalAttachment.FindStringSubmatch(context.source)
+	if canonicalImage.MatchString(strings.TrimSpace(context.source)) && (attachment == nil || attachment[1] == "!") {
+		text := strings.TrimSpace(context.source)
+		tags := append(context.tags, "image")
 		attachmentID, attachmentKind := "", ""
-		tags = append(tags, "image")
 		if attachment != nil {
 			tags = append(tags, "attachment")
 			attachmentID, attachmentKind = attachment[2], "image"
 		}
-		return parsedCanonicalLine{tag: "image", tags: tags, indent: indent, contentIndent: contentIndent, text: text, sourcePrefix: sourcePrefix(text), attachmentID: attachmentID, attachmentKind: attachmentKind}
+		return parsedCanonicalLine{
+			tag: "image", tags: tags, indent: context.indent, contentIndent: context.contentIndent,
+			text: text, sourcePrefix: context.sourcePrefix(text), attachmentID: attachmentID, attachmentKind: attachmentKind,
+		}, true
 	}
-	if attachment != nil {
-		text := strings.TrimSpace(source)
-		return parsedCanonicalLine{tag: "text", tags: append(tags, "attachment", "text"), indent: indent, contentIndent: contentIndent, text: text, sourcePrefix: sourcePrefix(text), attachmentID: attachment[2], attachmentKind: "file"}
+	if attachment == nil {
+		return parsedCanonicalLine{}, false
 	}
-	if match := canonicalBullet.FindStringSubmatch(source); match != nil {
-		text := strings.TrimSpace(match[2])
-		var checked *bool
-		if checkbox := canonicalCheckbox.FindStringSubmatch(match[2]); checkbox != nil {
-			text = strings.TrimSpace(checkbox[2])
-			value := strings.EqualFold(checkbox[1], "x")
-			checked = &value
-		}
-		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, sourcePrefix: sourcePrefix(text)}
+	text := strings.TrimSpace(context.source)
+	return parsedCanonicalLine{
+		tag: "text", tags: append(context.tags, "attachment", "text"), indent: context.indent,
+		contentIndent: context.contentIndent, text: text, sourcePrefix: context.sourcePrefix(text),
+		attachmentID: attachment[2], attachmentKind: "file",
+	}, true
+}
+
+func (context canonicalLineContext) listLine() (parsedCanonicalLine, bool) {
+	match := canonicalBullet.FindStringSubmatch(context.source)
+	if match == nil {
+		match = canonicalOrdered.FindStringSubmatch(context.source)
 	}
-	if match := canonicalOrdered.FindStringSubmatch(source); match != nil {
-		text := strings.TrimSpace(match[2])
-		var checked *bool
-		if checkbox := canonicalCheckbox.FindStringSubmatch(match[2]); checkbox != nil {
-			text = strings.TrimSpace(checkbox[2])
-			value := strings.EqualFold(checkbox[1], "x")
-			checked = &value
-		}
-		return parsedCanonicalLine{tag: "bulletpoint", tags: append(tags, "bulletpoint"), indent: indent, contentIndent: contentIndent + len(source) - len(text), text: text, checked: checked, sourcePrefix: sourcePrefix(text)}
+	if match == nil {
+		return parsedCanonicalLine{}, false
 	}
-	tags = append(tags, "text")
-	if strings.HasPrefix(source, "#") && canonicalHeading.MatchString(source) {
+	text, checked := canonicalListText(match[2])
+	return parsedCanonicalLine{
+		tag: "bulletpoint", tags: append(context.tags, "bulletpoint"), indent: context.indent,
+		contentIndent: context.contentIndent + len(context.source) - len(text), text: text,
+		checked: checked, sourcePrefix: context.sourcePrefix(text),
+	}, true
+}
+
+func canonicalListText(value string) (string, *bool) {
+	text := strings.TrimSpace(value)
+	checkbox := canonicalCheckbox.FindStringSubmatch(value)
+	if checkbox == nil {
+		return text, nil
+	}
+	text = strings.TrimSpace(checkbox[2])
+	checked := strings.EqualFold(checkbox[1], "x")
+	return text, &checked
+}
+
+func (context canonicalLineContext) textLine() parsedCanonicalLine {
+	tags := append(context.tags, "text")
+	if strings.HasPrefix(context.source, "#") && canonicalHeading.MatchString(context.source) {
 		tag := "text"
-		if outline != nil {
+		if context.outline {
 			tag = "section"
 		}
-		text := strings.TrimSpace(source)
-		return parsedCanonicalLine{tag: tag, tags: tags, indent: indent, contentIndent: contentIndent, text: text, sourcePrefix: sourcePrefix(text)}
+		text := strings.TrimSpace(context.source)
+		return parsedCanonicalLine{
+			tag: tag, tags: tags, indent: context.indent, contentIndent: context.contentIndent,
+			text: text, sourcePrefix: context.sourcePrefix(text),
+		}
 	}
-	checkbox := canonicalCheckbox.FindStringSubmatch(source)
-	text := strings.TrimSpace(source)
+	checkbox := canonicalCheckbox.FindStringSubmatch(context.source)
+	text := strings.TrimSpace(context.source)
 	checkboxContentIndent := -1
 	var checked *bool
 	if checkbox != nil {
 		text = strings.TrimSpace(checkbox[2])
-		checkboxContentIndent = contentIndent + len(source) - len(checkbox[2])
+		checkboxContentIndent = context.contentIndent + len(context.source) - len(checkbox[2])
 		value := strings.EqualFold(checkbox[1], "x")
 		checked = &value
 	}
-	if outline == nil && checkbox == nil {
-		contentIndent = indent + 2
+	contentIndent := context.contentIndent
+	if !context.outline && checkbox == nil {
+		contentIndent = context.indent + 2
 	}
 	if checkboxContentIndent >= 0 {
 		contentIndent = checkboxContentIndent
 	}
-	return parsedCanonicalLine{tag: map[bool]string{true: "section", false: "text"}[outline != nil], tags: tags, indent: indent, contentIndent: contentIndent, text: text, checked: checked, sourcePrefix: sourcePrefix(text)}
+	tag := "text"
+	if context.outline {
+		tag = "section"
+	}
+	return parsedCanonicalLine{
+		tag: tag, tags: tags, indent: context.indent, contentIndent: contentIndent,
+		text: text, checked: checked, sourcePrefix: context.sourcePrefix(text),
+	}
 }
 
 func startsWithWhitespace(text string) bool {
@@ -4504,7 +4933,7 @@ func lineVisualIndent(text string) int {
 func derivedMarkdownContent(content string) string {
 	var document canonicalObjectDocument
 	if err := json.Unmarshal([]byte(content), &document); err != nil ||
-		document.Format != "cipherleaf.object-document" ||
+		document.Format != canonicalObjectDocumentFormat ||
 		document.Version != 1 {
 		return content
 	}
@@ -4536,15 +4965,7 @@ func derivedMarkdownContent(content string) string {
 
 func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	if object.Tag == "code" {
-		indent := strings.Repeat(" ", max(0, object.Indent))
-		lines := []string{indent + "```" + object.Language}
-		if object.Text != "" {
-			lines = append(lines, strings.Split(object.Text, "\n")...)
-		}
-		if object.Closed == nil || *object.Closed {
-			lines = append(lines, indent+"```")
-		}
-		return strings.Join(lines, "\n")
+		return markdownCodeLine(object)
 	}
 
 	textLines := strings.Split(object.Text, "\n")
@@ -4554,35 +4975,9 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 	}
 	prefixHasCheckbox := canonicalCheckboxEnd.MatchString(object.SourcePrefix)
 	if object.Checked != nil && !prefixHasCheckbox {
-		if *object.Checked {
-			firstText = strings.TrimRight("[x] "+firstText, " ")
-		} else {
-			firstText = strings.TrimRight("[ ] "+firstText, " ")
-		}
+		firstText = canonicalCheckedText(firstText, *object.Checked)
 	}
-	hasSection := object.Tag == "section" || slices.Contains(object.Tags, "section")
-	indent := strings.Repeat(" ", max(0, object.Indent))
-	sourcePrefix := strings.TrimLeft(object.SourcePrefix, " \t")
-	if prefixHasCheckbox && object.Checked != nil {
-		marker := "[ ]"
-		if *object.Checked {
-			marker = "[x]"
-		}
-		sourcePrefix = canonicalCheckboxEnd.ReplaceAllString(sourcePrefix, marker+"$1")
-	}
-	prefix := ""
-	switch {
-	case hasSection:
-		prefix = indent + "> " + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
-	case strings.HasPrefix(sourcePrefix, "<"):
-		prefix = indent + sourcePrefix
-	case sourcePrefix != "":
-		prefix = indent + sourcePrefix
-	case object.Tag == "bulletpoint":
-		prefix = indent + "- "
-	default:
-		prefix = indent
-	}
+	prefix := canonicalObjectMarkdownPrefix(object, prefixHasCheckbox)
 	lines := []string{prefix + firstText}
 	continuationPrefix := strings.Repeat(" ", max(0, object.ContentIndent))
 	for _, line := range textLines[1:] {
@@ -4593,6 +4988,51 @@ func markdownLineForCanonicalObject(object canonicalObjectNode) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func markdownCodeLine(object canonicalObjectNode) string {
+	indent := strings.Repeat(" ", max(0, object.Indent))
+	lines := []string{indent + "```" + object.Language}
+	if object.Text != "" {
+		lines = append(lines, strings.Split(object.Text, "\n")...)
+	}
+	if object.Closed == nil || *object.Closed {
+		lines = append(lines, indent+"```")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func canonicalCheckedText(text string, checked bool) string {
+	marker := "[ ] "
+	if checked {
+		marker = "[x] "
+	}
+	return strings.TrimRight(marker+text, " ")
+}
+
+func canonicalObjectMarkdownPrefix(object canonicalObjectNode, prefixHasCheckbox bool) string {
+	hasSection := object.Tag == "section" || slices.Contains(object.Tags, "section")
+	indent := strings.Repeat(" ", max(0, object.Indent))
+	sourcePrefix := strings.TrimLeft(object.SourcePrefix, " \t")
+	if prefixHasCheckbox && object.Checked != nil {
+		marker := "[ ]"
+		if *object.Checked {
+			marker = "[x]"
+		}
+		sourcePrefix = canonicalCheckboxEnd.ReplaceAllString(sourcePrefix, marker+"$1")
+	}
+	switch {
+	case hasSection:
+		return indent + "> " + strings.TrimLeft(strings.TrimLeft(sourcePrefix, ">"), " \t")
+	case strings.HasPrefix(sourcePrefix, "<"):
+		return indent + sourcePrefix
+	case sourcePrefix != "":
+		return indent + sourcePrefix
+	case object.Tag == "bulletpoint":
+		return indent + "- "
+	default:
+		return indent
+	}
 }
 
 func sortSummaries(items []NoteSummary) {
@@ -4643,38 +5083,52 @@ func folderHasChild(folders []Folder, parentID string) bool {
 }
 
 func validateFolderHierarchy(folders []Folder) error {
+	byID, err := indexFolderHierarchy(folders)
+	if err != nil {
+		return err
+	}
+	for _, folder := range folders {
+		if err := validateFolderParent(folder, byID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func indexFolderHierarchy(folders []Folder) (map[string]Folder, error) {
 	byID := make(map[string]Folder, len(folders))
 	names := make(map[string]struct{}, len(folders))
 	for _, folder := range folders {
 		if _, duplicate := byID[folder.ID]; duplicate {
-			return errors.New("contains a duplicate folder")
+			return nil, errors.New("contains a duplicate folder")
 		}
 		byID[folder.ID] = folder
 		nameKey := folder.ParentID + "\x00" + strings.ToLower(folder.Name)
 		if _, duplicate := names[nameKey]; duplicate {
-			return errors.New("contains duplicate folder names")
+			return nil, errors.New("contains duplicate folder names")
 		}
 		names[nameKey] = struct{}{}
 	}
-	for _, folder := range folders {
-		if folder.ParentID == "" {
-			continue
+	return byID, nil
+}
+
+func validateFolderParent(folder Folder, byID map[string]Folder) error {
+	if folder.ParentID == "" {
+		return nil
+	}
+	if folder.ParentID == folder.ID {
+		return errors.New("contains a folder that parents itself")
+	}
+	if _, found := byID[folder.ParentID]; !found {
+		return errors.New("contains a folder with a missing parent")
+	}
+	seen := map[string]struct{}{folder.ID: {}}
+	for parentID := folder.ParentID; parentID != ""; {
+		if _, duplicate := seen[parentID]; duplicate {
+			return errors.New("contains a folder hierarchy cycle")
 		}
-		if folder.ParentID == folder.ID {
-			return errors.New("contains a folder that parents itself")
-		}
-		if _, found := byID[folder.ParentID]; !found {
-			return errors.New("contains a folder with a missing parent")
-		}
-		seen := map[string]struct{}{folder.ID: {}}
-		for parentID := folder.ParentID; parentID != ""; {
-			if _, duplicate := seen[parentID]; duplicate {
-				return errors.New("contains a folder hierarchy cycle")
-			}
-			seen[parentID] = struct{}{}
-			parent := byID[parentID]
-			parentID = parent.ParentID
-		}
+		seen[parentID] = struct{}{}
+		parentID = byID[parentID].ParentID
 	}
 	return nil
 }

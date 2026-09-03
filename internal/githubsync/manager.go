@@ -111,12 +111,12 @@ type RemoteSnapshotStore interface {
 	ValidateRemoteSnapshot(source string) (bool, error)
 }
 
-type snapshotRevisionStore interface {
+type SnapshotRevisioner interface {
 	SnapshotRevision() (string, error)
 }
 
 func snapshotRevision(snapshot RemoteSnapshotStore) (string, error) {
-	versioned, ok := snapshot.(snapshotRevisionStore)
+	versioned, ok := snapshot.(SnapshotRevisioner)
 	if !ok {
 		return "", nil
 	}

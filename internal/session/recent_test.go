@@ -181,3 +181,31 @@ func TestDefaultRecentVaultStoreUsesApplicationConfigDirectory(t *testing.T) {
 		t.Fatalf("default recent-vault path = %q", store.path)
 	}
 }
+
+func TestRecentVaultValidationAndCorruptState(t *testing.T) {
+	store := NewRecentVaultStore(filepath.Join(t.TempDir(), recentFilename))
+	if err := store.Remember(" "); err == nil {
+		t.Fatal("expected empty path error")
+	}
+	if err := store.RememberWithTheme(" ", "dark"); err == nil {
+		t.Fatal("expected empty themed path error")
+	}
+	if err := store.Remove(" "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(store.path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.path, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Paths(); err == nil {
+		t.Fatal("expected corrupt recent state error")
+	}
+	if got := NormalizeTheme(" LIGHT "); got != "light" {
+		t.Fatalf("NormalizeTheme() = %q", got)
+	}
+	if got := NormalizeTheme("unknown"); got != "" {
+		t.Fatalf("NormalizeTheme(unknown) = %q", got)
+	}
+}

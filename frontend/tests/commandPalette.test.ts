@@ -7,7 +7,7 @@ const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf
 
 test("command palette supports matching, keyboard selection, and themed presentation", () => {
   assert.match(app, /event\.key\.toLowerCase\(\) !== "p"/);
-  assert.match(app, /role="dialog" aria-modal="true" aria-labelledby="command-palette-title"/);
+  assert.match(app, /<dialog open className="global-search-panel command-palette" aria-modal="true" aria-labelledby="command-palette-title"/);
   assert.match(app, /event\.key === "ArrowDown"/);
   assert.match(app, /event\.key === "Enter"/);
   assert.match(app, /event\.key === "Escape"/);

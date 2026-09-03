@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { TimeClient, TimeDashboard, TimeDashboardDay, TimeEntry, TimeEntryRangeItem, TimeProject, TimeTag, TimeTrackingCatalog } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
@@ -36,6 +36,84 @@ type CalendarDay = {
   total: number;
 };
 
+type LabelAction = {
+  kind: "client" | "project" | "tag";
+  id: string;
+  action: "archive" | "restore" | "delete";
+};
+
+type TimeLabel = TimeClient | TimeProject | TimeTag;
+
+type TimeTrackingViewProps = {
+  readonly now: Date;
+  readonly onActiveEntryChange?: (entry: TimeEntry | null) => void;
+};
+
+function labelValues(
+  kind: LabelAction["kind"],
+  catalog: TimeTrackingCatalog | null,
+): TimeLabel[] {
+  if (kind === "client") return catalog?.clients ?? [];
+  if (kind === "project") return catalog?.projects ?? [];
+  return catalog?.tags ?? [];
+}
+
+async function performLabelAction(action: LabelAction): Promise<TimeLabel | null> {
+  if (action.kind === "client") {
+    if (action.action === "delete") {
+      await VaultService.DeleteClient(action.id);
+      return null;
+    }
+    if (action.action === "restore") return VaultService.RestoreClient(action.id);
+    return VaultService.ArchiveClient(action.id);
+  }
+  if (action.kind === "project") {
+    if (action.action === "delete") {
+      await VaultService.DeleteProject(action.id);
+      return null;
+    }
+    if (action.action === "restore") return VaultService.RestoreProject(action.id);
+    return VaultService.ArchiveProject(action.id);
+  }
+  if (action.action === "delete") {
+    await VaultService.DeleteTag(action.id);
+    return null;
+  }
+  if (action.action === "restore") return VaultService.RestoreTag(action.id);
+  return VaultService.ArchiveTag(action.id);
+}
+
+function updateLabelList<T extends TimeLabel>(
+  values: T[] | null | undefined,
+  action: LabelAction,
+  value: TimeLabel | null,
+): T[] {
+  const remaining = (values ?? []).filter((item) => item.id !== action.id);
+  if (action.action === "delete" || !value) return remaining;
+  return [...remaining, value as T];
+}
+
+function updateCatalogAfterLabelAction(
+  catalog: TimeTrackingCatalog | null,
+  action: LabelAction,
+  value: TimeLabel | null,
+): TimeTrackingCatalog | null {
+  if (!catalog) return catalog;
+  if (action.kind === "client") {
+    return { ...catalog, clients: updateLabelList(catalog.clients, action, value) };
+  }
+  if (action.kind === "project") {
+    return { ...catalog, projects: updateLabelList(catalog.projects, action, value) };
+  }
+  return { ...catalog, tags: updateLabelList(catalog.tags, action, value) };
+}
+
+function labelActionName(action: LabelAction["action"]): string {
+  if (action === "delete") return "Delete";
+  if (action === "restore") return "Restore";
+  return "Archive";
+}
+
 function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals: TimeDashboardDay[]): CalendarDay[] {
   const totalsByDate = new Map(totals.map((day) => [day.localDate, day.totalSeconds]));
   const entryRanges = entries.map((item) => ({ item, start: new Date(item.entry.startedAtUtc).getTime(), end: new Date(item.entry.endedAtUtc ?? "").getTime() }));
@@ -47,7 +125,116 @@ function buildCalendarDays(dates: Date[], entries: TimeEntryRangeItem[], totals:
   });
 }
 
-export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Date; onActiveEntryChange?: (entry: TimeEntry | null) => void }) {
+type WeekViewProps = {
+  readonly now: Date;
+  readonly busy: boolean;
+  readonly activeEntry: TimeEntry | null;
+  readonly name: string;
+  readonly clients: TimeClient[];
+  readonly clientID: string;
+  readonly taskProjects: TimeProject[];
+  readonly projectID: string;
+  readonly tags: TimeTag[];
+  readonly tagIDs: string[];
+  readonly weekDates: Date[];
+  readonly weekDays: CalendarDay[];
+  readonly selectedWeekDay: string;
+  readonly selectedWeekDate: CalendarDay | undefined;
+  readonly selectedWeekEntries: TimeEntryRangeItem[];
+  readonly todayKey: string;
+  readonly onStart: () => void;
+  readonly onNameChange: (value: string) => void;
+  readonly onClientChange: (value: string) => void;
+  readonly onProjectChange: (value: string) => void;
+  readonly onTagChange: (value: string[]) => void;
+  readonly onNavigate: (days: number) => void;
+  readonly onWeekDayChange: (value: string) => void;
+  readonly onResume: (entry: TimeEntry) => void;
+  readonly onBeginEdit: (entry: TimeEntry) => void;
+  readonly onDeleteRequest: (entry: TimeEntry) => void;
+};
+
+function WeekView({
+  now,
+  busy,
+  activeEntry,
+  name,
+  clients,
+  clientID,
+  taskProjects,
+  projectID,
+  tags,
+  tagIDs,
+  weekDates,
+  weekDays,
+  selectedWeekDay,
+  selectedWeekDate,
+  selectedWeekEntries,
+  todayKey,
+  onStart,
+  onNameChange,
+  onClientChange,
+  onProjectChange,
+  onTagChange,
+  onNavigate,
+  onWeekDayChange,
+  onResume,
+  onBeginEdit,
+  onDeleteRequest,
+}: WeekViewProps) {
+  return <>
+    <form className="time-entry-form" onSubmit={(event) => { event.preventDefault(); onStart(); }}>
+      <input aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => onNameChange(event.target.value)} disabled={!!activeEntry || busy} />
+      <ClientSelect clients={clients} selected={clientID} onChange={onClientChange} disabled={!!activeEntry || busy} />
+      <ProjectSelect projects={taskProjects} selected={projectID} onChange={onProjectChange} disabled={!!activeEntry || busy} />
+      <TagMultiSelect tags={tags} selected={tagIDs} onChange={onTagChange} disabled={!!activeEntry || busy} />
+      <button type="submit" className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
+    </form>
+    <div className="time-calendar-navigation">
+      <button className="secondary-button" onClick={() => onNavigate(-7)}>Previous</button>
+      <strong>{formatLocalDate(weekDates[0])} – {formatLocalDate(weekDates[6])}</strong>
+      <button className="secondary-button" onClick={() => onNavigate(0)}>Current week</button>
+      <button className="secondary-button" onClick={() => onNavigate(7)}>Next</button>
+    </div>
+    <div className="time-week-grid">
+      {weekDays.map(({ date: day, end, items, key, start, total }) => {
+        return <button type="button" key={key} aria-pressed={selectedWeekDay === key} className={`${key === todayKey ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => onWeekDayChange(key)}><header><strong>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), end) - Math.max(new Date(item.entry.startedAtUtc).getTime(), start)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></button>;
+      })}
+    </div>
+    <div className="time-entry-list">
+      <h3>{selectedWeekDate && formatLocalDate(selectedWeekDate.date)}</h3>
+      {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
+        <div><strong>{entry.name}</strong><span>{formatLocalDateTime(new Date(entry.startedAtUtc))} – {formatLocalDateTime(new Date(entry.endedAtUtc!))} · <strong>{formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</strong></span></div>
+        <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => onResume(entry)}>Resume</button><button className="secondary-button" onClick={() => onBeginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => onDeleteRequest(entry)}>Delete</button></div>
+      </article>)}
+      {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
+    </div>
+  </>;
+}
+
+type MonthViewProps = {
+  readonly busy: boolean;
+  readonly monthAnchor: Date;
+  readonly monthCalendarDays: CalendarDay[];
+  readonly todayKey: string;
+  readonly onPrevious: () => void;
+  readonly onCurrent: () => void;
+  readonly onNext: () => void;
+};
+
+function MonthView({ busy, monthAnchor, monthCalendarDays, todayKey, onPrevious, onCurrent, onNext }: MonthViewProps) {
+  return <>
+    <div className="time-calendar-navigation"><button className="secondary-button" onClick={onPrevious}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={onCurrent}>Current month</button><button className="secondary-button" onClick={onNext}>Next</button></div>
+    {busy ? <output className="settings-loading">Loading month...</output> : <div className="time-month-grid">
+      {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
+      {monthCalendarDays.map(({ date: day, items, key, total }) => {
+        return <div key={key} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === todayKey ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
+      })}
+    </div>}
+  </>;
+}
+
+export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrackingViewProps) {
   const [tab, setTab] = useState<TimeTrackingTab>("week");
   const [catalog, setCatalog] = useState<TimeTrackingCatalog | null>(null);
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
@@ -77,7 +264,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
   const [labelName, setLabelName] = useState("");
   const [labelClientID, setLabelClientID] = useState("");
   const [renamingLabelID, setRenamingLabelID] = useState("");
-  const [labelAction, setLabelAction] = useState<{ kind: "client" | "project" | "tag"; id: string; action: "archive" | "restore" | "delete" } | null>(null);
+  const [labelAction, setLabelAction] = useState<LabelAction | null>(null);
   const [dashboard, setDashboard] = useState<TimeDashboard | null>(null);
   const [dashboardPreset, setDashboardPreset] = useState<DashboardPreset>("current-week");
   const [customStart, setCustomStart] = useState(localDateKey(new Date()));
@@ -222,41 +409,18 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
     if (!labelAction) return;
     setBusy(true); setError("");
     try {
-      if (labelAction.kind === "client") {
-        if (labelAction.action === "delete") {
-          await VaultService.DeleteClient(labelAction.id);
-          setCatalog((current) => current && ({ ...current, clients: (current.clients ?? []).filter((item) => item.id !== labelAction.id) }));
-        } else {
-          const value = labelAction.action === "restore" ? await VaultService.RestoreClient(labelAction.id) : await VaultService.ArchiveClient(labelAction.id);
-          setCatalog((current) => current && ({ ...current, clients: [...(current.clients ?? []).filter((item) => item.id !== value.id), value] }));
-        }
-      } else if (labelAction.kind === "project") {
-        if (labelAction.action === "delete") {
-          await VaultService.DeleteProject(labelAction.id);
-          setCatalog((current) => current && ({ ...current, projects: (current.projects ?? []).filter((item) => item.id !== labelAction.id) }));
-        } else {
-          const value = labelAction.action === "restore" ? await VaultService.RestoreProject(labelAction.id) : await VaultService.ArchiveProject(labelAction.id);
-          setCatalog((current) => current && ({ ...current, projects: [...(current.projects ?? []).filter((item) => item.id !== value.id), value] }));
-        }
-      } else {
-        if (labelAction.action === "delete") {
-          await VaultService.DeleteTag(labelAction.id);
-          setCatalog((current) => current && ({ ...current, tags: (current.tags ?? []).filter((item) => item.id !== labelAction.id) }));
-        } else {
-          const value = labelAction.action === "restore" ? await VaultService.RestoreTag(labelAction.id) : await VaultService.ArchiveTag(labelAction.id);
-          setCatalog((current) => current && ({ ...current, tags: [...(current.tags ?? []).filter((item) => item.id !== value.id), value] }));
-        }
-      }
+      const value = await performLabelAction(labelAction);
+      setCatalog((current) => updateCatalogAfterLabelAction(current, labelAction, value));
       setLabelAction(null);
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
 
   const labelManager = (kind: "client" | "project" | "tag") => {
-    const values: (TimeClient | TimeProject | TimeTag)[] = kind === "client" ? catalog?.clients ?? [] : kind === "project" ? catalog?.projects ?? [] : catalog?.tags ?? [];
-    const projectClientID = (item: TimeClient | TimeProject | TimeTag) => kind === "project" ? (item as TimeProject).clientId ?? "" : "";
+    const values = labelValues(kind, catalog);
+    const projectClientID = (item: TimeLabel) => kind === "project" ? (item as TimeProject).clientId ?? "" : "";
     const beginRename = (item: TimeClient | TimeProject | TimeTag) => { setRenamingLabelID(item.id); setLabelName(item.name); setLabelClientID(projectClientID(item)); };
-    return <div className="time-label-manager"><form onSubmit={(event) => { event.preventDefault(); void saveLabel(kind); }}><input aria-label={`${kind} name`} value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder={`New ${kind} name`} />{kind === "project" && <ClientSelect clients={clients} selected={labelClientID} onChange={setLabelClientID} />}<button className="primary-button" disabled={busy}>{renamingLabelID ? "Save changes" : `Create ${kind}`}</button>{renamingLabelID && <button type="button" className="secondary-button" onClick={() => { setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>Cancel</button>}</form><section><h3>Active</h3>{values.filter((item) => !item.archivedAtUtc).map((item) => <article key={item.id}><span><strong>{item.name}</strong>{projectClientID(item) && <small>{(catalog?.clients ?? []).find((client) => client.id === projectClientID(item))?.name}</small>}</span><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "archive" })}>Archive</button></div></article>)}</section><section><h3>Archived</h3>{values.filter((item) => item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "restore" })}>Restore</button><button className="secondary-button danger-button" onClick={() => setLabelAction({ kind, id: item.id, action: "delete" })}>Delete</button></div></article>)}</section></div>;
+    return <div className="time-label-manager"><form onSubmit={(event) => { event.preventDefault(); void saveLabel(kind); }}><input aria-label={`${kind} name`} value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder={`New ${kind} name`} />{kind === "project" && <ClientSelect clients={clients} selected={labelClientID} onChange={setLabelClientID} />}<button type="submit" className="primary-button" disabled={busy}>{renamingLabelID ? "Save changes" : `Create ${kind}`}</button>{renamingLabelID && <button type="button" className="secondary-button" onClick={() => { setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>Cancel</button>}</form><section><h3>Active</h3>{values.filter((item) => !item.archivedAtUtc).map((item) => <article key={item.id}><span><strong>{item.name}</strong>{projectClientID(item) && <small>{(catalog?.clients ?? []).find((client) => client.id === projectClientID(item))?.name}</small>}</span><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "archive" })}>Archive</button></div></article>)}</section><section><h3>Archived</h3>{values.filter((item) => item.archivedAtUtc).map((item) => <article key={item.id}><strong>{item.name}</strong><div><button className="secondary-button" onClick={() => beginRename(item)}>Edit</button><button className="secondary-button" onClick={() => setLabelAction({ kind, id: item.id, action: "restore" })}>Restore</button><button className="secondary-button danger-button" onClick={() => setLabelAction({ kind, id: item.id, action: "delete" })}>Delete</button></div></article>)}</section></div>;
   };
 
   const dashboardRange = () => dashboardCustom ? inclusiveLocalDateRange(customStart, customEnd) : dashboardPresetRange(dashboardPreset, new Date());
@@ -303,7 +467,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
         <ProjectSelect label="Filter project" projects={(catalog?.projects ?? []).filter((project) => !dashboardClient || project.clientId === dashboardClient)} selected={dashboardProject} onChange={setDashboardProject} />
         <TagMultiSelect label="Filter tags" tags={catalog?.tags ?? []} selected={dashboardTags} onChange={setDashboardTags} />
       </div>
-      {busy ? <div className="settings-loading" role="status">Loading dashboard...</div> : dashboard && <>
+      {busy ? <output className="settings-loading">Loading dashboard...</output> : dashboard && <>
         <div className="dashboard-counters">
           <div><strong>{dashboard.projectCount}</strong><span>Projects used</span></div>
           <div><strong>{dashboard.tagCount}</strong><span>Tags used</span></div>
@@ -323,6 +487,52 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
     </div>;
   };
 
+  const weekView = <WeekView
+      now={now}
+      busy={busy}
+      activeEntry={activeEntry}
+      name={name}
+      clients={clients}
+      clientID={clientID}
+      taskProjects={taskProjects}
+      projectID={projectID}
+      tags={tags}
+      tagIDs={tagIDs}
+      weekDates={weekDates}
+      weekDays={weekDays}
+      selectedWeekDay={selectedWeekDay}
+      selectedWeekDate={selectedWeekDate}
+      selectedWeekEntries={selectedWeekEntries}
+      todayKey={todayKey}
+      onStart={startEntry}
+      onNameChange={setName}
+      onClientChange={(id) => { setClientID(id); if (projectID && projects.find((project) => project.id === projectID)?.clientId !== id) setProjectID(""); }}
+      onProjectChange={(id) => { setProjectID(id); if (!clientID) setClientID(projects.find((project) => project.id === id)?.clientId ?? ""); }}
+      onTagChange={setTagIDs}
+      onNavigate={navigateWeek}
+      onWeekDayChange={setSelectedWeekDay}
+      onResume={resumeEntry}
+      onBeginEdit={beginEdit}
+      onDeleteRequest={(entry) => { setDeleting(entry); setConfirmAction("delete"); }}
+    />;
+  const monthView = <MonthView
+      busy={busy}
+      monthAnchor={monthAnchor}
+      monthCalendarDays={monthCalendarDays}
+      todayKey={todayKey}
+      onPrevious={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}
+      onCurrent={() => setMonthAnchor(new Date())}
+      onNext={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}
+    />;
+  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
+    week: () => weekView,
+    month: () => monthView,
+    dashboard: dashboardView,
+    clients: () => labelManager("client"),
+    projects: () => labelManager("project"),
+    tags: () => labelManager("tag"),
+  };
+
   return (
     <section className="time-tracking-view">
       <header className="time-tracking-header">
@@ -333,49 +543,14 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: { now: Da
         {TIME_TRACKING_TABS.map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => { setTab(item); setRenamingLabelID(""); setLabelName(""); setLabelClientID(""); }}>{TAB_LABELS[item]}</button>)}
       </nav>
       <div className="time-tracking-panel" role="tabpanel">
-        {loading ? <div className="settings-loading" role="status">Loading time tracking...</div> : <>
+        {loading ? <output className="settings-loading">Loading time tracking...</output> : <>
           {error && <div className="time-tracking-error" role="alert">{error}</div>}
-          {tab === "week" ? <>
-            <form className="time-entry-form" onSubmit={(event) => { event.preventDefault(); void startEntry(); }}>
-              <input aria-label="Task name" placeholder="What are you working on?" value={name} onChange={(event) => setName(event.target.value)} disabled={!!activeEntry || busy} />
-              <ClientSelect clients={clients} selected={clientID} onChange={(id) => { setClientID(id); if (projectID && projects.find((project) => project.id === projectID)?.clientId !== id) setProjectID(""); }} disabled={!!activeEntry || busy} />
-              <ProjectSelect projects={taskProjects} selected={projectID} onChange={(id) => { setProjectID(id); if (!clientID) setClientID(projects.find((project) => project.id === id)?.clientId ?? ""); }} disabled={!!activeEntry || busy} />
-              <TagMultiSelect tags={tags} selected={tagIDs} onChange={setTagIDs} disabled={!!activeEntry || busy} />
-              <button className="primary-button" disabled={!!activeEntry || busy}>{activeEntry ? "Timer already running" : "Start timer"}</button>
-            </form>
-            <div className="time-calendar-navigation">
-              <button className="secondary-button" onClick={() => navigateWeek(-7)}>Previous</button>
-              <strong>{formatLocalDate(weekDates[0])} – {formatLocalDate(weekDates[6])}</strong>
-              <button className="secondary-button" onClick={() => navigateWeek(0)}>Current week</button>
-              <button className="secondary-button" onClick={() => navigateWeek(7)}>Next</button>
-            </div>
-            <div className="time-week-grid">
-              {weekDays.map(({ date: day, end, items, key, start, total }) => {
-                return <section key={key} role="button" tabIndex={0} aria-pressed={selectedWeekDay === key} className={`${key === todayKey ? "today" : ""} ${selectedWeekDay === key ? "selected" : ""}`} onClick={() => setSelectedWeekDay(key)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedWeekDay(key); } }}><header><strong>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong><span>{day.getDate()}</span></header><div>{items.map((item) => <div key={item.entry.id}><strong>{item.entry.name}</strong><span>{formatDuration(item.entry.endedAtUtc ? item.totalSeconds : (Math.min(now.getTime(), end) - Math.max(new Date(item.entry.startedAtUtc).getTime(), start)) / 1000)}</span></div>)}{!items.length && <small>No entries</small>}</div><footer>{formatDuration(total)}</footer></section>;
-              })}
-            </div>
-            <div className="time-entry-list">
-              <h3>{selectedWeekDate && formatLocalDate(selectedWeekDate.date)}</h3>
-              {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
-                <div><strong>{entry.name}</strong><span>{formatLocalDateTime(new Date(entry.startedAtUtc))} – {formatLocalDateTime(new Date(entry.endedAtUtc!))} · <strong>{formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</strong></span></div>
-                <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => void resumeEntry(entry)}>Resume</button><button className="secondary-button" onClick={() => beginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => { setDeleting(entry); setConfirmAction("delete"); }}>Delete</button></div>
-              </article>)}
-              {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
-            </div>
-          </> : tab === "month" ? <>
-            <div className="time-calendar-navigation"><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}>Previous</button><strong>{monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</strong><button className="secondary-button" onClick={() => setMonthAnchor(new Date())}>Current month</button><button className="secondary-button" onClick={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}>Next</button></div>
-            {busy ? <div className="settings-loading" role="status">Loading month...</div> : <div className="time-month-grid">
-              {Array.from({ length: 7 }, (_, index) => new Date(2026, 0, 4 + index)).map((day) => <strong key={day.getDay()}>{day.toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
-              {monthCalendarDays.map(({ date: day, items, key, total }) => {
-                return <div key={key} tabIndex={0} className={`${day.getMonth() !== monthAnchor.getMonth() ? "outside" : ""} ${key === todayKey ? "today" : ""}`} aria-label={`${day.toLocaleDateString("en-US")}: ${formatDuration(total)}. ${items.map((item) => item.entry.name).join(", ") || "No entries"}`}><span>{day.getDate()}</span><strong>{formatDuration(total)}</strong><div className="time-month-details">{items.map((item) => <span key={item.entry.id}>{item.entry.name} · {formatDuration(item.totalSeconds)}</span>)}</div></div>;
-              })}
-            </div>}
-          </> : tab === "dashboard" ? dashboardView() : tab === "clients" ? labelManager("client") : tab === "projects" ? labelManager("project") : labelManager("tag")}
+          {tabRenderers[tab]()}
         </>}
       </div>
-      {editing && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3>{error && <div className="time-tracking-error" role="alert">{error}</div>}<label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><ClientSelect clients={catalog?.clients ?? []} selected={editClientID} onChange={(id) => { setEditClientID(id); if (editProjectID && (catalog?.projects ?? []).find((project) => project.id === editProjectID)?.clientId !== id) setEditProjectID(""); }} /><ProjectSelect projects={(catalog?.projects ?? []).filter((project) => !editClientID || project.clientId === editClientID)} selected={editProjectID} onChange={(id) => { setEditProjectID(id); if (!editClientID) setEditClientID((catalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} /><TagMultiSelect tags={catalog?.tags ?? []} selected={editTagIDs} onChange={setEditTagIDs} /><div className="time-tracking-date-time"><label>Started date<ThemedDatePicker ariaLabel="Started date" value={editStartedAt.slice(0, 10)} onChange={(date) => setEditStartedAt(`${date}T${editStartedAt.slice(11, 16)}`)} /></label><label>Started time<input aria-label="Started time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editStartedAt.slice(11, 16)} onChange={(event) => setEditStartedAt(`${editStartedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="time-tracking-date-time"><label>Ended date<ThemedDatePicker ariaLabel="Ended date" value={editEndedAt.slice(0, 10)} onChange={(date) => setEditEndedAt(`${date}T${editEndedAt.slice(11, 16)}`)} /></label><label>Ended time<input aria-label="Ended time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editEndedAt.slice(11, 16)} onChange={(event) => setEditEndedAt(`${editEndedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setEditing(null); setError(""); }}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>Save correction</button></div></form></div>}
-      {confirmAction && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label={confirmAction === "finish" ? "Finish timer" : "Delete time entry"}><div><h3>{confirmAction === "finish" ? "Finish active timer?" : "Delete this entry?"}</h3><p>{confirmAction === "finish" ? activeEntry?.name : deleting?.name}</p><div className="settings-actions"><button className="secondary-button" onClick={() => { setConfirmAction(null); setDeleting(null); }}>Cancel</button><button className="primary-button" disabled={busy} onClick={() => confirmAction === "finish" ? void finishEntry() : void deleteEntry()}>{confirmAction === "finish" ? "Finish timer" : "Delete entry"}</button></div></div></div>}
-      {labelAction && <div className="time-tracking-dialog" role="dialog" aria-modal="true" aria-label={`${labelAction.action === "delete" ? "Delete" : labelAction.action === "restore" ? "Restore" : "Archive"} ${labelAction.kind}`}><div><h3>{labelAction.action === "delete" ? "Delete" : labelAction.action === "restore" ? "Restore" : "Archive"} this {labelAction.kind}?</h3>{labelAction.action === "delete" && <p>Historical time entries will not be changed.</p>}<div className="settings-actions"><button className="secondary-button" onClick={() => setLabelAction(null)}>Cancel</button><button className={labelAction.action === "delete" ? "danger-button" : "primary-button"} disabled={busy} onClick={() => void applyLabelAction()}>Confirm</button></div></div></div>}
+      {editing && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label="Correct time entry"><form onSubmit={(event) => { event.preventDefault(); void saveEdit(); }}><h3>Correct time entry</h3>{error && <div className="time-tracking-error" role="alert">{error}</div>}<label>Task name<input value={editName} onChange={(event) => setEditName(event.target.value)} /></label><ClientSelect clients={catalog?.clients ?? []} selected={editClientID} onChange={(id) => { setEditClientID(id); if (editProjectID && (catalog?.projects ?? []).find((project) => project.id === editProjectID)?.clientId !== id) setEditProjectID(""); }} /><ProjectSelect projects={(catalog?.projects ?? []).filter((project) => !editClientID || project.clientId === editClientID)} selected={editProjectID} onChange={(id) => { setEditProjectID(id); if (!editClientID) setEditClientID((catalog?.projects ?? []).find((project) => project.id === id)?.clientId ?? ""); }} /><TagMultiSelect tags={catalog?.tags ?? []} selected={editTagIDs} onChange={setEditTagIDs} /><div className="time-tracking-date-time"><label>Started date<ThemedDatePicker ariaLabel="Started date" value={editStartedAt.slice(0, 10)} onChange={(date) => setEditStartedAt(`${date}T${editStartedAt.slice(11, 16)}`)} /></label><label>Started time<input aria-label="Started time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editStartedAt.slice(11, 16)} onChange={(event) => setEditStartedAt(`${editStartedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="time-tracking-date-time"><label>Ended date<ThemedDatePicker ariaLabel="Ended date" value={editEndedAt.slice(0, 10)} onChange={(date) => setEditEndedAt(`${date}T${editEndedAt.slice(11, 16)}`)} /></label><label>Ended time<input aria-label="Ended time" type="text" inputMode="numeric" maxLength={5} pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" required value={editEndedAt.slice(11, 16)} onChange={(event) => setEditEndedAt(`${editEndedAt.slice(0, 10)}T${event.target.value}`)} /></label></div><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setEditing(null); setError(""); }}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>Save correction</button></div></form></dialog>}
+      {confirmAction && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label={confirmAction === "finish" ? "Finish timer" : "Delete time entry"}><div><h3>{confirmAction === "finish" ? "Finish active timer?" : "Delete this entry?"}</h3><p>{confirmAction === "finish" ? activeEntry?.name : deleting?.name}</p><div className="settings-actions"><button type="button" className="secondary-button" onClick={() => { setConfirmAction(null); setDeleting(null); }}>Cancel</button><button type="button" className="primary-button" disabled={busy} onClick={() => confirmAction === "finish" ? void finishEntry() : void deleteEntry()}>{confirmAction === "finish" ? "Finish timer" : "Delete entry"}</button></div></div></dialog>}
+      {labelAction && <dialog open className="time-tracking-dialog" aria-modal="true" aria-label={labelActionName(labelAction.action) + " " + labelAction.kind}><div><h3>{labelActionName(labelAction.action)} this {labelAction.kind}?</h3>{labelAction.action === "delete" && <p>Historical time entries will not be changed.</p>}<div className="settings-actions"><button type="button" className="secondary-button" onClick={() => setLabelAction(null)}>Cancel</button><button type="button" className={labelAction.action === "delete" ? "danger-button" : "primary-button"} disabled={busy} onClick={() => void applyLabelAction()}>Confirm</button></div></div></dialog>}
     </section>
   );
 }

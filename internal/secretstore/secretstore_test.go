@@ -2,6 +2,7 @@ package secretstore
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -91,5 +92,44 @@ func TestStoreLoadMissingExpiry(t *testing.T) {
 	_, err := store.Load(vaultID)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Load with missing expiry = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStoreValidationAndExpiryFailures(t *testing.T) {
+	store := New()
+	if _, err := store.Load(""); err == nil {
+		t.Fatal("expected empty vault id error from Load")
+	}
+	if err := store.Forget(""); err == nil {
+		t.Fatal("expected empty vault id error from Forget")
+	}
+
+	malformed := servicePrefix + "malformed-expiry"
+	if err := keyring.Set(malformed, accountExpiry, "not-a-timestamp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load("malformed-expiry"); err == nil {
+		t.Fatal("expected malformed expiry error")
+	}
+
+	missingSecret := servicePrefix + "missing-secret"
+	if err := keyring.Set(missingSecret, accountExpiry, fmt.Sprint(time.Now().Add(time.Hour).Unix())); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load("missing-secret"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load with missing secret = %v, want ErrNotFound", err)
+	}
+
+	for _, value := range []string{"dbus unavailable", "Secret Service unavailable", "ordinary error"} {
+		wrapped := wrapUnavailable(errors.New(value))
+		if value == "ordinary error" && errors.Is(wrapped, ErrUnavailable) {
+			t.Fatalf("ordinary error was marked unavailable: %v", wrapped)
+		}
+	}
+	if containsAny("needle", "") != true || containsAny("needle", "missing") {
+		t.Fatal("containsAny returned an unexpected result")
+	}
+	if indexOf("needle", "needle") != 0 || indexOf("needle", "missing") != -1 {
+		t.Fatal("indexOf returned an unexpected result")
 	}
 }

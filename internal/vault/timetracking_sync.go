@@ -15,49 +15,83 @@ import (
 )
 
 func (s *Store) readRemoteTimeTrackingLocked(source string) (*authenticatedTrackingSnapshot, error) {
+	inventory, trackingRoot, err := s.readRemoteTrackingInventoryLocked(source)
+	if err != nil || inventory == nil {
+		return nil, err
+	}
+	catalog, err := s.readRemoteTrackingCatalogLocked(trackingRoot, *inventory)
+	if err != nil {
+		return nil, err
+	}
+	buckets, err := s.readRemoteTrackingBucketsLocked(trackingRoot, *inventory, catalog)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRemoteTrackingPaths(trackingRoot, buckets); err != nil {
+		return nil, err
+	}
+	if err := validateRemoteActiveTrackingEntry(catalog, buckets); err != nil {
+		return nil, err
+	}
+	return &authenticatedTrackingSnapshot{Inventory: *inventory, Catalog: catalog, Buckets: buckets}, nil
+}
+
+func (s *Store) readRemoteTrackingInventoryLocked(source string) (*remoteTrackingInventory, string, error) {
 	inventoryPath := filepath.Join(source, syncDirectory, syncTrackingFile)
 	trackingRoot := filepath.Join(source, trackingDirectory)
 	if _, err := os.Stat(inventoryPath); errors.Is(err, os.ErrNotExist) {
 		if directoryExists(trackingRoot) {
-			return nil, errors.New("remote tracking folder is absent from its inventory")
+			return nil, trackingRoot, errors.New("remote tracking folder is absent from its inventory")
 		}
-		return nil, nil
+		return nil, trackingRoot, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("inspect remote tracking inventory: %w", err)
+		return nil, trackingRoot, fmt.Errorf("inspect remote tracking inventory: %w", err)
 	}
 	plaintext, err := s.readEnvelopeFileLocked(inventoryPath, "sync-tracking", "sync-tracking")
 	if err != nil {
-		return nil, fmt.Errorf("authenticate remote tracking inventory: %w", err)
+		return nil, trackingRoot, fmt.Errorf("authenticate remote tracking inventory: %w", err)
 	}
 	var inventory remoteTrackingInventory
 	if err := json.Unmarshal(plaintext, &inventory); err != nil ||
 		inventory.FormatVersion != TimeTrackingCatalogFormatVersion || inventory.VaultID != s.vaultID {
-		return nil, errors.New("remote tracking inventory is damaged or belongs to another vault")
+		return nil, trackingRoot, errors.New("remote tracking inventory is damaged or belongs to another vault")
 	}
 	if inventory.Catalog.ID != trackingCatalogObjectID || !validTrackingHash(inventory.Catalog.CiphertextHash) {
-		return nil, errors.New("remote tracking inventory contains an invalid catalog")
+		return nil, trackingRoot, errors.New("remote tracking inventory contains an invalid catalog")
 	}
-	catalogPath := filepath.Join(trackingRoot, trackingCatalogFilename)
+	return &inventory, trackingRoot, nil
+}
+
+func (s *Store) readRemoteTrackingCatalogLocked(root string, inventory remoteTrackingInventory) (timeTrackingCatalog, error) {
+	catalogPath := filepath.Join(root, trackingCatalogFilename)
 	catalogCiphertext, err := os.ReadFile(catalogPath)
 	if err != nil || ciphertextHash(catalogCiphertext) != inventory.Catalog.CiphertextHash {
-		return nil, errors.New("remote tracking catalog does not match its inventory hash")
+		return timeTrackingCatalog{}, errors.New("remote tracking catalog does not match its inventory hash")
 	}
 	catalogPlaintext, err := s.readEnvelopeFileLocked(catalogPath, trackingCatalogObjectType, trackingCatalogObjectID)
 	if err != nil {
-		return nil, fmt.Errorf("authenticate remote tracking catalog: %w", err)
+		return timeTrackingCatalog{}, fmt.Errorf("authenticate remote tracking catalog: %w", err)
 	}
 	var catalog timeTrackingCatalog
 	if err := json.Unmarshal(catalogPlaintext, &catalog); err != nil ||
 		catalog.FormatVersion != TimeTrackingCatalogFormatVersion || catalog.VaultID != s.vaultID ||
 		catalog.Revision != inventory.Catalog.Revision || catalog.ModifiedAt != inventory.Catalog.ModifiedAt {
-		return nil, errors.New("remote tracking catalog metadata is inconsistent")
+		return timeTrackingCatalog{}, errors.New("remote tracking catalog metadata is inconsistent")
 	}
 	if catalog.PendingMove != nil {
-		return nil, errors.New("remote tracking catalog contains an unfinished local move")
+		return timeTrackingCatalog{}, errors.New("remote tracking catalog contains an unfinished local move")
 	}
 	if err := validateTrackingCatalogObjects(catalog); err != nil {
-		return nil, err
+		return timeTrackingCatalog{}, err
 	}
+	return catalog, nil
+}
+
+func (s *Store) readRemoteTrackingBucketsLocked(
+	root string,
+	inventory remoteTrackingInventory,
+	catalog timeTrackingCatalog,
+) (map[string]timeTrackingBucket, error) {
 	summaries := make(map[string]timeTrackingBucketSummary, len(catalog.Buckets))
 	for _, summary := range catalog.Buckets {
 		summaries[summary.ID] = summary
@@ -73,34 +107,9 @@ func (s *Store) readRemoteTimeTrackingLocked(source string) (*authenticatedTrack
 		if _, duplicate := buckets[item.ID]; duplicate {
 			return nil, errors.New("remote tracking inventory contains a duplicate bucket")
 		}
-		path := filepath.Join(trackingRoot, trackingObjectsDirectory, item.ID[:2], item.ID+".enc")
-		ciphertext, err := os.ReadFile(path)
-		if err != nil || ciphertextHash(ciphertext) != item.CiphertextHash {
-			return nil, fmt.Errorf("remote tracking bucket %s does not match its inventory hash", item.ID)
-		}
-		bucketPlaintext, err := s.readEnvelopeFileLocked(path, trackingBucketObjectType, item.ID)
+		bucket, err := s.readRemoteTrackingBucketLocked(root, item, summary, catalog, seenEntries)
 		if err != nil {
-			return nil, fmt.Errorf("authenticate remote tracking bucket %s: %w", item.ID, err)
-		}
-		var bucket timeTrackingBucket
-		if err := json.Unmarshal(bucketPlaintext, &bucket); err != nil || bucket.FormatVersion != TimeTrackingCatalogFormatVersion || bucket.ID != item.ID {
-			return nil, errors.New("remote tracking bucket is damaged")
-		}
-		for _, entry := range bucket.Entries {
-			if err := validateStoredTimeEntry(entry, summary.MonthUTC); err != nil {
-				return nil, err
-			}
-			if _, duplicate := seenEntries[entry.ID]; duplicate {
-				return nil, errors.New("remote tracking data contains a duplicate entry")
-			}
-			seenEntries[entry.ID] = struct{}{}
-			clientID := entry.ClientID
-			if clientID == "" {
-				clientID = trackingProjectClientID(catalog, entry.ProjectID)
-			}
-			if err := validateTimeEntryReferences(catalog, clientID, entry.ProjectID, entry.TagIDs, false); err != nil {
-				return nil, errors.New("remote tracking entry references a missing label")
-			}
+			return nil, err
 		}
 		computed := updateTimeTrackingBucketSummary([]timeTrackingBucketSummary{{ID: summary.ID, MonthUTC: summary.MonthUTC}}, bucket)[0]
 		if computed.MinStartedAt != summary.MinStartedAt || computed.MaxEndedAt != summary.MaxEndedAt || computed.HasActiveEntry != summary.HasActiveEntry {
@@ -116,16 +125,59 @@ func (s *Store) readRemoteTimeTrackingLocked(source string) (*authenticatedTrack
 			return nil, errors.New("remote tracking entry is both live and deleted")
 		}
 	}
-	if err := validateRemoteTrackingPaths(trackingRoot, buckets); err != nil {
-		return nil, err
+	return buckets, nil
+}
+
+func (s *Store) readRemoteTrackingBucketLocked(
+	root string,
+	item remoteTrackingObject,
+	summary timeTrackingBucketSummary,
+	catalog timeTrackingCatalog,
+	seenEntries map[string]struct{},
+) (timeTrackingBucket, error) {
+	path := filepath.Join(root, trackingObjectsDirectory, item.ID[:2], item.ID+".enc")
+	ciphertext, err := os.ReadFile(path)
+	if err != nil || ciphertextHash(ciphertext) != item.CiphertextHash {
+		return timeTrackingBucket{}, fmt.Errorf("remote tracking bucket %s does not match its inventory hash", item.ID)
 	}
-	if active := catalog.ActiveEntry; active != nil {
-		bucket, found := buckets[active.BucketID]
-		if !found || !slices.ContainsFunc(bucket.Entries, func(entry TimeEntry) bool { return entry.ID == active.EntryID && entry.EndedAtUTC == "" }) {
-			return nil, errors.New("remote tracking active entry location is invalid")
+	bucketPlaintext, err := s.readEnvelopeFileLocked(path, trackingBucketObjectType, item.ID)
+	if err != nil {
+		return timeTrackingBucket{}, fmt.Errorf("authenticate remote tracking bucket %s: %w", item.ID, err)
+	}
+	var bucket timeTrackingBucket
+	if err := json.Unmarshal(bucketPlaintext, &bucket); err != nil || bucket.FormatVersion != TimeTrackingCatalogFormatVersion || bucket.ID != item.ID {
+		return timeTrackingBucket{}, errors.New("remote tracking bucket is damaged")
+	}
+	for _, entry := range bucket.Entries {
+		if err := validateStoredTimeEntry(entry, summary.MonthUTC); err != nil {
+			return timeTrackingBucket{}, err
+		}
+		if _, duplicate := seenEntries[entry.ID]; duplicate {
+			return timeTrackingBucket{}, errors.New("remote tracking data contains a duplicate entry")
+		}
+		seenEntries[entry.ID] = struct{}{}
+		clientID := entry.ClientID
+		if clientID == "" {
+			clientID = trackingProjectClientID(catalog, entry.ProjectID)
+		}
+		if err := validateTimeEntryReferences(catalog, clientID, entry.ProjectID, entry.TagIDs, false); err != nil {
+			return timeTrackingBucket{}, errors.New("remote tracking entry references a missing label")
 		}
 	}
-	return &authenticatedTrackingSnapshot{Inventory: inventory, Catalog: catalog, Buckets: buckets}, nil
+	return bucket, nil
+}
+
+func validateRemoteActiveTrackingEntry(catalog timeTrackingCatalog, buckets map[string]timeTrackingBucket) error {
+	if catalog.ActiveEntry == nil {
+		return nil
+	}
+	bucket, found := buckets[catalog.ActiveEntry.BucketID]
+	if !found || !slices.ContainsFunc(bucket.Entries, func(entry TimeEntry) bool {
+		return entry.ID == catalog.ActiveEntry.EntryID && entry.EndedAtUTC == ""
+	}) {
+		return errors.New("remote tracking active entry location is invalid")
+	}
+	return nil
 }
 
 func (s *Store) timeTrackingSnapshotMatchesLocked(remote *authenticatedTrackingSnapshot) (bool, error) {
@@ -198,61 +250,20 @@ func restoreTrackingCiphertext(source, target string, remote *authenticatedTrack
 }
 
 func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
-	clientIDs := make(map[string]struct{}, len(catalog.Clients))
-	for _, client := range catalog.Clients {
-		name, nameErr := normalizeTrackingLabelName(client.Name)
-		if !validID(client.ID) || client.Revision == 0 || nameErr != nil || name != client.Name {
-			return errors.New("remote tracking catalog contains an invalid client")
-		}
-		if _, duplicate := clientIDs[client.ID]; duplicate {
-			return errors.New("remote tracking catalog contains a duplicate client")
-		}
-		clientIDs[client.ID] = struct{}{}
+	clientIDs, err := validateTrackingClients(catalog.Clients)
+	if err != nil {
+		return err
 	}
-	projectIDs := make(map[string]struct{}, len(catalog.Projects))
-	for _, project := range catalog.Projects {
-		name, nameErr := normalizeTrackingLabelName(project.Name)
-		if !validID(project.ID) || project.Revision == 0 || nameErr != nil || name != project.Name {
-			return errors.New("remote tracking catalog contains an invalid project")
-		}
-		if _, duplicate := projectIDs[project.ID]; duplicate {
-			return errors.New("remote tracking catalog contains a duplicate project")
-		}
-		if project.ClientID != "" {
-			if _, found := clientIDs[project.ClientID]; !found && !trackingTombstoneExists(catalog.DeletedClients, project.ClientID) {
-				return errors.New("remote tracking project references a missing client")
-			}
-		}
-		projectIDs[project.ID] = struct{}{}
+	projectIDs, err := validateTrackingProjects(catalog.Projects, clientIDs, catalog.DeletedClients)
+	if err != nil {
+		return err
 	}
-	tagIDs := make(map[string]struct{}, len(catalog.Tags))
-	for _, tag := range catalog.Tags {
-		name, nameErr := normalizeTrackingLabelName(tag.Name)
-		if !validID(tag.ID) || tag.Revision == 0 || nameErr != nil || name != tag.Name {
-			return errors.New("remote tracking catalog contains an invalid tag")
-		}
-		if _, duplicate := tagIDs[tag.ID]; duplicate {
-			return errors.New("remote tracking catalog contains a duplicate tag")
-		}
-		tagIDs[tag.ID] = struct{}{}
+	tagIDs, err := validateTrackingTags(catalog.Tags)
+	if err != nil {
+		return err
 	}
-	bucketIDs := make(map[string]struct{}, len(catalog.Buckets))
-	months := make(map[string]struct{}, len(catalog.Buckets))
-	for _, bucket := range catalog.Buckets {
-		if !validID(bucket.ID) {
-			return errors.New("remote tracking catalog contains an invalid bucket")
-		}
-		if _, err := time.Parse("2006-01", bucket.MonthUTC); err != nil {
-			return errors.New("remote tracking catalog contains an invalid bucket month")
-		}
-		if _, duplicate := bucketIDs[bucket.ID]; duplicate {
-			return errors.New("remote tracking catalog contains a duplicate bucket")
-		}
-		if _, duplicate := months[bucket.MonthUTC]; duplicate {
-			return errors.New("remote tracking catalog contains a duplicate month")
-		}
-		bucketIDs[bucket.ID] = struct{}{}
-		months[bucket.MonthUTC] = struct{}{}
+	if err := validateTrackingBuckets(catalog.Buckets); err != nil {
+		return err
 	}
 	if err := validateTrackingTombstones(catalog.DeletedEntries, nil); err != nil {
 		return err
@@ -265,6 +276,78 @@ func validateTrackingCatalogObjects(catalog timeTrackingCatalog) error {
 	}
 	if err := validateTrackingTombstones(catalog.DeletedTags, tagIDs); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateTrackingClients(values []TimeClient) (map[string]struct{}, error) {
+	ids := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		name, nameErr := normalizeTrackingLabelName(value.Name)
+		if !validID(value.ID) || value.Revision == 0 || nameErr != nil || name != value.Name {
+			return nil, errors.New("remote tracking catalog contains an invalid client")
+		}
+		if _, duplicate := ids[value.ID]; duplicate {
+			return nil, errors.New("remote tracking catalog contains a duplicate client")
+		}
+		ids[value.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
+func validateTrackingProjects(values []TimeProject, clientIDs map[string]struct{}, deleted []Tombstone) (map[string]struct{}, error) {
+	ids := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		name, nameErr := normalizeTrackingLabelName(value.Name)
+		if !validID(value.ID) || value.Revision == 0 || nameErr != nil || name != value.Name {
+			return nil, errors.New("remote tracking catalog contains an invalid project")
+		}
+		if _, duplicate := ids[value.ID]; duplicate {
+			return nil, errors.New("remote tracking catalog contains a duplicate project")
+		}
+		if value.ClientID != "" {
+			if _, found := clientIDs[value.ClientID]; !found && !trackingTombstoneExists(deleted, value.ClientID) {
+				return nil, errors.New("remote tracking project references a missing client")
+			}
+		}
+		ids[value.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
+func validateTrackingTags(values []TimeTag) (map[string]struct{}, error) {
+	ids := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		name, nameErr := normalizeTrackingLabelName(value.Name)
+		if !validID(value.ID) || value.Revision == 0 || nameErr != nil || name != value.Name {
+			return nil, errors.New("remote tracking catalog contains an invalid tag")
+		}
+		if _, duplicate := ids[value.ID]; duplicate {
+			return nil, errors.New("remote tracking catalog contains a duplicate tag")
+		}
+		ids[value.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
+func validateTrackingBuckets(values []timeTrackingBucketSummary) error {
+	ids := make(map[string]struct{}, len(values))
+	months := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !validID(value.ID) {
+			return errors.New("remote tracking catalog contains an invalid bucket")
+		}
+		if _, err := time.Parse("2006-01", value.MonthUTC); err != nil {
+			return errors.New("remote tracking catalog contains an invalid bucket month")
+		}
+		if _, duplicate := ids[value.ID]; duplicate {
+			return errors.New("remote tracking catalog contains a duplicate bucket")
+		}
+		if _, duplicate := months[value.MonthUTC]; duplicate {
+			return errors.New("remote tracking catalog contains a duplicate month")
+		}
+		ids[value.ID] = struct{}{}
+		months[value.MonthUTC] = struct{}{}
 	}
 	return nil
 }
@@ -346,28 +429,66 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	if remote == nil {
 		return nil, false, nil
 	}
-	localCatalog := newTimeTrackingCatalog(s.vaultID)
-	localBuckets := make(map[string]timeTrackingBucket)
-	hadLocalCatalog := s.timeTrackingCatalog != nil
-	if hadLocalCatalog {
-		localCatalog = cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
-		for _, summary := range localCatalog.Buckets {
-			bucket, err := s.readTimeTrackingBucketLocked(summary.ID)
-			if err != nil {
-				return nil, false, err
-			}
-			localBuckets[summary.ID] = bucket
+	localCatalog, localBuckets, hadLocalCatalog, err := s.readLocalTimeTrackingStateLocked()
+	if err != nil {
+		return nil, false, err
+	}
+	merged, entries, conflicts := mergeTimeTrackingCatalogs(localCatalog, remote.Catalog, localBuckets, remote.Buckets)
+	mergedBuckets, err := buildMergedTimeTrackingBuckets(localCatalog, remote.Catalog, entries, &merged)
+	if err != nil {
+		return nil, false, err
+	}
+	if s.timeTrackingCatalog != nil && trackingCatalogLogicalEqual(localCatalog, merged) {
+		return conflicts, false, nil
+	}
+	rollbackBuckets := func() error {
+		return s.rollbackTimeTrackingMergeLocked(localCatalog, localBuckets, mergedBuckets, hadLocalCatalog)
+	}
+	for _, bucket := range mergedBuckets {
+		if err := s.writeTimeTrackingBucketLocked(bucket); err != nil {
+			return nil, false, errors.Join(err, rollbackBuckets())
 		}
 	}
+	if err := s.writeTimeTrackingCatalogLocked(merged); err != nil {
+		return nil, false, errors.Join(err, rollbackBuckets())
+	}
+	s.timeTrackingCatalog = &merged
+	if err := enableTimeTrackingCapability(&s.manifest); err != nil {
+		return nil, false, err
+	}
+	return conflicts, true, nil
+}
+
+func (s *Store) readLocalTimeTrackingStateLocked() (timeTrackingCatalog, map[string]timeTrackingBucket, bool, error) {
+	localCatalog := newTimeTrackingCatalog(s.vaultID)
+	localBuckets := make(map[string]timeTrackingBucket)
+	if s.timeTrackingCatalog == nil {
+		return localCatalog, localBuckets, false, nil
+	}
+	localCatalog = cloneTimeTrackingCatalog(*s.timeTrackingCatalog)
+	for _, summary := range localCatalog.Buckets {
+		bucket, err := s.readTimeTrackingBucketLocked(summary.ID)
+		if err != nil {
+			return timeTrackingCatalog{}, nil, false, err
+		}
+		localBuckets[summary.ID] = bucket
+	}
+	return localCatalog, localBuckets, true, nil
+}
+
+func mergeTimeTrackingCatalogs(
+	localCatalog, remoteCatalog timeTrackingCatalog,
+	localBuckets, remoteBuckets map[string]timeTrackingBucket,
+) (timeTrackingCatalog, map[string]TimeEntry, []TimeTrackingConflict) {
 	localEntries := trackingEntriesByID(localBuckets)
-	remoteEntries := trackingEntriesByID(remote.Buckets)
-	clients, clientConflicts := mergeTimeClients(localCatalog.Clients, remote.Catalog.Clients, localCatalog.DeletedClients, remote.Catalog.DeletedClients)
-	projects, projectConflicts := mergeTimeProjects(localCatalog.Projects, remote.Catalog.Projects, localCatalog.DeletedProjects, remote.Catalog.DeletedProjects)
-	tags, tagConflicts := mergeTimeTags(localCatalog.Tags, remote.Catalog.Tags, localCatalog.DeletedTags, remote.Catalog.DeletedTags)
-	deletedClients := mergeTrackingTombstones(localCatalog.DeletedClients, remote.Catalog.DeletedClients)
-	deletedProjects := mergeTrackingTombstones(localCatalog.DeletedProjects, remote.Catalog.DeletedProjects)
-	deletedTags := mergeTrackingTombstones(localCatalog.DeletedTags, remote.Catalog.DeletedTags)
-	deletedEntries := mergeTrackingTombstones(localCatalog.DeletedEntries, remote.Catalog.DeletedEntries)
+	remoteEntries := trackingEntriesByID(remoteBuckets)
+	clients, clientConflicts := mergeTimeClients(localCatalog.Clients, remoteCatalog.Clients, localCatalog.DeletedClients, remoteCatalog.DeletedClients)
+	projects, projectConflicts := mergeTimeProjects(localCatalog.Projects, remoteCatalog.Projects, localCatalog.DeletedProjects, remoteCatalog.DeletedProjects)
+	tags, tagConflicts := mergeTimeTags(localCatalog.Tags, remoteCatalog.Tags, localCatalog.DeletedTags, remoteCatalog.DeletedTags)
+	deletedClients := mergeTrackingTombstones(localCatalog.DeletedClients, remoteCatalog.DeletedClients)
+	deletedProjects := mergeTrackingTombstones(localCatalog.DeletedProjects, remoteCatalog.DeletedProjects)
+	deletedTags := mergeTrackingTombstones(localCatalog.DeletedTags, remoteCatalog.DeletedTags)
+	deletedEntries := mergeTrackingTombstones(localCatalog.DeletedEntries, remoteCatalog.DeletedEntries)
 	entries, entryConflicts := mergeTimeEntries(localEntries, remoteEntries, deletedEntries)
 	clients = removeDeletedClients(clients, deletedClients)
 	projects = removeDeletedProjects(projects, deletedProjects)
@@ -378,8 +499,7 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	conflicts = append(conflicts, entryConflicts...)
 	conflicts = append(conflicts, detectTimeEntryInvariantConflicts(entries)...)
 	conflicts = appendUniqueTrackingConflicts(localCatalog.Conflicts, conflicts...)
-
-	merged := newTimeTrackingCatalog(s.vaultID)
+	merged := newTimeTrackingCatalog(localCatalog.VaultID)
 	merged.Clients = clients
 	merged.Projects = projects
 	merged.Tags = tags
@@ -388,9 +508,17 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 	merged.DeletedTags = deletedTags
 	merged.DeletedEntries = deletedEntries
 	merged.Conflicts = conflicts
-	merged.Revision = max(localCatalog.Revision, remote.Catalog.Revision) + 1
-	merged.ModifiedAt = max(localCatalog.ModifiedAt, remote.Catalog.ModifiedAt)
-	monthIDs := trackingMonthIDs(localCatalog, remote.Catalog)
+	merged.Revision = max(localCatalog.Revision, remoteCatalog.Revision) + 1
+	merged.ModifiedAt = max(localCatalog.ModifiedAt, remoteCatalog.ModifiedAt)
+	return merged, entries, conflicts
+}
+
+func buildMergedTimeTrackingBuckets(
+	localCatalog, remoteCatalog timeTrackingCatalog,
+	entries map[string]TimeEntry,
+	merged *timeTrackingCatalog,
+) (map[string]timeTrackingBucket, error) {
+	monthIDs := trackingMonthIDs(localCatalog, remoteCatalog)
 	mergedBuckets := make(map[string]timeTrackingBucket)
 	entryIDs := make([]string, 0, len(entries))
 	for id := range entries {
@@ -405,7 +533,7 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 			var err error
 			bucketID, err = randomID(16)
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 			monthIDs[month] = bucketID
 		}
@@ -422,66 +550,55 @@ func (s *Store) mergeTimeTrackingSnapshotLocked(remote *authenticatedTrackingSna
 		mergedBuckets[id] = bucket
 	}
 	slices.SortFunc(merged.Buckets, func(left, right timeTrackingBucketSummary) int { return stringsCompare(left.MonthUTC, right.MonthUTC) })
-	running := make([]timeTrackingEntryLocation, 0)
 	for _, summary := range merged.Buckets {
 		for _, entry := range mergedBuckets[summary.ID].Entries {
 			if entry.EndedAtUTC == "" {
-				running = append(running, timeTrackingEntryLocation{EntryID: entry.ID, BucketID: summary.ID})
+				merged.ActiveEntry = &timeTrackingEntryLocation{EntryID: entry.ID, BucketID: summary.ID}
+				return mergedBuckets, nil
 			}
 		}
 	}
-	if len(running) > 0 {
-		merged.ActiveEntry = &running[0]
-	}
-	if s.timeTrackingCatalog != nil && trackingCatalogLogicalEqual(localCatalog, merged) {
-		return conflicts, false, nil
-	}
-	rollbackBuckets := func() error {
-		var rollbackErr error
-		for id := range mergedBuckets {
-			if _, existed := localBuckets[id]; existed {
-				continue
-			}
-			path, err := s.timeTrackingBucketPathLocked(id)
-			if err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-				continue
-			}
-			for _, candidate := range []string{path, path + ".bak"} {
-				if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
-					rollbackErr = errors.Join(rollbackErr, err)
-				}
-			}
-		}
-		for _, bucket := range localBuckets {
-			rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingBucketLocked(bucket))
-		}
-		if hadLocalCatalog {
-			rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingCatalogLocked(localCatalog))
-		} else {
-			path := filepath.Join(s.root, trackingDirectory, trackingCatalogFilename)
-			for _, candidate := range []string{path, path + ".bak"} {
-				if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
-					rollbackErr = errors.Join(rollbackErr, err)
-				}
-			}
-		}
-		s.clearTimeTrackingBucketCacheLocked()
-		return rollbackErr
-	}
-	for _, bucket := range mergedBuckets {
-		if err := s.writeTimeTrackingBucketLocked(bucket); err != nil {
-			return nil, false, errors.Join(err, rollbackBuckets())
+	return mergedBuckets, nil
+}
+
+func removeTimeTrackingFiles(path string) error {
+	var removeErr error
+	for _, candidate := range []string{path, path + ".bak"} {
+		if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+			removeErr = errors.Join(removeErr, err)
 		}
 	}
-	if err := s.writeTimeTrackingCatalogLocked(merged); err != nil {
-		return nil, false, errors.Join(err, rollbackBuckets())
+	return removeErr
+}
+
+func (s *Store) rollbackTimeTrackingMergeLocked(
+	localCatalog timeTrackingCatalog,
+	localBuckets, mergedBuckets map[string]timeTrackingBucket,
+	hadLocalCatalog bool,
+) error {
+	var rollbackErr error
+	for id := range mergedBuckets {
+		if _, existed := localBuckets[id]; existed {
+			continue
+		}
+		path, err := s.timeTrackingBucketPathLocked(id)
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+			continue
+		}
+		rollbackErr = errors.Join(rollbackErr, removeTimeTrackingFiles(path))
 	}
-	s.timeTrackingCatalog = &merged
-	if err := enableTimeTrackingCapability(&s.manifest); err != nil {
-		return nil, false, err
+	for _, bucket := range localBuckets {
+		rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingBucketLocked(bucket))
 	}
-	return conflicts, true, nil
+	if hadLocalCatalog {
+		rollbackErr = errors.Join(rollbackErr, s.writeTimeTrackingCatalogLocked(localCatalog))
+	} else {
+		path := filepath.Join(s.root, trackingDirectory, trackingCatalogFilename)
+		rollbackErr = errors.Join(rollbackErr, removeTimeTrackingFiles(path))
+	}
+	s.clearTimeTrackingBucketCacheLocked()
+	return rollbackErr
 }
 
 func trackingEntriesByID(buckets map[string]timeTrackingBucket) map[string]TimeEntry {
@@ -526,7 +643,7 @@ func mergeTimeProjects(local, remote []TimeProject, _, _ []Tombstone) ([]TimePro
 	for _, value := range remote {
 		current, found := result[value.ID]
 		if found && value.Revision == current.Revision && !reflect.DeepEqual(value, current) {
-			conflicts = append(conflicts, newTrackingConflict(TimeProjectRenameConflict, value.ID, "Project edits conflicted.", nil, nil, &current, &value, nil, nil))
+			conflicts = append(conflicts, newTrackingConflict(TimeProjectRenameConflict, value.ID, "Project edits conflicted.", trackingConflictDetails{localProject: &current, remoteProject: &value}))
 		} else if !found || versionIsNewer(value.Revision, value.ModifiedAt, current.Revision, current.ModifiedAt) {
 			result[value.ID] = value
 		}
@@ -548,7 +665,7 @@ func mergeTimeTags(local, remote []TimeTag, _, _ []Tombstone) ([]TimeTag, []Time
 	for _, value := range remote {
 		current, found := result[value.ID]
 		if found && value.Revision == current.Revision && !reflect.DeepEqual(value, current) {
-			conflicts = append(conflicts, newTrackingConflict(TimeTagRenameConflict, value.ID, "Tag edits conflicted.", nil, nil, nil, nil, &current, &value))
+			conflicts = append(conflicts, newTrackingConflict(TimeTagRenameConflict, value.ID, "Tag edits conflicted.", trackingConflictDetails{localTag: &current, remoteTag: &value}))
 		} else if !found || versionIsNewer(value.Revision, value.ModifiedAt, current.Revision, current.ModifiedAt) {
 			result[value.ID] = value
 		}
@@ -571,7 +688,7 @@ func mergeTimeEntries(local, remote map[string]TimeEntry, deleted []Tombstone) (
 		current, found := result[id]
 		if found && value.Revision == current.Revision && !reflect.DeepEqual(value, current) {
 			localCopy, remoteCopy := current, value
-			conflicts = append(conflicts, newTrackingConflict(TimeEntryEditConflict, id, "Time entry edits conflicted.", &localCopy, &remoteCopy, nil, nil, nil, nil))
+			conflicts = append(conflicts, newTrackingConflict(TimeEntryEditConflict, id, "Time entry edits conflicted.", trackingConflictDetails{localEntry: &localCopy, remoteEntry: &remoteCopy}))
 		} else if !found || versionIsNewer(value.Revision, value.ModifiedAt, current.Revision, current.ModifiedAt) {
 			result[id] = value
 		}
@@ -629,15 +746,21 @@ func detectTimeEntryInvariantConflicts(entries map[string]TimeEntry) []TimeTrack
 	}
 	if len(active) > 1 {
 		a, b := active[0], active[1]
-		conflicts = append(conflicts, newTrackingConflict(TimeActiveEntriesConflict, a.ID, "Multiple active timers require resolution.", &a, &b, nil, nil, nil, nil))
+		conflicts = append(conflicts, newTrackingConflict(TimeActiveEntriesConflict, a.ID, "Multiple active timers require resolution.", trackingConflictDetails{localEntry: &a, remoteEntry: &b}))
 	}
 	return conflicts
 }
 
-func newTrackingConflict(kind TimeTrackingConflictKind, objectID, message string, localEntry, remoteEntry *TimeEntry, localProject, remoteProject *TimeProject, localTag, remoteTag *TimeTag) TimeTrackingConflict {
-	raw, _ := json.Marshal([]any{kind, objectID, localEntry, remoteEntry, localProject, remoteProject, localTag, remoteTag})
+type trackingConflictDetails struct {
+	localEntry, remoteEntry     *TimeEntry
+	localProject, remoteProject *TimeProject
+	localTag, remoteTag         *TimeTag
+}
+
+func newTrackingConflict(kind TimeTrackingConflictKind, objectID, message string, details trackingConflictDetails) TimeTrackingConflict {
+	raw, _ := json.Marshal([]any{kind, objectID, details.localEntry, details.remoteEntry, details.localProject, details.remoteProject, details.localTag, details.remoteTag})
 	hash := sha256.Sum256(raw)
-	return TimeTrackingConflict{ID: hex.EncodeToString(hash[:16]), Kind: kind, ObjectID: objectID, Message: message, LocalEntry: localEntry, RemoteEntry: remoteEntry, LocalProject: localProject, RemoteProject: remoteProject, LocalTag: localTag, RemoteTag: remoteTag}
+	return TimeTrackingConflict{ID: hex.EncodeToString(hash[:16]), Kind: kind, ObjectID: objectID, Message: message, LocalEntry: details.localEntry, RemoteEntry: details.remoteEntry, LocalProject: details.localProject, RemoteProject: details.remoteProject, LocalTag: details.localTag, RemoteTag: details.remoteTag}
 }
 func newClientTrackingConflict(objectID string, local, remote *TimeClient) TimeTrackingConflict {
 	raw, _ := json.Marshal([]any{TimeClientRenameConflict, objectID, local, remote})

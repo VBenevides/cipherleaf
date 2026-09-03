@@ -91,7 +91,7 @@ export function targetForMatch(match: FindMatchLike, query = ""): SearchTarget |
 
 function queryRanges(document: string, query: string): SearchRange[] {
   if (!query) return [];
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   let expression: RegExp;
   try {
     expression = new RegExp(escaped, "giu");
@@ -131,7 +131,7 @@ export function rangeForActiveDocument(
   document: string,
   sourceDocument = document,
 ): SearchRange | null {
-  if (!target || target.noteID !== activeNoteID) return null;
+  if (target?.noteID !== activeNoteID) return null;
 
   const utf8End = target.offset + target.matchLength;
   if (!Number.isSafeInteger(utf8End)) return null;

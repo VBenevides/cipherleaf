@@ -13,6 +13,13 @@ func TestTimeTrackingProjectAndTagCRUD(t *testing.T) {
 	if _, err := store.Create(root, "secret-secret-secret"); err != nil {
 		t.Fatal(err)
 	}
+	activeProject := exerciseTimeTrackingProjectLifecycle(t, store)
+	exerciseTimeTrackingTagLifecycle(t, store)
+	assertTimeTrackingLabelsPersist(t, store, root, activeProject)
+}
+
+func exerciseTimeTrackingProjectLifecycle(t *testing.T, store *Store) TimeProject {
+	t.Helper()
 	project, err := store.CreateProject("  Client Work  ")
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +54,11 @@ func TestTimeTrackingProjectAndTagCRUD(t *testing.T) {
 	if err != nil || project.ArchivedAtUTC != "" || project.Revision != 5 {
 		t.Fatalf("unexpected restored project: %#v, %v", project, err)
 	}
+	return activeProject
+}
 
+func exerciseTimeTrackingTagLifecycle(t *testing.T, store *Store) {
+	t.Helper()
 	tag, err := store.CreateTag("  Billable  ")
 	if err != nil || tag.Name != "Billable" || tag.Revision != 1 {
 		t.Fatalf("unexpected created tag: %#v, %v", tag, err)
@@ -66,7 +77,10 @@ func TestTimeTrackingProjectAndTagCRUD(t *testing.T) {
 	if _, err := store.RestoreTag(tag.ID); err != nil {
 		t.Fatal(err)
 	}
+}
 
+func assertTimeTrackingLabelsPersist(t *testing.T, store *Store, root string, activeProject TimeProject) {
+	t.Helper()
 	catalog, err := store.GetTimeTrackingCatalog()
 	if err != nil {
 		t.Fatal(err)

@@ -17,6 +17,19 @@ import (
 	"cipherleaf/internal/secure"
 )
 
+type objectDocumentExpectedObject struct {
+	Tag, Text, SourcePrefix, Language string
+	AttachmentID, AttachmentKind      string
+	Tags                              []string
+	Indent, ContentIndent             int
+	Checked, Closed                   *bool
+}
+
+type objectDocumentFixture struct {
+	Name, Markdown, CanonicalMarkdown string
+	Objects                           []objectDocumentExpectedObject
+}
+
 func TestVaultLifecycleStoresNoPlaintext(t *testing.T) {
 	previous := defaultKDF
 	defaultKDF.Memory = 8 * 1024
@@ -1027,39 +1040,11 @@ func TestRemoteSnapshotContainsOnlyEncryptedRepositoryLayout(t *testing.T) {
 		filepath.Join(syncDirectory, syncFoldersFile):         true,
 		filepath.Join("objects", note.ID[:2], note.ID+".enc"): true,
 	}
-	err = filepath.WalkDir(snapshot, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
-			return walkErr
-		}
-		relative, err := filepath.Rel(snapshot, path)
-		if err != nil {
-			return err
-		}
-		if !expected[relative] {
-			t.Errorf("unexpected remote snapshot file %q", relative)
-		}
-		delete(expected, relative)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, plaintext := range []string{
-			"Remote private folder",
-			"Remote private title",
-			"Remote private content",
-		} {
-			if strings.Contains(string(data), plaintext) {
-				t.Errorf("plaintext %q leaked into %s", plaintext, relative)
-			}
-		}
-		return nil
+	assertRemoteSnapshotFiles(t, snapshot, expected, []string{
+		"Remote private folder",
+		"Remote private title",
+		"Remote private content",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(expected) != 0 {
-		t.Fatalf("remote snapshot files missing: %#v", expected)
-	}
 	matches, err := store.ValidateRemoteSnapshot(snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -1095,6 +1080,39 @@ func TestRemoteSnapshotContainsOnlyEncryptedRepositoryLayout(t *testing.T) {
 	if _, err := store.ValidateRemoteSnapshot(snapshot); err == nil ||
 		!strings.Contains(err.Error(), "absent from its inventory") {
 		t.Fatalf("extra object validation error = %v", err)
+	}
+}
+
+func assertRemoteSnapshotFiles(t *testing.T, snapshot string, expected map[string]bool, plaintexts []string) {
+	t.Helper()
+	err := filepath.WalkDir(snapshot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		relative, err := filepath.Rel(snapshot, path)
+		if err != nil {
+			return err
+		}
+		if !expected[relative] {
+			t.Errorf("unexpected remote snapshot file %q", relative)
+		}
+		delete(expected, relative)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, plaintext := range plaintexts {
+			if strings.Contains(string(data), plaintext) {
+				t.Errorf("plaintext %q leaked into %s", plaintext, relative)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("remote snapshot files missing: %#v", expected)
 	}
 }
 
@@ -2376,53 +2394,47 @@ func TestDerivedMarkdownContentPreservesCodeObjects(t *testing.T) {
 }
 
 func TestObjectDocumentConformance(t *testing.T) {
-	type expectedObject struct {
-		Tag, Text, SourcePrefix, Language string
-		AttachmentID, AttachmentKind      string
-		Tags                              []string
-		Indent, ContentIndent             int
-		Checked, Closed                   *bool
-	}
-	type fixture struct {
-		Name, Markdown, CanonicalMarkdown string
-		Objects                           []expectedObject
-	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "object_document_conformance.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fixtures []fixture
+	var fixtures []objectDocumentFixture
 	if err := json.Unmarshal(data, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	for _, item := range fixtures {
 		t.Run(item.Name, func(t *testing.T) {
-			document := canonicalObjectDocumentFromMarkdown(item.Markdown)
-			if len(document.Objects) != len(item.Objects) {
-				t.Fatalf("object count = %d, want %d", len(document.Objects), len(item.Objects))
-			}
-			for index, want := range item.Objects {
-				got := document.Objects[index]
-				if got.Tag != want.Tag || got.Text != want.Text || got.SourcePrefix != want.SourcePrefix ||
-					got.Language != want.Language || got.Indent != want.Indent || got.ContentIndent != want.ContentIndent ||
-					got.AttachmentID != want.AttachmentID || got.AttachmentKind != want.AttachmentKind ||
-					(want.Tags != nil && !slices.Equal(got.Tags, want.Tags)) ||
-					!pointerEqual(got.Checked, want.Checked) || !pointerEqual(got.Closed, want.Closed) {
-					t.Fatalf("object %d = %+v, want %+v", index, got, want)
-				}
-			}
-			content, err := json.Marshal(document)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := item.CanonicalMarkdown
-			if want == "" {
-				want = item.Markdown
-			}
-			if got := derivedMarkdownContent(string(content)); got != want {
-				t.Fatalf("round trip = %q, want %q", got, want)
-			}
+			assertObjectDocumentFixture(t, item.Markdown, item.CanonicalMarkdown, item.Objects)
 		})
+	}
+}
+
+func assertObjectDocumentFixture(t *testing.T, markdown, canonicalMarkdown string, wants []objectDocumentExpectedObject) {
+	t.Helper()
+	document := canonicalObjectDocumentFromMarkdown(markdown)
+	if len(document.Objects) != len(wants) {
+		t.Fatalf("object count = %d, want %d", len(document.Objects), len(wants))
+	}
+	for index, want := range wants {
+		got := document.Objects[index]
+		if got.Tag != want.Tag || got.Text != want.Text || got.SourcePrefix != want.SourcePrefix ||
+			got.Language != want.Language || got.Indent != want.Indent || got.ContentIndent != want.ContentIndent ||
+			got.AttachmentID != want.AttachmentID || got.AttachmentKind != want.AttachmentKind ||
+			(want.Tags != nil && !slices.Equal(got.Tags, want.Tags)) ||
+			!pointerEqual(got.Checked, want.Checked) || !pointerEqual(got.Closed, want.Closed) {
+			t.Fatalf("object %d = %+v, want %+v", index, got, want)
+		}
+	}
+	content, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := canonicalMarkdown
+	if want == "" {
+		want = markdown
+	}
+	if got := derivedMarkdownContent(string(content)); got != want {
+		t.Fatalf("round trip = %q, want %q", got, want)
 	}
 }
 

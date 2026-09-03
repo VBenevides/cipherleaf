@@ -55,6 +55,25 @@ func TestTimeTrackingStorageRoundTripAndPrivacy(t *testing.T) {
 	}
 
 	bucketPath := filepath.Join(root, trackingDirectory, trackingObjectsDirectory, bucketID[:2], bucketID+".enc")
+	assertTrackingStoragePrivacy(t, root, bucketPath)
+
+	store.Lock()
+	if err := os.WriteFile(bucketPath, []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Open(root, "secret-secret-secret"); err != nil {
+		t.Fatalf("opening should load only the catalog: %v", err)
+	}
+	store.mu.Lock()
+	got, err = store.readTimeTrackingBucketLocked(bucketID)
+	store.mu.Unlock()
+	if err != nil || len(got.Entries) != 1 {
+		t.Fatalf("encrypted bucket backup was not recovered: %#v, %v", got, err)
+	}
+}
+
+func assertTrackingStoragePrivacy(t *testing.T, root, bucketPath string) {
+	t.Helper()
 	for _, path := range []string{
 		filepath.Join(root, trackingDirectory),
 		filepath.Join(root, trackingDirectory, trackingObjectsDirectory),
@@ -101,20 +120,6 @@ func TestTimeTrackingStorageRoundTripAndPrivacy(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
-	}
-
-	store.Lock()
-	if err := os.WriteFile(bucketPath, []byte("damaged"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Open(root, "secret-secret-secret"); err != nil {
-		t.Fatalf("opening should load only the catalog: %v", err)
-	}
-	store.mu.Lock()
-	got, err = store.readTimeTrackingBucketLocked(bucketID)
-	store.mu.Unlock()
-	if err != nil || len(got.Entries) != 1 {
-		t.Fatalf("encrypted bucket backup was not recovered: %#v, %v", got, err)
 	}
 }
 

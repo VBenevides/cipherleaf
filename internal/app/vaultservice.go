@@ -44,6 +44,14 @@ type syncJobResult struct {
 	err    error
 }
 
+const (
+	clipboardWayland = "wl-paste"
+	clipboardXclip   = "xclip"
+	clipboardPNG     = "image/png"
+	clipboardWebP    = "image/webp"
+	clipboardJPEG    = "image/jpeg"
+)
+
 // RememberTTL is the default duration a vault secret stays in the OS keychain
 // when the user enables "Don't ask again".
 const RememberTTL = 7 * 24 * time.Hour
@@ -147,7 +155,7 @@ func (s *VaultService) ListInstalledFonts() ([]string, error) {
 	if runtime.GOOS != "linux" {
 		return nil, nil
 	}
-	output, err := exec.Command("fc-list", "--format=%{family}\n").Output()
+	output, err := exec.Command("/usr/bin/fc-list", "--format=%{family}\n").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list installed fonts: %w", err)
 	}
@@ -771,9 +779,9 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 	}
 	var output []byte
 	var mimeType string
-	if _, err := exec.LookPath("wl-paste"); err == nil {
-		candidates := []string{"image/png", "image/webp", "image/jpeg"}
-		types, listErr := runClipboardCommand("wl-paste", "--list-types")
+	if _, err := exec.LookPath(clipboardWayland); err == nil {
+		candidates := []string{clipboardPNG, clipboardWebP, clipboardJPEG}
+		types, listErr := runClipboardCommand(clipboardWayland, "--list-types")
 		if listErr == nil {
 			mimeType = selectClipboardImageType(string(types))
 		}
@@ -782,7 +790,7 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 		}
 		for _, candidate := range candidates {
 			value, readErr := runClipboardCommand(
-				"wl-paste", "--no-newline", "--type", candidate,
+				clipboardWayland, "--no-newline", "--type", candidate,
 			)
 			if readErr == nil && len(value) > 0 {
 				output = value
@@ -792,12 +800,12 @@ func (s *VaultService) ReadClipboardImage() (string, error) {
 		}
 	}
 	if len(output) == 0 {
-		for _, candidate := range []string{"image/png", "image/webp", "image/jpeg"} {
-			if _, err := exec.LookPath("xclip"); err != nil {
+		for _, candidate := range []string{clipboardPNG, clipboardWebP, clipboardJPEG} {
+			if _, err := exec.LookPath(clipboardXclip); err != nil {
 				break
 			}
 			value, err := runClipboardCommand(
-				"xclip", "-selection", "clipboard", "-t", candidate, "-o",
+				clipboardXclip, "-selection", "clipboard", "-t", candidate, "-o",
 			)
 			if err == nil && len(value) > 0 {
 				output = value
@@ -849,7 +857,7 @@ func selectClipboardImageType(value string) string {
 	for _, item := range strings.Fields(value) {
 		available[strings.ToLower(item)] = true
 	}
-	for _, candidate := range []string{"image/png", "image/webp", "image/jpeg"} {
+	for _, candidate := range []string{clipboardPNG, clipboardWebP, clipboardJPEG} {
 		if available[candidate] {
 			return candidate
 		}
@@ -1083,75 +1091,106 @@ func (s *VaultService) syncNow() (result SyncResult, resultErr error) {
 	}()
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		result := SyncResult{Linked: true}
-		phaseStartedAt := time.Now()
-		pull, pullErr := s.sync.PullVault(context.Background(), vaultID)
-		if pullErr != nil {
-			if githubsync.IsRetryableError(pullErr) && attempt+1 < maxAttempts {
-				time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
-				continue
-			}
-			return SyncResult{}, pullErr
+		result, retry, err := s.syncAttempt(vaultID, attempt, maxAttempts, startedAt)
+		if err != nil {
+			return SyncResult{}, err
 		}
-		result.Pull = pull
-		result.Timings.PullMilliseconds = time.Since(phaseStartedAt).Milliseconds()
-		result.Branch = pull.Branch
-		result.LastCommit = pull.LastCommit
-		phaseStartedAt = time.Now()
-		if pull.UpToDate {
-			result.Merge = vault.MergeResult{UpToDate: true}
-		} else if pull.StagingPath != "" {
-			merge, mergeErr := s.store.MergeRemoteSnapshot(pull.StagingPath)
-			if pull.Temporary {
-				_ = os.RemoveAll(pull.StagingPath)
-			}
-			if mergeErr != nil {
-				result.Warning = "Pull succeeded, but the remote changes could not be merged: " + mergeErr.Error()
-				return result, nil
-			}
-			result.Merge = merge
-			if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
-				result.Warning = "Pull succeeded, but note or time-tracking conflicts must be resolved before pushing."
-				return result, nil
-			}
-		} else {
-			result.Merge = vault.MergeResult{UpToDate: true}
-		}
-		result.Timings.MergeMilliseconds = time.Since(phaseStartedAt).Milliseconds()
-		phaseStartedAt = time.Now()
-		beforePushRevision, _ := s.store.SnapshotRevision()
-		push, pushErr := s.sync.PushVault(context.Background(), vaultID, s.store)
-		if errors.Is(pushErr, githubsync.ErrRemoteAdvanced) && attempt+1 < maxAttempts {
+		if retry {
 			continue
 		}
-		if githubsync.IsRetryableError(pushErr) && attempt+1 < maxAttempts {
-			time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
-			continue
+		if result.Warning == "" {
+			s.sync.MarkSynced(vaultID)
 		}
-		if pushErr != nil {
-			result.Warning = "Pull succeeded, but the push could not be completed: " + pushErr.Error()
-			return result, nil
-		}
-		afterPushRevision, _ := s.store.SnapshotRevision()
-		if beforePushRevision != "" && afterPushRevision != beforePushRevision && attempt+1 < maxAttempts {
-			continue
-		}
-		result.Push = push
-		result.Timings.PushMilliseconds = time.Since(phaseStartedAt).Milliseconds()
-		result.Timings.TransportMilliseconds = pull.TransportMilliseconds + push.TransportMilliseconds
-		result.Timings.LocalMilliseconds = push.LocalMilliseconds + result.Timings.MergeMilliseconds
-		result.Timings.TotalMilliseconds = time.Since(startedAt).Milliseconds()
-		if push.LastCommit != "" {
-			result.LastCommit = push.LastCommit
-		}
-		result.Message = push.Message
-		if result.Merge.UpToDate && push.UpToDate {
-			result.Message = "The vault is already in sync with GitHub."
-		}
-		s.sync.MarkSynced(vaultID)
 		return result, nil
 	}
 	return SyncResult{}, errors.New("sync could not converge after the remote branch changed repeatedly")
+}
+
+func (s *VaultService) syncAttempt(vaultID string, attempt, maxAttempts int, startedAt time.Time) (SyncResult, bool, error) {
+	result := SyncResult{Linked: true}
+	phaseStartedAt := time.Now()
+	pull, merge, warning, retry, err := s.pullAndMerge(vaultID, attempt, maxAttempts)
+	if err != nil || retry {
+		return result, retry, err
+	}
+	result.Pull = pull
+	result.Merge = merge
+	result.Timings.PullMilliseconds = time.Since(phaseStartedAt).Milliseconds()
+	result.Branch = pull.Branch
+	result.LastCommit = pull.LastCommit
+	phaseStartedAt = time.Now()
+	if warning != "" {
+		result.Warning = warning
+		return result, false, nil
+	}
+	result.Timings.MergeMilliseconds = time.Since(phaseStartedAt).Milliseconds()
+	phaseStartedAt = time.Now()
+	push, warning, retry := s.pushVault(vaultID, attempt, maxAttempts)
+	if retry {
+		return result, true, nil
+	}
+	if warning != "" {
+		result.Warning = warning
+		return result, false, nil
+	}
+	result.Push = push
+	result.Timings.PushMilliseconds = time.Since(phaseStartedAt).Milliseconds()
+	result.Timings.TransportMilliseconds = pull.TransportMilliseconds + push.TransportMilliseconds
+	result.Timings.LocalMilliseconds = push.LocalMilliseconds + result.Timings.MergeMilliseconds
+	result.Timings.TotalMilliseconds = time.Since(startedAt).Milliseconds()
+	if push.LastCommit != "" {
+		result.LastCommit = push.LastCommit
+	}
+	result.Message = push.Message
+	if result.Merge.UpToDate && push.UpToDate {
+		result.Message = "The vault is already in sync with GitHub."
+	}
+	return result, false, nil
+}
+
+func (s *VaultService) pullAndMerge(vaultID string, attempt, maxAttempts int) (githubsync.PullResult, vault.MergeResult, string, bool, error) {
+	pull, err := s.sync.PullVault(context.Background(), vaultID)
+	if err != nil {
+		if githubsync.IsRetryableError(err) && attempt+1 < maxAttempts {
+			time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+			return githubsync.PullResult{}, vault.MergeResult{}, "", true, nil
+		}
+		return githubsync.PullResult{}, vault.MergeResult{}, "", false, err
+	}
+	if pull.UpToDate || pull.StagingPath == "" {
+		return pull, vault.MergeResult{UpToDate: true}, "", false, nil
+	}
+	merge, err := s.store.MergeRemoteSnapshot(pull.StagingPath)
+	if pull.Temporary {
+		_ = os.RemoveAll(pull.StagingPath)
+	}
+	if err != nil {
+		return pull, vault.MergeResult{}, "Pull succeeded, but the remote changes could not be merged: " + err.Error(), false, nil
+	}
+	if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
+		return pull, merge, "Pull succeeded, but note or time-tracking conflicts must be resolved before pushing.", false, nil
+	}
+	return pull, merge, "", false, nil
+}
+
+func (s *VaultService) pushVault(vaultID string, attempt, maxAttempts int) (githubsync.PushResult, string, bool) {
+	beforeRevision, _ := s.store.SnapshotRevision()
+	push, err := s.sync.PushVault(context.Background(), vaultID, s.store)
+	if errors.Is(err, githubsync.ErrRemoteAdvanced) && attempt+1 < maxAttempts {
+		return githubsync.PushResult{}, "", true
+	}
+	if githubsync.IsRetryableError(err) && attempt+1 < maxAttempts {
+		time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+		return githubsync.PushResult{}, "", true
+	}
+	if err != nil {
+		return push, "Pull succeeded, but the push could not be completed: " + err.Error(), false
+	}
+	afterRevision, _ := s.store.SnapshotRevision()
+	if beforeRevision != "" && afterRevision != beforeRevision && attempt+1 < maxAttempts {
+		return githubsync.PushResult{}, "", true
+	}
+	return push, "", false
 }
 
 func gitDiagnostics(path string, pull githubsync.PullResult, push githubsync.PushResult) GitDiagnostics {

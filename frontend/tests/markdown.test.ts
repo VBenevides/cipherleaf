@@ -59,6 +59,11 @@ test("normalizes ASCII left arrows in prose", () => {
   assert.equal(normalizeArrowText("left <- center -> right"), "left ← center → right");
 });
 
+test("preserves HTML comment terminators", () => {
+  const marker = "<!-- cipherleaf-board:board-1: -->";
+  assert.equal(normalizeArrowText(marker), marker);
+});
+
 test("leaves arrows inside fenced code unchanged", () => {
   const markdown = "```ts\nconst result = first -> second <- third;\n```\n\nafter -> code <- here";
   assert.equal(

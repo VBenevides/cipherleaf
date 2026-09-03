@@ -48,7 +48,7 @@ function GraphNoteIcon() {
   return <path d="M-4-7h5l4 4v10H-5V-7ZM1-7v4h4M-2 1h4M-2 4h4" />;
 }
 
-function EmptyGraph({ mode }: { mode: "links" | "folders" }) {
+function EmptyGraph({ mode }: { readonly mode: "links" | "folders" }) {
   return (
     <div className="graph-empty-state">
       <p>{mode === "links" ? "Create notes and connect them with [[wikilinks]] to see their relationships." : "Create a folder to see the vault hierarchy."}</p>
@@ -56,7 +56,7 @@ function EmptyGraph({ mode }: { mode: "links" | "folders" }) {
   );
 }
 
-function RelationshipGraph({ notes, zoom, onSelectNote }: { notes: NoteSummary[]; zoom: number; onSelectNote: (id: string) => void }) {
+function RelationshipGraph({ notes, zoom, onSelectNote }: { readonly notes: NoteSummary[]; readonly zoom: number; readonly onSelectNote: (id: string) => void }) {
   const width = 900;
   const height = 620;
   const centerX = width / 2;
@@ -102,16 +102,91 @@ function RelationshipGraph({ notes, zoom, onSelectNote }: { notes: NoteSummary[]
   );
 }
 
+function GraphContent({
+  mode,
+  notes,
+  zoom,
+  nodes,
+  edges,
+  width,
+  height,
+  onSelectNote,
+  onActivate,
+}: {
+  readonly mode: "links" | "folders";
+  readonly notes: NoteSummary[];
+  readonly zoom: number;
+  readonly nodes: GraphNode[];
+  readonly edges: GraphEdge[];
+  readonly width: number;
+  readonly height: number;
+  readonly onSelectNote: (id: string) => void;
+  readonly onActivate: (node: GraphNode) => void;
+}) {
+  if (mode === "links") return <RelationshipGraph notes={notes} zoom={zoom} onSelectNote={onSelectNote} />;
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width={width * zoom} height={height * zoom} role="img" aria-label="Folder and note hierarchy">
+      <g className="graph-edges">
+        {edges.map(({ from, to }) => (
+          <path
+            key={`${from.kind}-${from.id}-${to.kind}-${to.id}`}
+            d={`M ${from.x + (from.kind === "folder" ? 75 : 20)} ${from.y} C ${from.x + 112} ${from.y}, ${to.x - 54} ${to.y}, ${to.x - (to.kind === "folder" ? 75 : 20)} ${to.y}`}
+            stroke={nodeFill(from)}
+          />
+        ))}
+      </g>
+      {nodes.map((node) => {
+        const fill = nodeFill(node);
+        const textFill = node.depth >= 3 ? "var(--ink)" : "var(--on-accent)";
+        return (
+          <g
+            key={`${node.kind}-${node.id}`}
+            className={`graph-node graph-node--${node.kind}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open ${node.kind} ${node.label}`}
+            onClick={() => onActivate(node)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onActivate(node);
+              }
+            }}
+          >
+            {node.kind === "folder" ? (
+              <>
+                <rect x={node.x - 75} y={node.y - 22} width="150" height="44" rx="11" fill={fill} />
+                <g transform={`translate(${node.x - 55} ${node.y})`} stroke={textFill} fill="none" strokeWidth="1.7">
+                  <GraphFolderIcon />
+                </g>
+                <text x={node.x - 36} y={node.y + 4} fill={textFill}>{node.label}</text>
+              </>
+            ) : (
+              <>
+                <circle cx={node.x} cy={node.y} r="21" fill={fill} />
+                <g transform={`translate(${node.x} ${node.y})`} stroke={textFill} fill="none" strokeWidth="1.5">
+                  <GraphNoteIcon />
+                </g>
+                <text x={node.x + 30} y={node.y + 4} fill="currentColor">{node.label}</text>
+              </>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export function GraphView({
   folders,
   notes,
   onSelectFolder,
   onSelectNote,
 }: {
-  folders: Folder[];
-  notes: NoteSummary[];
-  onSelectFolder: (folder: Folder) => void;
-  onSelectNote: (noteID: string) => void;
+  readonly folders: Folder[];
+  readonly notes: NoteSummary[];
+  readonly onSelectFolder: (folder: Folder) => void;
+  readonly onSelectNote: (noteID: string) => void;
 }) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [mode, setMode] = useState<"links" | "folders">("links");
@@ -204,55 +279,7 @@ export function GraphView({
         <button type="button" role="tab" aria-selected={mode === "folders"} className={mode === "folders" ? "active" : ""} onClick={() => setMode("folders")}>Folders</button>
       </nav>
       <div className="graph-canvas" role="tabpanel">
-        {mode === "links" ? (!graphModeIsEmpty(mode, notes.length, nodes.length) ? <RelationshipGraph notes={notes} zoom={zoom} onSelectNote={onSelectNote} /> : <EmptyGraph mode={mode} />) : graphModeIsEmpty(mode, notes.length, nodes.length) ? <EmptyGraph mode={mode} /> : <svg viewBox={`0 0 ${width} ${height}`} width={width * zoom} height={height * zoom} role="img" aria-label="Folder and note hierarchy">
-          <g className="graph-edges">
-            {edges.map(({ from, to }) => (
-              <path
-                key={`${from.kind}-${from.id}-${to.kind}-${to.id}`}
-                d={`M ${from.x + (from.kind === "folder" ? 75 : 20)} ${from.y} C ${from.x + 112} ${from.y}, ${to.x - 54} ${to.y}, ${to.x - (to.kind === "folder" ? 75 : 20)} ${to.y}`}
-                stroke={nodeFill(from)}
-              />
-            ))}
-          </g>
-          {nodes.map((node) => {
-            const fill = nodeFill(node);
-            const textFill = node.depth >= 3 ? "var(--ink)" : "var(--on-accent)";
-            return (
-              <g
-                key={`${node.kind}-${node.id}`}
-                className={`graph-node graph-node--${node.kind}`}
-                role="button"
-                tabIndex={0}
-                aria-label={`Open ${node.kind} ${node.label}`}
-                onClick={() => activate(node)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    activate(node);
-                  }
-                }}
-              >
-                {node.kind === "folder" ? (
-                  <>
-                    <rect x={node.x - 75} y={node.y - 22} width="150" height="44" rx="11" fill={fill} />
-                    <g transform={`translate(${node.x - 55} ${node.y})`} stroke={textFill} fill="none" strokeWidth="1.7">
-                      <GraphFolderIcon />
-                    </g>
-                    <text x={node.x - 36} y={node.y + 4} fill={textFill}>{node.label}</text>
-                  </>
-                ) : (
-                  <>
-                    <circle cx={node.x} cy={node.y} r="21" fill={fill} />
-                    <g transform={`translate(${node.x} ${node.y})`} stroke={textFill} fill="none" strokeWidth="1.5">
-                      <GraphNoteIcon />
-                    </g>
-                    <text x={node.x + 30} y={node.y + 4} fill="currentColor">{node.label}</text>
-                  </>
-                )}
-              </g>
-            );
-          })}
-        </svg>}
+        {graphModeIsEmpty(mode, notes.length, nodes.length) ? <EmptyGraph mode={mode} /> : <GraphContent mode={mode} notes={notes} zoom={zoom} nodes={nodes} edges={edges} width={width} height={height} onSelectNote={onSelectNote} onActivate={activate} />}
       </div>
     </section>
   );

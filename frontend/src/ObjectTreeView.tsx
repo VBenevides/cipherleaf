@@ -20,19 +20,15 @@ const editableObjectTypes: Array<{ value: EditableObjectTag; label: string }> = 
 ];
 
 function objectTypeLabel(tag: ObjectLine["tag"]): string {
-  return tag === "bulletpoint"
-    ? "Bullet"
-    : tag === "checkbox"
-      ? "Checklist"
-      : tag === "section"
-        ? "Section"
-        : tag === "code"
-          ? "Code block"
-          : tag === "image"
-            ? "Image"
-            : tag === "attachment"
-              ? "Attachment"
-              : "Text";
+  switch (tag) {
+    case "bulletpoint": return "Bullet";
+    case "checkbox": return "Checklist";
+    case "section": return "Section";
+    case "code": return "Code block";
+    case "image": return "Image";
+    case "attachment": return "Attachment";
+    default: return "Text";
+  }
 }
 
 function editableTypeFor(node: ObjectLine): EditableObjectTag | null {
@@ -60,13 +56,12 @@ function renderObjectBlock(node: ObjectLine, type: EditableObjectTag, text: stri
     ].join("\n");
   }
 
-  const marker = type === "section"
-    ? `> ${node.checked === undefined ? "" : `[${node.checked ? "x" : " "}] `}`
-    : type === "checkbox"
-      ? `- [${node.checked ? "x" : " "}] `
-      : type === "bulletpoint"
-        ? "- "
-        : "";
+  let sectionCheckmark = "";
+  if (node.checked !== undefined) sectionCheckmark = `[${node.checked ? "x" : " "}] `;
+  let marker = "";
+  if (type === "section") marker = `> ${sectionCheckmark}`;
+  else if (type === "checkbox") marker = `- [${node.checked ? "x" : " "}] `;
+  else if (type === "bulletpoint") marker = "- ";
   return [
     `${indent}${marker}${lines[0] ?? ""}`,
     ...lines.slice(1).map((line) => line ? `${continuationIndent}${line}` : ""),
@@ -74,8 +69,8 @@ function renderObjectBlock(node: ObjectLine, type: EditableObjectTag, text: stri
 }
 
 type Props = {
-  value: string;
-  onChange: (value: string) => void;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
 };
 
 function dropModeForPoint(target: HTMLElement, clientY: number): ObjectDropMode {
@@ -109,16 +104,16 @@ function ObjectTreeNode({
   onDelete,
   onToggleCheck,
 }: {
-  node: ObjectLine;
-  depth: number;
-  draggedId: string | null;
-  dropTarget: { id: string; mode: ObjectDropMode } | null;
-  onPointerDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
-  onEdit: (node: ObjectLine, text: string) => void;
-  onChangeType: (node: ObjectLine, type: EditableObjectTag) => void;
-  onAddChild: (node: ObjectLine) => void;
-  onDelete: (node: ObjectLine) => void;
-  onToggleCheck: (node: ObjectLine, checked: boolean) => void;
+  readonly node: ObjectLine;
+  readonly depth: number;
+  readonly draggedId: string | null;
+  readonly dropTarget: { id: string; mode: ObjectDropMode } | null;
+  readonly onPointerDragStart: (event: PointerEvent<HTMLElement>, id: string) => void;
+  readonly onEdit: (node: ObjectLine, text: string) => void;
+  readonly onChangeType: (node: ObjectLine, type: EditableObjectTag) => void;
+  readonly onAddChild: (node: ObjectLine) => void;
+  readonly onDelete: (node: ObjectLine) => void;
+  readonly onToggleCheck: (node: ObjectLine, checked: boolean) => void;
 }) {
   const currentDrop = dropTarget?.id === node.id ? dropTarget.mode : null;
   const [editing, setEditing] = useState(false);

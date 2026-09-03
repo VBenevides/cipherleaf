@@ -12,9 +12,10 @@ export function normalizeArrowText(text: string): string {
   return text.split(/(\r\n|\n|\r)/).map((part) => {
     if (part === "\n" || part === "\r" || part === "\r\n") return part;
 
-    const fence = part.match(/^\s{0,3}(`{3,}|~{3,})/);
+    const fence = /^\s{0,3}(`{3,}|~{3,})/.exec(part);
     if (activeFence) {
-      if (fence && fence[1][0] === activeFence && fence[1].length >= activeFenceLength) {
+      const fenceValue = fence?.[1];
+      if (fenceValue?.startsWith(activeFence) && fenceValue.length >= activeFenceLength) {
         activeFence = null;
       }
       return part;
@@ -29,23 +30,34 @@ export function normalizeArrowText(text: string): string {
     let cursor = 0;
     for (const link of part.matchAll(/\]\((<[^>\r\n]*>|[^)\r\n]*)\)/g)) {
       const start = link.index ?? 0;
-      result += part.slice(cursor, start).replace(/->/g, "→").replace(/<-/g, "←");
+      result += part.slice(cursor, start).replace(/(^|[^-])->/g, "$1→").replace(/<-/g, "←");
       result += link[0];
       cursor = start + link[0].length;
     }
-    return result + part.slice(cursor).replace(/->/g, "→").replace(/<-/g, "←");
+    return result + part.slice(cursor).replace(/(^|[^-])->/g, "$1→").replace(/<-/g, "←");
   }).join("");
 }
 
 export function markdownCitations(text: string) {
-  return [...text.matchAll(/(?<!!)\[([^\]\n]+)\]\(([^)\s]+)\)/gi)]
-    .filter((match) => isMarkdownLinkTarget(match[2]))
-    .map((match) => ({
-      label: match[1],
-      url: match[2],
-      index: match.index,
-      length: match[0].length,
-    }));
+  const citations: { label: string; url: string; index: number; length: number }[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf("[", cursor);
+    if (start < 0) break;
+    const separator = text.indexOf("](", start + 1);
+    if (separator < 0) { cursor = start + 1; continue; }
+    const end = text.indexOf(")", separator + 2);
+    if (end < 0) { cursor = start + 1; continue; }
+    const label = text.slice(start + 1, separator);
+    const url = text.slice(separator + 2, end);
+    if (start === 0 || text[start - 1] !== "!") {
+      if (label && !label.includes("\n") && !url.includes("\n") && isMarkdownLinkTarget(url)) {
+        citations.push({ label, url, index: start, length: end + 1 - start });
+      }
+    }
+    cursor = end + 1;
+  }
+  return citations;
 }
 
 export function markdownCitation(label: string, url: string): string | null {
@@ -58,7 +70,7 @@ export function markdownCitation(label: string, url: string): string | null {
 function isMarkdownLinkTarget(link: string): boolean {
   if (!link || /[\s)]/.test(link)) return false;
   if (/^[a-z]:[\\/]/i.test(link)) return true;
-  const protocol = link.match(/^([a-z][a-z\d+.-]*):/i)?.[1].toLowerCase();
+  const protocol = /^([a-z][a-z\d+.-]*):/i.exec(link)?.[1].toLowerCase();
   return !protocol || protocol === "http" || protocol === "https" || protocol === "file";
 }
 
@@ -72,9 +84,7 @@ export function isTableDivider(line: string): boolean {
 }
 
 export function parseAttachmentMarkdown(line: string) {
-  const match = line.match(
-    /^\s*!\[([^\]]*)\]\(attachment:([a-f0-9]{32})(?:#width=(\d{2,4})(?:&align=(left|center|right))?)?\)\s*$/,
-  );
+  const match = /^\s*!\[([^\]]*)\]\(attachment:([a-f0-9]{32})(?:#width=(\d{2,4})(?:&align=(left|center|right))?)?\)\s*$/.exec(line);
   if (!match) return null;
   return {
     alt: match[1],
@@ -85,9 +95,7 @@ export function parseAttachmentMarkdown(line: string) {
 }
 
 export function parseAttachmentReferenceMarkdown(line: string): { id: string; kind: AttachmentKind } | null {
-  const match = line.match(
-    /^\s*(!?)\[[^\]]*\]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$/,
-  );
+  const match = /^\s*(!?)\[[^\]]*\]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$/.exec(line);
   return match ? { id: match[2], kind: match[1] ? "image" : "file" } : null;
 }
 
@@ -120,6 +128,6 @@ export function insertAttachmentMarkdown(
 }
 
 export function embeddedClipboardImage(value: string): string | null {
-  return value.match(/data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+/)?.[0]
+  return /data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+/.exec(value)?.[0]
     .replace(/\s/g, "") ?? null;
 }

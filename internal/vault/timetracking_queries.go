@@ -27,54 +27,22 @@ func (s *Store) listTimeEntriesLocked(start, end time.Time, filters TimeEntryFil
 	if err != nil {
 		return TimeEntryRangeResult{}, err
 	}
-	entries := make(map[string]TimeEntry)
-	for _, bucket := range buckets {
-		for _, entry := range bucket.Entries {
-			if !timeEntryMatchesFilters(entry, filters, *s.timeTrackingCatalog) {
-				continue
-			}
-			if current, found := entries[entry.ID]; !found || entry.Revision > current.Revision ||
-				(entry.Revision == current.Revision && entry.ModifiedAt > current.ModifiedAt) {
-				entries[entry.ID] = cloneTimeEntry(entry)
-			}
-		}
-	}
+	entries := latestFilteredTimeEntries(buckets, filters, *s.timeTrackingCatalog)
 	result := emptyTimeEntryRangeResult()
 	dayDurations := make(map[string]time.Duration)
 	for _, entry := range entries {
-		entryStart, err := time.Parse(time.RFC3339Nano, entry.StartedAtUTC)
+		item, clippedStart, clippedEnd, ok, err := timeEntryRangeItem(entry, start, end, now)
 		if err != nil {
-			return TimeEntryRangeResult{}, errors.New("stored time entry has an invalid start")
+			return TimeEntryRangeResult{}, err
 		}
-		entryEnd := now
-		if entry.EndedAtUTC != "" {
-			entryEnd, err = time.Parse(time.RFC3339Nano, entry.EndedAtUTC)
-			if err != nil {
-				return TimeEntryRangeResult{}, errors.New("stored time entry has an invalid end")
-			}
-		}
-		clippedStart := maxTime(entryStart, start)
-		clippedEnd := minTime(entryEnd, end)
-		if !clippedEnd.After(clippedStart) {
+		if !ok {
 			continue
 		}
-		duration := clippedEnd.Sub(clippedStart)
-		result.Entries = append(result.Entries, TimeEntryRangeItem{
-			Entry: entry, StartedAtUTC: clippedStart.Format(time.RFC3339Nano),
-			EndedAtUTC: clippedEnd.Format(time.RFC3339Nano), TotalSeconds: int64(duration / time.Second),
-		})
-		result.TotalSeconds += int64(duration / time.Second)
+		result.Entries = append(result.Entries, item)
+		result.TotalSeconds += item.TotalSeconds
 		addTimeEntryLocalDays(dayDurations, clippedStart, clippedEnd, location)
 	}
-	slices.SortFunc(result.Entries, func(left, right TimeEntryRangeItem) int {
-		if left.StartedAtUTC < right.StartedAtUTC {
-			return -1
-		}
-		if left.StartedAtUTC > right.StartedAtUTC {
-			return 1
-		}
-		return stringsCompare(left.Entry.ID, right.Entry.ID)
-	})
+	slices.SortFunc(result.Entries, compareTimeEntryRangeItems)
 	dates := make([]string, 0, len(dayDurations))
 	for date := range dayDurations {
 		dates = append(dates, date)
@@ -84,6 +52,57 @@ func (s *Store) listTimeEntriesLocked(start, end time.Time, filters TimeEntryFil
 		result.Days = append(result.Days, TimeDashboardDay{LocalDate: date, TotalSeconds: int64(dayDurations[date] / time.Second)})
 	}
 	return result, nil
+}
+
+func latestFilteredTimeEntries(buckets []timeTrackingBucket, filters TimeEntryFilters, catalog timeTrackingCatalog) map[string]TimeEntry {
+	entries := make(map[string]TimeEntry)
+	for _, bucket := range buckets {
+		for _, entry := range bucket.Entries {
+			if !timeEntryMatchesFilters(entry, filters, catalog) {
+				continue
+			}
+			current, found := entries[entry.ID]
+			if !found || entry.Revision > current.Revision ||
+				(entry.Revision == current.Revision && entry.ModifiedAt > current.ModifiedAt) {
+				entries[entry.ID] = cloneTimeEntry(entry)
+			}
+		}
+	}
+	return entries
+}
+
+func timeEntryRangeItem(entry TimeEntry, start, end, now time.Time) (TimeEntryRangeItem, time.Time, time.Time, bool, error) {
+	entryStart, err := time.Parse(time.RFC3339Nano, entry.StartedAtUTC)
+	if err != nil {
+		return TimeEntryRangeItem{}, time.Time{}, time.Time{}, false, errors.New("stored time entry has an invalid start")
+	}
+	entryEnd := now
+	if entry.EndedAtUTC != "" {
+		entryEnd, err = time.Parse(time.RFC3339Nano, entry.EndedAtUTC)
+		if err != nil {
+			return TimeEntryRangeItem{}, time.Time{}, time.Time{}, false, errors.New("stored time entry has an invalid end")
+		}
+	}
+	clippedStart := maxTime(entryStart, start)
+	clippedEnd := minTime(entryEnd, end)
+	if !clippedEnd.After(clippedStart) {
+		return TimeEntryRangeItem{}, time.Time{}, time.Time{}, false, nil
+	}
+	duration := clippedEnd.Sub(clippedStart)
+	return TimeEntryRangeItem{
+		Entry: entry, StartedAtUTC: clippedStart.Format(time.RFC3339Nano),
+		EndedAtUTC: clippedEnd.Format(time.RFC3339Nano), TotalSeconds: int64(duration / time.Second),
+	}, clippedStart, clippedEnd, true, nil
+}
+
+func compareTimeEntryRangeItems(left, right TimeEntryRangeItem) int {
+	if left.StartedAtUTC < right.StartedAtUTC {
+		return -1
+	}
+	if left.StartedAtUTC > right.StartedAtUTC {
+		return 1
+	}
+	return stringsCompare(left.Entry.ID, right.Entry.ID)
 }
 
 func parseTimeTrackingRange(startUTC, endUTC string) (time.Time, time.Time, error) {

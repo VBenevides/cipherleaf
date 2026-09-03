@@ -13,13 +13,12 @@ test("time tracking navigation and dialogs expose keyboard semantics", () => {
   assert.match(view, /aria-selected=\{tab === item\}/);
   assert.match(view, /<ThemedDatePicker ariaLabel="Started date"/);
   assert.match(view, /aria-modal="true"/);
-  assert.match(view, /tabIndex=\{0\}/);
 });
 
 test("dashboard chart and global timer have accessible descriptions", () => {
   assert.match(view, /role="img" aria-label="Tracked time by local calendar day"/);
   assert.match(app, /className="global-timer-indicator"[^>]+aria-label=/);
-  assert.match(app, /closest\("\[role=dialog\]"\)/);
+  assert.match(app, /closest\("dialog, \[role=dialog\]"\)/);
 });
 
 test("global timer sits left of save status in one indicator group", () => {
@@ -34,10 +33,15 @@ test("tracking conflicts require an explicit accessible dialog choice", () => {
   assert.match(app, />Use remote</);
 });
 
-test("timer shortcuts open opaque modals without changing workspace views", () => {
-  assert.match(app, /event\.preventDefault\(\); openStartTimerDialog\(\); return;/);
-  assert.match(app, /setTimerDialog\("finish"\); return;/);
-  assert.match(app, /className="vault-modal timer-modal" role="dialog" aria-modal="true"/);
+test("timer and calendar modals use native dialog surfaces", () => {
+  assert.match(app, /\["shift\+t", \(\) => openStartTimerDialog\(\)\]/);
+  assert.match(app, /\["shift\+e", \(\) => \{ setTimerError\(""\); setTimerDialog\("finish"\); \}\]/);
+  assert.match(app, /<dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title">/);
+  assert.doesNotMatch(app, /timer-modal-backdrop"[^>]*onMouseDown=/);
+  assert.match(app, /<div className="vault-modal timer-modal">/);
+  assert.match(app, /<dialog open aria-modal="true" aria-labelledby="calendar-title"\n          className="modal-backdrop calendar-backdrop"/);
+  assert.doesNotMatch(app, /calendar-backdrop"[^>]*onMouseDown=/);
+  assert.match(app, /<div className="vault-modal calendar-modal">/);
   assert.match(style, /\.timer-modal \{ background: var\(--modal-surface\); \}/);
 });
 
@@ -47,7 +51,7 @@ test("all modal surfaces and controls use opaque theme colors", () => {
 });
 
 test("week days are keyboard-selectable and filter the activity list", () => {
-  assert.match(view, /role="button" tabIndex=\{0\} aria-pressed=\{selectedWeekDay === key\}/);
+  assert.match(view, /<button type="button" key=\{key\} aria-pressed=\{selectedWeekDay === key\}/);
   assert.match(view, /selectedWeekEntries\.map/);
 });
 
@@ -62,7 +66,7 @@ test("finishing the global timer refreshes the open tracking view", () => {
 
 test("task tag choices use a reusable multi-select dropdown", () => {
   assert.match(tagSelect, /<details className=/);
-  assert.match(tagSelect, /role="group" aria-label=\{label\}/);
+  assert.match(tagSelect, /<fieldset className="tag-multi-select-options" aria-label=\{label\}/);
   assert.doesNotMatch(view, /<legend>Tags<\/legend>/);
   assert.match(app, /<TagMultiSelect tags=/);
 });

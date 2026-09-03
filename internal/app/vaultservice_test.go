@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"cipherleaf/internal/githubsync"
+	appsession "cipherleaf/internal/session"
 	"cipherleaf/internal/vault"
 )
 
@@ -140,4 +142,78 @@ func TestSelectClipboardImageType(t *testing.T) {
 	if got := selectClipboardImageType("text/plain\ntext/html\n"); got != "" {
 		t.Fatalf("selected non-image MIME type %q", got)
 	}
+}
+
+func TestVaultServiceLifecycleAndDiagnostics(t *testing.T) {
+	service := NewVaultService()
+	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	parent := t.TempDir()
+	secret := "app lifecycle secret"
+	session, err := service.CreateVault(parent, "Lifecycle", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last, err := service.GetLastVaultPath(); err != nil || last != session.Path {
+		t.Fatalf("last vault = %q, %v", last, err)
+	}
+	if err := service.RememberTheme("dark"); err != nil {
+		t.Fatal(err)
+	}
+	if last, err := service.GetLastSession(); err != nil || last.Theme != "dark" {
+		t.Fatalf("last session = %#v, %v", last, err)
+	}
+	if _, err := service.SaveNote(mustCreateServiceNote(t, service).ID, "Lifecycle note", "content"); err != nil {
+		t.Fatal(err)
+	}
+	service.LockVault()
+	if _, err := service.OpenVault(session.Path, secret); err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := service.RenameVault("Renamed")
+	if err != nil || !renamed.Locked {
+		t.Fatalf("renamed session = %#v, %v", renamed, err)
+	}
+	if _, err := service.OpenVault(renamed.Path, secret); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetVaultStatistics(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetApplicationStatistics(); err != nil {
+		t.Fatal(err)
+	}
+	validSecret, err := service.GenerateVaultSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CopyVaultSecret(validSecret); err == nil {
+		t.Fatal("copying without an application unexpectedly succeeded")
+	}
+	if _, err := service.CloneGitHubVault(parent, "clone", "", "", "main", secret, true); err == nil {
+		t.Fatal("cloning while unlocked unexpectedly succeeded")
+	}
+	if _, err := service.syncNow(); err == nil {
+		t.Fatal("sync without a GitHub link unexpectedly succeeded")
+	}
+	if err := service.OpenGitTerminal(); err == nil {
+		t.Fatal("opening an unavailable Git checkout unexpectedly succeeded")
+	}
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "data"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := gitDiagnostics(root, githubsync.PullResult{}, githubsync.PushResult{TransportPerformed: true})
+	if diagnostics.TransportOperations != 2 || diagnostics.RepositoryFilesBytes != 4 || diagnostics.RepositoryPath != root {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+}
+
+func mustCreateServiceNote(t *testing.T, service *VaultService) vault.Note {
+	t.Helper()
+	note, err := service.CreateNote("Lifecycle note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return note
 }

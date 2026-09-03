@@ -37,9 +37,12 @@ function uuidV4(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
+  if (typeof crypto === "undefined") {
+    throw new TypeError("Secure random UUID generation is unavailable");
+  }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
-    const random = (Math.random() * 16) | 0;
-    const value = char === "x" ? random : (random & 0x3) | 0x8;
+    const random = Math.trunc(crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000 * 16);
+    const value = char === "x" ? random : (random % 4) + 0x8;
     return value.toString(16);
   });
 }
@@ -135,6 +138,8 @@ function rollFirstDatedSection(markdown: string, now = new Date()): string | nul
 }
 
 export const SNIPPETS: Snippet[] = [
+  { trigger: "card", description: "Create a card reference", expand: () => "/card" },
+  { trigger: "board", description: "Insert a four-column board", expand: () => "/board" },
   { trigger: "today", description: "Insert the current date (local timezone)", expand: localDate },
   { trigger: "date", description: "Insert the current date (local timezone)", expand: localDate },
   { trigger: "now", description: "Insert the current date and time (local timezone)", expand: localDateTime },

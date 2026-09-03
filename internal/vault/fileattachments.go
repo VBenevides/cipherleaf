@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+const fileAttachmentObjectType = "file-attachment"
+
 func encodeFileAttachment(info AttachmentInfo, data []byte) ([]byte, error) {
 	metadata, err := json.Marshal(info)
 	if err != nil {
@@ -86,7 +88,7 @@ func (s *Store) ImportFileAttachment(noteID, source string) (AttachmentInfo, err
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return AttachmentInfo{}, err
 	}
-	if err := s.writeEnvelopeLocked(path, "file-attachment", sharedAttachmentAAD(id), payload); err != nil {
+	if err := s.writeEnvelopeLocked(path, fileAttachmentObjectType, sharedAttachmentAAD(id), payload); err != nil {
 		return AttachmentInfo{}, err
 	}
 	s.trackPendingAttachmentLocked(noteID, id)
@@ -116,7 +118,7 @@ func (s *Store) FileAttachment(noteID, id string) (AttachmentInfo, []byte, error
 	if !allowed {
 		return AttachmentInfo{}, nil, errors.New("attachment does not belong to this note")
 	}
-	payload, err := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), "file-attachment", sharedAttachmentAAD(id))
+	payload, err := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), fileAttachmentObjectType, sharedAttachmentAAD(id))
 	if err != nil {
 		return AttachmentInfo{}, nil, fmt.Errorf("decrypt file attachment: %w", err)
 	}
@@ -138,7 +140,7 @@ func (s *Store) ListFileAttachments(noteID string) ([]AttachmentInfo, error) {
 	}
 	result := make([]AttachmentInfo, 0)
 	for _, id := range s.manifest.Notes[index].AttachmentIDs {
-		payload, err := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), "file-attachment", sharedAttachmentAAD(id))
+		payload, err := s.readEnvelopeLocked(s.sharedAttachmentPathLocked(id), fileAttachmentObjectType, sharedAttachmentAAD(id))
 		if err != nil {
 			continue
 		}
