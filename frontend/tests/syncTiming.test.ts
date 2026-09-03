@@ -62,3 +62,34 @@ test("formats Git connection and repository diagnostics", () => {
     "Sync elapsed (wall): 7.00 ms (0.007 s)",
   ]);
 });
+
+test("formats sync timing without Git diagnostics and with disabled optimizations", () => {
+  assert.equal(syncTimingMessages({
+    pullMilliseconds: 0,
+    mergeMilliseconds: 0,
+    pushMilliseconds: 0,
+    transportMilliseconds: 0,
+    localMilliseconds: 0,
+    totalMilliseconds: 0,
+  }, 0).length, 7);
+  assert.match(syncTimingMessages({
+    pullMilliseconds: 0,
+    mergeMilliseconds: 0,
+    pushMilliseconds: 0,
+    transportMilliseconds: 0,
+    localMilliseconds: 0,
+    totalMilliseconds: 0,
+  }, 0, {
+    sshConnectionReuse: false,
+    sshConnectionPersistSeconds: 0,
+    transportOperations: 0,
+    gitBytes: 0,
+    repositoryFilesBytes: 0,
+    platform: "test",
+    architecture: "test",
+    gitVersion: "git",
+    openSshVersion: "ssh",
+    usedPrefetch: false,
+    repositoryPath: "/repo",
+  })[9], /disabled/);
+});

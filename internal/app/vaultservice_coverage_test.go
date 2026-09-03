@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -327,6 +328,15 @@ func TestVaultServiceUtilityBranches(t *testing.T) {
 	}
 	if err := startTerminal(exec.Command("true")); err != nil {
 		t.Fatal(err)
+	}
+	if err := startTerminal(exec.Command("cipherleaf-command-does-not-exist")); err == nil {
+		t.Fatal("missing terminal command unexpectedly started")
+	}
+	if runtime.GOOS == "linux" {
+		t.Setenv("PATH", t.TempDir())
+		if err := openTerminal(t.TempDir()); err == nil {
+			t.Fatal("missing Linux terminal unexpectedly opened")
+		}
 	}
 }
 

@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { cardReference, boardMarker, type CardMetadata } from "../src/cards";
-import LiveMarkdownEditor from "../src/LiveMarkdownEditor";
+import LiveMarkdownEditor, { clipboardClaimsImage, clipboardImage, clipboardMayContainImage, imageDataURL } from "../src/LiveMarkdownEditor";
 import ObjectTreeView from "../src/ObjectTreeView";
 import SourceMarkdownEditor from "../src/SourceMarkdownEditor";
 
@@ -16,6 +16,20 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 Object.defineProperties(dom.window.Range.prototype, {
   getClientRects: { value: () => [], configurable: true },
   getBoundingClientRect: { value: () => new dom.window.DOMRect(), configurable: true },
+});
+Object.defineProperties(dom.window.HTMLElement.prototype, {
+  clientWidth: {
+    configurable: true,
+    get() { return this.classList.contains("cm-live-board-card-title") ? 100 : 0; },
+  },
+  scrollWidth: {
+    configurable: true,
+    get() {
+      return this.classList.contains("cm-live-board-card-title")
+        ? Math.max(100, (this.textContent?.length ?? 0) * 10)
+        : 0;
+    },
+  },
 });
 class ResizeObserverStub {
   observe() {}
@@ -41,6 +55,28 @@ Object.defineProperty(dom.window.navigator, "clipboard", {
   configurable: true,
   value: { writeText: async () => {}, write: async () => {}, read: async () => [] },
 });
+Object.defineProperties(dom.window.HTMLElement.prototype, {
+  setPointerCapture: { configurable: true, value: () => {} },
+  releasePointerCapture: { configurable: true, value: () => {} },
+});
+
+const clipboardImageBlob = new dom.window.Blob([new Uint8Array([65, 66])], { type: "image/png" });
+assert.equal(await imageDataURL("data:image/png;base64,AA=="), "data:image/png;base64,AA==");
+assert.match(await imageDataURL(clipboardImageBlob), /^data:image\/png;base64,/);
+await assert.rejects(imageDataURL(new dom.window.Blob(["text"], { type: "text/plain" })), /Only PNG/);
+assert.equal(clipboardImage({ clipboardData: null } as ClipboardEvent), null);
+assert.equal(clipboardImage({ clipboardData: { items: [], files: [], getData: () => "" } } as unknown as ClipboardEvent), null);
+assert.equal(clipboardImage({ clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => clipboardImageBlob }], files: [], getData: () => "" } } as unknown as ClipboardEvent), clipboardImageBlob);
+assert.equal(clipboardClaimsImage({ clipboardData: null } as ClipboardEvent), false);
+assert.equal(clipboardClaimsImage({ clipboardData: { items: [{ type: "image/png" }], types: [], getData: () => "" } } as unknown as ClipboardEvent), true);
+assert.equal(clipboardClaimsImage({ clipboardData: { items: [], types: ["Files"], getData: () => "" } } as unknown as ClipboardEvent), true);
+assert.equal(clipboardClaimsImage({ clipboardData: { items: [], types: [], getData: () => "PNG" } } as unknown as ClipboardEvent), true);
+assert.equal(clipboardMayContainImage({ clipboardData: { items: [], types: [], getData: () => "text" } } as unknown as ClipboardEvent), false);
+const userAgent = dom.window.navigator.userAgent;
+Object.defineProperty(dom.window.navigator, "userAgent", { configurable: true, value: "Linux" });
+assert.equal(clipboardMayContainImage({ clipboardData: null } as ClipboardEvent), true);
+assert.equal(clipboardMayContainImage({ clipboardData: { items: [], types: [], getData: () => "" } } as unknown as ClipboardEvent), true);
+Object.defineProperty(dom.window.navigator, "userAgent", { configurable: true, value: userAgent });
 
 const cards = new Map<string, CardMetadata>([
   ["card-1", { id: "card-1", title: "Backlog card", status: "not-started", tags: ["work"], createdAt: "2026-01-01" }],
@@ -143,15 +179,30 @@ live.body.querySelector<HTMLButtonElement>(".cm-live-link-menu button")?.click()
 
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
+assert.ok(board.querySelector(".cm-live-board-card-tags"));
+const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
+minimizeBoard.click();
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, true);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, true);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1");
+assert.equal(minimizeBoard.textContent, "Maximize");
+minimizeBoard.click();
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, false);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, false);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, false);
+assert.equal(minimizeBoard.textContent, "Minimize");
 const boardTitle = board.querySelector<HTMLInputElement>(".cm-live-board-title")!;
 boardTitle.value = "Updated board";
+boardTitle.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 boardTitle.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 const filter = board.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")!;
 filter.value = "card";
 filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.click();
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-board.querySelector<HTMLButtonElement>(".secondary-button")?.click();
+board.querySelector<HTMLButtonElement>(".cm-live-board-controls .secondary-button")?.click();
 board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
   input.value = "";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -311,6 +362,40 @@ for (const row of objectRows) {
   row.querySelector<HTMLButtonElement>("button[title='Add a child object']")?.click();
   row.querySelector<HTMLElement>("summary")?.click();
 }
+const dragEvent = (type: string, clientY: number) => {
+  const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, { pointerId: { value: 1 }, clientX: { value: 10 }, clientY: { value: clientY } });
+  return event;
+};
+const dragSource = objectRows[0].querySelector<HTMLButtonElement>(".object-tree-handle")!;
+const dragTarget = objectRows[1];
+Object.defineProperty(dragTarget, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, height: 100 }) });
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [dragTarget] });
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointermove", 10));
+document.dispatchEvent(dragEvent("pointermove", 50));
+document.dispatchEvent(dragEvent("pointermove", 90));
+document.dispatchEvent(dragEvent("pointerup", 90));
+Object.defineProperty(dragTarget, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, height: 0 }) });
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [dragTarget.querySelector(".object-tree-text")] });
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointermove", 50));
+document.dispatchEvent(dragEvent("pointerup", 50));
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [] });
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointermove", 50));
+document.dispatchEvent(dragEvent("pointerup", 50));
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointercancel", 50));
+assert.ok(objectChanges > 1);
+const attachmentObject = mount("attachment-object-host");
+await act(async () => {
+  attachmentObject.root.render(createElement(ObjectTreeView, { value: "[report.pdf](attachment:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)", onChange: () => {} }));
+  await wait();
+});
+assert.match(attachmentObject.body.textContent ?? "", /Attachment syntax/);
+await act(async () => { attachmentObject.root.unmount(); });
+attachmentObject.shell.remove();
 object.body.querySelector<HTMLButtonElement>(".object-tree-delete")?.click();
 assert.ok(objectChanges > 0);
 await act(async () => { object.root.unmount(); });

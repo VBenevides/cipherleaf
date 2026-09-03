@@ -12,6 +12,7 @@ import { ClientSelect, DashboardPeriodSelect, ProjectSelect, TagMultiSelect } fr
 import TimeTrackingView from "../src/TimeTrackingView";
 import { ThemedDatePicker } from "../src/ThemedDatePicker";
 import { SNIPPETS, completeCodeFenceElement, expandSnippet, expandSnippetWithContext, rollLastDatedSection } from "../src/snippets";
+import { canonicalObjectDocumentFromMarkdown } from "../src/objectDocument";
 
 const storage = new Map<string, string>();
 const windowListeners = new Map<string, Set<(event: any) => void>>();
@@ -59,10 +60,15 @@ const cardNote = { id: "card", title: "Card", folderId: "folder", order: 0, cont
 const tags = [{ id: "tag", name: "Tag", archivedAtUtc: "" }];
 const clients = [{ id: "client", name: "Client", archivedAtUtc: "" }];
 const projects = [{ id: "project", name: "Project", clientId: "client", archivedAtUtc: "" }];
+const archivedProject = { ...projects[0], id: "old-project", name: "Old project", archivedAtUtc: "2026-01-01" };
+const archivedTag = { ...tags[0], id: "old-tag", name: "Old tag", archivedAtUtc: "2026-01-01" };
+const archivedProjectResult = { ...projects[0], id: "archived-project", name: "Archived project", archivedAtUtc: "2026-01-01" };
+const archivedTagResult = { ...tags[0], id: "archived-tag", name: "Archived tag", archivedAtUtc: "2026-01-01" };
 const timeEntry = { id: "entry", name: "Task", clientId: "client", projectId: "project", tagIds: ["tag"], startedAtUtc: "2026-08-31T10:00:00Z", endedAtUtc: "2026-08-31T11:00:00Z", createdAtUtc: "2026-08-31T10:00:00Z", updatedAtUtc: "2026-08-31T11:00:00Z", modifiedAt: 1, revision: 1 };
 const timeRange = { entry: timeEntry, startedAtUtc: timeEntry.startedAtUtc, endedAtUtc: timeEntry.endedAtUtc, totalSeconds: 3600 };
 const syncResult = { linked: true, message: "Sync complete", warning: "", branch: "main", lastCommit: "commit", pull: { linked: true, message: "Pulled", warning: "", branch: "main", lastCommit: "commit", stagingPath: "", temporary: false }, push: { linked: true, message: "Pushed", warning: "", branch: "main", lastCommit: "commit", upToDate: true, localMilliseconds: 1, transportMilliseconds: 1, transportPerformed: true }, merge: { pulledNotes: 0, updatedNotes: 0, deletedNotes: 0, pulledFolders: 0, deletedFolders: 0, updatedSettings: false, upToDate: true, conflicts: [], trackingConflicts: [] }, timings: { pullMilliseconds: 1, mergeMilliseconds: 1, pushMilliseconds: 1, totalMilliseconds: 3, transportMilliseconds: 1, localMilliseconds: 2 }, git: { sshConnectionReuse: true, sshConnectionPersistSeconds: 1, transportOperations: 1, gitBytes: 1, repositoryFilesBytes: 1, platform: "test", architecture: "test", gitVersion: "git", openSshVersion: "ssh", usedPrefetch: true, repositoryPath: "/repo" } };
 let conflictNext = false;
+let timeTrackingMode: "normal" | "empty" | "error" = "normal";
 const richFolders = [
   { id: "folder", name: "Folder", parentId: "", order: 0, locked: false, hidden: false },
   { id: "nested", name: "Nested", parentId: "folder", order: 0, locked: true, hidden: false },
@@ -110,26 +116,54 @@ assert.match(render(createElement(ThemedDatePicker, { ariaLabel: "Date", value: 
 assert.match(render(createElement(TimeTrackingView, { now: new Date("2026-01-01T12:00:00Z") })), /time-tracking/);
 assert.match(render(createElement(GraphView, { folders: richFolders, notes: richNotes, onSelectFolder: onChange, onSelectNote: onChange })), /Knowledge links/);
 assert.match(render(createElement(ObjectTreeView, { value: richMarkdown, onChange })), /Nested task/);
+assert.match(render(createElement(GraphView, { folders: [], notes: [], onSelectFolder: onChange, onSelectNote: onChange })), /Create notes/);
+assert.match(render(createElement(ObjectTreeView, { value: JSON.stringify({ format: "cipherleaf.object-document", version: 1, objects: [] }), onChange })), /No objects yet/);
+assert.match(render(createElement(ObjectTreeView, { value: "[report.pdf](attachment:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)", onChange })), /Attachment syntax/);
 assert.match(render(createElement(ThemedDatePicker, { ariaLabel: "Invalid date", value: "invalid", onChange })), /Select date/);
+console.error("coverage marker: static done");
 
 const graphRenderer = create(createElement(GraphView, { folders: richFolders, notes: richNotes, onSelectFolder: onChange, onSelectNote: onChange }));
-await act(async () => { buttonNamed(graphRenderer, "Zoom out").props.onClick(); buttonNamed(graphRenderer, "Zoom in").props.onClick(); buttonNamed(graphRenderer, "Folders").props.onClick(); });
+console.error("coverage marker: graph create");
+await act(async () => { for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom out").props.onClick(); for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom in").props.onClick(); buttonNamed(graphRenderer, "Reset zoom").props.onClick(); buttonNamed(graphRenderer, "Folders").props.onClick(); });
 const graphNodes = graphRenderer.root.findAll((node) => typeof node.props.onClick === "function" && String(node.props.className ?? "").includes("graph-node"));
 await act(async () => { graphNodes.forEach((node) => { node.props.onClick(); node.props.onKeyDown({ key: "Enter", preventDefault: onChange }); }); });
+await act(async () => { graphNodes.forEach((node) => { node.props.onKeyDown({ key: " ", preventDefault: onChange }); node.props.onKeyDown({ key: "Escape", preventDefault: onChange }); }); });
 graphRenderer.unmount();
+console.error("coverage marker: graph done");
 
 const tagRenderer = create(createElement(TagMultiSelect, { tags, selected: [], onChange }));
+console.error("coverage marker: tag create");
 await act(async () => { tagRenderer.root.findAll((node) => node.type === "input")[0]?.props.onChange({ target: { checked: true } }); });
 tagRenderer.unmount();
+const selectedTagRenderer = create(createElement(TagMultiSelect, { tags, selected: ["tag"], onChange }));
+await act(async () => { selectedTagRenderer.root.findAll((node) => node.type === "input")[0]?.props.onChange({ target: { checked: false } }); });
+selectedTagRenderer.unmount();
+const emptyTagRenderer = create(createElement(TagMultiSelect, { tags: [], selected: [], onChange }));
+emptyTagRenderer.unmount();
+for (const element of [
+  createElement(ClientSelect, { clients, selected: "client", onChange, disabled: true }),
+  createElement(ProjectSelect, { projects, selected: "project", onChange, disabled: true }),
+  createElement(TagMultiSelect, { tags, selected: ["tag"], onChange, disabled: true }),
+]) {
+  const renderer = create(element);
+  await act(async () => { renderer.root.findByType("details").props.onToggle({ currentTarget: { open: true } }); });
+  renderer.unmount();
+}
 const clientRenderer = create(createElement(ClientSelect, { clients, selected: "", onChange }));
-await act(async () => { clientRenderer.root.findAll((node) => node.type === "button")[1]?.props.onClick(); });
+await act(async () => { clientRenderer.root.findAll((node) => node.type === "button")[0]?.props.onClick(); clientRenderer.root.findAll((node) => node.type === "button")[1]?.props.onClick(); });
 clientRenderer.unmount();
 const projectRenderer = create(createElement(ProjectSelect, { projects, selected: "", onChange }));
-await act(async () => { projectRenderer.root.findAll((node) => node.type === "button")[1]?.props.onClick(); });
+await act(async () => { projectRenderer.root.findAll((node) => node.type === "button")[0]?.props.onClick(); projectRenderer.root.findAll((node) => node.type === "button")[1]?.props.onClick(); });
 projectRenderer.unmount();
 const periodRenderer = create(createElement(DashboardPeriodSelect, { value: "current-week", onChange }));
-await act(async () => { periodRenderer.root.findAll((node) => node.type === "button")[1]?.props.onClick(); });
+for (const option of periodRenderer.root.findAll((node) => node.type === "button")) await act(async () => { option.props.onClick(); });
 periodRenderer.unmount();
+const filterClientRenderer = create(createElement(ClientSelect, { label: "Filter client", clients, selected: "missing", onChange }));
+await act(async () => { filterClientRenderer.root.findAll((node) => node.type === "button")[0]?.props.onClick(); });
+filterClientRenderer.unmount();
+const filterProjectRenderer = create(createElement(ProjectSelect, { label: "Filter project", projects, selected: "missing", onChange }));
+await act(async () => { filterProjectRenderer.root.findAll((node) => node.type === "button")[0]?.props.onClick(); });
+filterProjectRenderer.unmount();
 const dateRenderer = create(createElement(ThemedDatePicker, { ariaLabel: "Date", value: "2026-01-01", onChange }));
 await act(async () => { dateRenderer.root.findByProps({ className: "themed-date-picker-trigger" }).props.onClick(); });
 await act(async () => { dateRenderer.root.findAll((node) => node.type === "button").slice(1, 3).forEach((node) => node.props.onClick()); dateRenderer.root.findAll((node) => node.type === "button").at(-1)?.props.onClick(); });
@@ -140,15 +174,20 @@ assert.equal(vaultSubmissionError("open", "", "", false, false, clone), null);
 assert.match(vaultSubmissionError("create", "", "secret", true, true, clone) ?? "", /name/);
 assert.match(vaultSubmissionError("create", "vault", "", false, false, clone) ?? "", /Copy/);
 assert.match(vaultSubmissionError("clone", "vault", "secret", true, true, { ...clone, repositoryPrivate: false }) ?? "", /private/);
+assert.equal(vaultSubmissionError("create", "vault", "secret", true, true, clone), null);
+assert.equal(vaultSubmissionError("clone", "vault", "secret", true, true, clone), null);
 assert.equal(folderName("/vault/"), "vault");
 assert.equal(folderName(""), "Encrypted vault");
 const folderMap = new Map(richFolders.map((item) => [item.id, item]));
 assert.deepEqual(folderLineage("nested", folderMap).map((item) => item.id), ["folder", "nested"]);
+assert.deepEqual(folderLineage("missing", folderMap), []);
 assert.equal(folderIsLocked("nested", folderMap, new Set()), true);
 assert.equal(folderIsLocked("nested", folderMap, new Set(["nested"])), false);
 assert.equal(folderIsHidden("nested", folderMap), false);
+assert.equal(folderIsHidden("hidden", new Map([["hidden", { ...folders[0], id: "hidden", hidden: true }]])), true);
 assert.deepEqual(buildBreadcrumbItems([], "/vault", richFolders[0], note).map((item) => item.title), ["vault", "Folder", "Note"]);
 assert.deepEqual(buildBreadcrumbItems([{ id: "note", title: "Trail" }], "/vault", undefined, null), [{ id: "note", title: "Trail" }]);
+assert.deepEqual(buildBreadcrumbItems([], "/vault", undefined, { ...note, title: "" }).map((item) => item.title), ["vault", "Untitled"]);
 assert.equal(startOfMonth(new Date(2026, 3, 24)).getDate(), 1);
 assert.equal(isSameDay(new Date(2026, 3, 24), new Date(2026, 3, 24, 23)), true);
 assert.equal(isSameDay(new Date(2026, 3, 24), new Date(2026, 3, 25)), false);
@@ -156,15 +195,21 @@ assert.equal(formatStorageSize(512), "512 B");
 assert.equal(formatStorageSize(1024), "1.0 KB");
 assert.equal(formatStorageSize(1024 ** 2), "1.0 MB");
 assert.equal(formatStorageSize(1024 ** 3 * 10), "10 GB");
+assert.equal(formatStorageSize(1024 ** 4 * 10), "10 TB");
 assert.equal(markdownForEditing("plain"), "plain");
+assert.equal(markdownForEditing(JSON.stringify(canonicalObjectDocumentFromMarkdown("> Stored"))), "> Stored");
 const preparedNote = noteForEditing(note);
 assert.equal(preparedNote.note.id, "note");
 assert.equal(preparedNote.migrated, true);
+assert.equal(noteForEditing({ ...note, content: JSON.stringify(canonicalObjectDocumentFromMarkdown("> Stored")) }).migrated, false);
 assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": true, "cipherleaf-card-status": "in-progress", "cipherleaf-card-tags": ["Tag", 1], "cipherleaf-card-started-at": "2026-01-01" } }).status, "in-progress");
 assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": false } }), null);
 assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": true, "cipherleaf-card-status": "invalid" } }), null);
+assert.equal(cardMetadataFromSummary({ ...notes[0], title: "", properties: { "cipherleaf-card": "true" } }).title, "Untitled");
+assert.equal(cardMetadataFromSummary({ ...notes[0], properties: undefined }), null);
 assert.equal(isStructuredSummary({ ...notes[0], properties: { "cipherleaf-card-template": "true" } }), true);
 assert.equal(isStructuredSummary({ ...notes[0], properties: {} }), false);
+assert.equal(isStructuredSummary({ ...notes[0], properties: { "cipherleaf-card": true } }), true);
 assert.deepEqual([...changedLineNumbers("a\nb", "a\nc\nd")], [2, 3]);
 assert.equal(completeCodeFenceElement("```"), "```txt\n\n```");
 assert.equal(completeCodeFenceElement("- ```"), "```txt\n\n```");
@@ -181,21 +226,22 @@ let linkedAppMode = false;
 let lockedAction: "create" | "clone" = "create";
 setTransport({
   call: async (_objectID, _method, _windowName, request) => {
+    if (timeTrackingMode === "error" && [308561412, 1766611694, 2155705394, 259867052].includes(request?.methodID ?? -1)) throw new Error("time tracking failed");
     switch (request?.methodID) {
       case 355925843: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
       case 3632998615: return { path: "/vault", theme: "light" };
       case 1694639620: return ["/vault", "/other-vault"];
       case 2923257755: return linkedAppMode ? { linked: true, lastSyncedAt: 1, repositorySsh: "git@github.com:owner/repo.git", privateKeyPath: "/key", branch: "main", repositoryPrivate: true } : { linked: false, lastSyncedAt: 0 };
       case 4079532670: return { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
-      case 308561412: return { clients: [...clients, { id: "old-client", name: "Old client", archivedAtUtc: "2026-01-01" }], projects, tags };
-      case 259867052: return { projectCount: 1, tagCount: 1, totalSeconds: 3600, averageDaySeconds: 600, clients: [{ id: "client", name: "Client", totalSeconds: 3600 }], projects: [{ id: "project", name: "Project", totalSeconds: 3600 }], tags: [{ id: "tag", name: "Tag", totalSeconds: 3600 }], tasks: [{ name: "Task", totalSeconds: 3600, entryCount: 1 }], days: [{ localDate: "2026-01-01", totalSeconds: 3600 }] };
+      case 308561412: return timeTrackingMode === "empty" ? { clients: [], projects: [], tags: [] } : { clients: [...clients, { id: "old-client", name: "Old client", archivedAtUtc: "2026-01-01" }], projects: [...projects, archivedProject], tags: [...tags, archivedTag] };
+      case 259867052: return timeTrackingMode === "empty" ? { projectCount: 0, tagCount: 0, totalSeconds: 0, averageDaySeconds: 0, clients: [], projects: [], tags: [], tasks: [], days: [] } : { projectCount: 1, tagCount: 1, totalSeconds: 3600, averageDaySeconds: 600, clients: [{ id: "client", name: "Client", totalSeconds: 3600 }], projects: [{ id: "project", name: "Project", totalSeconds: 3600 }], tags: [{ id: "tag", name: "Tag", totalSeconds: 3600 }], tasks: [{ name: "Task", totalSeconds: 3600, entryCount: 1 }], days: [{ localDate: "2026-01-01", totalSeconds: 3600 }] };
       case 516244023: return [];
       case 2155705394: return null;
       case 220507736: return emptyAppMode ? [] : richFolders;
       case 888598820: return emptyAppMode ? [] : richNotes;
       case 1503400201: return openCardMode ? cardNote : note;
       case 715955408: return note;
-      case 1766611694: return { entries: [timeRange], days: [{ localDate: "2026-08-31", totalSeconds: 3600 }], totalSeconds: 3600 };
+      case 1766611694: return timeTrackingMode === "empty" ? { entries: [], days: [], totalSeconds: 0 } : { entries: [timeRange], days: [{ localDate: "2026-08-31", totalSeconds: 3600 }], totalSeconds: 3600 };
       case 1301789830: return { cpuPercent: 1, memoryBytes: 2, memoryUsage: [{ name: "cipherleaf", pid: 1, memoryBytes: 2 }] };
       case 3277829736: return { notesBytes: 2, attachmentsBytes: 3, timeTrackingBytes: 4, gitBytes: 5 };
       case 3351323131: return [{ id: "trash", kind: "note", title: "Deleted", deletedAt: "2026-01-01T00:00:00Z" }];
@@ -208,16 +254,21 @@ setTransport({
       case 239305947: return richFolders[0];
       case 4062770880: return clients[0];
       case 2039739724: return projects[0];
+      case 1966438356:
+      case 3548001575:
+      case 1556478150: return projects[0];
       case 1532899813: return tags[0];
+      case 2522910107: return tags[0];
+      case 975015718: return clients[0];
       case 3424202037: return { id: "entry", name: "Task", startedAtUtc: "2026-01-01T11:00:00Z", endedAtUtc: "2026-01-01T12:00:00Z", tagIds: [] };
+      case 4168033684: return archivedProjectResult;
       case 4267492704:
       case 1432466107: return timeEntry;
       case 2270152867: return null;
       case 2587329448: return { ...clients[0], archivedAtUtc: "2026-01-01" };
       case 2997005664: return clients[0];
-      case 4168033684: return projects[0];
       case 791124588: return projects[0];
-      case 2265665421: return tags[0];
+      case 2265665421: return archivedTagResult;
       case 47787781: return tags[0];
       case 3410023864: {
         if (!conflictNext) return syncResult;
@@ -267,12 +318,43 @@ await act(async () => { buttonNamed(trackingRenderer, "Archive")?.props.onClick(
 await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { buttonNamed(trackingRenderer, "Restore")?.props.onClick(); });
 await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(trackingRenderer, "Delete")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { trackingRenderer.root.findAll((node) => node.type === "input" && String(node.props["aria-label"] ?? "").includes("client name"))[0]?.props.onChange({ target: { value: "New client" } }); trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange }); });
 await act(async () => { buttonNamed(trackingRenderer, "Projects")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Edit")?.props.onClick(); });
+await act(async () => { trackingRenderer.root.findAll((node) => node.type === "input" && String(node.props["aria-label"] ?? "").includes("project name"))[0]?.props.onChange({ target: { value: "Renamed project" } }); trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange }); });
+await act(async () => { buttonNamed(trackingRenderer, "Archive")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(trackingRenderer, "Restore")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(trackingRenderer, "Delete")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { trackingRenderer.root.findAll((node) => node.type === "input" && String(node.props["aria-label"] ?? "").includes("project name"))[0]?.props.onChange({ target: { value: "New project" } }); trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange }); });
 await act(async () => { buttonNamed(trackingRenderer, "Tags")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Edit")?.props.onClick(); });
+await act(async () => { trackingRenderer.root.findAll((node) => node.type === "input" && String(node.props["aria-label"] ?? "").includes("tag name"))[0]?.props.onChange({ target: { value: "Renamed tag" } }); trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange }); });
+await act(async () => { buttonNamed(trackingRenderer, "Archive")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(trackingRenderer, "Restore")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(trackingRenderer, "Delete")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Confirm")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { trackingRenderer.root.findAll((node) => node.type === "input" && String(node.props["aria-label"] ?? "").includes("tag name"))[0]?.props.onChange({ target: { value: "New tag" } }); trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange }); });
 await act(async () => { buttonNamed(trackingRenderer, "Week")?.props.onClick(); });
+await act(async () => {
+  buttonNamed(trackingRenderer, "Previous")?.props.onClick();
+  buttonNamed(trackingRenderer, "Current week")?.props.onClick();
+  buttonNamed(trackingRenderer, "Next")?.props.onClick();
+});
+await act(async () => { trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange }); });
+await act(async () => {
+  trackingRenderer.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Task name")[0]?.props.onChange({ target: { value: "Running" } });
+  trackingRenderer.root.findAll((node) => node.type === "form")[0]?.props.onSubmit({ preventDefault: onChange });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+await act(async () => { buttonNamed(trackingRenderer, "Finish")?.props.onClick(); });
+await act(async () => { buttonNamed(trackingRenderer, "Finish timer")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { buttonNamed(trackingRenderer, "Edit")?.props.onClick(); });
 await act(async () => { buttonNamed(trackingRenderer, "Cancel")?.props.onClick(); });
 await act(async () => { trackingRenderer.unmount(); });
@@ -284,6 +366,20 @@ await act(async () => { entryDay?.props.onClick(); });
 await act(async () => { entryRenderer.root.findAll((node) => node.type === "button" && textContent(node) === "Edit")[0]?.props.onClick(); });
 await act(async () => { entryRenderer.root.findAll((node) => node.type === "button" && textContent(node) === "Cancel").at(-1)?.props.onClick(); });
 await act(async () => { entryRenderer.unmount(); });
+
+timeTrackingMode = "error";
+const errorTrackingRenderer = create(createElement(TimeTrackingView, { now: new Date("2026-09-02T12:00:00Z") }));
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+assert.equal(errorTrackingRenderer.root.findAll((node) => node.props.role === "alert").length, 1);
+await act(async () => { buttonNamed(errorTrackingRenderer, "Month")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(errorTrackingRenderer, "Dashboard")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+errorTrackingRenderer.unmount();
+timeTrackingMode = "empty";
+const emptyTrackingRenderer = create(createElement(TimeTrackingView, { now: new Date("2026-09-02T12:00:00Z") }));
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); buttonNamed(emptyTrackingRenderer, "Dashboard")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { buttonNamed(emptyTrackingRenderer, "Custom")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+emptyTrackingRenderer.unmount();
+timeTrackingMode = "normal";
 
 let appRenderer: ReturnType<typeof create> | undefined;
 await act(async () => {
@@ -346,6 +442,17 @@ await act(async () => { await liveEditor.props.onOpenCard("card"); await new Pro
 assert.ok(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length);
 const cardTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Title")[0];
 await act(async () => { cardTitle?.props.onChange({ target: { value: "Updated card" } }); });
+await act(async () => {
+  dispatchWindow("keydown", {
+    ctrlKey: true,
+    metaKey: false,
+    key: "s",
+    target: { closest: (selector: string) => selector === ".card-sidebar" ? {} : null },
+    preventDefault: onChange,
+    stopPropagation: onChange,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 const cardStatus = appRenderer?.root.findAll((node) => node.type === "button" && node.props.role === "option")[0];
 await act(async () => { cardStatus?.props.onClick(); });
 const cardTagInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "New tag")[0];

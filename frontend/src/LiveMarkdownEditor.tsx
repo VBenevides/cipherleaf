@@ -1105,6 +1105,13 @@ function boardCardDate(card: CardMetadata, status: CardStatus): string | undefin
   }
 }
 
+function fitBoardCardText(text: HTMLElement) {
+  text.style.fontSize = "";
+  if (!text.clientWidth || text.scrollWidth <= text.clientWidth) return;
+  const size = Number.parseFloat(getComputedStyle(text).fontSize) || 14;
+  text.style.fontSize = `${Math.max(size * 0.65, size * text.clientWidth / text.scrollWidth)}px`;
+}
+
 function alignmentLabel(align: "left" | "center" | "right"): string {
   if (align === "left") return "Align left";
   if (align === "center") return "Align center";
@@ -1112,6 +1119,8 @@ function alignmentLabel(align: "left" | "center" | "right"): string {
 }
 
 class BoardWidget extends WidgetType {
+  private titleResizeObserver: ResizeObserver | null = null;
+
   constructor(
     readonly boardID: string,
     readonly title: string,
@@ -1153,9 +1162,17 @@ class BoardWidget extends WidgetType {
       item.type = "button";
       item.className = "cm-live-board-card";
       item.draggable = true;
-      const cardTitle = item.appendChild(document.createElement("span"));
+      const summary = item.appendChild(document.createElement("span"));
+      summary.className = "cm-live-board-card-summary";
+      const cardTitle = summary.appendChild(document.createElement("span"));
       cardTitle.className = "cm-live-board-card-title";
       cardTitle.textContent = card.title || "Untitled";
+      if (card.tags.length > 0) {
+        const tags = summary.appendChild(document.createElement("span"));
+        tags.className = "cm-live-board-card-tags";
+        tags.textContent = card.tags.join(", ");
+        tags.title = `Tags: ${tags.textContent}`;
+      }
       item.title = `Open card “${card.title || "Untitled"}”`;
       item.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", card.id);
@@ -1188,14 +1205,28 @@ class BoardWidget extends WidgetType {
   toDOM() {
     const board = document.createElement("section");
     board.className = "cm-live-board";
-    const title = board.appendChild(document.createElement("input"));
+    const header = board.appendChild(document.createElement("div"));
+    header.className = "cm-live-board-header";
+    const title = header.appendChild(document.createElement("input"));
     title.className = "cm-live-board-title";
     title.type = "text";
     title.value = this.title || DEFAULT_BOARD_TITLE;
     title.setAttribute("aria-label", "Board title");
+    const minimized = header.appendChild(document.createElement("span"));
+    minimized.className = "cm-live-board-minimized";
+    minimized.hidden = true;
+    const minimize = header.appendChild(document.createElement("button"));
+    minimize.type = "button";
+    minimize.className = "secondary-button cm-live-board-minimize";
+    minimize.textContent = "Minimize";
+    minimize.setAttribute("aria-label", "Minimize board");
     const stopEditorEvent = (event: Event) => event.stopPropagation();
     for (const eventName of ["mousedown", "click", "input", "change"])
       title.addEventListener(eventName, stopEditorEvent);
+    title.addEventListener("input", () => {
+      minimized.textContent = `[BOARD] ${title.value || DEFAULT_BOARD_TITLE}`;
+      board.setAttribute("aria-label", title.value || DEFAULT_BOARD_TITLE);
+    });
     title.addEventListener("change", () => this.changeTitle(this.boardID, title.value));
     title.addEventListener("keydown", (event) => {
       event.stopPropagation();
@@ -1235,17 +1266,47 @@ class BoardWidget extends WidgetType {
     });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
+    const fitTitles = () => board.querySelectorAll<HTMLElement>(".cm-live-board-card-title, .cm-live-board-card-date").forEach(fitBoardCardText);
+    let isMinimized = false;
+    const updateMinimizedState = () => {
+      const boardTitle = title.value || DEFAULT_BOARD_TITLE;
+      const counts = BOARD_COLUMNS.slice(0, 3)
+        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${boardCardsForColumn(this.cards, this.cardIDs, status).length}`)
+        .join(" · ");
+      board.classList.toggle("is-minimized", isMinimized);
+      title.hidden = isMinimized;
+      minimized.hidden = !isMinimized;
+      controls.hidden = isMinimized;
+      columns.hidden = isMinimized;
+      minimized.textContent = `[BOARD] ${boardTitle} · ${counts}`;
+      minimize.textContent = isMinimized ? "Maximize" : "Minimize";
+      minimize.setAttribute("aria-label", `${isMinimized ? "Maximize" : "Minimize"} board`);
+      minimize.setAttribute("aria-expanded", String(!isMinimized));
+    };
+    minimize.addEventListener("click", (event) => {
+      event.stopPropagation();
+      isMinimized = !isMinimized;
+      updateMinimizedState();
+    });
     const render = () => {
       columns.replaceChildren();
       const titleQuery = filter.value.trim().toLocaleLowerCase();
       const requiredTags = tagFilter.value.split(",");
       for (const status of BOARD_COLUMNS) this.renderColumn(columns, status, titleQuery, requiredTags);
+      fitTitles();
     };
     filter.addEventListener("input", render);
     tagFilter.addEventListener("input", render);
     render();
+    updateMinimizedState();
+    if (typeof ResizeObserver === "function") {
+      this.titleResizeObserver = new ResizeObserver(fitTitles);
+      this.titleResizeObserver.observe(columns);
+    }
     return board;
   }
+
+  destroy() { this.titleResizeObserver?.disconnect(); }
 
   ignoreEvent() { return true; }
 }

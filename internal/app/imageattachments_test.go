@@ -67,6 +67,19 @@ func TestConvertImageDataURLRejectsUnsupportedFormats(t *testing.T) {
 	}
 }
 
+func TestConvertImageDataURLRejectsMalformedInput(t *testing.T) {
+	for _, value := range []string{
+		"plain text",
+		"data:image/png,not-base64",
+		"data:image/png;base64,",
+		"data:image/png;base64,AAAA",
+	} {
+		if _, err := convertImageDataURLToWebP(value); err == nil {
+			t.Fatalf("convertImageDataURLToWebP(%q) unexpectedly succeeded", value)
+		}
+	}
+}
+
 func TestResizeImage(t *testing.T) {
 	source := image.NewNRGBA(image.Rect(0, 0, 4, 2))
 	if got := resizeImage(source, 10); got != source {

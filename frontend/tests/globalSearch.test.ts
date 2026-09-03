@@ -15,4 +15,6 @@ test("advanced search syntax cannot be used as replacement text", () => {
   assert.equal(isAdvancedSearchQuery("notes tag:work"), true);
   assert.equal(isAdvancedSearchQuery("https://example.com"), false);
   assert.equal(canReplaceSearch("re:secret", searchResultsKey("re:secret", false, false), false, false, false), false);
+  assert.equal(isAdvancedSearchQuery(""), false);
+  assert.equal(canReplaceSearch("   ", searchResultsKey("", false, false), false, false, false), false);
 });

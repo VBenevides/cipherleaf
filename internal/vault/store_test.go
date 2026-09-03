@@ -1751,6 +1751,13 @@ func TestFindMatchIncludesUTF16Range(t *testing.T) {
 	}
 }
 
+func TestFindMatchKeepsInvalidRangeUnchanged(t *testing.T) {
+	match := FindMatch{Offset: -1, MatchLength: 2, UTF16Offset: 7, UTF16MatchLength: 8}
+	if got := withUTF16Range(match, "content"); got != match {
+		t.Fatalf("invalid UTF-16 range = %#v, want %#v", got, match)
+	}
+}
+
 func TestListUnlinkedMentionsExcludesWikilinks(t *testing.T) {
 	store := NewStore()
 	if _, err := store.Create(t.TempDir(), "mention-test-secret"); err != nil {

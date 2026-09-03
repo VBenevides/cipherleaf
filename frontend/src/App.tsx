@@ -683,6 +683,7 @@ function App() {
   const [cardPanelDirty, setCardPanelDirty] = useState(false);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
+  const saveCardPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
   const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
@@ -3448,6 +3449,21 @@ function App() {
     }
   };
 
+  saveCardPanelRef.current = saveCardPanel;
+  useEffect(() => {
+    if (!cardPanel) return;
+    const saveOnShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest?.(".card-sidebar") || target.closest?.(".cm-editor")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void saveCardPanelRef.current();
+    };
+    window.addEventListener("keydown", saveOnShortcut);
+    return () => window.removeEventListener("keydown", saveOnShortcut);
+  }, [cardPanel]);
+
   const deleteCard = async () => {
     if (cardPanel && await deleteNote(cardPanel.note.id, cardPanel.metadata.title, "card")) closeCardPanel();
   };
@@ -5277,17 +5293,7 @@ function App() {
   const renderCardPanel = () => {
     if (!cardPanel) return null;
     return (
-          <aside
-            className="card-sidebar"
-            aria-label="Card details"
-            onKeyDown={(event) => {
-              if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
-              if ((event.target as HTMLElement | null)?.closest(".cm-editor")) return;
-              event.preventDefault();
-              event.stopPropagation();
-              void saveCardPanel();
-            }}
-          >
+          <aside className="card-sidebar" aria-label="Card details">
             <header className="card-sidebar-header">
               <input
                 className="card-sidebar-title"

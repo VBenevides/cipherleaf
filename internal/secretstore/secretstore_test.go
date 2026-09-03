@@ -29,6 +29,9 @@ func TestStoreRoundTrip(t *testing.T) {
 }
 
 func TestStoreLoadMissing(t *testing.T) {
+	if isKeyringNotFound(nil) {
+		t.Fatal("nil keyring error reported as missing")
+	}
 	store := New()
 	_, err := store.Load("never-saved")
 	if !errors.Is(err, ErrNotFound) {

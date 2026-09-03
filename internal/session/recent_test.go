@@ -209,3 +209,63 @@ func TestRecentVaultValidationAndCorruptState(t *testing.T) {
 		t.Fatalf("NormalizeTheme(unknown) = %q", got)
 	}
 }
+
+func TestRecentVaultHandlesLegacyEntriesAndFilesystemErrors(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	file := filepath.Join(t.TempDir(), recentFilename)
+	store := NewRecentVaultStore(file)
+	write := func(value recentVault) {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(recentVault{Path: root})
+	if paths, err := store.Paths(); err != nil || !slices.Equal(paths, []string{root}) {
+		t.Fatalf("legacy Paths() = %#v, %v", paths, err)
+	}
+	write(recentVault{Paths: []string{root, root, "", other}})
+	if paths, err := store.Paths(); err != nil || !slices.Equal(paths, []string{root, other}) {
+		t.Fatalf("duplicate Paths() = %#v, %v", paths, err)
+	}
+	if err := store.Remove(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if paths, err := store.Paths(); err != nil || !slices.Equal(paths, []string{other}) {
+		t.Fatalf("remaining Paths() = %#v, %v", paths, err)
+	}
+	if err := store.Remove(other); err != nil {
+		t.Fatal(err)
+	}
+	if paths, err := store.Paths(); err != nil || len(paths) != 0 {
+		t.Fatalf("empty Paths() = %#v, %v", paths, err)
+	}
+	if err := os.WriteFile(file, []byte("broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if store.LastTheme() != "" || store.Remember(root) == nil || store.Remove(root) == nil {
+		t.Fatal("corrupt recent state was accepted")
+	}
+	parent := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(parent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewRecentVaultStore(filepath.Join(parent, recentFilename)).Remember(root); err == nil {
+		t.Fatal("recent state write unexpectedly succeeded below a file")
+	}
+	nonEmpty := t.TempDir()
+	if err := os.WriteFile(filepath.Join(nonEmpty, "child"), []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewRecentVaultStore(nonEmpty).Forget(); err == nil {
+		t.Fatal("Forget() unexpectedly removed a non-empty directory")
+	}
+}

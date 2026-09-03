@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+func TestTrackingLabelNameUsesDeletedFallback(t *testing.T) {
+	if got := trackingLabelName(map[string]string{}, "missing", "Deleted label"); got != "Deleted label" {
+		t.Fatalf("tracking label fallback = %q", got)
+	}
+}
+
 func TestTimeDashboardAggregatesAndLoadsGroupDetailsLazily(t *testing.T) {
 	store, _ := newTrackingTestStore(t)
 	clientA, _ := store.CreateClient("Client A")

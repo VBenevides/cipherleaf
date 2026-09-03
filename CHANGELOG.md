@@ -2,6 +2,22 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [1.0.3] - 2026-09-03
+
+### Features
+
+- Added card tags and Backlog, In Progress, and Blocked counts to minimized embedded boards.
+- Added minimized board summaries with a fixed minimize/maximize control.
+
+### Bugfixes
+
+- Made board card titles and dates fit their available space and reduced board outer spacing.
+- Aligned journal rules with the usable editor area.
+
+### Other
+
+- Expanded frontend coverage for board interactions and layout behavior.
+
 ## [1.0.2] - 2026-09-03
 
 ### Features

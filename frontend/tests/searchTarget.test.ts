@@ -63,6 +63,9 @@ test("converts Go UTF-8 offsets to CodeMirror UTF-16 offsets", () => {
   });
 
   assert.equal(utf8ByteOffsetToUtf16Offset("é", 1), null);
+  assert.equal(utf8ByteOffsetToUtf16Offset("text", -1), null);
+  assert.equal(utf8ByteOffsetToUtf16Offset("😀", 1), null);
+  assert.equal(utf8ByteOffsetToUtf16Offset("text", 99), null);
   assert.deepEqual(rangeForActiveDocument(target, "unicode", document), {
     from: 10,
     to: 16,
@@ -83,6 +86,24 @@ test("uses UTF-16 offsets calculated by Go", () => {
     from: 10,
     to: 16,
   });
+});
+
+test("rejects invalid search matches and keeps query whitespace normalized", () => {
+  const base = { noteId: "note", field: "content", offset: 0, matchLength: 1 };
+  assert.equal(targetForMatch({ ...base, noteId: "" }), null);
+  assert.equal(targetForMatch({ ...base, offset: -1 }), null);
+  assert.equal(targetForMatch({ ...base, matchLength: 0 }), null);
+  assert.equal(targetForMatch({ ...base, offset: 1, matchLength: Number.MAX_SAFE_INTEGER }), null);
+  assert.equal(targetForMatch({ ...base, field: "title" }), null);
+  assert.deepEqual(targetForMatch({ ...base, utf16Offset: 0, utf16MatchLength: 1 }, " needle ")?.query, "needle");
+});
+
+test("falls back safely when a search range cannot be resolved", () => {
+  const target = targetForMatch({ noteId: "note", field: "content", offset: 99, matchLength: 1 }, "missing")!;
+  assert.equal(rangeForActiveDocument(undefined, "note", "document"), null);
+  assert.equal(rangeForActiveDocument(target, "other", "document"), null);
+  assert.equal(rangeForActiveDocument(target, "note", "document"), null);
+  assert.equal(rangeForActiveDocument(target, "note", "needle", "source"), null);
 });
 
 test("resolves the query when Live Preview normalizes the document", () => {
