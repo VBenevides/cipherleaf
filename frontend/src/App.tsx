@@ -3221,14 +3221,6 @@ function App() {
     }
     return [...tags].sort((left, right) => left.localeCompare(right));
   }, [cardMetadata, cardPanel?.metadata.boardID]);
-  const cardSignature = useMemo(
-    () => notes.map((summary) => {
-      const item = cardMetadataFromSummary(summary);
-      return item ? `${item.id}:${item.title}:${item.status}:${item.columnEnteredAt ?? ""}` : "";
-    }).filter(Boolean).join("|")
-    , [notes],
-  );
-
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
   useEffect(() => {
@@ -5194,7 +5186,7 @@ function App() {
                 {view === "live" && (
                   <div className="editor-view-pane active">
                     <LiveMarkdownEditor
-                      key={`${note.id}:${sectionDefault}:${cardSignature}`}
+                      key={`${note.id}:${sectionDefault}`}
                       noteID={note.id}
                       value={noteMarkdown}
                       onChange={(content) => editNote({ content })}

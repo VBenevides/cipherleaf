@@ -128,6 +128,8 @@ const objectDocumentField = StateField.define<ObjectDocumentContext>({
   },
 });
 
+const refreshLivePreview = StateEffect.define<null>();
+
 function cachedObjectDocument(state: EditorState): ObjectDocument {
   return state.field(objectDocumentField).objectDocument;
 }
@@ -1133,7 +1135,7 @@ class BoardWidget extends WidgetType {
   ) { super(); }
 
   eq(other: BoardWidget) {
-    return other.boardID === this.boardID && other.title === this.title && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
+    return other.boardID === this.boardID && other.title === this.title && other.cards === this.cards && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
   }
 
   private renderColumn(columns: HTMLElement, status: CardStatus, titleQuery: string, requiredTags: string[]) {
@@ -1722,7 +1724,7 @@ type LivePreviewOptions = {
   openWikilink: (title: string) => void;
   openCard: (id: string) => void;
   cardTitle: (id: string) => string | null;
-  cards: ReadonlyMap<string, CardMetadata>;
+  cards: () => ReadonlyMap<string, CardMetadata>;
   moveCard: (id: string, status: CardStatus) => void;
   addCard: (boardID: string) => void;
   changeBoardTitle: (boardID: string, title: string) => void;
@@ -1786,7 +1788,7 @@ function renderBoardLine(
         board.id,
         board.title,
         board.cardIDs,
-        options.cards,
+        options.cards(),
         options.openCard,
         options.moveCard,
         options.addCard,
@@ -2347,9 +2349,11 @@ function livePreviewExtension(options: LivePreviewOptions) {
     update(value, transaction) {
       const { collapsed, cachedContext, collapseChanged } =
         updateCollapsedQuotes(value, transaction);
+      const cardDataChanged = transaction.effects.some((effect) => effect.is(refreshLivePreview));
       if (
         !transaction.docChanged &&
         !collapseChanged &&
+        !cardDataChanged &&
         (!transaction.selection || selectionStaysOnSameLines(transaction.startState, transaction.state))
       ) {
         return value;
@@ -3168,6 +3172,7 @@ export default function LiveMarkdownEditor({
   }, [showToolbar]);
 
   useEffect(() => {
+    const previousCardData = cardDataRef.current;
     onChangeRef.current = onChange;
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
@@ -3184,6 +3189,9 @@ export default function LiveMarkdownEditor({
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
+    if (previousCardData !== cardData) {
+      view.current?.dispatch({ effects: refreshLivePreview.of(null) });
+    }
   }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
@@ -3528,7 +3536,7 @@ export default function LiveMarkdownEditor({
             openWikilink: (title) => onOpenWikilinkRef.current(title),
             openCard: (id) => onOpenCardRef.current?.(id),
             cardTitle: (id) => cardTitlesRef.current.get(id) ?? null,
-            cards: cardDataRef.current,
+            cards: () => cardDataRef.current,
             moveCard: (id, status) => onMoveCardRef.current?.(id, status),
             addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
             changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),

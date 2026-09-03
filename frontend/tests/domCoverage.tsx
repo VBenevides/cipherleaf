@@ -180,8 +180,36 @@ live.body.querySelector<HTMLElement>(".cm-live-card-reference")?.dispatchEvent(n
 live.body.querySelector<HTMLElement>(".cm-live-citation")?.click();
 live.body.querySelector<HTMLButtonElement>(".cm-live-link-menu button")?.click();
 
+const editorNode = live.body.querySelector<HTMLElement>(".cm-editor");
+const updatedCards = new Map(cards);
+updatedCards.set("card-1", { ...cards.get("card-1")!, title: "Renamed card" });
+await act(async () => {
+  live.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "note",
+    value,
+    onChange: () => { changed++; },
+    onSave: () => { saved++; },
+    onError: () => {},
+    onOpenWikilink: () => { opened++; },
+    onOpenCard: () => { opened++; },
+    cardTitles: new Map([["card-1", "Renamed card"]]),
+    cardData: updatedCards,
+    onCreateCard: async () => { added++; return null; },
+    onCreateBoard: async () => null,
+    onMoveCard: () => { moved++; },
+    onAddCardToBoard: () => { added++; },
+    onChangeBoardTitle: () => { changed++; },
+    onDecreaseFontSize: () => {},
+    onIncreaseFontSize: () => {},
+    highlightLineNumbers: new Set([1, 5]),
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-editor"), editorNode);
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
 assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
 assert.ok(board.querySelector(".cm-live-board-card-tags"));
 const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
