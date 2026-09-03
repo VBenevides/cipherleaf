@@ -2,12 +2,57 @@ package vault
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestFileAttachmentPayloadValidation(t *testing.T) {
+	info := AttachmentInfo{ID: strings.Repeat("a", 32), Filename: "report.txt", Size: 4}
+	payload, err := encodeFileAttachment(info, []byte("data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, data, err := decodeFileAttachment(payload); err != nil || got != info || string(data) != "data" {
+		t.Fatalf("decodeFileAttachment() = %#v, %q, %v", got, data, err)
+	}
+	for name, damaged := range map[string][]byte{
+		"short":              nil,
+		"zero metadata":      {0, 0, 0, 0, 0},
+		"oversized metadata": {0, 0, 0, 9, 0},
+		"invalid metadata":   {0, 0, 0, 1, '{'},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := decodeFileAttachment(damaged); err == nil {
+				t.Fatal("expected damaged payload error")
+			}
+		})
+	}
+	for index, invalid := range []AttachmentInfo{
+		{ID: "short", Filename: "report.txt", Size: 4},
+		{ID: info.ID, Filename: " ", Size: 4},
+		{ID: info.ID, Filename: "report.txt", Size: 3},
+	} {
+		t.Run(fmt.Sprintf("invalid-%d", index), func(t *testing.T) {
+			metadata, err := json.Marshal(invalid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := make([]byte, 4+len(metadata)+4)
+			binary.BigEndian.PutUint32(candidate, uint32(len(metadata)))
+			copy(candidate[4:], metadata)
+			copy(candidate[4+len(metadata):], []byte("data"))
+			if _, _, err := decodeFileAttachment(candidate); err == nil {
+				t.Fatal("expected invalid metadata error")
+			}
+		})
+	}
+}
 
 func TestLockedFolderProtectsEveryContentAPI(t *testing.T) {
 	store := NewStore()

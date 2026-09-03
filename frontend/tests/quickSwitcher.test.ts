@@ -18,4 +18,5 @@ test("quick switcher supports fuzzy and case-insensitive matches", () => {
 
 test("quick switcher limits empty results", () => {
   assert.equal(rankQuickSwitcher(Array.from({ length: 30 }, (_, id) => ({ id: String(id), title: String(id) })), "").length, 20);
+  assert.deepEqual(rankQuickSwitcher(notes, "zzz"), []);
 });

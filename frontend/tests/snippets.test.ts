@@ -8,6 +8,7 @@ test("creates editable txt fences from every object type", () => {
   }
   assert.equal(completeCodeFenceElement(">> ```existing"), "  ```txt\nexisting\n  ```");
   assert.equal(expandSnippet("code"), "```txt\n\n```");
+  assert.equal(completeCodeFenceElement("plain text"), null);
 });
 
 test("expands directional arrow snippets", () => {
@@ -225,6 +226,12 @@ test("roll keeps the ancestor path to a nested open task", () => {
       "    > [ ] nested after",
     ].join("\n"),
   );
+});
+
+test("falls back when roll snippets have no dated section", () => {
+  assert.equal(rollLastDatedSection("plain text", new Date(2026, 6, 8)), null);
+  assert.equal(expandSnippetWithContext("rollb", "plain text", "", new Date(2026, 6, 8)), "/rollb");
+  assert.equal(expandSnippetWithContext("rollf", "", "plain text", new Date(2026, 6, 8)), "/rollf");
 });
 
 test("roll drops unrelated fenced code", () => {

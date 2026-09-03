@@ -29,7 +29,9 @@ test("time tracking exposes the ordered workspace tabs", () => {
 
 test("dashboard presets produce complete local periods", () => {
   const now = new Date("2026-07-16T12:00:00Z");
+  assert.deepEqual(dashboardPresetRange("current-week", now), localWeekRange(now));
   assert.deepEqual(dashboardPresetRange("last-week", now), localWeekRange(new Date(2026, 6, 9)));
+  assert.deepEqual(dashboardPresetRange("current-month", now), localMonthRange(now));
   assert.deepEqual(dashboardPresetRange("last-month", now), localMonthRange(new Date(2026, 5, 1)));
 });
 
@@ -86,6 +88,7 @@ test("inclusive local dates become half-open UTC ranges", () => {
 	assert.equal(formatDuration(Number.NaN), "0m");
 	assert.equal(formatDurationWithPercentage(4000, 6000), "1h 06m (67%)");
 	assert.equal(formatDurationWithPercentage(2000, 6000), "33m (33%)");
+	assert.equal(formatDurationWithPercentage(1, 0), "0m (0%)");
   const now = new Date("2026-07-16T11:05:30Z");
   assert.equal(runningElapsedSeconds("2026-07-16T10:00:00Z", now), 3930);
   assert.equal(formatRunningDuration("2026-07-16T10:00:00Z", now), "1h 05m");
@@ -99,4 +102,18 @@ test("entry corrections convert local date-time fields to and from UTC", () => {
   assert.equal(localDateTimeValue("2026-07-16T14:30:00Z"), "2026-07-16T10:30");
   assert.equal(localDateTimeToUTC("2026-07-16T10:30"), "2026-07-16T14:30:00.000Z");
   assert.throws(() => localDateTimeToUTC(""));
+  assert.equal(localDateTimeValue("invalid"), "");
+  assert.throws(() => inclusiveLocalDateRange("not-a-date", "2026-03-01"), /YYYY-MM-DD/);
+  assert.throws(() => inclusiveLocalDateRange("2026-02-29", "2026-03-01"), /invalid/);
+});
+
+test("covers calendar edges and invalid clock inputs", () => {
+  const sunday = new Date("2026-07-19T12:00:00Z");
+  assert.equal(localDateKey(localWeekDates(sunday)[0]), "2026-07-13");
+  assert.equal(localMonthGrid(new Date("2026-08-15T12:00:00Z")).length, 42);
+  assert.equal(formatDuration(-1), "0m");
+  assert.equal(formatDuration(3600), "1h 00m");
+  assert.equal(runningElapsedSeconds("2026-07-16T10:00:00Z", new Date("invalid")), 0);
+  assert.equal(millisecondsUntilNextDurationMinute("2026-07-16T12:00:00Z", new Date("2026-07-16T11:05:30Z")), 60_000);
+  assert.equal(millisecondsUntilNextDurationMinute("2026-07-16T11:00:00Z", new Date("invalid")), 60_000);
 });

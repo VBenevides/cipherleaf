@@ -10,6 +10,7 @@ import {
   parseCardDocument,
   parseCardReference,
   parseTemplateDocument,
+  replaceBoardMarker,
   serializeCardDocument,
   serializeTemplateDocument,
   transitionCard,
@@ -76,6 +77,8 @@ test("board cards filter by all selected tags and sort newest first", () => {
     ["b", { ...newCardMetadata("b", new Date("2026-01-02T00:00:00Z")), title: "Beta", tags: ["Work"] }],
   ]);
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "a", ["work", "urgent"]).map((card) => card.id), ["a"]);
+  assert.deepEqual(boardCardsForColumn(cards, ["a", "b", "missing"], "in-progress"), []);
+  assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "", ["missing"]), []);
 });
 
 test("board ordering uses latest column entry outside backlog", () => {
@@ -84,4 +87,40 @@ test("board ordering uses latest column entry outside backlog", () => {
   const cards = new Map([[older.id, older], [newer.id, newer]]);
   assert.deepEqual(boardCardsForColumn(cards, [older.id, newer.id], "in-progress").map((card) => card.id), ["b", "a"]);
   assert.deepEqual(boardCardsForColumn(cards, ["missing"], "in-progress"), []);
+});
+
+test("parses legacy, invalid, and optional card metadata", () => {
+  const metadata = {
+    ...newCardMetadata("card-1", new Date("2026-01-01T00:00:00Z")),
+    title: "Optional",
+    startedAt: "2026-01-02",
+    blockedOn: "2026-01-03",
+    finishedAt: "2026-01-04",
+    boardID: "board",
+    columnEnteredAt: "2026-01-05",
+  };
+  const optional = serializeCardDocument(metadata, "Body");
+  assert.equal(parseCardDocument("plain", "card-1", "Card"), null);
+  assert.equal(parseCardDocument("---\ncipherleaf-card: false\n---", "card-1", "Card"), null);
+  assert.equal(parseCardDocument("---\ncipherleaf-card: true\ncipherleaf-card-status: invalid\ncipherleaf-card-created-at: now\n---", "card-1", "Card"), null);
+  assert.deepEqual(parseCardDocument(optional, "card-1", " ")?.metadata, {
+    id: "card-1", title: "Untitled", status: "not-started", tags: [], createdAt: metadata.createdAt,
+    startedAt: "2026-01-02", blockedOn: "2026-01-03", finishedAt: "2026-01-04", boardID: "board", columnEnteredAt: "2026-01-05",
+  });
+  assert.deepEqual(parseCardDocument(`---\ncipherleaf-card: true\ncipherleaf-card-status: blocked\ncipherleaf-card-tags: [Work, Bug]\ncipherleaf-card-created-at: now\n---\nBody`, "card-1", "Card")?.metadata.tags, ["Work", "Bug"]);
+  assert.equal(parseTemplateDocument("plain", "template"), null);
+  assert.equal(parseTemplateDocument("---\ncipherleaf-card-template: true\ncipherleaf-card-template-name: \"\"\ncipherleaf-card-template-status: blocked\n---", "template"), null);
+  assert.equal(parseTemplateDocument("---\ncipherleaf-card-template: true\ncipherleaf-card-template-name: Name\ncipherleaf-card-template-status: invalid\n---", "template"), null);
+  assert.equal(parseCardDocument(`---\ncipherleaf-card: true\ncipherleaf-card-status: blocked\ncipherleaf-card-tags: not-json\ncipherleaf-card-created-at: now\n---`, "card-1", "Card")?.metadata.tags.length, 1);
+});
+
+test("rejects malformed board markers and replaces escaped IDs", () => {
+  assert.equal(parseBoardMarker("plain"), null);
+  assert.equal(parseBoardMarker("<!-- other:board -->"), null);
+  assert.equal(parseBoardMarker("<!-- cipherleaf-board::cards -->"), null);
+  assert.equal(parseBoardMarker("<!-- cipherleaf-board:board > cards -->"), null);
+  assert.equal(parseBoardMarker("<!-- cipherleaf-board:board:%E0%A4%A: -->")?.title, "%E0%A4%A");
+  const source = boardMarker("board.*", ["one"], "Old");
+  assert.equal(replaceBoardMarker(source, "missing", () => ({ id: "x", title: "x", cardIDs: [] })), source);
+  assert.equal(replaceBoardMarker(source, "board.*", () => ({ id: "board.*", title: "New", cardIDs: ["two"] })), boardMarker("board.*", ["two"], "New"));
 });

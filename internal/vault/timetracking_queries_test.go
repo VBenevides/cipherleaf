@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+func TestStringsCompareHandlesEqualValues(t *testing.T) {
+	if got := stringsCompare("same", "same"); got != 0 {
+		t.Fatalf("stringsCompare equal values = %d", got)
+	}
+}
+
 func TestListTimeEntriesClipsFiltersAndIncludesRunning(t *testing.T) {
 	store, _ := newTrackingTestStore(t)
 	projectID := fmt.Sprintf("%032x", 90)

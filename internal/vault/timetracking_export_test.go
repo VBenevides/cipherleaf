@@ -11,6 +11,26 @@ import (
 	"time"
 )
 
+func TestCopyAndHashTrackingCiphertextRejectsInvalidTargets(t *testing.T) {
+	if _, err := copyAndHashTrackingCiphertext(filepath.Join(t.TempDir(), "missing"), filepath.Join(t.TempDir(), "target")); err == nil {
+		t.Fatal("missing source unexpectedly accepted")
+	}
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.WriteFile(source, []byte("ciphertext"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(t.TempDir(), "file-parent")
+	if err := os.WriteFile(parent, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyAndHashTrackingCiphertext(source, filepath.Join(parent, "target")); err == nil {
+		t.Fatal("file parent unexpectedly accepted")
+	}
+	if _, err := copyAndHashTrackingCiphertext(source, t.TempDir()); err == nil {
+		t.Fatal("directory target unexpectedly accepted")
+	}
+}
+
 func TestTrackingMutationsChangeSnapshotRevision(t *testing.T) {
 	store, _ := newTrackingTestStore(t)
 	revision, err := store.SnapshotRevision()

@@ -33,4 +33,8 @@ test("relationship edges include resolved and unresolved wikilinks", () => {
 test("empty folder mode does not make link mode empty", () => {
   assert.equal(graphModeIsEmpty("folders", 2, 0), true);
   assert.equal(graphModeIsEmpty("links", 2, 0), false);
+  assert.equal(graphModeIsEmpty("links", 0, 0), true);
+  assert.equal(graphModeIsEmpty("folders", 1, 1), false);
+  assert.equal(relationshipTargetID(notes, "Alpha|note:missing"), "a");
+  assert.deepEqual(relationshipLinks([{ id: "a", title: "Alpha", outgoingLinks: null }]), []);
 });

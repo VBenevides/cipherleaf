@@ -5,20 +5,30 @@ import test from "node:test";
 import { expandedSelection } from "../src/editorSelection.ts";
 import {
   canonicalObjectDocumentFromMarkdown,
+  classifyObjectLine,
   continuationPrefix,
   deleteObjectInMarkdown,
+  isContinuationLine,
+  isSeparatorLine,
+  lineIndent,
   markdownFromCanonicalObjectDocument,
   markdownObjectTree,
   moveObject,
   moveObjectInMarkdown,
   objectAncestorsByLine,
+  objectBlockEnd,
+  objectContentIndent,
   objectDepthByLine,
+  objectOwnerLineNumber,
   portableMarkdown,
   parseCanonicalObjectDocument,
+  parseCanonicalObjectDocumentText,
   parseObjectDocument,
   prepareNoteContent,
   remapObjectKeysByLine,
   removeAttachmentReferences,
+  stringifyCanonicalObjectDocument,
+  visualIndent,
 } from "../src/objectDocument.ts";
 
 test("deletes an object block from its starting line", () => {
@@ -40,6 +50,13 @@ test("expands selection from word to object text to document", () => {
       expected,
     );
   }
+});
+
+test("keeps an already complete selection unchanged", () => {
+  const source = "> first word\nsecond element";
+  const document = parseObjectDocument(source);
+  const state = EditorState.create({ doc: source, selection: { anchor: 0, head: source.length } });
+  assert.deepEqual(expandedSelection(state, document).main, state.selection.main);
 });
 
 test("keeps object type markers out of selection text", () => {
@@ -667,4 +684,71 @@ test("keeps Object Tree actions accessible and text-first on narrow panels", () 
   assert.match(style, /grid-template-columns: 22px max-content minmax\(0, 1fr\)/);
   assert.match(style, /\.object-tree-metadata/);
   assert.match(style, /@media \(max-width: 600px\)[\s\S]*?\.object-tree-view/);
+});
+
+test("covers object parser boundaries and invalid moves", () => {
+  assert.equal(visualIndent(" \t"), 3);
+  assert.equal(lineIndent(" \ttext"), 3);
+  assert.equal(classifyObjectLine("1) item").listMarker, "1)");
+  assert.equal(classifyObjectLine("1item").tag, "text");
+  assert.equal(classifyObjectLine("- [x] done").checked, true);
+  assert.equal(classifyObjectLine("[x] done").checked, true);
+  assert.equal(classifyObjectLine("# heading").tag, "text");
+  assert.equal(classifyObjectLine("> # heading").tag, "section");
+  assert.equal(objectContentIndent("  text"), 4);
+  assert.equal(isContinuationLine(["Parent", "  child"], 1), false);
+  assert.equal(isContinuationLine(["Parent", "  child"], 2), true);
+  assert.equal(isContinuationLine(["Parent", "  - child"], 2), false);
+  assert.equal(isContinuationLine(["Parent", "  ", "next"], 2), false);
+  assert.equal(isSeparatorLine(["Parent", ""], 2), true);
+  assert.equal(objectOwnerLineNumber(["Parent", "  child"], 2), 1);
+  assert.equal(objectOwnerLineNumber(["Parent"], 1), 1);
+  assert.equal(objectBlockEnd(["```", "code"], 1), 2);
+  assert.equal(deleteObjectInMarkdown("a\nb", 0), "a\nb");
+  assert.equal(deleteObjectInMarkdown("a\nb", 3), "a\nb");
+  assert.equal(moveObjectInMarkdown("a\nb", 1, 1, "before"), "a\nb");
+  assert.equal(moveObjectInMarkdown("a\nb", 0, 1, "before"), "a\nb");
+  assert.equal(moveObject("a\nb", "missing", "also-missing", "before"), "a\nb");
+  assert.equal(moveObject("a\nb", "same", "same", "before"), "a\nb");
+});
+
+test("validates canonical object documents before using them", () => {
+  assert.equal(parseCanonicalObjectDocumentText("not json"), null);
+  assert.equal(parseCanonicalObjectDocumentText("{}"), null);
+  const valid = canonicalObjectDocumentFromMarkdown("text");
+  const object = valid.objects[0];
+  const invalid = (changes: Record<string, unknown>) => parseCanonicalObjectDocumentText(JSON.stringify({
+    ...valid,
+    objects: [{ ...object, ...changes }],
+  }));
+  assert.ok(parseCanonicalObjectDocumentText(stringifyCanonicalObjectDocument(valid)));
+  assert.equal(invalid({ id: 1 }), null);
+  assert.equal(invalid({ tag: "invalid" }), null);
+  assert.equal(invalid({ tags: ["invalid"] }), null);
+  assert.equal(invalid({ text: 1 }), null);
+  assert.equal(invalid({ indent: "0" }), null);
+  assert.equal(invalid({ contentIndent: "0" }), null);
+  assert.equal(invalid({ parentId: 1 }), null);
+  assert.equal(invalid({ parentSectionId: 1 }), null);
+  assert.equal(invalid({ childrenIds: [1] }), null);
+  assert.equal(invalid({ sourcePrefix: 1 }), null);
+  assert.equal(invalid({ attachmentId: 1 }), null);
+  assert.equal(invalid({ attachmentKind: "other" }), null);
+  assert.equal(invalid({ checked: "false" }), null);
+  assert.equal(invalid({ language: 1 }), null);
+  assert.equal(invalid({ closed: "false" }), null);
+  assert.equal(markdownFromCanonicalObjectDocument({ ...valid, objects: [{ ...object, tag: "code", text: "", closed: false, childrenIds: ["missing"] }] }).startsWith("```"), true);
+  const complete = {
+    ...object,
+    tag: "image" as const,
+    tags: ["image" as const, "text" as const],
+    text: "Image",
+    sourcePrefix: "![Image](attachment:image)",
+    attachmentId: "image",
+    attachmentKind: "file" as const,
+    checked: true,
+    language: "txt",
+    closed: false,
+  };
+  assert.equal(parseCanonicalObjectDocumentText(JSON.stringify({ ...valid, objects: [complete] }))?.objects[0].attachmentKind, "file");
 });

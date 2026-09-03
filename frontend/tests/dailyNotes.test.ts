@@ -6,6 +6,7 @@ const date = new Date(2026, 6, 13, 9, 5);
 
 test("daily note titles use configured date tokens", () => {
   assert.equal(formatDailyTitle(date, "DD.MM.YYYY"), "13.07.2026");
+  assert.equal(formatDailyTitle(date, ""), "2026-07-13");
 });
 
 test("daily templates expand title and date variables", () => {

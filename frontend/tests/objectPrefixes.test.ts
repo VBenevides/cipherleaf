@@ -76,6 +76,10 @@ test("continues numbering from the previous numbered object", () => {
 
 test("continues bare text objects at the same indentation", () => {
   assert.equal(repeatedObjectPrefix("  < Text"), "  < ");
+  assert.equal(repeatedObjectPrefix("> Quote"), "> ");
+  assert.equal(repeatedObjectPrefix("- [ ] Task"), "- [ ] ");
+  assert.equal(repeatedObjectPrefix("1. Task"), "2. ");
+  assert.equal(repeatedObjectPrefix("plain"), null);
 });
 
 test("inserting before an object does not duplicate its marker", () => {

@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { cardReference, boardMarker, type CardMetadata } from "../src/cards";
-import LiveMarkdownEditor from "../src/LiveMarkdownEditor";
+import LiveMarkdownEditor, { clipboardClaimsImage, clipboardImage, clipboardMayContainImage, imageDataURL } from "../src/LiveMarkdownEditor";
 import ObjectTreeView from "../src/ObjectTreeView";
 import SourceMarkdownEditor from "../src/SourceMarkdownEditor";
 
@@ -55,6 +55,28 @@ Object.defineProperty(dom.window.navigator, "clipboard", {
   configurable: true,
   value: { writeText: async () => {}, write: async () => {}, read: async () => [] },
 });
+Object.defineProperties(dom.window.HTMLElement.prototype, {
+  setPointerCapture: { configurable: true, value: () => {} },
+  releasePointerCapture: { configurable: true, value: () => {} },
+});
+
+const clipboardImageBlob = new dom.window.Blob([new Uint8Array([65, 66])], { type: "image/png" });
+assert.equal(await imageDataURL("data:image/png;base64,AA=="), "data:image/png;base64,AA==");
+assert.match(await imageDataURL(clipboardImageBlob), /^data:image\/png;base64,/);
+await assert.rejects(imageDataURL(new dom.window.Blob(["text"], { type: "text/plain" })), /Only PNG/);
+assert.equal(clipboardImage({ clipboardData: null } as ClipboardEvent), null);
+assert.equal(clipboardImage({ clipboardData: { items: [], files: [], getData: () => "" } } as unknown as ClipboardEvent), null);
+assert.equal(clipboardImage({ clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => clipboardImageBlob }], files: [], getData: () => "" } } as unknown as ClipboardEvent), clipboardImageBlob);
+assert.equal(clipboardClaimsImage({ clipboardData: null } as ClipboardEvent), false);
+assert.equal(clipboardClaimsImage({ clipboardData: { items: [{ type: "image/png" }], types: [], getData: () => "" } } as unknown as ClipboardEvent), true);
+assert.equal(clipboardClaimsImage({ clipboardData: { items: [], types: ["Files"], getData: () => "" } } as unknown as ClipboardEvent), true);
+assert.equal(clipboardClaimsImage({ clipboardData: { items: [], types: [], getData: () => "PNG" } } as unknown as ClipboardEvent), true);
+assert.equal(clipboardMayContainImage({ clipboardData: { items: [], types: [], getData: () => "text" } } as unknown as ClipboardEvent), false);
+const userAgent = dom.window.navigator.userAgent;
+Object.defineProperty(dom.window.navigator, "userAgent", { configurable: true, value: "Linux" });
+assert.equal(clipboardMayContainImage({ clipboardData: null } as ClipboardEvent), true);
+assert.equal(clipboardMayContainImage({ clipboardData: { items: [], types: [], getData: () => "" } } as unknown as ClipboardEvent), true);
+Object.defineProperty(dom.window.navigator, "userAgent", { configurable: true, value: userAgent });
 
 const cards = new Map<string, CardMetadata>([
   ["card-1", { id: "card-1", title: "Backlog card", status: "not-started", tags: ["work"], createdAt: "2026-01-01" }],
@@ -340,6 +362,40 @@ for (const row of objectRows) {
   row.querySelector<HTMLButtonElement>("button[title='Add a child object']")?.click();
   row.querySelector<HTMLElement>("summary")?.click();
 }
+const dragEvent = (type: string, clientY: number) => {
+  const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, { pointerId: { value: 1 }, clientX: { value: 10 }, clientY: { value: clientY } });
+  return event;
+};
+const dragSource = objectRows[0].querySelector<HTMLButtonElement>(".object-tree-handle")!;
+const dragTarget = objectRows[1];
+Object.defineProperty(dragTarget, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, height: 100 }) });
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [dragTarget] });
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointermove", 10));
+document.dispatchEvent(dragEvent("pointermove", 50));
+document.dispatchEvent(dragEvent("pointermove", 90));
+document.dispatchEvent(dragEvent("pointerup", 90));
+Object.defineProperty(dragTarget, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, height: 0 }) });
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [dragTarget.querySelector(".object-tree-text")] });
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointermove", 50));
+document.dispatchEvent(dragEvent("pointerup", 50));
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [] });
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointermove", 50));
+document.dispatchEvent(dragEvent("pointerup", 50));
+dragSource.dispatchEvent(dragEvent("pointerdown", 50));
+document.dispatchEvent(dragEvent("pointercancel", 50));
+assert.ok(objectChanges > 1);
+const attachmentObject = mount("attachment-object-host");
+await act(async () => {
+  attachmentObject.root.render(createElement(ObjectTreeView, { value: "[report.pdf](attachment:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)", onChange: () => {} }));
+  await wait();
+});
+assert.match(attachmentObject.body.textContent ?? "", /Attachment syntax/);
+await act(async () => { attachmentObject.root.unmount(); });
+attachmentObject.shell.remove();
 object.body.querySelector<HTMLButtonElement>(".object-tree-delete")?.click();
 assert.ok(objectChanges > 0);
 await act(async () => { object.root.unmount(); });

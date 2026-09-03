@@ -53,3 +53,9 @@ func TestFrontmatterUnknownLinesRemainInContent(t *testing.T) {
 		t.Fatalf("saved = %#v, %v", saved, err)
 	}
 }
+
+func TestExtractPropertiesSkipsMalformedAndEmptyFrontmatter(t *testing.T) {
+	if properties := extractProperties("---\nnot a property\n: missing key\n---"); properties != nil {
+		t.Fatalf("extractProperties() = %#v, want nil", properties)
+	}
+}
