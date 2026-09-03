@@ -205,7 +205,7 @@ function WeekView({
       <h3>{selectedWeekDate && formatLocalDate(selectedWeekDate.date)}</h3>
       {selectedWeekEntries.map(({ entry }) => <article key={entry.id}>
         <div><strong>{entry.name}</strong><span>{formatLocalDateTime(new Date(entry.startedAtUtc))} – {formatLocalDateTime(new Date(entry.endedAtUtc!))} · <strong>{formatDuration((new Date(entry.endedAtUtc!).getTime() - new Date(entry.startedAtUtc).getTime()) / 1000)}</strong></span></div>
-        <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => void onResume(entry)}>Resume</button><button className="secondary-button" onClick={() => onBeginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => onDeleteRequest(entry)}>Delete</button></div>
+        <div><button className="secondary-button" disabled={!!activeEntry || busy} onClick={() => onResume(entry)}>Resume</button><button className="secondary-button" onClick={() => onBeginEdit(entry)}>Edit</button><button className="secondary-button danger-button" onClick={() => onDeleteRequest(entry)}>Delete</button></div>
       </article>)}
       {!selectedWeekEntries.length && <div className="time-tracking-empty"><p>No completed entries for this day.</p></div>}
     </div>
