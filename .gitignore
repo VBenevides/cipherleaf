@@ -1,5 +1,6 @@
 # Manual Entries
 local/
+coverage/
 AGENTS.md
 .vscode
 .kilo

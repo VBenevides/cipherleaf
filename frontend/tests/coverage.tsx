@@ -1,0 +1,21 @@
+await Promise.all([
+  import("./cards.test.ts"),
+  import("./commandPalette.test.ts"),
+  import("./dailyNotes.test.ts"),
+  import("./errors.test.ts"),
+  import("./globalSearch.test.ts"),
+  import("./graphView.test.ts"),
+  import("./markdown.test.ts"),
+  import("./objectDocument.test.ts"),
+  import("./objectPrefixes.test.ts"),
+  import("./objectTree.test.ts"),
+  import("./quickSwitcher.test.ts"),
+  import("./searchTarget.test.ts"),
+  import("./serialTask.test.ts"),
+  import("./snippets.test.ts"),
+  import("./syncTiming.test.ts"),
+  import("./timeTracking.test.ts"),
+  import("./timeTrackingAccessibility.test.ts"),
+  import("./workspaceUI.test.ts"),
+]);
+await import("./componentCoverage.tsx");
