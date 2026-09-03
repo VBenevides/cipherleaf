@@ -229,6 +229,15 @@ test("journals reordering and code content changes", () => {
   assert.match(code, /      const a = 2/);
 });
 
+test("journals large cards without quadratic diff allocation", () => {
+  const previous = Array.from({ length: 1000 }, (_, index) => `> Item ${index}`).join("\n");
+  const result = appendCardContentJournal(previous, `${previous}\n> Added`, metadata(), date);
+
+  assert.ok(result);
+  assert.match(result, /      > Added/);
+  assert.equal((result.match(/      > Item /g) ?? []).length, 0);
+});
+
 test("does not emit journal wrapper markers", () => {
   const first = appendCardContentJournal("Before", "After", metadata(), date);
   assert.ok(first);

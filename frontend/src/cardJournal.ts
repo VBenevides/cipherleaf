@@ -56,34 +56,6 @@ function objectEntries(markdown: string): ObjectEntry[] {
   });
 }
 
-// ponytail: LCS is O(n²) per save; use keyed diffing if unusually large cards make saves slow.
-function longestCommonSubsequence(left: readonly string[], right: readonly string[]): [number, number][] {
-  const lengths = Array.from({ length: left.length + 1 }, () => new Array<number>(right.length + 1).fill(0));
-  for (let leftIndex = left.length - 1; leftIndex >= 0; leftIndex--) {
-    for (let rightIndex = right.length - 1; rightIndex >= 0; rightIndex--) {
-      lengths[leftIndex][rightIndex] = left[leftIndex] === right[rightIndex]
-        ? lengths[leftIndex + 1][rightIndex + 1] + 1
-        : Math.max(lengths[leftIndex + 1][rightIndex], lengths[leftIndex][rightIndex + 1]);
-    }
-  }
-
-  const pairs: [number, number][] = [];
-  let leftIndex = 0;
-  let rightIndex = 0;
-  while (leftIndex < left.length && rightIndex < right.length) {
-    if (left[leftIndex] === right[rightIndex]) {
-      pairs.push([leftIndex, rightIndex]);
-      leftIndex++;
-      rightIndex++;
-    } else if (lengths[leftIndex + 1][rightIndex] >= lengths[leftIndex][rightIndex + 1]) {
-      leftIndex++;
-    } else {
-      rightIndex++;
-    }
-  }
-  return pairs;
-}
-
 function sameValues(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -91,20 +63,32 @@ function sameValues(left: readonly string[], right: readonly string[]): boolean 
 function changedObjects(previous: ObjectEntry[], next: ObjectEntry[]): ObjectLine[] {
   const previousKeys = previous.map(({ key }) => key);
   const nextKeys = next.map(({ key }) => key);
-  const pairs = longestCommonSubsequence(previousKeys, nextKeys);
-  const matchedNext = new Set(pairs.map(([, nextIndex]) => nextIndex));
   const previousKeySet = new Set(previousKeys);
   const nextKeySet = new Set(nextKeys);
   const commonPrevious = previousKeys.filter((key) => nextKeySet.has(key));
   const commonNext = nextKeys.filter((key) => previousKeySet.has(key));
   const orderChanged = !sameValues(commonPrevious, commonNext);
 
-  const changed = next
-    .filter((_, index) => !matchedNext.has(index))
-    .map(({ object }) => object);
+  const previousCounts = new Map<string, number>();
+  for (const key of previousKeys) previousCounts.set(key, (previousCounts.get(key) ?? 0) + 1);
+  const matchedCounts = new Map<string, number>();
+  const changed: ObjectLine[] = [];
+  const changedSet = new Set<ObjectLine>();
+  for (const { object, key } of next) {
+    const matched = matchedCounts.get(key) ?? 0;
+    if (matched < (previousCounts.get(key) ?? 0)) {
+      matchedCounts.set(key, matched + 1);
+    } else {
+      changed.push(object);
+      changedSet.add(object);
+    }
+  }
   if (orderChanged) {
     next.forEach(({ object, key }) => {
-      if (previousKeySet.has(key) && !changed.includes(object)) changed.push(object);
+      if (previousKeySet.has(key) && !changedSet.has(object)) {
+        changed.push(object);
+        changedSet.add(object);
+      }
     });
   }
   return changed;
