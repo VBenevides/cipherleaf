@@ -293,6 +293,35 @@ function tagSectionInsertionLine(
   return firstUntagged ? firstUntagged.lineNumber - 1 : sectionInsertionLine(lines, document, section);
 }
 
+function appendJournalTags(
+  lines: string[],
+  document: ReturnType<typeof parseObjectDocument>,
+  section: ObjectLine,
+  journal: string,
+  boardLine: number,
+  date: Date,
+): string {
+  for (const block of journalTagBlocks(journal)) {
+    const blockLines = block.split("\n");
+    const tag = blockLines[0].replace(/^\s*>\s*/, "").trim().toLocaleLowerCase();
+    const existing = section.childrenIds
+      .map((id) => document.byId.get(id))
+      .find((object) => object?.tag === "section" && sectionTag(object) === tag);
+    const inserted = (existing ? blockLines.slice(1) : blockLines).join("\n");
+    const insertionLine = existing
+      ? sectionInsertionLine(lines, document, existing)
+      : tagSectionInsertionLine(lines, document, section);
+    lines = insertLines(lines, insertionLine, inserted).split("\n");
+    document = parseObjectDocument(lines.join("\n"));
+    const nextSection = document.roots.find(
+      (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
+    );
+    if (!nextSection) break;
+    section = nextSection;
+  }
+  return lines.join("\n");
+}
+
 export function appendCardJournalToMainEditor(
   mainContent: string,
   previousBody: string,
@@ -329,23 +358,5 @@ export function appendCardJournalToMainEditor(
     );
   }
   if (!section) return appendBody(normalized, journal);
-
-  for (const block of journalTagBlocks(journal)) {
-    const blockLines = block.split("\n");
-    const tag = blockLines[0].replace(/^\s*>\s*/, "").trim().toLocaleLowerCase();
-    const existing = section.childrenIds
-      .map((id) => document.byId.get(id))
-      .find((object) => object?.tag === "section" && sectionTag(object) === tag);
-    const inserted = (existing ? blockLines.slice(1) : blockLines).join("\n");
-    const insertionLine = existing
-      ? sectionInsertionLine(lines, document, existing)
-      : tagSectionInsertionLine(lines, document, section);
-    lines = insertLines(lines, insertionLine, inserted).split("\n");
-    document = parseObjectDocument(lines.join("\n"));
-    section = document.roots.find(
-      (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
-    );
-    if (!section) break;
-  }
-  return lines.join("\n");
+  return appendJournalTags(lines, document, section, journal, boardLine, date);
 }
