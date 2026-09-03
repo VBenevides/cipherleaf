@@ -4106,6 +4106,7 @@ dialog.modal-backdrop {
 .card-sidebar-notes { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .card-sidebar-notes .live-editor-frame { min-height: 0; }
 .card-sidebar-notes .live-markdown-editor .cm-content { padding: 16px 0 40px; }
+.card-sidebar-notes .cm-journal-rules { inset: 0; }
 .card-sidebar-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card-sidebar-actions .card-save-button { margin-left: auto; }
 .card-save-button.is-dirty { color: #fff; border-color: #2588d8; background: #2588d8; }
