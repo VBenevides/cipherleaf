@@ -181,6 +181,7 @@ live.body.querySelector<HTMLElement>(".cm-live-citation")?.click();
 live.body.querySelector<HTMLButtonElement>(".cm-live-link-menu button")?.click();
 
 const editorNode = live.body.querySelector<HTMLElement>(".cm-editor");
+const boardNode = live.body.querySelector<HTMLElement>(".cm-live-board");
 const updatedCards = new Map(cards);
 updatedCards.set("card-1", { ...cards.get("card-1")!, title: "Renamed card" });
 await act(async () => {
@@ -207,6 +208,7 @@ await act(async () => {
   await wait();
 });
 assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-editor"), editorNode);
+assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-live-board"), boardNode);
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");

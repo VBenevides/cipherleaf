@@ -134,6 +134,7 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /Remove tag \$\{tag\}/);
   assert.match(app, /className="card-sidebar-divider"/);
   assert.match(app, /className="card-sidebar-notes"[\s\S]*<LiveMarkdownEditor/);
+  assert.match(app, /\}, \[cardPanel\?\.metadata, cardPanel\?\.note\.id, notes\]\);/);
   assert.match(app, /const deleteCard = async/);
   assert.match(app, /Delete card/);
   assert.match(app, /cardPanelDirty \? "primary-button is-dirty" : "secondary-button"/);
@@ -171,6 +172,8 @@ test("live preview updates only safe local edits", () => {
 test("board widget equality compares card IDs without serialization", () => {
   assert.match(liveEditor, /other\.cardIDs\.length !== this\.cardIDs\.length/);
   assert.match(liveEditor, /other\.cardIDs\[index\] !== this\.cardIDs\[index\]/);
+  assert.match(liveEditor, /updateDOM\(dom: HTMLElement, _view: EditorView, from: BoardWidget\)/);
+  assert.match(liveEditor, /boardCardPresentationChanged\(previous, card\)/);
   assert.doesNotMatch(liveEditor, /JSON\.stringify\(other\.cardIDs\)/);
 });
 

@@ -1098,6 +1098,8 @@ class CardReferenceWidget extends WidgetType {
 }
 
 const boardCardMime = "application/x-cipherleaf-board-card";
+const DEFAULT_CARD_TITLE = "Untitled";
+const boardCardData = new WeakMap<HTMLElement, ReadonlyMap<string, CardMetadata>>();
 
 function boardCardDate(card: CardMetadata, status: CardStatus): string | undefined {
   switch (status) {
@@ -1125,6 +1127,30 @@ function fitBoardCardTexts(board: HTMLElement) {
   }
 }
 
+function boardCardPresentationChanged(previous: CardMetadata, current: CardMetadata): boolean {
+  return previous.title !== current.title ||
+    previous.tags.length !== current.tags.length ||
+    previous.tags.some((tag, index) => tag !== current.tags[index]) ||
+    boardCardDate(previous, previous.status) !== boardCardDate(current, current.status);
+}
+
+function boardCardTitleChangedOnly(previous: CardMetadata, current: CardMetadata): boolean {
+  return previous.title !== current.title &&
+    previous.tags.length === current.tags.length &&
+    previous.tags.every((tag, index) => tag === current.tags[index]) &&
+    boardCardDate(previous, previous.status) === boardCardDate(current, current.status);
+}
+
+function updateBoardCardTitle(item: HTMLButtonElement, card: CardMetadata, status: CardStatus): boolean {
+  const title = item.querySelector<HTMLElement>(".cm-live-board-card-title");
+  if (!title) return false;
+  title.textContent = card.title || DEFAULT_CARD_TITLE;
+  item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
+  item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
+  fitBoardCardTexts(item);
+  return true;
+}
+
 function alignmentLabel(align: "left" | "center" | "right"): string {
   if (align === "left") return "Align left";
   if (align === "center") return "Align center";
@@ -1146,9 +1172,33 @@ class BoardWidget extends WidgetType {
   ) { super(); }
 
   eq(other: BoardWidget) {
-    if (other.boardID !== this.boardID || other.title !== this.title || other.cards !== this.cards || other.cardIDs.length !== this.cardIDs.length) return false;
+    if (other.boardID !== this.boardID || other.title !== this.title || other.cardIDs.length !== this.cardIDs.length) return false;
     for (let index = 0; index < this.cardIDs.length; index++) {
       if (other.cardIDs[index] !== this.cardIDs[index]) return false;
+      const previous = this.cards.get(this.cardIDs[index]);
+      const current = other.cards.get(other.cardIDs[index]);
+      if (previous === current) continue;
+      if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+    }
+    return true;
+  }
+
+  updateDOM(dom: HTMLElement, _view: EditorView, from: BoardWidget) {
+    boardCardData.set(dom, this.cards);
+    const cardElements = new Map<string, HTMLButtonElement>();
+    dom.querySelectorAll<HTMLButtonElement>(".cm-live-board-card").forEach((item) => {
+      if (item.dataset.cardId) cardElements.set(item.dataset.cardId, item);
+    });
+    for (const id of this.cardIDs) {
+      const previous = from.cards.get(id);
+      const card = this.cards.get(id);
+      if (!previous || !card || previous.status !== card.status) return false;
+      if (!boardCardPresentationChanged(previous, card)) continue;
+      if (!boardCardTitleChangedOnly(previous, card) ||
+        dom.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")?.value ||
+        dom.querySelector<HTMLInputElement>("[aria-label='Filter board cards by tags']")?.value) return false;
+      const item = cardElements.get(id);
+      if (!item || !updateBoardCardTitle(item, card, card.status)) return false;
     }
     return true;
   }
@@ -1157,7 +1207,7 @@ class BoardWidget extends WidgetType {
     columns: HTMLElement,
     status: CardStatus,
     cards: readonly CardMetadata[],
-  ): { empty: HTMLElement; cards: { card: CardMetadata; item: HTMLButtonElement }[] } {
+  ) {
     const column = columns.appendChild(document.createElement("div"));
     column.className = `cm-live-board-column status-${status}`;
     column.dataset.status = status;
@@ -1175,7 +1225,6 @@ class BoardWidget extends WidgetType {
     const empty = column.appendChild(document.createElement("p"));
     empty.className = "cm-live-board-empty";
     empty.textContent = "No cards";
-    const cardElements: { card: CardMetadata; item: HTMLButtonElement }[] = [];
     for (const card of cards) {
       const item = column.appendChild(document.createElement("button"));
       item.type = "button";
@@ -1185,14 +1234,15 @@ class BoardWidget extends WidgetType {
       summary.className = "cm-live-board-card-summary";
       const cardTitle = summary.appendChild(document.createElement("span"));
       cardTitle.className = "cm-live-board-card-title";
-      cardTitle.textContent = card.title || "Untitled";
+      cardTitle.textContent = card.title || DEFAULT_CARD_TITLE;
       if (card.tags.length > 0) {
         const tags = summary.appendChild(document.createElement("span"));
         tags.className = "cm-live-board-card-tags";
         tags.textContent = card.tags.join(", ");
         tags.title = `Tags: ${tags.textContent}`;
       }
-      item.title = `Open card “${card.title || "Untitled"}”`;
+      item.dataset.cardId = card.id;
+      item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
       item.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", card.id);
         event.dataTransfer?.setData(boardCardMime, card.id);
@@ -1202,7 +1252,7 @@ class BoardWidget extends WidgetType {
         event.stopPropagation();
         this.openCard(card.id);
       });
-      item.setAttribute("aria-label", `${card.title || "Untitled"}, ${BOARD_COLUMN_LABELS[status]}`);
+      item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
       item.addEventListener("keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         const index = BOARD_COLUMNS.indexOf(status);
@@ -1218,9 +1268,7 @@ class BoardWidget extends WidgetType {
         cardDate.dateTime = date;
         cardDate.textContent = new Date(date).toLocaleDateString();
       }
-      cardElements.push({ card, item });
     }
-    return { empty, cards: cardElements };
   }
 
   toDOM() {
@@ -1289,10 +1337,10 @@ class BoardWidget extends WidgetType {
     columns.className = "cm-live-board-columns";
     const fitTitles = () => fitBoardCardTexts(board);
     const allCards = boardCardsForColumns(this.cards, this.cardIDs);
-    const columnElements = new Map<CardStatus, ReturnType<BoardWidget["renderColumn"]>>();
     for (const status of BOARD_COLUMNS) {
-      columnElements.set(status, this.renderColumn(columns, status, allCards.get(status) ?? []));
+      this.renderColumn(columns, status, allCards.get(status) ?? []);
     }
+    boardCardData.set(board, this.cards);
     let isMinimized = false;
     const updateMinimizedState = () => {
       const boardTitle = title.value || DEFAULT_BOARD_TITLE;
@@ -1315,17 +1363,18 @@ class BoardWidget extends WidgetType {
       updateMinimizedState();
     });
     const updateFilter = () => {
+      const currentCards = boardCardData.get(board) ?? this.cards;
       const titleQuery = filter.value.trim().toLocaleLowerCase();
       const requiredTags = tagFilter.value.split(",");
       const filteredCards = titleQuery || requiredTags.some((tag) => tag.trim())
-        ? boardCardsForColumns(this.cards, this.cardIDs, titleQuery, requiredTags)
+        ? boardCardsForColumns(currentCards, this.cardIDs, titleQuery, requiredTags)
         : allCards;
       for (const status of BOARD_COLUMNS) {
         const visible = new Set((filteredCards.get(status) ?? []).map((card) => card.id));
-        const column = columnElements.get(status);
-        if (!column) continue;
-        for (const { card, item } of column.cards) item.hidden = !visible.has(card.id);
-        column.empty.hidden = visible.size > 0;
+        for (const item of board.querySelectorAll<HTMLButtonElement>(`.status-${status} .cm-live-board-card`)) {
+          item.hidden = !visible.has(item.dataset.cardId ?? "");
+        }
+        board.querySelector<HTMLElement>(`.status-${status} .cm-live-board-empty`)!.hidden = visible.size > 0;
       }
     };
     filter.addEventListener("input", updateFilter);

@@ -3202,7 +3202,7 @@ function App() {
     }
     if (cardPanel) cards.set(cardPanel.note.id, cardPanel.metadata);
     return cards;
-  }, [cardPanel, notes]);
+  }, [cardPanel?.metadata, cardPanel?.note.id, notes]);
 
   const cardTitles = useMemo(
     () => new Map([...cardMetadata].map(([id, metadata]) => [id, metadata.title])),
