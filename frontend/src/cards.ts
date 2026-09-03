@@ -43,6 +43,31 @@ export type CardTemplate = {
   body: string;
 };
 
+export function boardCardsForColumns(
+  cards: ReadonlyMap<string, CardMetadata>,
+  ids: readonly string[],
+  titleQuery = "",
+  requiredTags: readonly string[] = [],
+): ReadonlyMap<CardStatus, CardMetadata[]> {
+  const title = titleQuery.trim().toLocaleLowerCase();
+  const tags = requiredTags.map((tag) => tag.trim().toLocaleLowerCase()).filter(Boolean);
+  const columns = new Map<CardStatus, CardMetadata[]>(BOARD_COLUMNS.map((status) => [status, []]));
+  for (const id of ids) {
+    const card = cards.get(id);
+    if (!card || (title && !card.title.toLocaleLowerCase().includes(title)) ||
+      !tags.every((tag) => card.tags.some((value) => value.toLocaleLowerCase() === tag))) continue;
+    columns.get(card.status)?.push(card);
+  }
+  for (const [status, column] of columns) {
+    column.sort((left, right) => {
+      const leftDate = status === "not-started" ? left.createdAt : left.columnEnteredAt ?? left.createdAt;
+      const rightDate = status === "not-started" ? right.createdAt : right.columnEnteredAt ?? right.createdAt;
+      return rightDate.localeCompare(leftDate);
+    });
+  }
+  return columns;
+}
+
 export function boardCardsForColumn(
   cards: ReadonlyMap<string, CardMetadata>,
   ids: readonly string[],
@@ -50,18 +75,7 @@ export function boardCardsForColumn(
   titleQuery = "",
   requiredTags: readonly string[] = [],
 ): CardMetadata[] {
-  const title = titleQuery.trim().toLocaleLowerCase();
-  const tags = requiredTags.map((tag) => tag.trim().toLocaleLowerCase()).filter(Boolean);
-  return ids
-    .map((id) => cards.get(id))
-    .filter((card): card is CardMetadata => !!card && card.status === status)
-    .filter((card) => !title || card.title.toLocaleLowerCase().includes(title))
-    .filter((card) => tags.every((tag) => card.tags.some((value) => value.toLocaleLowerCase() === tag)))
-    .sort((left, right) => {
-      const leftDate = status === "not-started" ? left.createdAt : left.columnEnteredAt ?? left.createdAt;
-      const rightDate = status === "not-started" ? right.createdAt : right.columnEnteredAt ?? right.createdAt;
-      return rightDate.localeCompare(leftDate);
-    });
+  return boardCardsForColumns(cards, ids, titleQuery, requiredTags).get(status) ?? [];
 }
 
 const CARD_KEYS = {

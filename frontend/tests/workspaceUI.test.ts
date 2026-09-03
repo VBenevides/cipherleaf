@@ -146,7 +146,7 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /cm-live-board-card-date/);
   assert.match(liveEditor, /cm-live-board-minimize/);
   assert.match(liveEditor, /\[BOARD\] \$\{boardTitle\}/);
-  assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*boardCardsForColumn\(this\.cards, this\.cardIDs, status\)\.length/);
+  assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*allCards\.get\(status\)/);
   assert.match(liveEditor, /cm-live-board-card-tags/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);

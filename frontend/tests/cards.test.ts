@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   boardMarker,
+  boardCardsForColumns,
   boardCardsForColumn,
   cardReference,
   newCardMetadata,
@@ -82,6 +83,8 @@ test("board cards filter by all selected tags and sort newest first", () => {
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "a", ["work", "urgent"]).map((card) => card.id), ["a"]);
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b", "missing"], "in-progress"), []);
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "", ["missing"]), []);
+  const grouped = boardCardsForColumns(cards, ["a", "b"], "a", ["urgent"]);
+  assert.deepEqual((grouped.get("not-started") ?? []).map((card) => card.id), ["a"]);
 });
 
 test("board ordering uses latest column entry outside backlog", () => {

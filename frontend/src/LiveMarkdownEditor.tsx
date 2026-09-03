@@ -72,7 +72,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -1139,7 +1139,11 @@ class BoardWidget extends WidgetType {
     return other.boardID === this.boardID && other.title === this.title && other.cards === this.cards && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
   }
 
-  private renderColumn(columns: HTMLElement, status: CardStatus, titleQuery: string, requiredTags: string[]) {
+  private renderColumn(
+    columns: HTMLElement,
+    status: CardStatus,
+    cards: readonly CardMetadata[],
+  ): { empty: HTMLElement; cards: { card: CardMetadata; item: HTMLButtonElement }[] } {
     const column = columns.appendChild(document.createElement("div"));
     column.className = `cm-live-board-column status-${status}`;
     column.dataset.status = status;
@@ -1154,12 +1158,10 @@ class BoardWidget extends WidgetType {
     });
     const heading = column.appendChild(document.createElement("h4"));
     heading.textContent = BOARD_COLUMN_LABELS[status];
-    const cards = boardCardsForColumn(this.cards, this.cardIDs, status, titleQuery, requiredTags);
-    if (cards.length === 0) {
-      const empty = column.appendChild(document.createElement("p"));
-      empty.className = "cm-live-board-empty";
-      empty.textContent = "No cards";
-    }
+    const empty = column.appendChild(document.createElement("p"));
+    empty.className = "cm-live-board-empty";
+    empty.textContent = "No cards";
+    const cardElements: { card: CardMetadata; item: HTMLButtonElement }[] = [];
     for (const card of cards) {
       const item = column.appendChild(document.createElement("button"));
       item.type = "button";
@@ -1202,7 +1204,9 @@ class BoardWidget extends WidgetType {
         cardDate.dateTime = date;
         cardDate.textContent = new Date(date).toLocaleDateString();
       }
+      cardElements.push({ card, item });
     }
+    return { empty, cards: cardElements };
   }
 
   toDOM() {
@@ -1265,16 +1269,21 @@ class BoardWidget extends WidgetType {
       event.stopPropagation();
       filter.value = "";
       tagFilter.value = "";
-      render();
+      updateFilter();
     });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
     const fitTitles = () => board.querySelectorAll<HTMLElement>(".cm-live-board-card-title, .cm-live-board-card-date").forEach(fitBoardCardText);
+    const allCards = boardCardsForColumns(this.cards, this.cardIDs);
+    const columnElements = new Map<CardStatus, ReturnType<BoardWidget["renderColumn"]>>();
+    for (const status of BOARD_COLUMNS) {
+      columnElements.set(status, this.renderColumn(columns, status, allCards.get(status) ?? []));
+    }
     let isMinimized = false;
     const updateMinimizedState = () => {
       const boardTitle = title.value || DEFAULT_BOARD_TITLE;
       const counts = BOARD_COLUMNS.slice(0, 3)
-        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${boardCardsForColumn(this.cards, this.cardIDs, status).length}`)
+        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${allCards.get(status)?.length ?? 0}`)
         .join(" · ");
       board.classList.toggle("is-minimized", isMinimized);
       title.hidden = isMinimized;
@@ -1291,16 +1300,24 @@ class BoardWidget extends WidgetType {
       isMinimized = !isMinimized;
       updateMinimizedState();
     });
-    const render = () => {
-      columns.replaceChildren();
+    const updateFilter = () => {
       const titleQuery = filter.value.trim().toLocaleLowerCase();
       const requiredTags = tagFilter.value.split(",");
-      for (const status of BOARD_COLUMNS) this.renderColumn(columns, status, titleQuery, requiredTags);
+      const filteredCards = titleQuery || requiredTags.some((tag) => tag.trim())
+        ? boardCardsForColumns(this.cards, this.cardIDs, titleQuery, requiredTags)
+        : allCards;
+      for (const status of BOARD_COLUMNS) {
+        const visible = new Set((filteredCards.get(status) ?? []).map((card) => card.id));
+        const column = columnElements.get(status);
+        if (!column) continue;
+        for (const { card, item } of column.cards) item.hidden = !visible.has(card.id);
+        column.empty.hidden = visible.size > 0;
+      }
       fitTitles();
     };
-    filter.addEventListener("input", render);
-    tagFilter.addEventListener("input", render);
-    render();
+    filter.addEventListener("input", updateFilter);
+    tagFilter.addEventListener("input", updateFilter);
+    updateFilter();
     updateMinimizedState();
     if (typeof ResizeObserver === "function") {
       this.titleResizeObserver = new ResizeObserver(fitTitles);
