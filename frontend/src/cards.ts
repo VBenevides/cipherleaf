@@ -269,7 +269,7 @@ export function replaceBoardMarker(
   boardID: string,
   update: (marker: BoardMarker) => BoardMarker,
 ): string {
-  const escaped = boardID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = boardID.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   const marker = new RegExp(String.raw`<!--\s*cipherleaf-board:${escaped}:[^>]*-->`);
   return markdown.replace(marker, (line) => {
     const current = parseBoardMarker(line);
