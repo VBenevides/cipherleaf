@@ -40,6 +40,7 @@ test("timer and calendar modals use native dialog surfaces", () => {
   assert.doesNotMatch(app, /timer-modal-backdrop"[^>]*onMouseDown=/);
   assert.match(app, /<div className="vault-modal timer-modal">/);
   assert.match(app, /<dialog open aria-modal="true" aria-labelledby="calendar-title"\n          className="modal-backdrop calendar-backdrop"/);
+  assert.doesNotMatch(app, /calendar-backdrop"[^>]*onMouseDown=/);
   assert.match(app, /<div className="vault-modal calendar-modal">/);
   assert.match(style, /\.timer-modal \{ background: var\(--modal-surface\); \}/);
 });

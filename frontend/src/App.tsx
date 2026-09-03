@@ -6228,9 +6228,6 @@ function App() {
         <dialog open aria-modal="true" aria-labelledby="calendar-title"
           className="modal-backdrop calendar-backdrop"
           style={{ zIndex: windowLayers.calendar }}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setCalendarOpen(false);
-          }}
         >
           <div className="vault-modal calendar-modal">
             <button type="button" className="icon-button modal-close" aria-label="Close calendar" onClick={() => setCalendarOpen(false)}>
