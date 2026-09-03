@@ -2245,11 +2245,9 @@ function updateCollapsedQuotes(
   }
 
   for (const effect of transaction.effects) {
-    if (!cachedContext) {
-      cachedContext = transaction.docChanged
-        ? transaction.state.field(objectDocumentField)
-        : { lines: value.lines, objectDocument: value.objectDocument };
-    }
+    cachedContext ??= transaction.docChanged
+      ? transaction.state.field(objectDocumentField)
+      : { lines: value.lines, objectDocument: value.objectDocument };
     if (applyCollapseEffect(effect, transaction.state, cachedContext.objectDocument, collapsed)) {
       collapseChanged = true;
     }
