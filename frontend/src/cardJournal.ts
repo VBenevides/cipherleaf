@@ -277,7 +277,7 @@ function sectionInsertionLine(
 }
 
 function journalTagBlocks(journal: string): string[] {
-  return journal.split(/\n(?=  > )/).slice(1);
+  return journal.split(/\n(?= {2}> )/).slice(1);
 }
 
 function sectionTag(section: ObjectLine): string {
