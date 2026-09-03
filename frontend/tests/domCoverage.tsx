@@ -100,7 +100,9 @@ const value = [
   "const code = 1;",
   "```",
   "![image](attachment:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
-  cardReference("card-1"),
+  `  > Tag 1\n    [ ] ${cardReference("card-1")} Untitled`,
+  "    [ ] [card](note:missing-card)",
+  "    [ ] [card](legacy-missing) Legacy title",
   boardMarker("board-1", [...cards.keys()], "Roadmap"),
 ].join("\n");
 
@@ -156,6 +158,7 @@ assert.ok(live.body.querySelector(".cm-live-board"));
 assert.ok(live.body.querySelector(".cm-live-table-wrap"));
 assert.ok(live.body.querySelector(".cm-live-attachment"));
 assert.ok(live.body.querySelector(".cm-live-code-block"));
+assert.ok(live.body.querySelector(".cm-live-card-reference"));
 
 for (const [name, options] of [
   ["s", { ctrlKey: true }], ["a", { ctrlKey: true }], ["z", { ctrlKey: true }],
@@ -177,10 +180,46 @@ live.body.querySelector<HTMLElement>(".cm-live-card-reference")?.dispatchEvent(n
 live.body.querySelector<HTMLElement>(".cm-live-citation")?.click();
 live.body.querySelector<HTMLButtonElement>(".cm-live-link-menu button")?.click();
 
+const editorNode = live.body.querySelector<HTMLElement>(".cm-editor");
+const boardNode = live.body.querySelector<HTMLElement>(".cm-live-board");
+const updatedCards = new Map(cards);
+updatedCards.set("card-1", { ...cards.get("card-1")!, title: "Renamed card" });
+await act(async () => {
+  live.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "note",
+    value,
+    onChange: () => { changed++; },
+    onSave: () => { saved++; },
+    onError: () => {},
+    onOpenWikilink: () => { opened++; },
+    onOpenCard: () => { opened++; },
+    cardTitles: new Map([["card-1", "Renamed card"]]),
+    cardData: updatedCards,
+    onCreateCard: async () => { added++; return null; },
+    onCreateBoard: async () => null,
+    onMoveCard: () => { moved++; },
+    onAddCardToBoard: () => { added++; },
+    onChangeBoardTitle: () => { changed++; },
+    onDecreaseFontSize: () => {},
+    onIncreaseFontSize: () => {},
+    highlightLineNumbers: new Set([1, 5]),
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-editor"), editorNode);
+assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-live-board"), boardNode);
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
 assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
 assert.ok(board.querySelector(".cm-live-board-card-tags"));
+const boardFilter = board.querySelector<HTMLInputElement>("input[aria-label=\"Filter board cards by title\"]")!;
+boardFilter.value = "Renamed";
+boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 1);
+boardFilter.value = "";
+boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
 minimizeBoard.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);

@@ -72,7 +72,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -109,6 +109,7 @@ type LivePreviewState = {
   atomicRanges: DecorationSet;
   lines: readonly string[];
   objectDocument: ObjectDocument;
+  depthByLine: ReadonlyMap<number, number>;
 };
 
 type ObjectDocumentContext = {
@@ -127,6 +128,8 @@ const objectDocumentField = StateField.define<ObjectDocumentContext>({
     return { lines: text.split("\n"), objectDocument: parseObjectDocument(text) };
   },
 });
+
+const refreshLivePreview = StateEffect.define<null>();
 
 function cachedObjectDocument(state: EditorState): ObjectDocument {
   return state.field(objectDocumentField).objectDocument;
@@ -173,7 +176,7 @@ const deepCodeHighlightLoader = ViewPlugin.fromClass(class {
   private async refresh(view: EditorView) {
     const generation = ++this.generation;
     const source = view.state.doc.toString();
-    const codeObjects = parseObjectDocument(source).objects.filter(
+    const codeObjects = cachedObjectDocument(view.state).objects.filter(
       (object) => object.tag === "code" && object.indent >= 4 && object.text && object.language,
     );
     const supports = await Promise.all(codeObjects.map(async (object) => {
@@ -1095,6 +1098,8 @@ class CardReferenceWidget extends WidgetType {
 }
 
 const boardCardMime = "application/x-cipherleaf-board-card";
+const DEFAULT_CARD_TITLE = "Untitled";
+const boardCardData = new WeakMap<HTMLElement, ReadonlyMap<string, CardMetadata>>();
 
 function boardCardDate(card: CardMetadata, status: CardStatus): string | undefined {
   switch (status) {
@@ -1106,10 +1111,44 @@ function boardCardDate(card: CardMetadata, status: CardStatus): string | undefin
 }
 
 function fitBoardCardText(text: HTMLElement) {
-  text.style.fontSize = "";
   if (!text.clientWidth || text.scrollWidth <= text.clientWidth) return;
   const size = Number.parseFloat(getComputedStyle(text).fontSize) || 14;
-  text.style.fontSize = `${Math.max(size * 0.65, size * text.clientWidth / text.scrollWidth)}px`;
+  return `${Math.max(size * 0.65, size * text.clientWidth / text.scrollWidth)}px`;
+}
+
+function fitBoardCardTexts(board: HTMLElement) {
+  const texts = [...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title, .cm-live-board-card-date")];
+  for (const text of texts) {
+    if (text.style.fontSize) text.style.fontSize = "";
+  }
+  const sizes = texts.map(fitBoardCardText);
+  for (const [index, size] of sizes.entries()) {
+    if (size) texts[index].style.fontSize = size;
+  }
+}
+
+function boardCardPresentationChanged(previous: CardMetadata, current: CardMetadata): boolean {
+  return previous.title !== current.title ||
+    previous.tags.length !== current.tags.length ||
+    previous.tags.some((tag, index) => tag !== current.tags[index]) ||
+    boardCardDate(previous, previous.status) !== boardCardDate(current, current.status);
+}
+
+function boardCardTitleChangedOnly(previous: CardMetadata, current: CardMetadata): boolean {
+  return previous.title !== current.title &&
+    previous.tags.length === current.tags.length &&
+    previous.tags.every((tag, index) => tag === current.tags[index]) &&
+    boardCardDate(previous, previous.status) === boardCardDate(current, current.status);
+}
+
+function updateBoardCardTitle(item: HTMLButtonElement, card: CardMetadata, status: CardStatus): boolean {
+  const title = item.querySelector<HTMLElement>(".cm-live-board-card-title");
+  if (!title) return false;
+  title.textContent = card.title || DEFAULT_CARD_TITLE;
+  item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
+  item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
+  fitBoardCardTexts(item);
+  return true;
 }
 
 function alignmentLabel(align: "left" | "center" | "right"): string {
@@ -1133,10 +1172,42 @@ class BoardWidget extends WidgetType {
   ) { super(); }
 
   eq(other: BoardWidget) {
-    return other.boardID === this.boardID && other.title === this.title && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
+    if (other.boardID !== this.boardID || other.title !== this.title || other.cardIDs.length !== this.cardIDs.length) return false;
+    for (let index = 0; index < this.cardIDs.length; index++) {
+      if (other.cardIDs[index] !== this.cardIDs[index]) return false;
+      const previous = this.cards.get(this.cardIDs[index]);
+      const current = other.cards.get(other.cardIDs[index]);
+      if (previous === current) continue;
+      if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+    }
+    return true;
   }
 
-  private renderColumn(columns: HTMLElement, status: CardStatus, titleQuery: string, requiredTags: string[]) {
+  updateDOM(dom: HTMLElement, _view: EditorView, from: BoardWidget) {
+    boardCardData.set(dom, this.cards);
+    const cardElements = new Map<string, HTMLButtonElement>();
+    dom.querySelectorAll<HTMLButtonElement>(".cm-live-board-card").forEach((item) => {
+      if (item.dataset.cardId) cardElements.set(item.dataset.cardId, item);
+    });
+    for (const id of this.cardIDs) {
+      const previous = from.cards.get(id);
+      const card = this.cards.get(id);
+      if (!previous || !card || previous.status !== card.status) return false;
+      if (!boardCardPresentationChanged(previous, card)) continue;
+      if (!boardCardTitleChangedOnly(previous, card) ||
+        dom.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")?.value ||
+        dom.querySelector<HTMLInputElement>("[aria-label='Filter board cards by tags']")?.value) return false;
+      const item = cardElements.get(id);
+      if (!item || !updateBoardCardTitle(item, card, card.status)) return false;
+    }
+    return true;
+  }
+
+  private renderColumn(
+    columns: HTMLElement,
+    status: CardStatus,
+    cards: readonly CardMetadata[],
+  ) {
     const column = columns.appendChild(document.createElement("div"));
     column.className = `cm-live-board-column status-${status}`;
     column.dataset.status = status;
@@ -1151,12 +1222,9 @@ class BoardWidget extends WidgetType {
     });
     const heading = column.appendChild(document.createElement("h4"));
     heading.textContent = BOARD_COLUMN_LABELS[status];
-    const cards = boardCardsForColumn(this.cards, this.cardIDs, status, titleQuery, requiredTags);
-    if (cards.length === 0) {
-      const empty = column.appendChild(document.createElement("p"));
-      empty.className = "cm-live-board-empty";
-      empty.textContent = "No cards";
-    }
+    const empty = column.appendChild(document.createElement("p"));
+    empty.className = "cm-live-board-empty";
+    empty.textContent = "No cards";
     for (const card of cards) {
       const item = column.appendChild(document.createElement("button"));
       item.type = "button";
@@ -1166,14 +1234,15 @@ class BoardWidget extends WidgetType {
       summary.className = "cm-live-board-card-summary";
       const cardTitle = summary.appendChild(document.createElement("span"));
       cardTitle.className = "cm-live-board-card-title";
-      cardTitle.textContent = card.title || "Untitled";
+      cardTitle.textContent = card.title || DEFAULT_CARD_TITLE;
       if (card.tags.length > 0) {
         const tags = summary.appendChild(document.createElement("span"));
         tags.className = "cm-live-board-card-tags";
         tags.textContent = card.tags.join(", ");
         tags.title = `Tags: ${tags.textContent}`;
       }
-      item.title = `Open card “${card.title || "Untitled"}”`;
+      item.dataset.cardId = card.id;
+      item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
       item.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", card.id);
         event.dataTransfer?.setData(boardCardMime, card.id);
@@ -1183,7 +1252,7 @@ class BoardWidget extends WidgetType {
         event.stopPropagation();
         this.openCard(card.id);
       });
-      item.setAttribute("aria-label", `${card.title || "Untitled"}, ${BOARD_COLUMN_LABELS[status]}`);
+      item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
       item.addEventListener("keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         const index = BOARD_COLUMNS.indexOf(status);
@@ -1262,16 +1331,21 @@ class BoardWidget extends WidgetType {
       event.stopPropagation();
       filter.value = "";
       tagFilter.value = "";
-      render();
+      updateFilter();
     });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
-    const fitTitles = () => board.querySelectorAll<HTMLElement>(".cm-live-board-card-title, .cm-live-board-card-date").forEach(fitBoardCardText);
+    const fitTitles = () => fitBoardCardTexts(board);
+    const allCards = boardCardsForColumns(this.cards, this.cardIDs);
+    for (const status of BOARD_COLUMNS) {
+      this.renderColumn(columns, status, allCards.get(status) ?? []);
+    }
+    boardCardData.set(board, this.cards);
     let isMinimized = false;
     const updateMinimizedState = () => {
       const boardTitle = title.value || DEFAULT_BOARD_TITLE;
       const counts = BOARD_COLUMNS.slice(0, 3)
-        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${boardCardsForColumn(this.cards, this.cardIDs, status).length}`)
+        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${allCards.get(status)?.length ?? 0}`)
         .join(" · ");
       board.classList.toggle("is-minimized", isMinimized);
       title.hidden = isMinimized;
@@ -1288,16 +1362,25 @@ class BoardWidget extends WidgetType {
       isMinimized = !isMinimized;
       updateMinimizedState();
     });
-    const render = () => {
-      columns.replaceChildren();
+    const updateFilter = () => {
+      const currentCards = boardCardData.get(board) ?? this.cards;
       const titleQuery = filter.value.trim().toLocaleLowerCase();
       const requiredTags = tagFilter.value.split(",");
-      for (const status of BOARD_COLUMNS) this.renderColumn(columns, status, titleQuery, requiredTags);
-      fitTitles();
+      const filteredCards = titleQuery || requiredTags.some((tag) => tag.trim())
+        ? boardCardsForColumns(currentCards, this.cardIDs, titleQuery, requiredTags)
+        : allCards;
+      for (const status of BOARD_COLUMNS) {
+        const visible = new Set((filteredCards.get(status) ?? []).map((card) => card.id));
+        for (const item of board.querySelectorAll<HTMLButtonElement>(`.status-${status} .cm-live-board-card`)) {
+          item.hidden = !visible.has(item.dataset.cardId ?? "");
+        }
+        board.querySelector<HTMLElement>(`.status-${status} .cm-live-board-empty`)!.hidden = visible.size > 0;
+      }
     };
-    filter.addEventListener("input", render);
-    tagFilter.addEventListener("input", render);
-    render();
+    filter.addEventListener("input", updateFilter);
+    tagFilter.addEventListener("input", updateFilter);
+    updateFilter();
+    fitTitles();
     updateMinimizedState();
     if (typeof ResizeObserver === "function") {
       this.titleResizeObserver = new ResizeObserver(fitTitles);
@@ -1443,22 +1526,28 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
     searchFrom = closing + 2;
   }
 
-  for (const match of text.matchAll(/(?<!!)\[card\]\(([a-f0-9]{32})\)/gi)) {
+  for (const match of text.matchAll(/(?<!!)\[card\]\(([^\s)]+)\)/gi)) {
     if (match.index === undefined) continue;
-    const title = cardTitle(match[1]);
-    if (title === null) continue;
+    const id = parseCardReference(match[0]);
+    if (!id) continue;
     const start = offset + match.index;
+    const trailingText = text.slice(start - offset + match[0].length);
+    const trailingTitle = trailingText.length > 1 && (trailingText[0] === " " || trailingText[0] === "\t")
+      ? trailingText
+      : undefined;
+    const title = cardTitle(id) ?? trailingTitle?.trim() ?? "Untitled";
     addHiddenRange(
       start,
-      start + match[0].length,
+      start + match[0].length + (trailingTitle?.[0].length ?? 0),
       decorations,
       atomicRanges,
-      new CardReferenceWidget(match[1], title, openCard),
+      new CardReferenceWidget(id, title, openCard),
     );
   }
 
   for (const citation of markdownCitations(text)) {
-    if (/^\[card\]\([a-f0-9]{32}\)$/i.test(text.slice(citation.index, citation.index + citation.length))) continue;
+    const cardID = parseCardReference(text.slice(citation.index, citation.index + citation.length));
+    if (cardID !== null) continue;
     const start = offset + citation.index;
     addHiddenRange(
       start,
@@ -1716,7 +1805,7 @@ type LivePreviewOptions = {
   openWikilink: (title: string) => void;
   openCard: (id: string) => void;
   cardTitle: (id: string) => string | null;
-  cards: ReadonlyMap<string, CardMetadata>;
+  cards: () => ReadonlyMap<string, CardMetadata>;
   moveCard: (id: string, status: CardStatus) => void;
   addCard: (boardID: string) => void;
   changeBoardTitle: (boardID: string, title: string) => void;
@@ -1737,6 +1826,158 @@ type LivePreviewRenderContext = {
   lineAttributes: (lineNumber: number, className?: string, style?: string) => Record<string, string>;
   options: LivePreviewOptions;
 };
+
+function createPreviewRenderContext(
+  state: EditorState,
+  collapsedQuotes: ReadonlySet<string>,
+  options: LivePreviewOptions,
+  context: ObjectDocumentContext,
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+  depthByLine: ReadonlyMap<number, number>,
+): LivePreviewRenderContext {
+  const lineAttributes = (lineNumber: number, className = "", style?: string) =>
+    objectLineAttributes(
+      lineNumber,
+      [
+        className,
+        options.highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : "",
+      ].filter(Boolean).join(" "),
+      style,
+      depthByLine.get(lineNumber) ?? 0,
+    );
+  return {
+    state,
+    lines: context.lines,
+    objectDocument: context.objectDocument,
+    nextCollapsed: new Set(collapsedQuotes),
+    decorations,
+    atomicRanges,
+    depthByLine,
+    lineAttributes,
+    options,
+  };
+}
+
+function singleLineChange(transaction: Transaction): {
+  oldLineNumber: number;
+  newLineNumber: number;
+} | null {
+  let change: { oldLineNumber: number; newLineNumber: number } | null = null;
+  let valid = true;
+  transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (change) {
+      valid = false;
+      return;
+    }
+    const oldLineNumber = transaction.startState.doc.lineAt(fromA).number;
+    const oldEndLineNumber = transaction.startState.doc.lineAt(Math.max(fromA, toA - 1)).number;
+    const newLineNumber = transaction.state.doc.lineAt(fromB).number;
+    const newEndLineNumber = transaction.state.doc.lineAt(Math.max(fromB, toB - 1)).number;
+    if (
+      oldLineNumber !== oldEndLineNumber ||
+      newLineNumber !== newEndLineNumber ||
+      oldLineNumber !== newLineNumber ||
+      transaction.startState.sliceDoc(fromA, toA).includes("\n") ||
+      transaction.state.sliceDoc(fromB, toB).includes("\n")
+    ) {
+      valid = false;
+      return;
+    }
+    change = { oldLineNumber, newLineNumber };
+  });
+  return valid ? change : null;
+}
+
+function sameObjectLayout(before: ObjectLine | undefined, after: ObjectLine | undefined): boolean {
+  if (!before || !after) return before === after;
+  return before.tag === after.tag &&
+    before.tags.length === after.tags.length &&
+    before.tags.every((tag, index) => tag === after.tags[index]) &&
+    before.indent === after.indent &&
+    before.contentIndent === after.contentIndent &&
+    before.parentId === after.parentId &&
+    before.parentSectionId === after.parentSectionId &&
+    before.sourcePrefix === after.sourcePrefix &&
+    before.sectionPrefixSize === after.sectionPrefixSize &&
+    before.barePrefixSize === after.barePrefixSize &&
+    before.listMarker === after.listMarker &&
+    before.attachmentId === after.attachmentId &&
+    before.attachmentKind === after.attachmentKind &&
+    before.checked === after.checked &&
+    before.language === after.language &&
+    before.closed === after.closed &&
+    before.lineStart === after.lineStart &&
+    before.lineEnd === after.lineEnd;
+}
+
+function incrementalPreviewState(
+  value: LivePreviewState,
+  transaction: Transaction,
+  collapsedQuotes: ReadonlySet<string>,
+  options: LivePreviewOptions,
+): LivePreviewState | null {
+  const change = singleLineChange(transaction);
+  if (!change) return null;
+
+  const oldLine = transaction.startState.doc.line(change.oldLineNumber);
+  const newLine = transaction.state.doc.line(change.newLineNumber);
+  const oldObject = value.objectDocument.byLine.get(change.oldLineNumber);
+  const context = transaction.state.field(objectDocumentField);
+  const newObject = context.objectDocument.byLine.get(change.newLineNumber);
+  if (
+    parseBoardMarker(oldLine.text) ||
+    parseBoardMarker(newLine.text) ||
+    oldLine.text.includes("|") ||
+    newLine.text.includes("|") ||
+    isHorizontalRule(oldLine.text) ||
+    isHorizontalRule(newLine.text) ||
+    headingLevel(oldLine.text) !== null ||
+    headingLevel(newLine.text) !== null ||
+    parseAttachmentMarkdown(oldLine.text) ||
+    parseAttachmentMarkdown(newLine.text) ||
+    oldObject?.tag === "code" ||
+    newObject?.tag === "code" ||
+    continuationOwnerObject(value.objectDocument, change.oldLineNumber) ||
+    continuationOwnerObject(context.objectDocument, change.newLineNumber) ||
+    oldObject?.lineNumber !== change.oldLineNumber ||
+    newObject?.lineNumber !== change.newLineNumber ||
+    oldObject?.childrenIds.length ||
+    newObject?.childrenIds.length ||
+    !sameObjectLayout(oldObject, newObject)
+  ) return null;
+
+  const decorations: Range<Decoration>[] = [];
+  const atomicRanges: Range<Decoration>[] = [];
+  const renderContext = createPreviewRenderContext(
+    transaction.state,
+    collapsedQuotes,
+    options,
+    context,
+    decorations,
+    atomicRanges,
+    value.depthByLine,
+  );
+  if (renderPreviewLine(renderContext, change.newLineNumber) !== change.newLineNumber + 1) return null;
+
+  const replaceLine = (set: DecorationSet, add: Range<Decoration>[]) => set
+    .map(transaction.changes)
+    .update({
+      filterFrom: newLine.from,
+      filterTo: newLine.to + 1,
+      filter: (from, to) => from > newLine.to || to < newLine.from,
+      add,
+      sort: true,
+    });
+  return {
+    collapsedQuotes,
+    decorations: replaceLine(value.decorations, decorations),
+    atomicRanges: replaceLine(value.atomicRanges, atomicRanges),
+    lines: context.lines,
+    objectDocument: context.objectDocument,
+    depthByLine: value.depthByLine,
+  };
+}
 
 function decoratePreviewText(
   context: LivePreviewRenderContext,
@@ -1780,7 +2021,7 @@ function renderBoardLine(
         board.id,
         board.title,
         board.cardIDs,
-        options.cards,
+        options.cards(),
         options.openCard,
         options.moveCard,
         options.addCard,
@@ -2223,27 +2464,15 @@ function buildLivePreviewState(
   }
   const { lines, objectDocument } = prepared;
   const depthByLine = objectDepthByLine(objectDocument);
-  const lineAttributes = (lineNumber: number, className = "", style?: string) =>
-    objectLineAttributes(
-      lineNumber,
-      [
-        className,
-        options.highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : "",
-      ].filter(Boolean).join(" "),
-      style,
-      depthByLine.get(lineNumber) ?? 0,
-    );
-  const renderContext: LivePreviewRenderContext = {
+  const renderContext = createPreviewRenderContext(
     state,
-    lines,
-    objectDocument,
     nextCollapsed,
+    options,
+    { lines, objectDocument },
     decorations,
     atomicRanges,
     depthByLine,
-    lineAttributes,
-    options,
-  };
+  );
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     lineNumber = renderPreviewLine(renderContext, lineNumber);
@@ -2255,6 +2484,7 @@ function buildLivePreviewState(
     atomicRanges: Decoration.set(atomicRanges, true),
     lines,
     objectDocument,
+    depthByLine,
   };
 }
 function applyCollapseEffect(
@@ -2341,14 +2571,20 @@ function livePreviewExtension(options: LivePreviewOptions) {
     update(value, transaction) {
       const { collapsed, cachedContext, collapseChanged } =
         updateCollapsedQuotes(value, transaction);
+      const cardDataChanged = transaction.effects.some((effect) => effect.is(refreshLivePreview));
       if (
         !transaction.docChanged &&
         !collapseChanged &&
+        !cardDataChanged &&
         (!transaction.selection || selectionStaysOnSameLines(transaction.startState, transaction.state))
       ) {
         return value;
       }
       if (collapseChanged) persistCollapsedPositions(transaction.state, options.noteID, collapsed);
+      if (transaction.docChanged) {
+        const incremental = incrementalPreviewState(value, transaction, collapsed, options);
+        if (incremental) return incremental;
+      }
       const context = cachedContext ?? (
         transaction.docChanged
           ? undefined
@@ -3162,6 +3398,7 @@ export default function LiveMarkdownEditor({
   }, [showToolbar]);
 
   useEffect(() => {
+    const previousCardData = cardDataRef.current;
     onChangeRef.current = onChange;
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
@@ -3178,6 +3415,9 @@ export default function LiveMarkdownEditor({
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
+    if (previousCardData !== cardData) {
+      view.current?.dispatch({ effects: refreshLivePreview.of(null) });
+    }
   }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
@@ -3522,7 +3762,7 @@ export default function LiveMarkdownEditor({
             openWikilink: (title) => onOpenWikilinkRef.current(title),
             openCard: (id) => onOpenCardRef.current?.(id),
             cardTitle: (id) => cardTitlesRef.current.get(id) ?? null,
-            cards: cardDataRef.current,
+            cards: () => cardDataRef.current,
             moveCard: (id, status) => onMoveCardRef.current?.(id, status),
             addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
             changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),

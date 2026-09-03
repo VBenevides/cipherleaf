@@ -1,5 +1,6 @@
 await Promise.all([
   import("./cards.test.ts"),
+  import("./cardJournal.test.ts"),
   import("./commandPalette.test.ts"),
   import("./dailyNotes.test.ts"),
   import("./errors.test.ts"),

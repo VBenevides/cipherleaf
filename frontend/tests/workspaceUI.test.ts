@@ -134,17 +134,20 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /Remove tag \$\{tag\}/);
   assert.match(app, /className="card-sidebar-divider"/);
   assert.match(app, /className="card-sidebar-notes"[\s\S]*<LiveMarkdownEditor/);
+  assert.match(app, /\}, \[cardPanel\?\.metadata, cardPanel\?\.note\.id, notes\]\);/);
   assert.match(app, /const deleteCard = async/);
   assert.match(app, /Delete card/);
   assert.match(app, /cardPanelDirty \? "primary-button is-dirty" : "secondary-button"/);
   assert.match(app, /const saveOnShortcut = \(event: KeyboardEvent\) => \{[\s\S]*event\.key\.toLowerCase\(\) !== "s"/);
   assert.match(app, /window\.addEventListener\("keydown", saveOnShortcut\)/);
+  assert.doesNotMatch(app, /cardSignature/);
+  assert.match(app, /key=\{`\$\{note\.id\}:\$\{sectionDefault\}`\}/);
   assert.match(liveEditor, /key: "Mod-s"[\s\S]*onSaveRef\.current\(\)/);
   assert.match(liveEditor, /cm-live-board-card-title/);
   assert.match(liveEditor, /cm-live-board-card-date/);
   assert.match(liveEditor, /cm-live-board-minimize/);
   assert.match(liveEditor, /\[BOARD\] \$\{boardTitle\}/);
-  assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*boardCardsForColumn\(this\.cards, this\.cardIDs, status\)\.length/);
+  assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*allCards\.get\(status\)/);
   assert.match(liveEditor, /cm-live-board-card-tags/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
@@ -155,6 +158,23 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.cm-live-board \[hidden\] \{[\s\S]*display: none !important/);
   assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #2588d8/);
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
+});
+
+test("live preview updates only safe local edits", () => {
+  assert.match(liveEditor, /function singleLineChange\(transaction: Transaction\)/);
+  assert.match(liveEditor, /transaction\.changes\.iterChangedRanges/);
+  assert.match(liveEditor, /function incrementalPreviewState\(/);
+  assert.match(liveEditor, /set\s*\.map\(transaction\.changes\)/);
+  assert.match(liveEditor, /cachedObjectDocument\(view\.state\)\.objects\.filter/);
+  assert.match(liveEditor, /const incremental = incrementalPreviewState\(/);
+});
+
+test("board widget equality compares card IDs without serialization", () => {
+  assert.match(liveEditor, /other\.cardIDs\.length !== this\.cardIDs\.length/);
+  assert.match(liveEditor, /other\.cardIDs\[index\] !== this\.cardIDs\[index\]/);
+  assert.match(liveEditor, /updateDOM\(dom: HTMLElement, _view: EditorView, from: BoardWidget\)/);
+  assert.match(liveEditor, /boardCardPresentationChanged\(previous, card\)/);
+  assert.doesNotMatch(liveEditor, /JSON\.stringify\(other\.cardIDs\)/);
 });
 
 test("embedded boards fill the usable editor line with equal columns", () => {

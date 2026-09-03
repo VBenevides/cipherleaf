@@ -31,6 +31,7 @@ test("renders safe Markdown citations without treating images as links", () => {
     length: 42,
   }]);
   assert.deepEqual(markdownCitations("[bad](javascript:alert(1)) ![image](https://example.com/a.png)"), []);
+  assert.deepEqual(markdownCitations("[card](note:card-1)"), []);
   assert.equal(markdownCitation(" Updated name ", " https://example.com/new "), "[Updated name](https://example.com/new)");
   assert.deepEqual(
     markdownCitations("[HTTP](http://example.com) [relative](./docs/readme.md) [absolute](/tmp/readme.md)"),

@@ -930,7 +930,6 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		return Note{}, err
 	}
 	originalSummary := s.manifest.Notes[index]
-	originalManifest := cloneManifest(s.manifest)
 	contentMatches := current.Content == storedContent || derivedMarkdownContent(current.Content) == content
 	if current.Title == title && contentMatches {
 		if err := s.pruneNoteAttachmentsByIDLocked(id, extractAttachmentIDs(derivedContent)); err != nil {
@@ -941,6 +940,7 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 		}
 		return noteForClientContent(current, derivedContent), nil
 	}
+	originalManifest := cloneManifest(s.manifest)
 	original := current
 	if err := s.writeNoteHistoryLocked(current); err != nil {
 		return Note{}, err

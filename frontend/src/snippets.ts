@@ -133,7 +133,7 @@ export function rollLastDatedSection(markdown: string, now = new Date()): string
   return rollDatedSection(markdown, now, true);
 }
 
-function rollFirstDatedSection(markdown: string, now = new Date()): string | null {
+export function rollFirstDatedSection(markdown: string, now = new Date()): string | null {
   return rollDatedSection(markdown, now, false);
 }
 

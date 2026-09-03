@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   boardMarker,
+  boardCardsForColumns,
   boardCardsForColumn,
   cardReference,
   newCardMetadata,
@@ -26,10 +27,13 @@ test("card metadata round-trips through frontmatter", () => {
 });
 
 test("card references use stable IDs and do not treat titles as references", () => {
-  assert.equal(cardReference("card-1"), "[card](card-1)");
+  assert.equal(cardReference("card-1"), "[card](note:card-1)");
   assert.equal(parseCardReference("[card](card-1)"), "card-1");
+  assert.equal(parseCardReference("[card](note:card-1)"), "card-1");
   assert.equal(parseCardReference("[card](Project%20Plan)"), "Project%20Plan");
   assert.equal(parseCardReference("[card](Project Plan)"), null);
+  assert.equal(parseCardReference("[card](https://example.com)"), null);
+  assert.equal(parseCardReference("[card](note:)"), null);
 });
 
 test("template and board markers round-trip", () => {
@@ -79,6 +83,8 @@ test("board cards filter by all selected tags and sort newest first", () => {
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "a", ["work", "urgent"]).map((card) => card.id), ["a"]);
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b", "missing"], "in-progress"), []);
   assert.deepEqual(boardCardsForColumn(cards, ["a", "b"], "not-started", "", ["missing"]), []);
+  const grouped = boardCardsForColumns(cards, ["a", "b"], "a", ["urgent"]);
+  assert.deepEqual((grouped.get("not-started") ?? []).map((card) => card.id), ["a"]);
 });
 
 test("board ordering uses latest column entry outside backlog", () => {

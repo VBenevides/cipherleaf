@@ -49,6 +49,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
+import { appendCardJournalToMainEditor, stripCardJournalEntries } from "./cardJournal";
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 import {
@@ -3201,7 +3202,7 @@ function App() {
     }
     if (cardPanel) cards.set(cardPanel.note.id, cardPanel.metadata);
     return cards;
-  }, [cardPanel, notes]);
+  }, [cardPanel?.metadata, cardPanel?.note.id, notes]);
 
   const cardTitles = useMemo(
     () => new Map([...cardMetadata].map(([id, metadata]) => [id, metadata.title])),
@@ -3220,14 +3221,6 @@ function App() {
     }
     return [...tags].sort((left, right) => left.localeCompare(right));
   }, [cardMetadata, cardPanel?.metadata.boardID]);
-  const cardSignature = useMemo(
-    () => notes.map((summary) => {
-      const item = cardMetadataFromSummary(summary);
-      return item ? `${item.id}:${item.title}:${item.status}:${item.columnEnteredAt ?? ""}` : "";
-    }).filter(Boolean).join("|")
-    , [notes],
-  );
-
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
   useEffect(() => {
@@ -3434,13 +3427,26 @@ function App() {
     try {
       const title = cardPanel.metadata.title.trim() || "Untitled";
       const metadata = { ...cardPanel.metadata, title, tags: normalizeCardTags(cardPanel.metadata.tags) };
+      const previousBody = stripCardJournalEntries(
+        parseCardDocument(cardPanel.note.content, cardPanel.note.id, cardPanel.note.title)?.body ?? cardPanel.body,
+      );
+      const body = stripCardJournalEntries(cardPanel.body);
+      const mainNote = noteRef.current;
+      const mainContent = mainNote && mainNote.id !== cardPanel.note.id ? markdownForEditing(mainNote.content) : "";
+      const journaledMain = mainContent
+        ? appendCardJournalToMainEditor(mainContent, previousBody, body, metadata)
+        : null;
       const saved = await VaultService.SaveNote(
         cardPanel.note.id,
         title,
-        serializeCardDocument(metadata, cardPanel.body),
+        serializeCardDocument(metadata, body),
       );
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata, body: cardPanel.body });
+      setCardPanel({ note: saved.note, metadata, body });
+      if (journaledMain && mainNote) {
+        editNote({ content: journaledMain }, false);
+        await persistCurrent();
+      }
       setCardPanelDirty(false);
     } catch (reason) {
       setError(errorText(reason));
@@ -5180,7 +5186,7 @@ function App() {
                 {view === "live" && (
                   <div className="editor-view-pane active">
                     <LiveMarkdownEditor
-                      key={`${note.id}:${sectionDefault}:${cardSignature}`}
+                      key={`${note.id}:${sectionDefault}`}
                       noteID={note.id}
                       value={noteMarkdown}
                       onChange={(content) => editNote({ content })}
