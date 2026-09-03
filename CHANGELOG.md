@@ -2,6 +2,26 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [1.0.2] - 2026-09-03
+
+### Features
+
+- Added structured cards with encrypted metadata, lifecycle history, normalized tags, references, templates, and an accessible side-panel editor.
+- Added embedded boards with card creation, filtering, sorting, drag and keyboard status movement, editable titles, and safe persistence.
+- Added logical-object copy and paste, card deletion, unsaved-change feedback, and Ctrl+S save support.
+
+### Bugfixes
+
+- Preserved card and board metadata through Markdown normalization, duplicate and paste actions, and board operations while preventing duplicate citations and orphaned records.
+- Hardened configuration paths, platform command handling, UUID generation, AppImage downloads, and parser behavior.
+- Removed the unused debug and production pprof support entirely.
+
+### Other
+
+- Updated the Go toolchain to 1.27 and added CI Go and frontend coverage gates at 85% with SonarQube reports.
+- Improved accessibility semantics across editors, boards, dialogs, date pickers, and time-tracking controls.
+- Expanded Go and frontend regression coverage across card, vault, synchronization, editor, and workflow behavior.
+
 ## [1.0.1] - 2026-08-25
 
 ### Features
