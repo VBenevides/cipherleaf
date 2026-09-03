@@ -208,7 +208,9 @@ function journalBlockFor(
 
 function appendBody(body: string, block: string): string {
   if (!body) return block;
-  const separator = body.endsWith("\n\n") ? "" : body.endsWith("\n") ? "\n" : "\n\n";
+  let separator = "\n\n";
+  if (body.endsWith("\n")) separator = "\n";
+  if (body.endsWith("\n\n")) separator = "";
   return `${body}${separator}${block}`;
 }
 
