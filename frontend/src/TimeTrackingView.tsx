@@ -515,9 +515,7 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
       onBeginEdit={beginEdit}
       onDeleteRequest={(entry) => { setDeleting(entry); setConfirmAction("delete"); }}
     />;
-  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
-    week: () => weekView,
-    month: () => <MonthView
+  const monthView = <MonthView
       busy={busy}
       monthAnchor={monthAnchor}
       monthCalendarDays={monthCalendarDays}
@@ -525,7 +523,10 @@ export default function TimeTrackingView({ now, onActiveEntryChange }: TimeTrack
       onPrevious={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))}
       onCurrent={() => setMonthAnchor(new Date())}
       onNext={() => setMonthAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))}
-    />,
+    />;
+  const tabRenderers: Record<TimeTrackingTab, () => ReactNode> = {
+    week: () => weekView,
+    month: () => monthView,
     dashboard: dashboardView,
     clients: () => labelManager("client"),
     projects: () => labelManager("project"),
