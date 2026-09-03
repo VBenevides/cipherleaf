@@ -191,6 +191,7 @@ jobs:
 
     env:
       APP_VERSION: ${{ needs.validate.outputs.app_version }}
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Ensure GitHub release exists
@@ -214,6 +215,9 @@ jobs:
 
     permissions:
       contents: write
+
+    env:
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Download release assets

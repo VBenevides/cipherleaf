@@ -9,6 +9,7 @@
   <a href="https://github.com/VBenevides/cipherleaf/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/VBenevides/cipherleaf?sort=semver"></a>
   <a href="https://github.com/VBenevides/cipherleaf/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/VBenevides/cipherleaf/actions/workflows/codeql.yml/badge.svg"></a>
   <a href="https://github.com/VBenevides/cipherleaf/actions/workflows/security.yml"><img alt="Security Analysis" src="https://github.com/VBenevides/cipherleaf/actions/workflows/security.yml/badge.svg"></a>
+  <a href="https://sonarcloud.io/project/overview?id=VBenevides_cipherleaf"><img alt="SonarCloud Quality Gate" src="https://sonarcloud.io/api/project_badges/measure?project=VBenevides_cipherleaf&amp;metric=alert_status"></a>
 </p>
 
 Cipherleaf is open-source software licensed under the [MIT License](LICENSE).
