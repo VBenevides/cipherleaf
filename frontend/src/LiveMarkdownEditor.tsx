@@ -1136,7 +1136,11 @@ class BoardWidget extends WidgetType {
   ) { super(); }
 
   eq(other: BoardWidget) {
-    return other.boardID === this.boardID && other.title === this.title && other.cards === this.cards && JSON.stringify(other.cardIDs) === JSON.stringify(this.cardIDs);
+    if (other.boardID !== this.boardID || other.title !== this.title || other.cards !== this.cards || other.cardIDs.length !== this.cardIDs.length) return false;
+    for (let index = 0; index < this.cardIDs.length; index++) {
+      if (other.cardIDs[index] !== this.cardIDs[index]) return false;
+    }
+    return true;
   }
 
   private renderColumn(

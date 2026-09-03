@@ -168,6 +168,12 @@ test("live preview updates only safe local edits", () => {
   assert.match(liveEditor, /const incremental = incrementalPreviewState\(/);
 });
 
+test("board widget equality compares card IDs without serialization", () => {
+  assert.match(liveEditor, /other\.cardIDs\.length !== this\.cardIDs\.length/);
+  assert.match(liveEditor, /other\.cardIDs\[index\] !== this\.cardIDs\[index\]/);
+  assert.doesNotMatch(liveEditor, /JSON\.stringify\(other\.cardIDs\)/);
+});
+
 test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /cm-live-board-line/);
   assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
