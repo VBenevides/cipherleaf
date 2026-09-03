@@ -109,6 +109,7 @@ type LivePreviewState = {
   atomicRanges: DecorationSet;
   lines: readonly string[];
   objectDocument: ObjectDocument;
+  depthByLine: ReadonlyMap<number, number>;
 };
 
 type ObjectDocumentContext = {
@@ -175,7 +176,7 @@ const deepCodeHighlightLoader = ViewPlugin.fromClass(class {
   private async refresh(view: EditorView) {
     const generation = ++this.generation;
     const source = view.state.doc.toString();
-    const codeObjects = parseObjectDocument(source).objects.filter(
+    const codeObjects = cachedObjectDocument(view.state).objects.filter(
       (object) => object.tag === "code" && object.indent >= 4 && object.text && object.language,
     );
     const supports = await Promise.all(codeObjects.map(async (object) => {
@@ -1746,6 +1747,158 @@ type LivePreviewRenderContext = {
   options: LivePreviewOptions;
 };
 
+function createPreviewRenderContext(
+  state: EditorState,
+  collapsedQuotes: ReadonlySet<string>,
+  options: LivePreviewOptions,
+  context: ObjectDocumentContext,
+  decorations: Range<Decoration>[],
+  atomicRanges: Range<Decoration>[],
+  depthByLine: ReadonlyMap<number, number>,
+): LivePreviewRenderContext {
+  const lineAttributes = (lineNumber: number, className = "", style?: string) =>
+    objectLineAttributes(
+      lineNumber,
+      [
+        className,
+        options.highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : "",
+      ].filter(Boolean).join(" "),
+      style,
+      depthByLine.get(lineNumber) ?? 0,
+    );
+  return {
+    state,
+    lines: context.lines,
+    objectDocument: context.objectDocument,
+    nextCollapsed: new Set(collapsedQuotes),
+    decorations,
+    atomicRanges,
+    depthByLine,
+    lineAttributes,
+    options,
+  };
+}
+
+function singleLineChange(transaction: Transaction): {
+  oldLineNumber: number;
+  newLineNumber: number;
+} | null {
+  let change: { oldLineNumber: number; newLineNumber: number } | null = null;
+  let valid = true;
+  transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (change) {
+      valid = false;
+      return;
+    }
+    const oldLineNumber = transaction.startState.doc.lineAt(fromA).number;
+    const oldEndLineNumber = transaction.startState.doc.lineAt(Math.max(fromA, toA - 1)).number;
+    const newLineNumber = transaction.state.doc.lineAt(fromB).number;
+    const newEndLineNumber = transaction.state.doc.lineAt(Math.max(fromB, toB - 1)).number;
+    if (
+      oldLineNumber !== oldEndLineNumber ||
+      newLineNumber !== newEndLineNumber ||
+      oldLineNumber !== newLineNumber ||
+      transaction.startState.sliceDoc(fromA, toA).includes("\n") ||
+      transaction.state.sliceDoc(fromB, toB).includes("\n")
+    ) {
+      valid = false;
+      return;
+    }
+    change = { oldLineNumber, newLineNumber };
+  });
+  return valid ? change : null;
+}
+
+function sameObjectLayout(before: ObjectLine | undefined, after: ObjectLine | undefined): boolean {
+  if (!before || !after) return before === after;
+  return before.tag === after.tag &&
+    before.tags.length === after.tags.length &&
+    before.tags.every((tag, index) => tag === after.tags[index]) &&
+    before.indent === after.indent &&
+    before.contentIndent === after.contentIndent &&
+    before.parentId === after.parentId &&
+    before.parentSectionId === after.parentSectionId &&
+    before.sourcePrefix === after.sourcePrefix &&
+    before.sectionPrefixSize === after.sectionPrefixSize &&
+    before.barePrefixSize === after.barePrefixSize &&
+    before.listMarker === after.listMarker &&
+    before.attachmentId === after.attachmentId &&
+    before.attachmentKind === after.attachmentKind &&
+    before.checked === after.checked &&
+    before.language === after.language &&
+    before.closed === after.closed &&
+    before.lineStart === after.lineStart &&
+    before.lineEnd === after.lineEnd;
+}
+
+function incrementalPreviewState(
+  value: LivePreviewState,
+  transaction: Transaction,
+  collapsedQuotes: ReadonlySet<string>,
+  options: LivePreviewOptions,
+): LivePreviewState | null {
+  const change = singleLineChange(transaction);
+  if (!change) return null;
+
+  const oldLine = transaction.startState.doc.line(change.oldLineNumber);
+  const newLine = transaction.state.doc.line(change.newLineNumber);
+  const oldObject = value.objectDocument.byLine.get(change.oldLineNumber);
+  const context = transaction.state.field(objectDocumentField);
+  const newObject = context.objectDocument.byLine.get(change.newLineNumber);
+  if (
+    parseBoardMarker(oldLine.text) ||
+    parseBoardMarker(newLine.text) ||
+    oldLine.text.includes("|") ||
+    newLine.text.includes("|") ||
+    isHorizontalRule(oldLine.text) ||
+    isHorizontalRule(newLine.text) ||
+    headingLevel(oldLine.text) !== null ||
+    headingLevel(newLine.text) !== null ||
+    parseAttachmentMarkdown(oldLine.text) ||
+    parseAttachmentMarkdown(newLine.text) ||
+    oldObject?.tag === "code" ||
+    newObject?.tag === "code" ||
+    continuationOwnerObject(value.objectDocument, change.oldLineNumber) ||
+    continuationOwnerObject(context.objectDocument, change.newLineNumber) ||
+    oldObject?.lineNumber !== change.oldLineNumber ||
+    newObject?.lineNumber !== change.newLineNumber ||
+    oldObject?.childrenIds.length ||
+    newObject?.childrenIds.length ||
+    !sameObjectLayout(oldObject, newObject)
+  ) return null;
+
+  const decorations: Range<Decoration>[] = [];
+  const atomicRanges: Range<Decoration>[] = [];
+  const renderContext = createPreviewRenderContext(
+    transaction.state,
+    collapsedQuotes,
+    options,
+    context,
+    decorations,
+    atomicRanges,
+    value.depthByLine,
+  );
+  if (renderPreviewLine(renderContext, change.newLineNumber) !== change.newLineNumber + 1) return null;
+
+  const replaceLine = (set: DecorationSet, add: Range<Decoration>[]) => set
+    .map(transaction.changes)
+    .update({
+      filterFrom: newLine.from,
+      filterTo: newLine.to + 1,
+      filter: (from, to) => from > newLine.to || to < newLine.from,
+      add,
+      sort: true,
+    });
+  return {
+    collapsedQuotes,
+    decorations: replaceLine(value.decorations, decorations),
+    atomicRanges: replaceLine(value.atomicRanges, atomicRanges),
+    lines: context.lines,
+    objectDocument: context.objectDocument,
+    depthByLine: value.depthByLine,
+  };
+}
+
 function decoratePreviewText(
   context: LivePreviewRenderContext,
   text: string,
@@ -2231,27 +2384,15 @@ function buildLivePreviewState(
   }
   const { lines, objectDocument } = prepared;
   const depthByLine = objectDepthByLine(objectDocument);
-  const lineAttributes = (lineNumber: number, className = "", style?: string) =>
-    objectLineAttributes(
-      lineNumber,
-      [
-        className,
-        options.highlightLineNumbers.has(lineNumber) ? "cm-live-conflict-diff" : "",
-      ].filter(Boolean).join(" "),
-      style,
-      depthByLine.get(lineNumber) ?? 0,
-    );
-  const renderContext: LivePreviewRenderContext = {
+  const renderContext = createPreviewRenderContext(
     state,
-    lines,
-    objectDocument,
     nextCollapsed,
+    options,
+    { lines, objectDocument },
     decorations,
     atomicRanges,
     depthByLine,
-    lineAttributes,
-    options,
-  };
+  );
 
   for (let lineNumber = 1; lineNumber <= state.doc.lines;) {
     lineNumber = renderPreviewLine(renderContext, lineNumber);
@@ -2263,6 +2404,7 @@ function buildLivePreviewState(
     atomicRanges: Decoration.set(atomicRanges, true),
     lines,
     objectDocument,
+    depthByLine,
   };
 }
 function applyCollapseEffect(
@@ -2359,6 +2501,10 @@ function livePreviewExtension(options: LivePreviewOptions) {
         return value;
       }
       if (collapseChanged) persistCollapsedPositions(transaction.state, options.noteID, collapsed);
+      if (transaction.docChanged) {
+        const incremental = incrementalPreviewState(value, transaction, collapsed, options);
+        if (incremental) return incremental;
+      }
       const context = cachedContext ?? (
         transaction.docChanged
           ? undefined

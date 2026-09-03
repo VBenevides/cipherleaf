@@ -159,6 +159,15 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
 });
 
+test("live preview updates only safe local edits", () => {
+  assert.match(liveEditor, /function singleLineChange\(transaction: Transaction\)/);
+  assert.match(liveEditor, /transaction\.changes\.iterChangedRanges/);
+  assert.match(liveEditor, /function incrementalPreviewState\(/);
+  assert.match(liveEditor, /set\s*\.map\(transaction\.changes\)/);
+  assert.match(liveEditor, /cachedObjectDocument\(view\.state\)\.objects\.filter/);
+  assert.match(liveEditor, /const incremental = incrementalPreviewState\(/);
+});
+
 test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /cm-live-board-line/);
   assert.match(liveEditor, /:not\(\.cm-live-board-line\)/);
