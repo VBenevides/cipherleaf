@@ -363,6 +363,7 @@ test("does not indent fenced code contents", () => {
   assert.equal(portableMarkdown("  ```ts\nconst answer = 42;\n  ```"), "  ```ts\nconst answer = 42;\n  ```");
   const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
   const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+  assert.match(style, /\.cm-live-task \{[\s\S]*vertical-align: middle;/);
   assert.match(style, /\.cm-line\.cm-live-object-line:not\(\.cm-live-code-block\)/);
   assert.doesNotMatch(style, /\.cm-live-code-content span/);
   assert.match(editor, /syntaxHighlighting\(codeHighlightStyle\)/);
