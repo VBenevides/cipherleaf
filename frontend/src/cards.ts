@@ -198,12 +198,15 @@ export function serializeCardDocument(metadata: CardMetadata, body: string): str
 }
 
 export function cardReference(id: string): string {
-  return `[card](${id})`;
+  return `[card](note:${id})`;
 }
 
 export function parseCardReference(value: string): string | null {
   const match = /^\[card\]\(([^\s)]+)\)$/i.exec(value.trim());
-  return match?.[1] ?? null;
+  const target = match?.[1];
+  if (!target || (/^[a-z][a-z\d+.-]*:/i.test(target) && !/^note:/i.test(target))) return null;
+  const id = target.replace(/^note:/i, "");
+  return id || null;
 }
 
 export function parseTemplateDocument(markdown: string, id: string): { template: CardTemplate; body: string } | null {

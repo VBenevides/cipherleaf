@@ -72,7 +72,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumn, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -1443,22 +1443,25 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
     searchFrom = closing + 2;
   }
 
-  for (const match of text.matchAll(/(?<!!)\[card\]\(([a-f0-9]{32})\)/gi)) {
+  for (const match of text.matchAll(/(?<!!)\[card\]\(([^\s)]+)\)/gi)) {
     if (match.index === undefined) continue;
-    const title = cardTitle(match[1]);
-    if (title === null) continue;
+    const id = parseCardReference(match[0]);
+    if (!id) continue;
     const start = offset + match.index;
+    const trailingTitle = /^[ \t]+(.+)$/.exec(text.slice(start - offset + match[0].length));
+    const title = cardTitle(id) ?? trailingTitle?.[1].trim() ?? "Untitled";
     addHiddenRange(
       start,
-      start + match[0].length,
+      start + match[0].length + (trailingTitle?.[0].length ?? 0),
       decorations,
       atomicRanges,
-      new CardReferenceWidget(match[1], title, openCard),
+      new CardReferenceWidget(id, title, openCard),
     );
   }
 
   for (const citation of markdownCitations(text)) {
-    if (/^\[card\]\([a-f0-9]{32}\)$/i.test(text.slice(citation.index, citation.index + citation.length))) continue;
+    const cardID = parseCardReference(text.slice(citation.index, citation.index + citation.length));
+    if (cardID !== null) continue;
     const start = offset + citation.index;
     addHiddenRange(
       start,

@@ -49,7 +49,7 @@ import {
 import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
-import { appendCardContentJournal } from "./cardJournal";
+import { appendCardJournalToMainEditor, stripCardJournalEntries } from "./cardJournal";
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 import {
@@ -3435,8 +3435,15 @@ function App() {
     try {
       const title = cardPanel.metadata.title.trim() || "Untitled";
       const metadata = { ...cardPanel.metadata, title, tags: normalizeCardTags(cardPanel.metadata.tags) };
-      const previousBody = parseCardDocument(cardPanel.note.content, cardPanel.note.id, cardPanel.note.title)?.body ?? cardPanel.body;
-      const body = appendCardContentJournal(previousBody, cardPanel.body, metadata) ?? cardPanel.body;
+      const previousBody = stripCardJournalEntries(
+        parseCardDocument(cardPanel.note.content, cardPanel.note.id, cardPanel.note.title)?.body ?? cardPanel.body,
+      );
+      const body = stripCardJournalEntries(cardPanel.body);
+      const mainNote = noteRef.current;
+      const mainContent = mainNote && mainNote.id !== cardPanel.note.id ? markdownForEditing(mainNote.content) : "";
+      const journaledMain = mainContent
+        ? appendCardJournalToMainEditor(mainContent, previousBody, body, metadata)
+        : null;
       const saved = await VaultService.SaveNote(
         cardPanel.note.id,
         title,
@@ -3444,6 +3451,10 @@ function App() {
       );
       updateSummary(saved.summary);
       setCardPanel({ note: saved.note, metadata, body });
+      if (journaledMain && mainNote) {
+        editNote({ content: journaledMain }, false);
+        await persistCurrent();
+      }
       setCardPanelDirty(false);
     } catch (reason) {
       setError(errorText(reason));

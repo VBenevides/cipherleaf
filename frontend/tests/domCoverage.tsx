@@ -100,7 +100,9 @@ const value = [
   "const code = 1;",
   "```",
   "![image](attachment:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
-  cardReference("card-1"),
+  `  > Tag 1\n    [ ] ${cardReference("card-1")} Untitled`,
+  "    [ ] [card](note:missing-card)",
+  "    [ ] [card](legacy-missing) Legacy title",
   boardMarker("board-1", [...cards.keys()], "Roadmap"),
 ].join("\n");
 
@@ -156,6 +158,7 @@ assert.ok(live.body.querySelector(".cm-live-board"));
 assert.ok(live.body.querySelector(".cm-live-table-wrap"));
 assert.ok(live.body.querySelector(".cm-live-attachment"));
 assert.ok(live.body.querySelector(".cm-live-code-block"));
+assert.ok(live.body.querySelector(".cm-live-card-reference"));
 
 for (const [name, options] of [
   ["s", { ctrlKey: true }], ["a", { ctrlKey: true }], ["z", { ctrlKey: true }],

@@ -26,10 +26,13 @@ test("card metadata round-trips through frontmatter", () => {
 });
 
 test("card references use stable IDs and do not treat titles as references", () => {
-  assert.equal(cardReference("card-1"), "[card](card-1)");
+  assert.equal(cardReference("card-1"), "[card](note:card-1)");
   assert.equal(parseCardReference("[card](card-1)"), "card-1");
+  assert.equal(parseCardReference("[card](note:card-1)"), "card-1");
   assert.equal(parseCardReference("[card](Project%20Plan)"), "Project%20Plan");
   assert.equal(parseCardReference("[card](Project Plan)"), null);
+  assert.equal(parseCardReference("[card](https://example.com)"), null);
+  assert.equal(parseCardReference("[card](note:)"), null);
 });
 
 test("template and board markers round-trip", () => {
