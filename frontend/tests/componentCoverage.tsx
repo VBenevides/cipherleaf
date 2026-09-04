@@ -55,7 +55,7 @@ const folders = [{ id: "folder", name: "Folder", parentId: "", order: 0, locked:
 const notes = [{ id: "note", title: "Note", folderId: "folder", order: 0, updatedAt: "", createdAt: "", tags: [], outgoingLinks: [] }];
 const note = { id: "note", title: "Note", folderId: "folder", order: 0, content: "# Note\n\n- [ ] Task", updatedAt: "", createdAt: "", modifiedAt: 0, revision: 0 };
 const cardNote = { id: "card", title: "Card", folderId: "folder", order: 0, content: [
-  "---", "cipherleaf-card: true", "cipherleaf-card-status: not-started", "cipherleaf-card-tags: [work]", "cipherleaf-card-created-at: 2026-01-01T00:00:00Z", "---", "Card body",
+  "---", "cipherleaf-card: true", "cipherleaf-card-status: not-started", "cipherleaf-card-tags: [work]", "cipherleaf-card-created-at: 2026-01-01T12:00:00", "cipherleaf-card-started-at: 2026-01-02T12:00:00", "cipherleaf-card-finished-at: 2026-01-04T12:00:00", "---", "Card body",
 ].join("\n") };
 const tags = [{ id: "tag", name: "Tag", archivedAtUtc: "" }];
 const clients = [{ id: "client", name: "Client", archivedAtUtc: "" }];
@@ -437,6 +437,7 @@ assert.ok(liveEditor);
 openCardMode = true;
 await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 assert.ok(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length);
+assert.equal(textContent(appRenderer!.root.findByProps({ "aria-label": "Card dates" })), "Created At:  2026-01-01  | Started At:  2026-01-02  | Blocked on:  -  | Finished At:  2026-01-04");
 const cardTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Title")[0];
 await act(async () => { cardTitle?.props.onChange({ target: { value: "Updated card" } }); });
 await act(async () => {

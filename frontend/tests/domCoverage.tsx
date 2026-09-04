@@ -79,10 +79,10 @@ assert.equal(clipboardMayContainImage({ clipboardData: { items: [], types: [], g
 Object.defineProperty(dom.window.navigator, "userAgent", { configurable: true, value: userAgent });
 
 const cards = new Map<string, CardMetadata>([
-  ["card-1", { id: "card-1", title: "Backlog card", status: "not-started", tags: ["work"], createdAt: "2026-01-01" }],
-  ["card-2", { id: "card-2", title: "Active card", status: "in-progress", tags: ["work"], createdAt: "2026-01-01", startedAt: "2026-01-02" }],
-  ["card-3", { id: "card-3", title: "Blocked card", status: "blocked", tags: ["urgent"], createdAt: "2026-01-01", blockedOn: "2026-01-03" }],
-  ["card-4", { id: "card-4", title: "Finished card", status: "finished", tags: ["done"], createdAt: "2026-01-01", finishedAt: "2026-01-04" }],
+  ["card-1", { id: "card-1", title: "Backlog card", status: "not-started", tags: ["work"], createdAt: "2026-01-01T12:00:00" }],
+  ["card-2", { id: "card-2", title: "Active card", status: "in-progress", tags: ["work"], createdAt: "2026-01-01T12:00:00", startedAt: "2026-01-02T12:00:00" }],
+  ["card-3", { id: "card-3", title: "Blocked card", status: "blocked", tags: ["urgent"], createdAt: "2026-01-01T12:00:00", blockedOn: "2026-01-03T12:00:00" }],
+  ["card-4", { id: "card-4", title: "Finished card", status: "finished", tags: ["done"], createdAt: "2026-01-01T12:00:00", finishedAt: "2026-01-04T12:00:00" }],
 ]);
 const value = [
   "# Heading",
@@ -214,6 +214,12 @@ assert.ok(board);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
 assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
 assert.ok(board.querySelector(".cm-live-board-card-tags"));
+assert.deepEqual([...board.querySelectorAll<HTMLTimeElement>(".cm-live-board-card-date")].map((date) => [date.dateTime, date.textContent]), [
+  ["2026-01-01T12:00:00", "2026-01-01"],
+  ["2026-01-02T12:00:00", "2026-01-02"],
+  ["2026-01-03T12:00:00", "2026-01-03"],
+  ["2026-01-04T12:00:00", "2026-01-04"],
+]);
 const boardFilter = board.querySelector<HTMLInputElement>("input[aria-label=\"Filter board cards by title\"]")!;
 boardFilter.value = "Renamed";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));

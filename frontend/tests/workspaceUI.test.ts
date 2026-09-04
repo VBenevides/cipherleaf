@@ -126,7 +126,7 @@ test("editor chrome stays compact", () => {
 
 test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /className="card-sidebar-title"/);
-  assert.match(app, /Created At: \{new Date\(cardPanel\.metadata\.createdAt\)/);
+  assert.match(app, /Created At: \{localDateKey\(new Date\(cardPanel\.metadata\.createdAt\)\)\}/);
   assert.match(app, /className="card-sidebar-properties"/);
   assert.match(app, /className="tag-multi-select card-status-picker"/);
   assert.match(app, /className="card-tags-editor"/);

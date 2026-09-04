@@ -50,7 +50,7 @@ import { targetForMatch, type SearchTarget } from "./searchTarget";
 import { rankQuickSwitcher } from "./quickSwitcher";
 import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 import { appendCardJournalToMainEditor, stripCardJournalEntries } from "./cardJournal";
-import { formatLocalDateTime, formatLocalTime, formatRunningDuration, millisecondsUntilNextDurationMinute } from "./timeTracking";
+import { formatLocalDateTime, formatLocalTime, formatRunningDuration, localDateKey, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 import {
   BOARD_COLUMNS,
@@ -5335,7 +5335,7 @@ function App() {
               </button>
             </header>
             <div className="card-sidebar-dates" aria-label="Card dates">
-              Created At: {new Date(cardPanel.metadata.createdAt).toLocaleString()} | Started At: {cardPanel.metadata.startedAt ? new Date(cardPanel.metadata.startedAt).toLocaleString() : "-"} | Blocked on: {cardPanel.metadata.blockedOn ? new Date(cardPanel.metadata.blockedOn).toLocaleString() : "-"} | Finished At: {cardPanel.metadata.finishedAt ? new Date(cardPanel.metadata.finishedAt).toLocaleString() : "-"}
+              Created At: {localDateKey(new Date(cardPanel.metadata.createdAt))} | Started At: {cardPanel.metadata.startedAt ? localDateKey(new Date(cardPanel.metadata.startedAt)) : "-"} | Blocked on: {cardPanel.metadata.blockedOn ? localDateKey(new Date(cardPanel.metadata.blockedOn)) : "-"} | Finished At: {cardPanel.metadata.finishedAt ? localDateKey(new Date(cardPanel.metadata.finishedAt)) : "-"}
             </div>
             <div className="card-sidebar-properties">
               <div className="card-sidebar-field"><span>Status</span><CardStatusPicker value={cardPanel.metadata.status} onChange={(status) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, status) } : current); }} /></div>

@@ -73,6 +73,7 @@ import {
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
 import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
+import { localDateKey } from "./timeTracking";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -1326,12 +1327,10 @@ class BoardWidget extends WidgetType {
         this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
       });
       const date = boardCardDate(card, status);
-      if (date) {
-        const cardDate = item.appendChild(document.createElement("time"));
-        cardDate.className = "cm-live-board-card-date";
-        cardDate.dateTime = date;
-        cardDate.textContent = new Date(date).toLocaleDateString();
-      }
+      const cardDate = item.appendChild(document.createElement("time"));
+      cardDate.className = "cm-live-board-card-date";
+      cardDate.dateTime = date ?? "";
+      cardDate.textContent = date ? localDateKey(new Date(date)) : "-";
     }
   }
 
