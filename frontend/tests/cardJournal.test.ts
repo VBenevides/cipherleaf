@@ -108,7 +108,7 @@ test("merges an existing tag without a board marker", () => {
   assert.ok(result.includes("    • Existing content\n    [ ] [card](note:card-1)"));
 });
 
-test("rolls the first dated section before journaling a new date", () => {
+test("creates a new date without rolling older content forward", () => {
   const main = [
     "> 2026-09-02",
     "  > Tag 1",
@@ -129,8 +129,10 @@ test("rolls the first dated section before journaling a new date", () => {
   assert.ok(result.indexOf("> 2026-09-03") < previousDate);
   const currentDate = result.slice(0, previousDate);
   assert.equal((currentDate.match(/^  > Tag 1$/gm) ?? []).length, 1);
-  assert.ok(currentDate.includes("    [ ] Existing content\n    [ ] [card](note:card-1)"));
+  assert.ok(currentDate.includes("    [ ] [card](note:card-1)"));
+  assert.equal(currentDate.includes("Existing content"), false);
   assert.equal(currentDate.includes("Done"), false);
+  assert.ok(result.slice(previousDate).includes("Existing content"));
 });
 
 test("inserts a new journal immediately below the matching board", () => {
@@ -146,6 +148,81 @@ test("inserts a new journal immediately below the matching board", () => {
 
   assert.ok(result);
   assert.ok(result.includes(board + "\n> 2026-09-03"));
+});
+
+test("does not create today's section when the card body is unchanged", () => {
+  const board = boardMarker("board-1", ["card-1"], "Main");
+  const result = appendCardJournalToMainEditor(
+    board,
+    "> Existing",
+    "> Existing",
+    { ...metadata(), boardID: "board-1" },
+    date,
+  );
+
+  assert.equal(result, null);
+});
+
+test("records an edited checked element today without changing its older entry", () => {
+  const previous = "> Teste\n  > [x] Testascca";
+  const next = "> Teste\n  > [x] Testasccaaa";
+  const main = [
+    "> 2026-09-03",
+    "  > Untagged",
+    "    [ ] [card](note:card-1)",
+    "      > Teste",
+    "        > [x] Testascca",
+  ].join("\n");
+  const result = appendCardJournalToMainEditor(main, previous, next, { ...metadata(), tags: [] }, new Date(2026, 8, 4, 12));
+
+  assert.ok(result);
+  const older = result.indexOf("> 2026-09-03");
+  assert.ok(result.slice(0, older).includes("> 2026-09-04"));
+  assert.ok(result.slice(0, older).includes("> [x] Testasccaaa"));
+  assert.ok(result.slice(older).includes("> [x] Testascca"));
+  assert.doesNotMatch(result.slice(older), /Testasccaaa/);
+});
+
+test("creates today's section when an older copy is unchecked", () => {
+  const previous = "> Teste\n  > [ ] Testascca";
+  const next = "> Teste\n  > [x] Testasccaaa";
+  const main = [
+    "> 2026-09-03",
+    "  > Untagged",
+    "    [ ] [card](note:card-1)",
+    "      > Teste",
+    "        > [ ] Testascca",
+  ].join("\n");
+  const result = appendCardJournalToMainEditor(main, previous, next, { ...metadata(), tags: [] }, new Date(2026, 8, 4, 12));
+
+  assert.ok(result);
+  const older = result.indexOf("> 2026-09-03");
+  assert.ok(result.slice(0, older).includes("> 2026-09-04"));
+  assert.ok(result.slice(0, older).includes("> [x] Testasccaaa"));
+  assert.ok(result.slice(older).includes("> [ ] Testascca"));
+});
+
+test("creates today's section with only the changed sibling", () => {
+  const previous = "> Teste\n  > [x] Done\n  > [ ] Keep";
+  const next = "> Teste\n  > [x] Done\n  > [ ] Keep\n  > [ ] New";
+  const main = [
+    "> 2026-09-03",
+    "  > Untagged",
+    "    [ ] [card](note:card-1)",
+    "      > Teste",
+    "        > [x] Done",
+    "        > [ ] Keep",
+  ].join("\n");
+  const result = appendCardJournalToMainEditor(main, previous, next, { ...metadata(), tags: [] }, new Date(2026, 8, 4, 12));
+
+  assert.ok(result);
+  const older = result.indexOf("> 2026-09-03");
+  assert.ok(result.slice(0, older).includes("> 2026-09-04"));
+  assert.ok(result.slice(0, older).includes("> [ ] New"));
+  assert.doesNotMatch(result.slice(0, older), /> \[x\] Done/);
+  assert.doesNotMatch(result.slice(0, older), /> \[ \] Keep/);
+  assert.ok(result.slice(older).includes("> [x] Done"));
+  assert.ok(result.slice(older).includes("> [ ] Keep"));
 });
 
 test("removes legacy journal wrappers from the main editor", () => {
@@ -168,7 +245,12 @@ test("journals a newly saved checked point with its children", () => {
     );
 
     assert.ok(result);
+    assert.ok(result.startsWith("> 2026-09-03"));
     assert.ok(result.includes("> [x] Done\n        > Child"));
+    if (!tags.length) {
+      assert.ok(result.includes("  > Untagged"));
+      assert.doesNotMatch(result, /^  >\s*$/m);
+    }
   }
 });
 
@@ -178,7 +260,7 @@ test("checks an existing current-date point in place", () => {
     const next = "> Root\n  > [x] Done\n    > Child\n  > [ ] Keep";
     const main = [
       "> 2026-09-03",
-      `  > ${tag}`,
+      `  > ${tag || "Untagged"}`,
       "    [ ] [card](note:card-1)",
       "      > Root",
       "        > [ ] Done",
@@ -199,6 +281,45 @@ test("checks an existing current-date point in place", () => {
       null,
     );
   }
+});
+
+test("keeps only the latest version of a repeated same-day change", () => {
+  const previous = "> Test\n  > Testa\n> Keep";
+  const firstBody = "> Test\n  > Testas\n> Keep";
+  const latestBody = "> Test\n  > Testasc\n> Keep";
+  const main = [
+    "> 2026-09-03",
+    "  > Untagged",
+    "    [ ] [card](note:other-card)",
+    "      > Other",
+  ].join("\n");
+  const first = appendCardJournalToMainEditor(main, previous, firstBody, { ...metadata(), tags: [] }, date);
+
+  assert.ok(first);
+  const result = appendCardJournalToMainEditor(first, firstBody, latestBody, { ...metadata(), tags: [] }, date);
+
+  assert.ok(result);
+  assert.equal((result.match(/note:card-1/g) ?? []).length, 1);
+  assert.equal((result.match(/note:other-card/g) ?? []).length, 1);
+  assert.ok(result.includes("        > Testasc"));
+  assert.doesNotMatch(result, /^      > Keep$/m);
+  assert.doesNotMatch(result, /^        > Testas$/m);
+});
+
+test("accumulates separate same-day changes without unchanged siblings", () => {
+  const original = "> Root\n  > First\n  > Second\n  > Keep";
+  const firstBody = "> Root\n  > First changed\n  > Second\n  > Keep";
+  const latestBody = "> Root\n  > First changed\n  > Second changed\n  > Keep";
+  const first = appendCardJournalToMainEditor("", original, firstBody, { ...metadata(), tags: [] }, date);
+
+  assert.ok(first);
+  const result = appendCardJournalToMainEditor(first, firstBody, latestBody, { ...metadata(), tags: [] }, date);
+
+  assert.ok(result);
+  assert.equal((result.match(/note:card-1/g) ?? []).length, 1);
+  assert.ok(result.includes("> First changed"));
+  assert.ok(result.includes("> Second changed"));
+  assert.doesNotMatch(result, /^        > Keep$/m);
 });
 
 test("appends a checked point when its unchecked copy exists only on an older date", () => {

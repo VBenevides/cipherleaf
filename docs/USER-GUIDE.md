@@ -51,7 +51,9 @@ compromised operating system, or OS swap.
   stops.
 - Card notes include a **Write changes to editor** option. Save the card to
   persist its value; choose **Settings → Card editor** to set the default for
-  new cards. Changing the default does not change existing cards.
+  new cards. When enabled, each save adds only changed body elements under the
+  current date; same-day changes share one card entry, and older dates remain
+  unchanged. Changing the default does not change existing cards.
 - Use the folder list to organize notes and drag notes or folders to reorder
   them.
 - Use `Ctrl+]` and `Ctrl+[` to expand or collapse the current outline section.

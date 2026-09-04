@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { JSDOM } from "jsdom";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
@@ -182,6 +183,17 @@ test("card saving is opt-in for editor journaling and closes safely", () => {
   assert.match(style, /\.card-sidebar \.card-editor-journal-toggle input\[type="checkbox"\] \{[^}]*width: 1em;[^}]*height: 1em;[^}]*min-height: 0;[^}]*flex: 0 0 1em;[^}]*margin: 0;[^}]*padding: 0;[^}]*accent-color: var\(--green-dark\)/);
 });
 
+test("card editor setting keeps its checkbox inline and compact", () => {
+  const dom = new JSDOM(`<style>${style}</style><dialog class="vault-modal settings-modal"><fieldset id="settings-card-editor-default"><label><input type="checkbox">Write changes to editor by default</label></fieldset></dialog>`);
+  const label = dom.window.getComputedStyle(dom.window.document.querySelector("label")!);
+  const input = dom.window.getComputedStyle(dom.window.document.querySelector("input")!);
+  assert.equal(label.display, "flex");
+  assert.equal(label.alignItems, "center");
+  assert.equal(input.width, "15px");
+  assert.equal(input.height, "15px");
+  assert.equal(input.padding, "0px");
+});
+
 test("cards keep folder access and stay out of folder note pages", () => {
   assert.match(app, /const targetFolder = noteRef\.current\?\.folderId \?\? \(selectedFolderID === "all" \? "" : selectedFolderID\);/);
   assert.match(app, /VaultService\.CreateNoteInFolder\("Untitled", targetFolder\)/);
@@ -215,7 +227,7 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /document\.addEventListener\("pointermove", move\)/);
   assert.match(liveEditor, /targetColumn\?\.classList\.add\("is-drop-target"\)/);
   assert.match(liveEditor, /is-drag-preview/);
-  assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
+  assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 5%;/);
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
