@@ -204,12 +204,16 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.doesNotMatch(liveEditor, /rule\.style\.left/);
   assert.match(liveEditor, /cm-live-board-title[\s\S]*value = this\.title \|\| DEFAULT_BOARD_TITLE/);
   assert.match(liveEditor, /onChangeBoardTitle/);
-  assert.match(liveEditor, /setData\(boardCardMime, card\.id\)/);
-  assert.match(liveEditor, /drop\(event\)[\s\S]*includes\(boardCardMime\)/);
+  assert.match(liveEditor, /item\.addEventListener\("pointerdown"/);
+  assert.match(liveEditor, /document\.addEventListener\("pointermove", move\)/);
+  assert.match(liveEditor, /targetColumn\?\.classList\.add\("is-drop-target"\)/);
+  assert.match(liveEditor, /is-drag-preview/);
   assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-live-board-card\.is-dragging \{[\s\S]*cursor: grabbing/);
+  assert.match(style, /\.cm-live-board-card\.is-drag-preview \{[\s\S]*border-style: dashed/);
   assert.match(style, /\.cm-journal-rules \{[\s\S]*inset: 0 var\(--editor-content-right\) 0 var\(--editor-content-left\)/);
   assert.match(style, /\.cm-journal-rule \{[\s\S]*left: 0[\s\S]*right: 0/);
   assert.match(style, /\.card-sidebar-notes \.cm-journal-rules \{[\s\S]*inset: 0/);
