@@ -178,7 +178,8 @@ test("card saving is opt-in for editor journaling and closes safely", () => {
   assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);
   assert.match(app, /window\.addEventListener\("keydown", closeOnEscape\)/);
   assert.match(app, /target\.closest\("\.editor-shell"\)[\s\S]*void closeCardPanel\(\);/);
-  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle \{[\s\S]*flex-direction: row/);
+  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle \{[^}]*width: fit-content;[^}]*max-width: 100%;[^}]*align-self: flex-start;[^}]*flex-direction: row;[^}]*align-items: center;[^}]*gap: \.4em/);
+  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle input\[type="checkbox"\] \{[^}]*width: 1em;[^}]*height: 1em;[^}]*min-height: 0;[^}]*flex: 0 0 1em;[^}]*margin: 0;[^}]*padding: 0;[^}]*accent-color: var\(--green-dark\)/);
 });
 
 test("cards keep folder access and stay out of folder note pages", () => {

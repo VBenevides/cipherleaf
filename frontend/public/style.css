@@ -4110,8 +4110,8 @@ dialog.modal-backdrop {
 .card-sidebar-notes .live-editor-frame { min-height: 0; }
 .card-sidebar-notes .live-markdown-editor .cm-content { padding: 16px 0 40px; }
 .card-sidebar-notes .cm-journal-rules { inset: 0; }
-.card-sidebar .card-editor-journal-toggle { flex-direction: row; align-items: center; gap: 8px; }
-.card-sidebar .card-editor-journal-toggle input { width: auto; min-height: auto; padding: 0; }
+.card-sidebar .card-editor-journal-toggle { width: fit-content; max-width: 100%; align-self: flex-start; flex-direction: row; align-items: center; gap: .4em; }
+.card-sidebar .card-editor-journal-toggle input[type="checkbox"] { width: 1em; height: 1em; min-height: 0; flex: 0 0 1em; margin: 0; padding: 0; accent-color: var(--green-dark); }
 .card-sidebar-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card-sidebar-actions .card-save-button { margin-left: auto; }
 .card-save-button.is-dirty { color: #fff; border-color: #1e73b5; background: #1e73b5; }
