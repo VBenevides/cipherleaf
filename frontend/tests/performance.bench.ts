@@ -4,6 +4,14 @@ import { memoryUsage } from "node:process";
 import { EditorState } from "@codemirror/state";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { appendCardContentJournal, appendCardJournalToMainEditor } from "../src/cardJournal.ts";
+import {
+  boardCardsForColumns,
+  boardMarker,
+  BOARD_COLUMNS,
+  newCardMetadata,
+  serializeCardDocument,
+} from "../src/cards.ts";
 import { relationshipLinks } from "../src/graphRelationships.ts";
 import { parseObjectDocument } from "../src/objectDocument.ts";
 
@@ -101,3 +109,70 @@ assert.match(
   ),
   /circle/,
 );
+
+const cardScaleDate = new Date("2026-09-03T12:00:00.000Z");
+const cardScale = (count: number) => {
+  const ids = Array.from({ length: count }, (_, index) => `card-${index}`);
+  const cards = new Map(ids.map((id, index) => [
+    id,
+    {
+      ...newCardMetadata(id, cardScaleDate),
+      title: `Card ${index}`,
+      status: BOARD_COLUMNS[index % BOARD_COLUMNS.length],
+      boardID: "board-1",
+    },
+  ]));
+  const metadata = {
+    ...newCardMetadata("card-0", cardScaleDate),
+    title: "Card 0",
+    tags: ["Work"],
+    boardID: "board-1",
+  };
+  const previousBody = "> Root\n  > Existing";
+  const nextBody = "> Root\n  > Updated";
+  const mainContent = [
+    boardMarker("board-1", ids, "Main"),
+    "> 2026-09-03",
+    "  > Work",
+    "    [ ] [card](note:card-0)",
+    "      > Root",
+    "        > Existing",
+  ].join("\n");
+  return { ids, cards, metadata, previousBody, nextBody, mainContent };
+};
+
+for (const count of [1, 10, 100, 1_000, 10_000]) {
+  const { ids, cards, metadata, previousBody, nextBody, mainContent } = cardScale(count);
+  assert.match(
+    benchmark(
+      `card_write_journal_${count}_cards`,
+      () => appendCardContentJournal(previousBody, nextBody, metadata),
+      (result) => [`payload-B=${result?.length ?? 0}`],
+    ) ?? "",
+    /Updated/,
+  );
+  assert.match(
+    benchmark(
+      `card_save_serialize_${count}_cards`,
+      () => serializeCardDocument(metadata, nextBody),
+      (result) => [`payload-B=${result.length}`],
+    ),
+    /cipherleaf-card: true/,
+  );
+  assert.equal(
+    benchmark(
+      `board_update_group_${count}_cards`,
+      () => boardCardsForColumns(cards, ids),
+      (result) => [`items/op=${[...result.values()].reduce((total, column) => total + column.length, 0)}`],
+    ).get("not-started")?.length ?? 0,
+    Math.ceil(count / BOARD_COLUMNS.length),
+  );
+  assert.match(
+    benchmark(
+      `main_editor_update_${count}_cards`,
+      () => appendCardJournalToMainEditor(mainContent, previousBody, nextBody, metadata, cardScaleDate),
+      (result) => [`payload-B=${result?.length ?? 0}`],
+    ) ?? "",
+    /Updated/,
+  );
+}

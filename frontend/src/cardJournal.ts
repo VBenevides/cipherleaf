@@ -5,7 +5,6 @@ import {
   type CanonicalObjectDocument,
   type ObjectLine,
 } from "./objectDocument.ts";
-import { rollFirstDatedSection } from "./snippets.ts";
 
 export const CARD_JOURNAL_START = "<!-- cipherleaf-card-journal:start -->";
 export const CARD_JOURNAL_END = "<!-- cipherleaf-card-journal:end -->";
@@ -128,17 +127,20 @@ function canonicalNode(object: ObjectLine): CanonicalObjectDocument["objects"][n
   };
 }
 
-function copiedElement(document: ReturnType<typeof parseObjectDocument>, root: ObjectLine): string | null {
+function copiedElement(
+  document: ReturnType<typeof parseObjectDocument>,
+  root: ObjectLine,
+  changedIDs: ReadonlySet<string>,
+): string | null {
   const included = new Set<string>();
-  const collect = (object: ObjectLine) => {
-    if (included.has(object.id) || object.checked === true) return;
-    included.add(object.id);
-    object.childrenIds.forEach((id) => {
-      const child = document.byId.get(id);
-      if (child) collect(child);
-    });
-  };
-  collect(root);
+  for (const id of changedIDs) {
+    let object = document.byId.get(id);
+    while (object) {
+      included.add(object.id);
+      if (object.id === root.id) break;
+      object = object.parentId ? document.byId.get(object.parentId) : undefined;
+    }
+  }
   if (!included.has(root.id)) return null;
 
   const nodes = document.objects
@@ -179,7 +181,7 @@ function journalBlockFor(
 ): string {
   const checked = metadata.status === "finished" ? "x" : " ";
   const tags = normalizeCardTags(metadata.tags.flatMap((tag) => tag.split(",")));
-  const tagSections = tags.length ? tags : [""];
+  const tagSections = tags.length ? tags : ["Untagged"];
   return [
     `> ${localDate(date)}`,
     ...tagSections.flatMap((tag) => [
@@ -212,8 +214,9 @@ function journalForChangedContent(
   const changed = changedObjects(previousEntries, nextEntries);
   if (changed.length === 0) return null;
 
+  const changedIDs = new Set(changed.map((object) => object.id));
   const elements = changedRoots(nextDocument, changed)
-    .map((root) => copiedElement(nextDocument, root))
+    .map((root) => copiedElement(nextDocument, root, changedIDs))
     .filter((element): element is string => element !== null);
   if (elements.length === 0) return null;
   return journalBlockFor(metadata, elements, date);
@@ -245,16 +248,24 @@ function isDatedRoot(object: ObjectLine): boolean {
   return object.parentId === null && object.tag === "section" && /^\s*\d{4}-\d{2}-\d{2}\b/.test(object.text);
 }
 
+function currentDateSection(
+  document: ReturnType<typeof parseObjectDocument>,
+  boardLine: number,
+  date: Date,
+): ObjectLine | undefined {
+  return document.roots.find(
+    (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
+  );
+}
+
 function sectionInsertionLine(
   lines: readonly string[],
   document: ReturnType<typeof parseObjectDocument>,
   section: ObjectLine,
 ): number {
-  const nextSibling = document.objects.find(
-    (object) => object.parentId === section.parentId && object.lineNumber > section.lineNumber,
+  const next = document.objects.find(
+    (object) => object.lineNumber > section.lineNumber && object.indent <= section.indent,
   );
-  const nextRoot = document.roots.find((object) => object.lineNumber > section.lineNumber);
-  const next = nextSibling ?? nextRoot;
   let index = next ? next.lineNumber - 1 : lines.length;
   while (index > section.lineNumber && lines[index - 1]?.trim() === "") index--;
   return index;
@@ -266,6 +277,89 @@ function journalTagBlocks(journal: string): string[] {
 
 function sectionTag(section: ObjectLine): string {
   return section.text.split("\n", 1)[0].trim().toLocaleLowerCase();
+}
+
+function objectPathKey(
+  document: ReturnType<typeof parseObjectDocument>,
+  object: ObjectLine,
+  stopID: string | null = null,
+): string | null {
+  const path: unknown[][] = [];
+  let current: ObjectLine | undefined = object;
+  while (current && current.id !== stopID) {
+    path.unshift([current.tag, current.tags, current.text, current.language, current.attachmentId]);
+    current = current.parentId ? document.byId.get(current.parentId) : undefined;
+  }
+  return stopID && current?.id !== stopID ? null : JSON.stringify(path);
+}
+
+function objectPositionKey(
+  document: ReturnType<typeof parseObjectDocument>,
+  object: ObjectLine,
+  stopID: string | null = null,
+): string | null {
+  if (object.id === stopID) return null;
+  const parent = object.parentId ? document.byId.get(object.parentId) : undefined;
+  if (stopID && !parent) return null;
+  const parentPath = parent && parent.id !== stopID ? objectPathKey(document, parent, stopID) : "[]";
+  if (parentPath === null) return null;
+  const siblings = parent ? parent.childrenIds : document.roots.map((root) => root.id);
+  return JSON.stringify([parentPath, object.tag, siblings.indexOf(object.id)]);
+}
+
+function mergeDailyCard(
+  document: ReturnType<typeof parseObjectDocument>,
+  card: ObjectLine,
+  inserted: string,
+  previousBody: string,
+  nextBody: string,
+): string {
+  const previous = stripCardJournalEntries(previousBody);
+  const next = stripCardJournalEntries(nextBody);
+  const previousDocument = parseObjectDocument(previous);
+  const nextDocument = parseObjectDocument(next);
+  const deltaDocument = parseObjectDocument(inserted);
+  const deltaCard = deltaDocument.roots.find((object) => object.text === card.text);
+  if (!deltaCard) return inserted;
+
+  // ponytail: path lookup is quadratic for journal-sized cards; add indexes if profiling shows this is hot.
+  const included = new Set<string>();
+  document.objects.forEach((object) => {
+    const path = object.id === card.id ? null : objectPathKey(document, object, card.id);
+    if (!path) return;
+    const previousObject = previousDocument.objects.find(
+      (candidate) => objectPathKey(previousDocument, candidate) === path,
+    );
+    if (!previousObject) return;
+    const previousPath = objectPathKey(previousDocument, previousObject);
+    const previousPosition = objectPositionKey(previousDocument, previousObject);
+    const current = nextDocument.objects.find((candidate) =>
+      objectPathKey(nextDocument, candidate) === previousPath
+      || objectPositionKey(nextDocument, candidate) === previousPosition,
+    );
+    if (current) included.add(current.id);
+  });
+  deltaDocument.objects.forEach((object) => {
+    const path = object.id === deltaCard.id ? null : objectPathKey(deltaDocument, object, deltaCard.id);
+    if (!path) return;
+    const current = nextDocument.objects.find((candidate) => objectPathKey(nextDocument, candidate) === path);
+    if (current) included.add(current.id);
+  });
+
+  [...included].forEach((id) => {
+    let object = nextDocument.byId.get(id);
+    while (object) {
+      included.add(object.id);
+      object = object.parentId ? nextDocument.byId.get(object.parentId) : undefined;
+    }
+  });
+  const body = markdownFromCanonicalObjectDocument({
+    format: "cipherleaf.object-document",
+    version: 1,
+    objects: nextDocument.objects.filter((object) => included.has(object.id)).map(canonicalNode),
+  });
+  const cardLine = inserted.split("\n", 1)[0];
+  return body ? `${cardLine}\n${body.split("\n").map((line) => `      ${line}`).join("\n")}` : cardLine;
 }
 
 function tagSectionInsertionLine(
@@ -284,6 +378,9 @@ function appendJournalTags(
   document: ReturnType<typeof parseObjectDocument>,
   section: ObjectLine,
   journal: string,
+  cardID: string,
+  previousBody: string,
+  nextBody: string,
   boardLine: number,
   date: Date,
 ): string {
@@ -293,10 +390,25 @@ function appendJournalTags(
     const existing = section.childrenIds
       .map((id) => document.byId.get(id))
       .find((object) => object?.tag === "section" && sectionTag(object) === tag);
-    const inserted = (existing ? blockLines.slice(1) : blockLines).join("\n");
-    const insertionLine = existing
+    const cards = existing
+      ? existing.childrenIds
+        .map((id) => document.byId.get(id))
+        .filter((object): object is ObjectLine => object?.text === cardReference(cardID))
+      : [];
+    let inserted = (existing ? blockLines.slice(1) : blockLines).join("\n");
+    let insertionLine = existing
       ? sectionInsertionLine(lines, document, existing)
       : tagSectionInsertionLine(lines, document, section);
+    if (cards.length) {
+      inserted = mergeDailyCard(document, cards[0], inserted, previousBody, nextBody);
+      const ranges = cards.map((card) => ({
+        start: card.lineNumber - 1,
+        end: sectionInsertionLine(lines, document, card),
+      }));
+      insertionLine = Math.min(...ranges.map(({ start }) => start));
+      ranges.sort((left, right) => right.start - left.start)
+        .forEach(({ start, end }) => lines.splice(start, end - start));
+    }
     lines = insertLines(lines, insertionLine, inserted).split("\n");
     document = parseObjectDocument(lines.join("\n"));
     const nextSection = document.roots.find(
@@ -319,30 +431,21 @@ export function appendCardJournalToMainEditor(
   if (!journal) return null;
 
   const normalized = removeCardJournalMarkers(mainContent);
-  let lines = normalized.split("\n");
+  const lines = normalized.split("\n");
   const boardLine = lines.findIndex((line) => {
     const board = parseBoardMarker(line);
     return board && (!metadata.boardID || board.id === metadata.boardID);
   });
 
-  let document = parseObjectDocument(normalized);
+  const document = parseObjectDocument(normalized);
   const firstDatedRoot = document.roots.find(isDatedRoot);
-  let section = document.roots.find(
-    (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
-  );
+  const section = currentDateSection(document, boardLine, date);
   if (!section) {
+    if (boardLine < 0 && !firstDatedRoot) return appendBody(normalized, journal);
     const insertionLine = boardLine >= 0 ? boardLine + 1 : (firstDatedRoot?.lineNumber ?? lines.length + 1) - 1;
-    const source = lines.slice(insertionLine).join("\n");
-    const rolled = rollFirstDatedSection(source, date);
-    if (!rolled) return boardLine < 0
-      ? appendBody(normalized, journal)
-      : insertLines(lines, boardLine + 1, journal);
-    lines = insertLines(lines, insertionLine, rolled).split("\n");
-    document = parseObjectDocument(lines.join("\n"));
-    section = document.roots.find(
-      (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
-    );
+    return insertLines(lines, insertionLine, journal);
   }
-  if (!section) return appendBody(normalized, journal);
-  return appendJournalTags(lines, document, section, journal, boardLine, date);
+
+  const result = appendJournalTags(lines, document, section, journal, metadata.id, previousBody, nextBody, boardLine, date);
+  return result === normalized ? null : result;
 }

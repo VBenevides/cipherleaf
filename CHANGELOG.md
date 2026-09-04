@@ -2,6 +2,24 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [1.0.5] - 2026-09-04
+
+### Features
+
+- Display card lifecycle dates as `YYYY-MM-DD` in card panels and embedded boards.
+- Replace board tag text search with a normalized tag dropdown filter.
+
+### Bugfixes
+
+- Fixed card journals to record only changed elements, merge same-day updates, and preserve older dated history.
+- Fixed checked journal points to update existing current-date entries without duplicates while retaining nested and unrelated content.
+- Aligned card-journal checkboxes with their labels.
+
+### Other
+
+- Added deterministic card-operation benchmarks covering writing, serialization, board grouping, and main-editor updates from 1 to 10,000 cards.
+- Expanded frontend and card-journal regression coverage for dates, filters, synchronization, and repeated saves.
+
 ## [1.0.4] - 2026-09-03
 
 ### Features

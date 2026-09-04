@@ -79,10 +79,10 @@ assert.equal(clipboardMayContainImage({ clipboardData: { items: [], types: [], g
 Object.defineProperty(dom.window.navigator, "userAgent", { configurable: true, value: userAgent });
 
 const cards = new Map<string, CardMetadata>([
-  ["card-1", { id: "card-1", title: "Backlog card", status: "not-started", tags: ["work"], createdAt: "2026-01-01" }],
-  ["card-2", { id: "card-2", title: "Active card", status: "in-progress", tags: ["work"], createdAt: "2026-01-01", startedAt: "2026-01-02" }],
-  ["card-3", { id: "card-3", title: "Blocked card", status: "blocked", tags: ["urgent"], createdAt: "2026-01-01", blockedOn: "2026-01-03" }],
-  ["card-4", { id: "card-4", title: "Finished card", status: "finished", tags: ["done"], createdAt: "2026-01-01", finishedAt: "2026-01-04" }],
+  ["card-1", { id: "card-1", title: "Backlog card", status: "not-started", tags: ["work", " alpha "], createdAt: "2026-01-01T12:00:00" }],
+  ["card-2", { id: "card-2", title: "Active card", status: "in-progress", tags: ["WORK"], createdAt: "2026-01-01T12:00:00", startedAt: "2026-01-02T12:00:00" }],
+  ["card-3", { id: "card-3", title: "Blocked card", status: "blocked", tags: ["urgent"], createdAt: "2026-01-01T12:00:00", blockedOn: "2026-01-03T12:00:00" }],
+  ["card-4", { id: "card-4", title: "Finished card", status: "finished", tags: [], createdAt: "2026-01-01T12:00:00", finishedAt: "2026-01-04T12:00:00" }],
 ]);
 const value = [
   "# Heading",
@@ -214,6 +214,21 @@ assert.ok(board);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
 assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
 assert.ok(board.querySelector(".cm-live-board-card-tags"));
+assert.deepEqual([...board.querySelectorAll<HTMLTimeElement>(".cm-live-board-card-date")].map((date) => [date.dateTime, date.textContent]), [
+  ["2026-01-01T12:00:00", "2026-01-01"],
+  ["2026-01-02T12:00:00", "2026-01-02"],
+  ["2026-01-03T12:00:00", "2026-01-03"],
+  ["2026-01-04T12:00:00", "2026-01-04"],
+]);
+const boardTagFilter = board.querySelector<HTMLSelectElement>("select[aria-label=\"Filter board cards by tags\"]")!;
+assert.deepEqual([...boardTagFilter.options].map((option) => option.textContent), ["", "work", "alpha", "urgent"]);
+boardTagFilter.value = "work";
+boardTagFilter.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 2);
+const clearBoardFilters = [...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-controls button")].find((button) => button.textContent === "Clear")!;
+clearBoardFilters.click();
+assert.equal(boardTagFilter.value, "");
+assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 4);
 const boardFilter = board.querySelector<HTMLInputElement>("input[aria-label=\"Filter board cards by title\"]")!;
 boardFilter.value = "Renamed";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -278,6 +293,21 @@ board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
 });
 board.querySelectorAll("button[aria-label]").forEach((button) => button.click());
 assert.ok(opened > 0 && moved > 0 && added > 0);
+
+const cardsWithoutTags = new Map([...updatedCards].map(([id, card]) => [id, { ...card, tags: [] }]));
+await act(async () => {
+  live.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "note", value, onChange: () => { changed++; }, onSave: () => { saved++; }, onError: () => {},
+    onOpenWikilink: () => { opened++; }, onOpenCard: () => { opened++; }, cardData: cardsWithoutTags,
+    onCreateCard: async () => null, onCreateBoard: async () => null, onMoveCard: () => { moved++; },
+    onAddCardToBoard: () => { added++; }, onChangeBoardTitle: () => { changed++; },
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const emptyTagFilter = live.body.querySelector<HTMLSelectElement>("select[aria-label=\"Filter board cards by tags\"]")!;
+assert.deepEqual([...emptyTagFilter.options].map((option) => option.textContent), [""]);
+emptyTagFilter.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 
 live.body.querySelectorAll<HTMLButtonElement>("button[aria-label*='section'], button[title*='code']").forEach((button) => button.click());
 await act(async () => {

@@ -72,7 +72,8 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, normalizeCardTags, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
+import { localDateKey } from "./timeTracking";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
 type LiveMarkdownEditorProps = {
@@ -1195,7 +1196,7 @@ class BoardWidget extends WidgetType {
       if (!boardCardPresentationChanged(previous, card)) continue;
       if (!boardCardTitleChangedOnly(previous, card) ||
         dom.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")?.value ||
-        dom.querySelector<HTMLInputElement>("[aria-label='Filter board cards by tags']")?.value) return false;
+        dom.querySelector<HTMLSelectElement>("[aria-label='Filter board cards by tags']")?.value) return false;
       const item = cardElements.get(id);
       if (!item || !updateBoardCardTitle(item, card, card.status)) return false;
     }
@@ -1326,12 +1327,10 @@ class BoardWidget extends WidgetType {
         this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
       });
       const date = boardCardDate(card, status);
-      if (date) {
-        const cardDate = item.appendChild(document.createElement("time"));
-        cardDate.className = "cm-live-board-card-date";
-        cardDate.dateTime = date;
-        cardDate.textContent = new Date(date).toLocaleDateString();
-      }
+      const cardDate = item.appendChild(document.createElement("time"));
+      cardDate.className = "cm-live-board-card-date";
+      cardDate.dateTime = date ?? "";
+      cardDate.textContent = date ? localDateKey(new Date(date)) : "-";
     }
   }
 
@@ -1375,10 +1374,14 @@ class BoardWidget extends WidgetType {
     filter.type = "search";
     filter.placeholder = "Filter cards by title";
     filter.setAttribute("aria-label", "Filter board cards by title");
-    const tagFilter = controls.appendChild(document.createElement("input"));
-    tagFilter.type = "search";
-    tagFilter.placeholder = "Filter tags";
+    const tagFilter = controls.appendChild(document.createElement("select"));
     tagFilter.setAttribute("aria-label", "Filter board cards by tags");
+    tagFilter.appendChild(document.createElement("option")).value = "";
+    for (const tag of normalizeCardTags(this.cardIDs.flatMap((id) => this.cards.get(id)?.tags ?? []))) {
+      const option = tagFilter.appendChild(document.createElement("option"));
+      option.value = tag;
+      option.textContent = tag;
+    }
     const add = controls.appendChild(document.createElement("button"));
     add.type = "button";
     add.className = "secondary-button";
@@ -1429,9 +1432,8 @@ class BoardWidget extends WidgetType {
     const updateFilter = () => {
       const currentCards = boardCardData.get(board) ?? this.cards;
       const titleQuery = filter.value.trim().toLocaleLowerCase();
-      const requiredTags = tagFilter.value.split(",");
-      const filteredCards = titleQuery || requiredTags.some((tag) => tag.trim())
-        ? boardCardsForColumns(currentCards, this.cardIDs, titleQuery, requiredTags)
+      const filteredCards = titleQuery || tagFilter.value
+        ? boardCardsForColumns(currentCards, this.cardIDs, titleQuery, [tagFilter.value])
         : allCards;
       for (const status of BOARD_COLUMNS) {
         const visible = new Set((filteredCards.get(status) ?? []).map((card) => card.id));
@@ -1442,7 +1444,7 @@ class BoardWidget extends WidgetType {
       }
     };
     filter.addEventListener("input", updateFilter);
-    tagFilter.addEventListener("input", updateFilter);
+    tagFilter.addEventListener("change", updateFilter);
     updateFilter();
     fitTitles();
     updateMinimizedState();

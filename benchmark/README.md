@@ -44,6 +44,12 @@ user-visible limits should be investigated:
 `bash benchmark/run.sh --output local` runs the complete suite. Bundle limits
 are enforced by `frontend/tests/bundle.bench.mjs`.
 
+The frontend suite also measures card-board scaling at 1, 10, 100, 1,000, and
+10,000 cards: `card_write_journal_*`, `card_save_serialize_*`,
+`board_update_group_*`, and `main_editor_update_*`. Card body and serialization
+inputs stay fixed; board grouping and main-editor inputs include the generated
+board card IDs.
+
 ## Profiles
 
 Benchmark profiles can be captured with `-cpuprofile`, `-memprofile`, and

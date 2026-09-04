@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { JSDOM } from "jsdom";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
@@ -126,7 +127,7 @@ test("editor chrome stays compact", () => {
 
 test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /className="card-sidebar-title"/);
-  assert.match(app, /Created At: \{new Date\(cardPanel\.metadata\.createdAt\)/);
+  assert.match(app, /Created At: \{localDateKey\(new Date\(cardPanel\.metadata\.createdAt\)\)\}/);
   assert.match(app, /className="card-sidebar-properties"/);
   assert.match(app, /className="tag-multi-select card-status-picker"/);
   assert.match(app, /className="card-tags-editor"/);
@@ -149,11 +150,14 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /\[BOARD\] \$\{boardTitle\}/);
   assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*allCards\.get\(status\)/);
   assert.match(liveEditor, /cm-live-board-card-tags/);
+  assert.match(liveEditor, /normalizeCardTags\(this\.cardIDs\.flatMap/);
+  assert.match(liveEditor, /document\.createElement\("select"\)/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
   assert.match(style, /\.cm-live-board-card \{[\s\S]*display: flex[\s\S]*justify-content: space-between/);
   assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
+  assert.match(style, /\.cm-live-board-controls select \{ min-width: 0; flex: 1; \}/);
   assert.match(style, /\.cm-live-board-minimized \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board \[hidden\] \{[\s\S]*display: none !important/);
   assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #1e73b5/);
@@ -175,7 +179,19 @@ test("card saving is opt-in for editor journaling and closes safely", () => {
   assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);
   assert.match(app, /window\.addEventListener\("keydown", closeOnEscape\)/);
   assert.match(app, /target\.closest\("\.editor-shell"\)[\s\S]*void closeCardPanel\(\);/);
-  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle \{[\s\S]*flex-direction: row/);
+  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle \{[^}]*width: fit-content;[^}]*max-width: 100%;[^}]*align-self: flex-start;[^}]*flex-direction: row;[^}]*align-items: center;[^}]*gap: \.4em/);
+  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle input\[type="checkbox"\] \{[^}]*width: 1em;[^}]*height: 1em;[^}]*min-height: 0;[^}]*flex: 0 0 1em;[^}]*margin: 0;[^}]*padding: 0;[^}]*accent-color: var\(--green-dark\)/);
+});
+
+test("card editor setting keeps its checkbox inline and compact", () => {
+  const dom = new JSDOM(`<style>${style}</style><dialog class="vault-modal settings-modal"><fieldset id="settings-card-editor-default"><label><input type="checkbox">Write changes to editor by default</label></fieldset></dialog>`);
+  const label = dom.window.getComputedStyle(dom.window.document.querySelector("label")!);
+  const input = dom.window.getComputedStyle(dom.window.document.querySelector("input")!);
+  assert.equal(label.display, "flex");
+  assert.equal(label.alignItems, "center");
+  assert.equal(input.width, "15px");
+  assert.equal(input.height, "15px");
+  assert.equal(input.padding, "0px");
 });
 
 test("cards keep folder access and stay out of folder note pages", () => {
@@ -211,7 +227,7 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(liveEditor, /document\.addEventListener\("pointermove", move\)/);
   assert.match(liveEditor, /targetColumn\?\.classList\.add\("is-drop-target"\)/);
   assert.match(liveEditor, /is-drag-preview/);
-  assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
+  assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 5%;/);
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);

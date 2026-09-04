@@ -56,7 +56,7 @@
   --notebook-gutter: 70px;
   --notebook-margin: 60px;
   --editor-content-left: 5%;
-  --editor-content-right: 15%;
+  --editor-content-right: 5%;
 }
 
 :root[data-theme="dark"] {
@@ -1409,7 +1409,8 @@ dialog.modal-backdrop {
   min-height: 43px;
 }
 
-.settings-modal .private-repository-confirmation {
+.settings-modal .private-repository-confirmation,
+#settings-card-editor-default label {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -1419,11 +1420,13 @@ dialog.modal-backdrop {
   letter-spacing: 0;
 }
 
-.settings-modal .private-repository-confirmation input {
+.settings-modal .private-repository-confirmation input,
+#settings-card-editor-default input[type="checkbox"] {
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
   margin: 0;
+  padding: 0;
   accent-color: var(--green-dark);
 }
 
@@ -4041,7 +4044,8 @@ dialog.modal-backdrop {
   margin-bottom: 10px;
 }
 
-.cm-live-board-controls input { min-width: 0; flex: 1; }
+.cm-live-board-controls input,
+.cm-live-board-controls select { min-width: 0; flex: 1; }
 .cm-live-board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .cm-live-board-column { min-height: 100px; max-height: 420px; overflow: auto; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .cm-live-board-column.status-in-progress { background: color-mix(in srgb, #2588d8 18%, transparent); }
@@ -4109,8 +4113,8 @@ dialog.modal-backdrop {
 .card-sidebar-notes .live-editor-frame { min-height: 0; }
 .card-sidebar-notes .live-markdown-editor .cm-content { padding: 16px 0 40px; }
 .card-sidebar-notes .cm-journal-rules { inset: 0; }
-.card-sidebar .card-editor-journal-toggle { flex-direction: row; align-items: center; gap: 8px; }
-.card-sidebar .card-editor-journal-toggle input { width: auto; min-height: auto; padding: 0; }
+.card-sidebar .card-editor-journal-toggle { width: fit-content; max-width: 100%; align-self: flex-start; flex-direction: row; align-items: center; gap: .4em; }
+.card-sidebar .card-editor-journal-toggle input[type="checkbox"] { width: 1em; height: 1em; min-height: 0; flex: 0 0 1em; margin: 0; padding: 0; accent-color: var(--green-dark); }
 .card-sidebar-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card-sidebar-actions .card-save-button { margin-left: auto; }
 .card-save-button.is-dirty { color: #fff; border-color: #1e73b5; background: #1e73b5; }
