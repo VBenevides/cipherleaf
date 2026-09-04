@@ -149,11 +149,14 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /\[BOARD\] \$\{boardTitle\}/);
   assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*allCards\.get\(status\)/);
   assert.match(liveEditor, /cm-live-board-card-tags/);
+  assert.match(liveEditor, /normalizeCardTags\(this\.cardIDs\.flatMap/);
+  assert.match(liveEditor, /document\.createElement\("select"\)/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
   assert.match(style, /\.cm-live-board-card \{[\s\S]*display: flex[\s\S]*justify-content: space-between/);
   assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
+  assert.match(style, /\.cm-live-board-controls select \{ min-width: 0; flex: 1; \}/);
   assert.match(style, /\.cm-live-board-minimized \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board \[hidden\] \{[\s\S]*display: none !important/);
   assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #1e73b5/);

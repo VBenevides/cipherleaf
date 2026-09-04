@@ -4041,7 +4041,8 @@ dialog.modal-backdrop {
   margin-bottom: 10px;
 }
 
-.cm-live-board-controls input { min-width: 0; flex: 1; }
+.cm-live-board-controls input,
+.cm-live-board-controls select { min-width: 0; flex: 1; }
 .cm-live-board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .cm-live-board-column { min-height: 100px; max-height: 420px; overflow: auto; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .cm-live-board-column.status-in-progress { background: color-mix(in srgb, #2588d8 18%, transparent); }
