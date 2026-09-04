@@ -6,15 +6,19 @@ All notable changes to Cipherleaf are documented here.
 
 ### Features
 
+- Added a configurable default for the **Write changes to editor** option on new cards; existing cards retain their saved choice.
 - Added automatic card-content journals to the main editor, grouped by date and tag while preserving nested elements and card links.
 
 ### Bugfixes
 
+- Fixed the **Write changes to editor** option resetting when a card is closed and reopened.
 - Fixed card references so stable note IDs render as cards instead of ordinary hyperlinks.
 - Aligned card task checkboxes with their text.
 
 ### Other
 
+- Reduced inline Markdown decoration complexity by separating wikilink, card-reference, and citation handling.
+- Documented card editor preference behavior and added regression coverage.
 - Improved editor and board performance by reusing preview state, grouped card data, board DOM, and card text measurements.
 - Replaced quadratic journal diffing and deferred unnecessary vault manifest snapshots during unchanged saves.
 - Updated the security workflow to use npm 12 for dependency audits and expanded frontend regression coverage.

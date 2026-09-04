@@ -124,16 +124,17 @@ type manifest struct {
 
 // VaultSettings contains general preferences encrypted and synced with a vault.
 type VaultSettings struct {
-	DailyNoteFormat         string `json:"dailyNoteFormat"`
-	DailyNoteFolderID       string `json:"dailyNoteFolderId"`
-	DailyTemplateNoteID     string `json:"dailyTemplateNoteId"`
-	AutosaveIntervalSeconds int    `json:"autosaveIntervalSeconds"`
-	AutoSyncMinutes         int    `json:"autoSyncMinutes"`
-	AutoLockMinutes         int    `json:"autoLockMinutes"`
-	FileHistoryLimit        int    `json:"fileHistoryLimit"`
-	SectionDefault          string `json:"sectionDefault"`
-	Revision                uint64 `json:"revision"`
-	ModifiedAt              int64  `json:"modifiedAt"`
+	DailyNoteFormat                 string `json:"dailyNoteFormat"`
+	DailyNoteFolderID               string `json:"dailyNoteFolderId"`
+	DailyTemplateNoteID             string `json:"dailyTemplateNoteId"`
+	AutosaveIntervalSeconds         int    `json:"autosaveIntervalSeconds"`
+	AutoSyncMinutes                 int    `json:"autoSyncMinutes"`
+	AutoLockMinutes                 int    `json:"autoLockMinutes"`
+	FileHistoryLimit                int    `json:"fileHistoryLimit"`
+	SectionDefault                  string `json:"sectionDefault"`
+	CardWriteChangesToEditorDefault bool   `json:"cardWriteChangesToEditorDefault"`
+	Revision                        uint64 `json:"revision"`
+	ModifiedAt                      int64  `json:"modifiedAt"`
 }
 
 type vaultConfig struct {

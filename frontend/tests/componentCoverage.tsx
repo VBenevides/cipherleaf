@@ -199,6 +199,7 @@ assert.equal(preparedNote.note.id, "note");
 assert.equal(preparedNote.migrated, true);
 assert.equal(noteForEditing({ ...note, content: JSON.stringify(canonicalObjectDocumentFromMarkdown("> Stored")) }).migrated, false);
 assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": true, "cipherleaf-card-status": "in-progress", "cipherleaf-card-tags": ["Tag", 1], "cipherleaf-card-started-at": "2026-01-01" } }).status, "in-progress");
+assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": true, "cipherleaf-card-write-changes-to-editor": true } }).writeChangesToEditor, true);
 assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": false } }), null);
 assert.equal(cardMetadataFromSummary({ ...notes[0], properties: { "cipherleaf-card": true, "cipherleaf-card-status": "invalid" } }), null);
 assert.equal(cardMetadataFromSummary({ ...notes[0], title: "", properties: { "cipherleaf-card": "true" } }).title, "Untitled");

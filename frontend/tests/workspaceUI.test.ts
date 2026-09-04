@@ -161,10 +161,13 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
 });
 
 test("card saving is opt-in for editor journaling and closes safely", () => {
-  assert.match(app, /const \[writeCardChangesToEditor, setWriteCardChangesToEditor\] = useState\(false\)/);
+  assert.match(app, /const \[cardWriteChangesToEditorDefault, setCardWriteChangesToEditorDefault\] = useState\(false\)/);
   assert.match(app, /aria-label="Write changes to editor"/);
-  assert.match(app, /checked=\{writeCardChangesToEditor\}/);
-  assert.match(app, /const journaledMain = writeCardChangesToEditor && mainContent/);
+  assert.match(app, /checked=\{cardPanel\.metadata\.writeChangesToEditor\}/);
+  assert.match(app, /const journaledMain = cardPanel\.metadata\.writeChangesToEditor && mainContent/);
+  assert.match(app, /cipherleaf-card-write-changes-to-editor/);
+  assert.match(app, /Write changes to editor by default/);
+  assert.match(app, /cardWriteChangesToEditorDefault/);
   assert.match(app, /const closeCardPanel = async \(force = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
   assert.match(app, /message: "This card has unsaved changes\. Close it without saving\?"/);
   assert.match(app, /setCardPanelDirty\(false\);[\s\S]*await closeCardPanel\(true\);/);

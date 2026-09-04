@@ -514,7 +514,7 @@ func TestVaultSettingsSyncAndRestore(t *testing.T) {
 	}
 	want, err := first.SaveVaultSettings(VaultSettings{
 		DailyNoteFormat: "DD-MM-YYYY", AutosaveIntervalSeconds: 90, AutoSyncMinutes: 20,
-		AutoLockMinutes: 30, SectionDefault: "expanded",
+		AutoLockMinutes: 30, SectionDefault: "expanded", CardWriteChangesToEditorDefault: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -618,6 +618,9 @@ func TestVaultSettingsDefaultAutoSyncInterval(t *testing.T) {
 	}
 	if got := settings.FileHistoryLimit; got != 10 {
 		t.Fatalf("file history limit = %d, want 10", got)
+	}
+	if settings.CardWriteChangesToEditorDefault {
+		t.Fatal("card editor default = true, want false")
 	}
 	if got := normalizeVaultSettings(VaultSettings{FileHistoryLimit: 51}).FileHistoryLimit; got != 50 {
 		t.Fatalf("file history limit = %d, want 50", got)
