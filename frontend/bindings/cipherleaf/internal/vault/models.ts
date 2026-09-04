@@ -272,6 +272,7 @@ export interface VaultSettings {
     "autoLockMinutes": number;
     "fileHistoryLimit": number;
     "sectionDefault": string;
+    "cardWriteChangesToEditorDefault": boolean;
     "revision": number;
     "modifiedAt": number;
 }

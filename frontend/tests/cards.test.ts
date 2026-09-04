@@ -18,7 +18,7 @@ import {
 } from "../src/cards.ts";
 
 test("card metadata round-trips through frontmatter", () => {
-  const metadata = { ...newCardMetadata("card-1"), title: "Launch", tags: ["Work", "work", " Bug "] };
+  const metadata = { ...newCardMetadata("card-1"), title: "Launch", tags: ["Work", "work", " Bug "], writeChangesToEditor: true };
   const source = serializeCardDocument(metadata, "# Notes\n\nBody");
   assert.deepEqual(parseCardDocument(source, "card-1", "Launch"), {
     metadata: { ...metadata, tags: ["Work", "Bug"] },
@@ -34,6 +34,11 @@ test("card references use stable IDs and do not treat titles as references", () 
   assert.equal(parseCardReference("[card](Project Plan)"), null);
   assert.equal(parseCardReference("[card](https://example.com)"), null);
   assert.equal(parseCardReference("[card](note:)"), null);
+});
+
+test("new cards default editor journaling off and accept the configured default", () => {
+  assert.equal(newCardMetadata("card-1").writeChangesToEditor, false);
+  assert.equal(newCardMetadata("card-2", new Date(), true).writeChangesToEditor, true);
 });
 
 test("template and board markers round-trip", () => {
@@ -110,7 +115,7 @@ test("parses legacy, invalid, and optional card metadata", () => {
   assert.equal(parseCardDocument("---\ncipherleaf-card: false\n---", "card-1", "Card"), null);
   assert.equal(parseCardDocument("---\ncipherleaf-card: true\ncipherleaf-card-status: invalid\ncipherleaf-card-created-at: now\n---", "card-1", "Card"), null);
   assert.deepEqual(parseCardDocument(optional, "card-1", " ")?.metadata, {
-    id: "card-1", title: "Untitled", status: "not-started", tags: [], createdAt: metadata.createdAt,
+    id: "card-1", title: "Untitled", status: "not-started", tags: [], writeChangesToEditor: false, createdAt: metadata.createdAt,
     startedAt: "2026-01-02", blockedOn: "2026-01-03", finishedAt: "2026-01-04", boardID: "board", columnEnteredAt: "2026-01-05",
   });
   assert.deepEqual(parseCardDocument(`---\ncipherleaf-card: true\ncipherleaf-card-status: blocked\ncipherleaf-card-tags: [Work, Bug]\ncipherleaf-card-created-at: now\n---\nBody`, "card-1", "Card")?.metadata.tags, ["Work", "Bug"]);

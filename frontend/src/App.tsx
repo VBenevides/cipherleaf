@@ -296,6 +296,7 @@ export function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | nu
     title: summary.title || "Untitled",
     status,
     tags,
+    writeChangesToEditor: properties["cipherleaf-card-write-changes-to-editor"] === true || properties["cipherleaf-card-write-changes-to-editor"] === "true",
     createdAt: String(properties["cipherleaf-card-created-at"] ?? summary.createdAt),
   };
   for (const [key, field] of [
@@ -683,7 +684,6 @@ function App() {
   const [cardPanel, setCardPanel] = useState<CardPanelState | null>(null);
   const [cardPanelDirty, setCardPanelDirty] = useState(false);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
-  const [writeCardChangesToEditor, setWriteCardChangesToEditor] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
   const saveCardPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
@@ -730,6 +730,7 @@ function App() {
   const [sectionDefault, setSectionDefault] = useState<SectionDefault>(() =>
     window.localStorage.getItem("cipherleaf-section-default") === "expanded" ? "expanded" : "collapsed"
   );
+  const [cardWriteChangesToEditorDefault, setCardWriteChangesToEditorDefault] = useState(false);
   const [today, setToday] = useState(() => new Date());
   const [windowLayers, setWindowLayers] = useState<Partial<Record<WindowLayer, number>>>({});
   const [theme, setTheme] = useState<Theme>(() => {
@@ -787,6 +788,7 @@ function App() {
     autoLockMinutes,
     fileHistoryLimit,
     sectionDefault,
+    cardWriteChangesToEditorDefault,
     revision: 0,
     modifiedAt: 0,
   }), [
@@ -798,6 +800,7 @@ function App() {
     dailyTemplateNoteID,
     fileHistoryLimit,
     sectionDefault,
+    cardWriteChangesToEditorDefault,
   ]);
 
   const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, revision: 0, modifiedAt: 0 });
@@ -813,6 +816,7 @@ function App() {
     setFileHistoryLimit(settings.fileHistoryLimit);
     setFileHistoryLimitDraft(settings.fileHistoryLimit);
     setSectionDefault(settings.sectionDefault as SectionDefault);
+    setCardWriteChangesToEditorDefault(settings.cardWriteChangesToEditorDefault);
   };
 
   const loadVaultSettings = async (vaultID: string, seedIfMissing = true) => {
@@ -3299,7 +3303,6 @@ function App() {
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) throw new Error("This reference is not a card.");
       setSelectedTemplateID("");
-      setWriteCardChangesToEditor(false);
       setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
       setCardPanelDirty(false);
     } catch (reason) {
@@ -3326,7 +3329,6 @@ function App() {
     cardOriginRef.current = null;
     setCardPanel(null);
     setCardPanelDirty(false);
-    setWriteCardChangesToEditor(false);
     return true;
   };
 
@@ -3361,11 +3363,10 @@ function App() {
       const targetFolder = noteRef.current?.folderId ?? (selectedFolderID === "all" ? "" : selectedFolderID);
       const created = await VaultService.CreateNoteInFolder("Untitled", targetFolder);
       createdID = created.id;
-      const metadata = newCardMetadata(created.id, new Date(created.createdAt));
+      const metadata = newCardMetadata(created.id, new Date(created.createdAt), cardWriteChangesToEditorDefault);
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
       updateSummary(saved.summary);
       setSelectedTemplateID("");
-      setWriteCardChangesToEditor(false);
       setCardPanel({ note: saved.note, metadata, body: "" });
       setCardPanelDirty(false);
       return cardReference(created.id);
@@ -3450,7 +3451,7 @@ function App() {
       const body = stripCardJournalEntries(cardPanel.body);
       const mainNote = noteRef.current;
       const mainContent = mainNote && mainNote.id !== cardPanel.note.id ? markdownForEditing(mainNote.content) : "";
-      const journaledMain = writeCardChangesToEditor && mainContent
+      const journaledMain = cardPanel.metadata.writeChangesToEditor && mainContent
         ? appendCardJournalToMainEditor(mainContent, previousBody, body, metadata)
         : null;
       const saved = await VaultService.SaveNote(
@@ -5376,8 +5377,11 @@ function App() {
               <input
                 type="checkbox"
                 aria-label="Write changes to editor"
-                checked={writeCardChangesToEditor}
-                onChange={(event) => setWriteCardChangesToEditor(event.target.checked)}
+                checked={cardPanel.metadata.writeChangesToEditor}
+                onChange={(event) => {
+                  setCardPanelDirty(true);
+                  setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, writeChangesToEditor: event.target.checked } } : current);
+                }}
               />{" "}
               Write changes to editor
             </label>
@@ -5581,6 +5585,7 @@ function App() {
                     <button type="button" onClick={() => openSettingsSection("general", "settings-auto-sync")}>Auto-sync</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-auto-lock")}>Vault lock</button>
                     <button type="button" onClick={() => openSettingsSection("general", "settings-section-default")}>Section state</button>
+                    <button type="button" onClick={() => openSettingsSection("general", "settings-card-editor-default")}>Card editor</button>
                   </div>
                 )}
                 <button
@@ -5677,6 +5682,13 @@ function App() {
                           </button>
                         ))}
                       </div>
+                    </fieldset>
+                    <fieldset id="settings-card-editor-default" className="appearance-fieldset settings-section settings-section-card">
+                      <legend>Card editor</legend>
+                      <label>
+                        <input type="checkbox" checked={cardWriteChangesToEditorDefault} onChange={(event) => setCardWriteChangesToEditorDefault(event.target.checked)} />{" "}
+                        Write changes to editor by default
+                      </label>
                     </fieldset>
                   </>
                 ) : (

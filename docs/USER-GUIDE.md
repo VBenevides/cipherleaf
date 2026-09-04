@@ -49,6 +49,9 @@ compromised operating system, or OS swap.
   **Markdown** editing.
 - Press `Ctrl+S` to save explicitly. Autosave runs 60 seconds after editing
   stops.
+- Card notes include a **Write changes to editor** option. Save the card to
+  persist its value; choose **Settings → Card editor** to set the default for
+  new cards. Changing the default does not change existing cards.
 - Use the folder list to organize notes and drag notes or folders to reorder
   them.
 - Use `Ctrl+]` and `Ctrl+[` to expand or collapse the current outline section.

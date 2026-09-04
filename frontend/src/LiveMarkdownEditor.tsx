@@ -1550,24 +1550,8 @@ function decorateDelimitedMarkdown(
   }
 }
 
-function decorateInlineMarkdown(context: InlineMarkdownContext) {
-  const { text, offset, decorations, atomicRanges, openWikilink, openCard, cardTitle, onError } = context;
-  decorateDelimitedMarkdown(context, bold, "cm-live-strong", 2);
-  decorateDelimitedMarkdown(
-    context,
-    italic,
-    "cm-live-em",
-    1,
-  );
-  decorateDelimitedMarkdown(
-    context,
-    asteriskItalic,
-    "cm-live-em",
-    1,
-  );
-  decorateDelimitedMarkdown(context, /\x60([^\x60\n]+)\x60/g, "cm-live-code", 1);
-  decorateDelimitedMarkdown(context, /~~(?=\S)(.+?\S)~~/g, "cm-live-strike", 2);
-
+function decorateWikilinks(context: InlineMarkdownContext) {
+  const { text, offset, decorations, atomicRanges, openWikilink } = context;
   let searchFrom = 0;
   while (true) {
     const opening = text.indexOf("[[", searchFrom);
@@ -1589,7 +1573,10 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
     );
     searchFrom = closing + 2;
   }
+}
 
+function decorateCardReferences(context: InlineMarkdownContext) {
+  const { text, offset, decorations, atomicRanges, openCard, cardTitle } = context;
   for (const match of text.matchAll(/(?<!!)\[card\]\(([^\s)]+)\)/gi)) {
     if (match.index === undefined) continue;
     const id = parseCardReference(match[0]);
@@ -1608,7 +1595,10 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
       new CardReferenceWidget(id, title, openCard),
     );
   }
+}
 
+function decorateCitations(context: InlineMarkdownContext) {
+  const { text, offset, decorations, atomicRanges, onError } = context;
   for (const citation of markdownCitations(text)) {
     const cardID = parseCardReference(text.slice(citation.index, citation.index + citation.length));
     if (cardID !== null) continue;
@@ -1621,6 +1611,17 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
       new CitationWidget(citation.label, citation.url, start, start + citation.length, onError),
     );
   }
+}
+
+function decorateInlineMarkdown(context: InlineMarkdownContext) {
+  decorateDelimitedMarkdown(context, bold, "cm-live-strong", 2);
+  decorateDelimitedMarkdown(context, italic, "cm-live-em", 1);
+  decorateDelimitedMarkdown(context, asteriskItalic, "cm-live-em", 1);
+  decorateDelimitedMarkdown(context, /\x60([^\x60\n]+)\x60/g, "cm-live-code", 1);
+  decorateDelimitedMarkdown(context, /~~(?=\S)(.+?\S)~~/g, "cm-live-strike", 2);
+  decorateWikilinks(context);
+  decorateCardReferences(context);
+  decorateCitations(context);
 }
 
 function decorateUnorderedListMarker(

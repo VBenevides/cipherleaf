@@ -22,6 +22,7 @@ export type CardMetadata = {
   title: string;
   status: CardStatus;
   tags: string[];
+  writeChangesToEditor: boolean;
   createdAt: string;
   startedAt?: string;
   blockedOn?: string;
@@ -86,6 +87,7 @@ const CARD_KEYS = {
   startedAt: "cipherleaf-card-started-at",
   blockedOn: "cipherleaf-card-blocked-on",
   finishedAt: "cipherleaf-card-finished-at",
+  writeChangesToEditor: "cipherleaf-card-write-changes-to-editor",
   boardID: "cipherleaf-card-board-id",
   columnEnteredAt: "cipherleaf-card-column-entered-at",
 } as const;
@@ -147,12 +149,13 @@ function validStatus(value: string | undefined): value is CardStatus {
   return CARD_STATUSES.includes(value as CardStatus);
 }
 
-export function newCardMetadata(id: string, now = new Date()): CardMetadata {
+export function newCardMetadata(id: string, now = new Date(), writeChangesToEditor = false): CardMetadata {
   return {
     id,
     title: "Untitled",
     status: "not-started",
     tags: [],
+    writeChangesToEditor,
     createdAt: now.toISOString(),
   };
 }
@@ -179,6 +182,7 @@ export function parseCardDocument(markdown: string, id: string, title: string): 
     title: title.trim() || "Untitled",
     status,
     tags: parseTags(frontmatter.values.get(CARD_KEYS.tags)),
+    writeChangesToEditor: frontmatter.values.get(CARD_KEYS.writeChangesToEditor) === "true",
     createdAt,
   };
   for (const [key, field] of [
@@ -200,6 +204,7 @@ export function serializeCardDocument(metadata: CardMetadata, body: string): str
     `${CARD_KEYS.marker}: true`,
     `${CARD_KEYS.status}: ${metadata.status}`,
     `${CARD_KEYS.tags}: ${quote(normalizeCardTags(metadata.tags))}`,
+    `${CARD_KEYS.writeChangesToEditor}: ${metadata.writeChangesToEditor}`,
     `${CARD_KEYS.createdAt}: ${metadata.createdAt}`,
     `${CARD_KEYS.startedAt}: ${metadata.startedAt ?? ""}`,
     `${CARD_KEYS.blockedOn}: ${metadata.blockedOn ?? ""}`,
