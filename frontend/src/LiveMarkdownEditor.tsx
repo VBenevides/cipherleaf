@@ -1097,7 +1097,6 @@ class CardReferenceWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
-const boardCardMime = "application/x-cipherleaf-board-card";
 const DEFAULT_CARD_TITLE = "Untitled";
 const boardCardData = new WeakMap<HTMLElement, ReadonlyMap<string, CardMetadata>>();
 
@@ -1213,13 +1212,6 @@ class BoardWidget extends WidgetType {
     column.dataset.status = status;
     column.setAttribute("role", "group");
     column.setAttribute("aria-label", BOARD_COLUMN_LABELS[status]);
-    column.addEventListener("dragover", (event) => event.preventDefault());
-    column.addEventListener("drop", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const id = event.dataTransfer?.getData("text/plain");
-      if (id) this.moveCard(id, status);
-    });
     const heading = column.appendChild(document.createElement("h4"));
     heading.textContent = BOARD_COLUMN_LABELS[status];
     const empty = column.appendChild(document.createElement("p"));
@@ -1229,7 +1221,6 @@ class BoardWidget extends WidgetType {
       const item = column.appendChild(document.createElement("button"));
       item.type = "button";
       item.className = "cm-live-board-card";
-      item.draggable = true;
       const summary = item.appendChild(document.createElement("span"));
       summary.className = "cm-live-board-card-summary";
       const cardTitle = summary.appendChild(document.createElement("span"));
@@ -1243,13 +1234,86 @@ class BoardWidget extends WidgetType {
       }
       item.dataset.cardId = card.id;
       item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
-      item.addEventListener("dragstart", (event) => {
-        event.dataTransfer?.setData("text/plain", card.id);
-        event.dataTransfer?.setData(boardCardMime, card.id);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      let suppressClick = false;
+      item.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        suppressClick = false;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        let dragging = false;
+        let targetColumn: HTMLElement | null = null;
+        let preview: HTMLButtonElement | null = null;
+        let previewEmpty: HTMLElement | null = null;
+        let previewEmptyWasHidden = false;
+        const columnAt = (x: number, y: number) =>
+          document.elementFromPoint(x, y)?.closest<HTMLElement>(".cm-live-board-column") ?? null;
+        const clearPreview = () => {
+          preview?.remove();
+          if (previewEmpty) previewEmpty.hidden = previewEmptyWasHidden;
+          preview = null;
+          previewEmpty = null;
+        };
+        const clearTarget = () => {
+          targetColumn?.classList.remove("is-drop-target");
+          clearPreview();
+          targetColumn = null;
+        };
+        const cleanup = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", finish);
+          document.removeEventListener("pointercancel", cancel);
+          item.classList.remove("is-dragging");
+          clearTarget();
+        };
+        const move = (moveEvent: PointerEvent) => {
+          if (moveEvent.pointerId !== event.pointerId) return;
+          if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 6) return;
+          dragging = true;
+          suppressClick = true;
+          moveEvent.preventDefault();
+          item.classList.add("is-dragging");
+          const nextTarget = columnAt(moveEvent.clientX, moveEvent.clientY);
+          if (nextTarget === targetColumn) return;
+          clearTarget();
+          targetColumn = nextTarget;
+          if (targetColumn?.dataset.status === status) return;
+          targetColumn?.classList.add("is-drop-target");
+          if (targetColumn) {
+            preview = item.cloneNode(true) as HTMLButtonElement;
+            preview.classList.remove("is-dragging");
+            preview.classList.add("is-drag-preview");
+            preview.disabled = true;
+            preview.setAttribute("aria-hidden", "true");
+            previewEmpty = targetColumn.querySelector<HTMLElement>(".cm-live-board-empty");
+            if (previewEmpty) {
+              previewEmptyWasHidden = previewEmpty.hidden;
+              previewEmpty.hidden = true;
+            }
+            targetColumn.append(preview);
+          }
+        };
+        const finish = (upEvent: PointerEvent) => {
+          if (upEvent.pointerId !== event.pointerId) return;
+          cleanup();
+          if (!dragging) return;
+          upEvent.preventDefault();
+          const target = columnAt(upEvent.clientX, upEvent.clientY);
+          const nextStatus = target?.dataset.status as CardStatus | undefined;
+          if (nextStatus && nextStatus !== status) this.moveCard(card.id, nextStatus);
+        };
+        const cancel = (cancelEvent: PointerEvent) => {
+          if (cancelEvent.pointerId === event.pointerId) cleanup();
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", finish);
+        document.addEventListener("pointercancel", cancel);
       });
       item.addEventListener("click", (event) => {
         event.stopPropagation();
+        if (suppressClick) {
+          suppressClick = false;
+          return;
+        }
         this.openCard(card.id);
       });
       item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
@@ -1532,7 +1596,7 @@ function decorateInlineMarkdown(context: InlineMarkdownContext) {
     if (!id) continue;
     const start = offset + match.index;
     const trailingText = text.slice(start - offset + match[0].length);
-    const trailingTitle = trailingText.length > 1 && (trailingText[0] === " " || trailingText[0] === "\t")
+    const trailingTitle = trailingText.length > 1 && (trailingText.startsWith(" ") || trailingText.startsWith("\t"))
       ? trailingText
       : undefined;
     const title = cardTitle(id) ?? trailingTitle?.trim() ?? "Untitled";
@@ -3687,12 +3751,6 @@ export default function LiveMarkdownEditor({
               document.addEventListener("pointermove", move);
               document.addEventListener("pointerup", finish);
               document.addEventListener("pointercancel", finish);
-              return true;
-            },
-            drop(event) {
-              if (!Array.from(event.dataTransfer?.types ?? []).includes(boardCardMime)) return false;
-              event.preventDefault();
-              event.stopPropagation();
               return true;
             },
             paste(event, pastedView) {

@@ -220,6 +220,36 @@ boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 1);
 boardFilter.value = "";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+const boardCard = board.querySelector<HTMLButtonElement>(".status-not-started .cm-live-board-card")!;
+const blockedColumn = board.querySelector<HTMLElement>(".status-blocked")!;
+const elementFromPoint = document.elementFromPoint;
+Object.defineProperty(document, "elementFromPoint", {
+  configurable: true,
+  value: () => blockedColumn,
+});
+const pointer = (type: string, clientX: number, clientY: number) => {
+  const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    pointerId: { value: 1 },
+    button: { value: 0 },
+    clientX: { value: clientX },
+    clientY: { value: clientY },
+  });
+  return event;
+};
+const movesBeforePointerDrag = moved;
+boardCard.dispatchEvent(pointer("pointerdown", 0, 0));
+document.dispatchEvent(pointer("pointermove", 20, 20));
+assert.ok(blockedColumn.querySelector(".cm-live-board-card.is-drag-preview"));
+document.dispatchEvent(pointer("pointerup", 20, 20));
+assert.equal(blockedColumn.querySelector(".cm-live-board-card.is-drag-preview"), null);
+Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+assert.equal(moved, movesBeforePointerDrag + 1);
+const openedBeforeBoardClick = opened;
+boardCard.dispatchEvent(pointer("pointerdown", 0, 0));
+document.dispatchEvent(pointer("pointerup", 0, 0));
+boardCard.click();
+assert.equal(opened, openedBeforeBoardClick + 1);
 const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
 minimizeBoard.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);

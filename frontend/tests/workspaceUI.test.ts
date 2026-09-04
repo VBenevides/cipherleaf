@@ -115,7 +115,7 @@ test("note titles can be collapsed and restored", () => {
   assert.match(style, /\.document-heading-toolbar > \.view-tabs/);
   assert.match(style, /\.document-heading-toolbar \{[\s\S]*margin-top: 8px/);
   assert.match(style, /:root\[data-theme="archivist"\] \.document-heading-toolbar > \.view-tabs/);
-  assert.match(style, /\.disclosure-chevron::before,[\s\S]*width: \.45em[\s\S]*height: \.45em[\s\S]*vertical-align: middle/);
+  assert.match(style, /\.disclosure-chevron::before,[\s\S]*width: \.45em[\s\S]*height: \.45em/);
 });
 
 test("editor chrome stays compact", () => {
@@ -156,8 +156,29 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board-minimized \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board \[hidden\] \{[\s\S]*display: none !important/);
-  assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #2588d8/);
+  assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #1e73b5/);
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
+});
+
+test("card saving is opt-in for editor journaling and closes safely", () => {
+  assert.match(app, /const \[writeCardChangesToEditor, setWriteCardChangesToEditor\] = useState\(false\)/);
+  assert.match(app, /aria-label="Write changes to editor"/);
+  assert.match(app, /checked=\{writeCardChangesToEditor\}/);
+  assert.match(app, /const journaledMain = writeCardChangesToEditor && mainContent/);
+  assert.match(app, /const closeCardPanel = async \(force = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
+  assert.match(app, /message: "This card has unsaved changes\. Close it without saving\?"/);
+  assert.match(app, /setCardPanelDirty\(false\);[\s\S]*await closeCardPanel\(true\);/);
+  assert.match(app, /onClick=\{\(\) => void closeCardPanel\(\)\}/);
+  assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);
+  assert.match(app, /window\.addEventListener\("keydown", closeOnEscape\)/);
+  assert.match(app, /target\.closest\("\.editor-shell"\)[\s\S]*void closeCardPanel\(\);/);
+  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle \{[\s\S]*flex-direction: row/);
+});
+
+test("cards keep folder access and stay out of folder note pages", () => {
+  assert.match(app, /const targetFolder = noteRef\.current\?\.folderId \?\? \(selectedFolderID === "all" \? "" : selectedFolderID\);/);
+  assert.match(app, /VaultService\.CreateNoteInFolder\("Untitled", targetFolder\)/);
+  assert.match(app, /sortNotesForFolder\(\s*publicNotes\.filter\(\(item\) => item\.folderId === selectedFolderID\)/);
 });
 
 test("live preview updates only safe local edits", () => {
@@ -183,12 +204,16 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.doesNotMatch(liveEditor, /rule\.style\.left/);
   assert.match(liveEditor, /cm-live-board-title[\s\S]*value = this\.title \|\| DEFAULT_BOARD_TITLE/);
   assert.match(liveEditor, /onChangeBoardTitle/);
-  assert.match(liveEditor, /setData\(boardCardMime, card\.id\)/);
-  assert.match(liveEditor, /drop\(event\)[\s\S]*includes\(boardCardMime\)/);
+  assert.match(liveEditor, /item\.addEventListener\("pointerdown"/);
+  assert.match(liveEditor, /document\.addEventListener\("pointermove", move\)/);
+  assert.match(liveEditor, /targetColumn\?\.classList\.add\("is-drop-target"\)/);
+  assert.match(liveEditor, /is-drag-preview/);
   assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 15%;/);
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-live-board-card\.is-dragging \{[\s\S]*cursor: grabbing/);
+  assert.match(style, /\.cm-live-board-card\.is-drag-preview \{[\s\S]*border-style: dashed/);
   assert.match(style, /\.cm-journal-rules \{[\s\S]*inset: 0 var\(--editor-content-right\) 0 var\(--editor-content-left\)/);
   assert.match(style, /\.cm-journal-rule \{[\s\S]*left: 0[\s\S]*right: 0/);
   assert.match(style, /\.card-sidebar-notes \.cm-journal-rules \{[\s\S]*inset: 0/);

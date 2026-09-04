@@ -108,7 +108,7 @@ losing access; there is intentionally no reset or recovery mechanism.
 
 | Layer | Technology |
 | --- | --- |
-| Desktop shell and bindings | Wails v3 alpha |
+| Desktop shell and bindings | Wails v3 beta.16 |
 | Backend | Go 1.25 |
 | Frontend | React 18 and TypeScript |
 | Editor | CodeMirror 6 with a custom object-document layer |
@@ -124,10 +124,10 @@ losing access; there is intentionally no reset or recovery mechanism.
 - Go 1.25 or newer
 - Node.js 22 or newer and npm
 - Git, for GitHub synchronization
-- Wails `v3.0.0-alpha2.112`:
+- Wails `v3.0.0-beta.16`:
 
   ```sh
-  go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.112
+  go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
   ```
 
 - The platform dependencies from the
