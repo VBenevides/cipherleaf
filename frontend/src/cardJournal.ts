@@ -128,14 +128,19 @@ function canonicalNode(object: ObjectLine): CanonicalObjectDocument["objects"][n
   };
 }
 
-function copiedElement(document: ReturnType<typeof parseObjectDocument>, root: ObjectLine): string | null {
+function copiedElement(
+  document: ReturnType<typeof parseObjectDocument>,
+  root: ObjectLine,
+  changedIDs: ReadonlySet<string>,
+): string | null {
   const included = new Set<string>();
-  const collect = (object: ObjectLine) => {
-    if (included.has(object.id) || object.checked === true) return;
+  const collect = (object: ObjectLine, checkedAncestor = false) => {
+    const changed = changedIDs.has(object.id);
+    if (included.has(object.id) || (object.checked === true && !changed && !checkedAncestor)) return;
     included.add(object.id);
     object.childrenIds.forEach((id) => {
       const child = document.byId.get(id);
-      if (child) collect(child);
+      if (child) collect(child, checkedAncestor || (changed && object.checked === true));
     });
   };
   collect(root);
@@ -212,8 +217,9 @@ function journalForChangedContent(
   const changed = changedObjects(previousEntries, nextEntries);
   if (changed.length === 0) return null;
 
+  const changedIDs = new Set(changed.map((object) => object.id));
   const elements = changedRoots(nextDocument, changed)
-    .map((root) => copiedElement(nextDocument, root))
+    .map((root) => copiedElement(nextDocument, root, changedIDs))
     .filter((element): element is string => element !== null);
   if (elements.length === 0) return null;
   return journalBlockFor(metadata, elements, date);
@@ -245,6 +251,16 @@ function isDatedRoot(object: ObjectLine): boolean {
   return object.parentId === null && object.tag === "section" && /^\s*\d{4}-\d{2}-\d{2}\b/.test(object.text);
 }
 
+function currentDateSection(
+  document: ReturnType<typeof parseObjectDocument>,
+  boardLine: number,
+  date: Date,
+): ObjectLine | undefined {
+  return document.roots.find(
+    (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
+  );
+}
+
 function sectionInsertionLine(
   lines: readonly string[],
   document: ReturnType<typeof parseObjectDocument>,
@@ -266,6 +282,73 @@ function journalTagBlocks(journal: string): string[] {
 
 function sectionTag(section: ObjectLine): string {
   return section.text.split("\n", 1)[0].trim().toLocaleLowerCase();
+}
+
+function objectPathKey(
+  document: ReturnType<typeof parseObjectDocument>,
+  object: ObjectLine,
+  stopID: string | null = null,
+): string | null {
+  const path: unknown[][] = [];
+  let current: ObjectLine | undefined = object;
+  while (current && current.id !== stopID) {
+    path.unshift([current.tag, current.tags, current.text, current.language, current.attachmentId]);
+    current = current.parentId ? document.byId.get(current.parentId) : undefined;
+  }
+  return stopID && current?.id !== stopID ? null : JSON.stringify(path);
+}
+
+function changedCheckedObjects(
+  previousBody: string,
+  nextBody: string,
+): [ReturnType<typeof parseObjectDocument>, ObjectLine[], boolean] {
+  const previous = objectEntries(stripCardJournalEntries(previousBody));
+  const next = stripCardJournalEntries(nextBody);
+  const document = parseObjectDocument(next);
+  const changed = changedObjects(previous, objectEntries(next));
+  const checked = changed.filter((object) => object.checked === true);
+  const covered = new Set<string>();
+  const collect = (object: ObjectLine) => {
+    covered.add(object.id);
+    object.childrenIds.forEach((id) => {
+      const child = document.byId.get(id);
+      if (child) collect(child);
+    });
+  };
+  checked.forEach(collect);
+  return [document, checked, changed.every((object) => covered.has(object.id))];
+}
+
+function syncCheckedObjects(
+  lines: string[],
+  document: ReturnType<typeof parseObjectDocument>,
+  dateSection: ObjectLine,
+  tag: string,
+  metadata: CardMetadata,
+  nextDocument: ReturnType<typeof parseObjectDocument>,
+  checkedObjects: readonly ObjectLine[],
+): boolean {
+  const tagSection = dateSection.childrenIds
+    .map((id) => document.byId.get(id))
+    .find((object) => object?.tag === "section" && sectionTag(object) === tag.toLocaleLowerCase());
+  if (!tagSection) return false;
+
+  const cardIDs = tagSection.childrenIds.filter(
+    (id) => document.byId.get(id)?.text === cardReference(metadata.id),
+  );
+
+  const matches = checkedObjects.map((object) => {
+    const key = objectPathKey(nextDocument, object);
+    // ponytail: quadratic scan is fine for journal-sized documents; index paths if this becomes hot.
+    return document.objects.filter((candidate) =>
+      candidate.checked !== undefined && cardIDs.some((cardID) => objectPathKey(document, candidate, cardID) === key),
+    );
+  });
+  if (matches.some((items) => !items.length)) return false;
+  matches.flat().forEach((match) => {
+      if (match.checked === false) lines[match.lineNumber - 1] = lines[match.lineNumber - 1].replace("[ ]", "[x]");
+  });
+  return true;
 }
 
 function tagSectionInsertionLine(
@@ -317,6 +400,7 @@ export function appendCardJournalToMainEditor(
 ): string | null {
   const journal = journalForChangedContent(previousBody, nextBody, metadata, date);
   if (!journal) return null;
+  const checked = changedCheckedObjects(previousBody, nextBody);
 
   const normalized = removeCardJournalMarkers(mainContent);
   let lines = normalized.split("\n");
@@ -327,9 +411,7 @@ export function appendCardJournalToMainEditor(
 
   let document = parseObjectDocument(normalized);
   const firstDatedRoot = document.roots.find(isDatedRoot);
-  let section = document.roots.find(
-    (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
-  );
+  let section = currentDateSection(document, boardLine, date);
   if (!section) {
     const insertionLine = boardLine >= 0 ? boardLine + 1 : (firstDatedRoot?.lineNumber ?? lines.length + 1) - 1;
     const source = lines.slice(insertionLine).join("\n");
@@ -339,10 +421,29 @@ export function appendCardJournalToMainEditor(
       : insertLines(lines, boardLine + 1, journal);
     lines = insertLines(lines, insertionLine, rolled).split("\n");
     document = parseObjectDocument(lines.join("\n"));
-    section = document.roots.find(
-      (object) => (boardLine < 0 || object.lineNumber > boardLine + 1) && isCurrentDateSection(object, date),
-    );
+    section = currentDateSection(document, boardLine, date);
   }
   if (!section) return appendBody(normalized, journal);
+
+  const tags = normalizeCardTags(metadata.tags.flatMap((tag) => tag.split(",")));
+  const tagSections = tags.length ? tags : [""];
+  if (checked[2] && checked[1].length) {
+    const pending = tagSections.filter(
+      (tag) => !syncCheckedObjects(lines, document, section, tag, metadata, checked[0], checked[1]),
+    );
+    if (pending.length < tagSections.length) {
+      if (!pending.length) {
+        const result = lines.join("\n");
+        return result === normalized ? null : result;
+      }
+      const pendingJournal = journalForChangedContent(
+        previousBody,
+        nextBody,
+        { ...metadata, tags: pending },
+        date,
+      );
+      if (pendingJournal) return appendJournalTags(lines, document, section, pendingJournal, boardLine, date);
+    }
+  }
   return appendJournalTags(lines, document, section, journal, boardLine, date);
 }

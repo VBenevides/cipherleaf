@@ -157,30 +157,75 @@ test("removes legacy journal wrappers from the main editor", () => {
   assert.doesNotMatch(result, new RegExp(`${CARD_JOURNAL_START}|${CARD_JOURNAL_END}`));
 });
 
-test("omits checked checkbox elements and their children", () => {
-  const board = boardMarker("board-1", ["card-1"], "Main");
-  const result = appendCardJournalToMainEditor(
-    board,
-    "> Root\n  > [ ] Keep\n  > [ ] Done\n    > Child",
-    "> Root\n  > [ ] Keep\n  > [x] Done\n    > Child",
-    { ...metadata(), boardID: "board-1" },
-    date,
-  );
+test("journals a newly saved checked point with its children", () => {
+  for (const tags of [["Work"], []]) {
+    const result = appendCardJournalToMainEditor(
+      "",
+      "",
+      "> [x] Done\n  > Child",
+      { ...metadata(), tags },
+      date,
+    );
+
+    assert.ok(result);
+    assert.ok(result.includes("> [x] Done\n        > Child"));
+  }
+});
+
+test("checks an existing current-date point in place", () => {
+  for (const tag of ["Work", ""]) {
+    const previous = "> Root\n  > [ ] Done\n    > Child\n  > [ ] Keep";
+    const next = "> Root\n  > [x] Done\n    > Child\n  > [ ] Keep";
+    const main = [
+      "> 2026-09-03",
+      `  > ${tag}`,
+      "    [ ] [card](note:card-1)",
+      "      > Root",
+      "        > [ ] Done",
+      "          > Child",
+      "        > [ ] Keep",
+      "    [ ] [card](note:other-card)",
+      "      > [ ] Unrelated",
+    ].join("\n");
+    const result = appendCardJournalToMainEditor(main, previous, next, { ...metadata(), tags: tag ? [tag] : [] }, date);
+
+    assert.ok(result);
+    assert.equal((result.match(/> \[x\] Done/g) ?? []).length, 1);
+    assert.equal((result.match(/note:card-1/g) ?? []).length, 1);
+    assert.ok(result.includes("> [x] Done\n          > Child\n        > [ ] Keep"));
+    assert.ok(result.includes("note:other-card)\n      > [ ] Unrelated"));
+    assert.equal(
+      appendCardJournalToMainEditor(result, previous, next, { ...metadata(), tags: tag ? [tag] : [] }, date),
+      null,
+    );
+  }
+});
+
+test("appends a checked point when its unchecked copy exists only on an older date", () => {
+  const previous = "> Root\n  > [ ] Done\n    > Child\n  > [ ] Keep";
+  const next = "> Root\n  > [x] Done\n    > Child\n  > [ ] Keep";
+  const main = [
+    "> 2026-09-03",
+    "  > Work",
+    "    [ ] [card](note:other-card)",
+    "      > [ ] Unrelated",
+    "> 2026-09-02",
+    "  > Work",
+    "    [ ] [card](note:card-1)",
+    "      > Root",
+    "        > [ ] Done",
+    "          > Child",
+    "        > [ ] Keep",
+  ].join("\n");
+  const result = appendCardJournalToMainEditor(main, previous, next, { ...metadata(), tags: ["Work"] }, date);
 
   assert.ok(result);
-  assert.ok(result.includes("  > [ ] Keep"));
-  assert.equal(result.includes("Done"), false);
-  assert.equal(result.includes("Child"), false);
-  assert.equal(
-    appendCardJournalToMainEditor(
-      board,
-      "> [ ] Done",
-      "> [x] Done\n  > Child",
-      { ...metadata(), boardID: "board-1" },
-      date,
-    ),
-    null,
-  );
+  const olderDate = result.indexOf("> 2026-09-02");
+  assert.ok(olderDate > 0);
+  assert.equal((result.slice(0, olderDate).match(/> \[x\] Done/g) ?? []).length, 1);
+  assert.equal((result.slice(0, olderDate).match(/> \[ \] Done/g) ?? []).length, 0);
+  assert.ok(result.slice(0, olderDate).includes("note:other-card)\n      > [ ] Unrelated"));
+  assert.ok(result.slice(olderDate).includes("> [ ] Done"));
 });
 
 test("splits comma-separated tags into separate journal sections", () => {
