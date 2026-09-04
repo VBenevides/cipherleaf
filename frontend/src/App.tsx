@@ -3174,7 +3174,7 @@ function App() {
       : publicNotes;
     if (selectedFolderID === "all") return sortNotesForMode(tagged, globalSortMode);
     return sortNotesForFolder(
-      notes.filter((item) => item.folderId === selectedFolderID),
+      publicNotes.filter((item) => item.folderId === selectedFolderID),
       selectedFolderID,
     ).filter((item) => !selectedTag || (item.tags ?? []).includes(selectedTag));
   }, [globalSortMode, notes, publicNotes, selectedFolderID, selectedTag, sortNotesForFolder, sortNotesForMode]);
@@ -3343,7 +3343,8 @@ function App() {
   const createCard = async () => {
     let createdID = "";
     try {
-      const created = await VaultService.CreateNote("Untitled");
+      const targetFolder = noteRef.current?.folderId ?? (selectedFolderID === "all" ? "" : selectedFolderID);
+      const created = await VaultService.CreateNoteInFolder("Untitled", targetFolder);
       createdID = created.id;
       const metadata = newCardMetadata(created.id, new Date(created.createdAt));
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));

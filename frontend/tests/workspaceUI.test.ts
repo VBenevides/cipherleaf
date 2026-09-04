@@ -160,6 +160,12 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
 });
 
+test("cards keep folder access and stay out of folder note pages", () => {
+  assert.match(app, /const targetFolder = noteRef\.current\?\.folderId \?\? \(selectedFolderID === "all" \? "" : selectedFolderID\);/);
+  assert.match(app, /VaultService\.CreateNoteInFolder\("Untitled", targetFolder\)/);
+  assert.match(app, /sortNotesForFolder\(\s*publicNotes\.filter\(\(item\) => item\.folderId === selectedFolderID\)/);
+});
+
 test("live preview updates only safe local edits", () => {
   assert.match(liveEditor, /function singleLineChange\(transaction: Transaction\)/);
   assert.match(liveEditor, /transaction\.changes\.iterChangedRanges/);
