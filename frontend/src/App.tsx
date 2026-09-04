@@ -683,6 +683,7 @@ function App() {
   const [cardPanel, setCardPanel] = useState<CardPanelState | null>(null);
   const [cardPanelDirty, setCardPanelDirty] = useState(false);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
+  const [writeCardChangesToEditor, setWriteCardChangesToEditor] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
   const saveCardPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
@@ -3291,12 +3292,14 @@ function App() {
 
   const openCard = async (id: string) => {
     try {
+      if (cardPanel && !(await closeCardPanel())) return;
       const origin = noteRef.current;
       cardOriginRef.current = origin ? { noteID: origin.id, offset: noteCaretOffsetsRef.current.get(origin.id) ?? 0 } : null;
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) throw new Error("This reference is not a card.");
       setSelectedTemplateID("");
+      setWriteCardChangesToEditor(false);
       setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
       setCardPanelDirty(false);
     } catch (reason) {
@@ -3304,7 +3307,17 @@ function App() {
     }
   };
 
-  const closeCardPanel = () => {
+  const closeCardPanel = async (force = false) => {
+    if (!cardPanel) return true;
+    if (!force && cardPanelDirty && !(await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Card changes",
+      title: "Discard unsaved changes?",
+      message: "This card has unsaved changes. Close it without saving?",
+      confirmLabel: "Discard",
+      danger: true,
+      icon: "trash",
+    }))) return false;
     const origin = cardOriginRef.current;
     if (origin) {
       noteCaretOffsetsRef.current.set(origin.noteID, origin.offset);
@@ -3313,6 +3326,8 @@ function App() {
     cardOriginRef.current = null;
     setCardPanel(null);
     setCardPanelDirty(false);
+    setWriteCardChangesToEditor(false);
+    return true;
   };
 
   useEffect(() => {
@@ -3320,25 +3335,25 @@ function App() {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        closeCardPanel();
+        void closeCardPanel();
       }
     };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [cardPanel]);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [cardPanel, cardPanelDirty]);
 
   useEffect(() => {
     const closeOnDocumentClick = (event: MouseEvent) => {
       if (!(event.target instanceof Element)) return;
       const target = event.target;
-      if (cardPanel && target.closest(".editor-shell") && !target.closest(".card-sidebar")) closeCardPanel();
+      if (cardPanel && target.closest(".editor-shell") && !target.closest(".card-sidebar")) void closeCardPanel();
       if (quickSwitcherOpen && target.classList.contains("quick-switcher-scrim")) setQuickSwitcherOpen(false);
       if (commandPaletteOpen && target.classList.contains("command-palette-scrim")) closeCommandPalette();
       if (globalSearchOpen && target.classList.contains("global-search-scrim")) setGlobalSearchOpen(false);
     };
     document.addEventListener("click", closeOnDocumentClick);
     return () => document.removeEventListener("click", closeOnDocumentClick);
-  }, [cardPanel, commandPaletteOpen, globalSearchOpen, quickSwitcherOpen]);
+  }, [cardPanel, cardPanelDirty, commandPaletteOpen, globalSearchOpen, quickSwitcherOpen]);
 
   const createCard = async () => {
     let createdID = "";
@@ -3350,6 +3365,7 @@ function App() {
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
       updateSummary(saved.summary);
       setSelectedTemplateID("");
+      setWriteCardChangesToEditor(false);
       setCardPanel({ note: saved.note, metadata, body: "" });
       setCardPanelDirty(false);
       return cardReference(created.id);
@@ -3434,7 +3450,7 @@ function App() {
       const body = stripCardJournalEntries(cardPanel.body);
       const mainNote = noteRef.current;
       const mainContent = mainNote && mainNote.id !== cardPanel.note.id ? markdownForEditing(mainNote.content) : "";
-      const journaledMain = mainContent
+      const journaledMain = writeCardChangesToEditor && mainContent
         ? appendCardJournalToMainEditor(mainContent, previousBody, body, metadata)
         : null;
       const saved = await VaultService.SaveNote(
@@ -3449,6 +3465,7 @@ function App() {
         await persistCurrent();
       }
       setCardPanelDirty(false);
+      await closeCardPanel(true);
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -3472,7 +3489,7 @@ function App() {
   }, [cardPanel]);
 
   const deleteCard = async () => {
-    if (cardPanel && await deleteNote(cardPanel.note.id, cardPanel.metadata.title, "card")) closeCardPanel();
+    if (cardPanel && await deleteNote(cardPanel.note.id, cardPanel.metadata.title, "card")) await closeCardPanel(true);
   };
 
   const saveCardAsTemplate = async () => {
@@ -5312,7 +5329,7 @@ function App() {
                   setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, title: event.target.value }, note: { ...current.note, title: event.target.value } } : current);
                 }}
               />
-              <button type="button" className="icon-button" aria-label="Close card" title="Close card" onClick={closeCardPanel}>
+              <button type="button" className="icon-button" aria-label="Close card" title="Close card" onClick={() => void closeCardPanel()}>
                 <Icon name="x" size={16} />
               </button>
             </header>
@@ -5355,6 +5372,15 @@ function App() {
                 />
               </Suspense>
             </section>
+            <label className="card-editor-journal-toggle">
+              <input
+                type="checkbox"
+                aria-label="Write changes to editor"
+                checked={writeCardChangesToEditor}
+                onChange={(event) => setWriteCardChangesToEditor(event.target.checked)}
+              />{" "}
+              Write changes to editor
+            </label>
             <div className="card-sidebar-actions">
               <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>
               <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>

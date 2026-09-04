@@ -120,19 +120,15 @@ assert.match(render(createElement(GraphView, { folders: [], notes: [], onSelectF
 assert.match(render(createElement(ObjectTreeView, { value: JSON.stringify({ format: "cipherleaf.object-document", version: 1, objects: [] }), onChange })), /No objects yet/);
 assert.match(render(createElement(ObjectTreeView, { value: "[report.pdf](attachment:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)", onChange })), /Attachment syntax/);
 assert.match(render(createElement(ThemedDatePicker, { ariaLabel: "Invalid date", value: "invalid", onChange })), /Select date/);
-console.error("coverage marker: static done");
 
 const graphRenderer = create(createElement(GraphView, { folders: richFolders, notes: richNotes, onSelectFolder: onChange, onSelectNote: onChange }));
-console.error("coverage marker: graph create");
 await act(async () => { for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom out").props.onClick(); for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom in").props.onClick(); buttonNamed(graphRenderer, "Reset zoom").props.onClick(); buttonNamed(graphRenderer, "Folders").props.onClick(); });
 const graphNodes = graphRenderer.root.findAll((node) => typeof node.props.onClick === "function" && String(node.props.className ?? "").includes("graph-node"));
 await act(async () => { graphNodes.forEach((node) => { node.props.onClick(); node.props.onKeyDown({ key: "Enter", preventDefault: onChange }); }); });
 await act(async () => { graphNodes.forEach((node) => { node.props.onKeyDown({ key: " ", preventDefault: onChange }); node.props.onKeyDown({ key: "Escape", preventDefault: onChange }); }); });
 graphRenderer.unmount();
-console.error("coverage marker: graph done");
 
 const tagRenderer = create(createElement(TagMultiSelect, { tags, selected: [], onChange }));
-console.error("coverage marker: tag create");
 await act(async () => { tagRenderer.root.findAll((node) => node.type === "input")[0]?.props.onChange({ target: { checked: true } }); });
 tagRenderer.unmount();
 const selectedTagRenderer = create(createElement(TagMultiSelect, { tags, selected: ["tag"], onChange }));
@@ -443,6 +439,26 @@ assert.ok(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card
 const cardTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Title")[0];
 await act(async () => { cardTitle?.props.onChange({ target: { value: "Updated card" } }); });
 await act(async () => {
+  dispatchWindow("keydown", { key: "Escape", preventDefault: onChange });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+assert.ok(appRenderer?.root.findAll((node) => node.props.children === "Discard unsaved changes?").length);
+await submitAppDialog();
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
+const writeCardChanges = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Write changes to editor")[0];
+assert.equal(writeCardChanges?.props.checked, false);
+await act(async () => { writeCardChanges?.props.onChange({ target: { checked: true } }); });
+const cardStatus = appRenderer?.root.findAll((node) => node.type === "button" && node.props.role === "option")[0];
+await act(async () => { cardStatus?.props.onClick(); });
+const cardTagInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "New tag")[0];
+await act(async () => { cardTagInput?.props.onChange({ target: { value: "urgent" } }); });
+const addTag = appRenderer?.root.findAll((node) => node.type === "button" && textContent(node) === "Add tag")[0];
+await act(async () => { addTag?.props.onClick(); });
+await clickApp("Save card");
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => {
   dispatchWindow("keydown", {
     ctrlKey: true,
     metaKey: false,
@@ -453,13 +469,8 @@ await act(async () => {
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-const cardStatus = appRenderer?.root.findAll((node) => node.type === "button" && node.props.role === "option")[0];
-await act(async () => { cardStatus?.props.onClick(); });
-const cardTagInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "New tag")[0];
-await act(async () => { cardTagInput?.props.onChange({ target: { value: "urgent" } }); });
-const addTag = appRenderer?.root.findAll((node) => node.type === "button" && textContent(node) === "Add tag")[0];
-await act(async () => { addTag?.props.onClick(); });
-await clickApp("Save card");
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await clickApp("Save as template");
 await clickApp("Delete template");
 await clickApp("Delete card");

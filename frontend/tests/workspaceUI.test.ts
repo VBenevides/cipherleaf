@@ -115,7 +115,7 @@ test("note titles can be collapsed and restored", () => {
   assert.match(style, /\.document-heading-toolbar > \.view-tabs/);
   assert.match(style, /\.document-heading-toolbar \{[\s\S]*margin-top: 8px/);
   assert.match(style, /:root\[data-theme="archivist"\] \.document-heading-toolbar > \.view-tabs/);
-  assert.match(style, /\.disclosure-chevron::before,[\s\S]*width: \.45em[\s\S]*height: \.45em[\s\S]*vertical-align: middle/);
+  assert.match(style, /\.disclosure-chevron::before,[\s\S]*width: \.45em[\s\S]*height: \.45em/);
 });
 
 test("editor chrome stays compact", () => {
@@ -156,8 +156,23 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board-minimized \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board \[hidden\] \{[\s\S]*display: none !important/);
-  assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #2588d8/);
+  assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #1e73b5/);
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
+});
+
+test("card saving is opt-in for editor journaling and closes safely", () => {
+  assert.match(app, /const \[writeCardChangesToEditor, setWriteCardChangesToEditor\] = useState\(false\)/);
+  assert.match(app, /aria-label="Write changes to editor"/);
+  assert.match(app, /checked=\{writeCardChangesToEditor\}/);
+  assert.match(app, /const journaledMain = writeCardChangesToEditor && mainContent/);
+  assert.match(app, /const closeCardPanel = async \(force = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
+  assert.match(app, /message: "This card has unsaved changes\. Close it without saving\?"/);
+  assert.match(app, /setCardPanelDirty\(false\);[\s\S]*await closeCardPanel\(true\);/);
+  assert.match(app, /onClick=\{\(\) => void closeCardPanel\(\)\}/);
+  assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);
+  assert.match(app, /window\.addEventListener\("keydown", closeOnEscape\)/);
+  assert.match(app, /target\.closest\("\.editor-shell"\)[\s\S]*void closeCardPanel\(\);/);
+  assert.match(style, /\.card-sidebar \.card-editor-journal-toggle \{[\s\S]*flex-direction: row/);
 });
 
 test("cards keep folder access and stay out of folder note pages", () => {

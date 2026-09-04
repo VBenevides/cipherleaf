@@ -2615,7 +2615,6 @@ dialog.modal-backdrop {
   height: .45em;
   box-sizing: border-box;
   content: "";
-  vertical-align: middle;
   border-right: .12em solid;
   border-bottom: .12em solid;
   transform: rotate(-45deg);
@@ -4107,10 +4106,12 @@ dialog.modal-backdrop {
 .card-sidebar-notes .live-editor-frame { min-height: 0; }
 .card-sidebar-notes .live-markdown-editor .cm-content { padding: 16px 0 40px; }
 .card-sidebar-notes .cm-journal-rules { inset: 0; }
+.card-sidebar .card-editor-journal-toggle { flex-direction: row; align-items: center; gap: 8px; }
+.card-sidebar .card-editor-journal-toggle input { width: auto; min-height: auto; padding: 0; }
 .card-sidebar-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card-sidebar-actions .card-save-button { margin-left: auto; }
-.card-save-button.is-dirty { color: #fff; border-color: #2588d8; background: #2588d8; }
-.card-save-button.is-dirty:hover { background: #1e73b5; }
+.card-save-button.is-dirty { color: #fff; border-color: #1e73b5; background: #1e73b5; }
+.card-save-button.is-dirty:hover { background: #155a91; }
 
 @media (max-width: 900px) {
   .card-sidebar { inset: 0 0 0 10%; padding: 18px; }
