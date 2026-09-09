@@ -516,11 +516,11 @@ func (s *VaultService) OpenVaultRemembered(path string) (vault.Session, error) {
 		_ = s.secrets.Forget(vaultID)
 		return vault.Session{}, err
 	}
+	s.clearScratchpad()
 	if err := s.rememberVault(session.Path); err != nil {
 		s.store.Lock()
 		return vault.Session{}, errors.New("the vault was unlocked, but its location could not be remembered")
 	}
-	s.clearScratchpad()
 	return session, nil
 }
 
