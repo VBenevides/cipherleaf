@@ -4,8 +4,64 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+const nativeMain = readFileSync(new URL("../../main.go", import.meta.url), "utf8");
+const scratchpad = readFileSync(new URL("../src/Scratchpad.tsx", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+
+test("scratchpad is a fixed rightmost tab with normal-tab-only shortcuts", () => {
+  assert.match(app, /import Scratchpad from "\.\/Scratchpad"/);
+  assert.match(app, /const \[scratchpadActive, setScratchpadActive\] = useState\(false\)/);
+  assert.match(app, /const scratchpadActiveRef = useRef\(scratchpadActive\)/);
+  assert.match(app, /role="tab"[\s\S]*className=\{`note-tab scratchpad-tab/);
+  assert.match(app, /className=\{`note-tab scratchpad-tab[\s\S]*<span>Scratchpad<\/span>/);
+  assert.match(app, /<\/button>\n          <button type="button" className="new-note-tab"/);
+  assert.doesNotMatch(app, /scratchpad-tab[\s\S]*Close Scratchpad/);
+  assert.match(app, /if \(scratchpadActiveRef\.current\) \{[\s\S]*event\.preventDefault\(\);[\s\S]*return;/);
+  assert.match(app, /const shortcut = `\$\{event\.shiftKey \? "shift\+" : ""\}\$\{key\}`;/);
+  assert.match(app, /scratchpadActiveRef\.current && shortcut === "s"/);
+});
+
+test("scratchpad overlay and backend state are generation fenced", () => {
+  assert.match(main, /new URLSearchParams\(window\.location\.search\)\.get\('window'\) === 'scratchpad'/);
+  assert.match(main, /<Scratchpad overlay \/>/);
+  assert.match(main, /dataset\.window = 'scratchpad'/);
+  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-changed"/);
+  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-cleared"/);
+  assert.match(scratchpad, /VaultService\.GetScratchpad\(\)/);
+  assert.match(scratchpad, /VaultService\.SaveScratchpad\(content, caretOffset, generation\)/);
+  assert.match(scratchpad, /next\.generation < current\.generation/);
+  assert.match(scratchpad, /next\.revision < current\.revision/);
+  assert.match(scratchpad, /key=\{editorGeneration\}/);
+  assert.match(scratchpad, /noteID=\{`scratchpad:\$\{editorGeneration\}`\}/);
+  assert.match(scratchpad, /aria-label="Hide scratchpad"/);
+  assert.match(scratchpad, /Window\.Hide\(\)/);
+});
+
+test("native shortcut toggles the focused window or guarded overlay", () => {
+  assert.match(nativeMain, /Name:\s+"scratchpad"/);
+  assert.match(nativeMain, /AlwaysOnTop:\s+true/);
+  assert.match(nativeMain, /Frameless:\s+true/);
+  assert.match(nativeMain, /BackgroundType:\s+application\.BackgroundTypeTranslucent/);
+  assert.match(nativeMain, /GlobalShortcut\.Register\("Super\+Shift\+Space"/);
+  assert.match(nativeMain, /window\.IsFocused\(\) && window\.IsVisible\(\)/);
+  assert.match(nativeMain, /if\s+scratchpad\.IsVisible\(\)/);
+  assert.match(nativeMain, /vaultService\.GetSession\(\)\.Locked/);
+  assert.match(nativeMain, /scratchpad\.Show\(\)/);
+  assert.match(nativeMain, /scratchpad\.Hide\(\)/);
+  assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
+});
+
+test("scratchpad styling stays accessible, responsive, translucent, and reduced-motion safe", () => {
+  assert.match(style, /\.scratchpad-tab \{/);
+  assert.match(style, /\.scratchpad-tab\.active \{/);
+  assert.match(style, /\.scratchpad-tab:focus-visible \{/);
+  assert.match(style, /:root\[data-window="scratchpad"\]/);
+  assert.match(style, /\.scratchpad-overlay-shell \* \{[\s\S]*--wails-draggable: no-drag/);
+  assert.match(style, /@media \(max-width: 600px\)[\s\S]*\.scratchpad-overlay-shell/);
+  assert.match(style, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.scratchpad-overlay-shell/);
+});
 
 test("note tabs expose navigation, close, new-tab, and idle unloading", () => {
   assert.match(app, /Open in a New Tab/);

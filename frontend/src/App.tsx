@@ -52,6 +52,7 @@ import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 import { appendCardJournalToMainEditor, stripCardJournalEntries } from "./cardJournal";
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, localDateKey, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
+import Scratchpad from "./Scratchpad";
 import {
   BOARD_COLUMNS,
   CARD_STATUS_LABELS,
@@ -597,6 +598,7 @@ function App() {
   const [note, setNote] = useState<Note | null>(null);
   const [tabs, setTabs] = useState<EditorTab[]>(() => [{ id: 1, noteID: "", title: "New tab", lastActiveAt: Date.now() }]);
   const [activeTabID, setActiveTabID] = useState(1);
+  const [scratchpadActive, setScratchpadActive] = useState(false);
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
   const [fileAttachments, setFileAttachments] = useState<AttachmentInfo[]>([]);
@@ -763,6 +765,7 @@ function App() {
   const noteRef = useRef<Note | null>(null);
   const tabsRef = useRef(tabs);
   const activeTabIDRef = useRef(activeTabID);
+  const scratchpadActiveRef = useRef(scratchpadActive);
   const nextTabIDRef = useRef(2);
   const tabNoteCacheRef = useRef(new Map<number, Note>());
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
@@ -869,6 +872,7 @@ function App() {
 
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { activeTabIDRef.current = activeTabID; }, [activeTabID]);
+  useEffect(() => { scratchpadActiveRef.current = scratchpadActive; }, [scratchpadActive]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1760,6 +1764,7 @@ function App() {
       if (target?.closest(".card-sidebar")) return;
       const key = event.key.toLowerCase();
       const shortcut = `${event.shiftKey ? "shift+" : ""}${key}`;
+      if (scratchpadActiveRef.current && shortcut === "s") return;
       const action = new Map<string, () => void>([
         ["shift+t", () => openStartTimerDialog()],
         ["shift+e", () => { setTimerError(""); setTimerDialog("finish"); }],
@@ -1843,6 +1848,7 @@ function App() {
 
   const resetToLocked = (locked: Session) => {
     unlockedRef.current = false;
+    scratchpadActiveRef.current = false;
     noteCaretOffsetsRef.current.clear();
     tabNoteCacheRef.current.clear();
     const emptyTab = { id: nextTabIDRef.current++, noteID: "", title: "New tab", lastActiveAt: Date.now() };
@@ -1850,6 +1856,7 @@ function App() {
     activeTabIDRef.current = emptyTab.id;
     setTabs([emptyTab]);
     setActiveTabID(emptyTab.id);
+    setScratchpadActive(false);
     setUnlockedFolderIDs(new Set());
     setSession(locked);
     setFolders([]);
@@ -2382,6 +2389,7 @@ function App() {
   };
 
   const createNote = async (title = "Untitled") => {
+    leaveScratchpad();
     setError("");
     try {
       await persistCurrent();
@@ -2397,6 +2405,7 @@ function App() {
   };
 
   const openDailyNote = async (date: Date) => {
+    leaveScratchpad();
     const title = formatDailyTitle(date, dailyNoteFormat);
     const existing = notes.find((item) => item.title === title && item.folderId === dailyNoteFolderID);
     setCalendarOpen(false);
@@ -2674,6 +2683,8 @@ function App() {
     id: string,
     options: { appendTrail?: boolean; replaceTrail?: NoteCrumb[] } = {},
   ) => {
+    scratchpadActiveRef.current = false;
+    setScratchpadActive(false);
     setTimeTrackingOpen(false);
     if (note?.id === id) {
       setSidebarOpen(false);
@@ -2706,7 +2717,23 @@ function App() {
     }
   };
 
+  const activateScratchpad = () => {
+    saveCurrentDraft();
+    setGraphOpen(false);
+    setTimeTrackingOpen(false);
+    setConflictResolution(null);
+    setSidebarOpen(false);
+    scratchpadActiveRef.current = true;
+    setScratchpadActive(true);
+  };
+
+  const leaveScratchpad = () => {
+    scratchpadActiveRef.current = false;
+    setScratchpadActive(false);
+  };
+
   const openNoteInNewTab = async (id: string) => {
+    leaveScratchpad();
     try {
       const saved = await persistCurrent();
       if (saved) tabNoteCacheRef.current.set(activeTabIDRef.current, saved);
@@ -2720,7 +2747,8 @@ function App() {
     }
   };
 
-  const openEmptyTab = async () => {
+  const openEmptyTab = async (keepScratchpad = false) => {
+    if (!keepScratchpad) leaveScratchpad();
     try {
       await persistCurrent();
       const currentTab = tabsRef.current.find((tab) => tab.id === activeTabIDRef.current);
@@ -2735,20 +2763,23 @@ function App() {
       setTimeTrackingOpen(false);
       applyLoadedNote(null);
       setNoteTrail([]);
+      return true;
     } catch {
       // persistCurrent already presents the actionable error.
+      return false;
     }
   };
 
-  const switchTab = async (tabID: number) => {
-    if (tabID === activeTabIDRef.current) return;
+  const switchTab = async (tabID: number, keepScratchpad = false) => {
+    if (!keepScratchpad) leaveScratchpad();
+    if (tabID === activeTabIDRef.current) return true;
     try {
       const saved = await persistCurrent();
       const previousID = activeTabIDRef.current;
       if (saved) tabNoteCacheRef.current.set(previousID, saved);
       const now = Date.now();
       const target = tabsRef.current.find((tab) => tab.id === tabID);
-      if (!target) return;
+      if (!target) return false;
       setTabs((current) => current.map((tab) => tab.id === previousID || tab.id === tabID ? { ...tab, lastActiveAt: now } : tab));
       setActiveTabID(tabID);
       activeTabIDRef.current = tabID;
@@ -2759,12 +2790,15 @@ function App() {
       else if (target.noteID) applyLoadedNote(await VaultService.GetNote(target.noteID));
       else applyLoadedNote(null);
       setNoteTrail([]);
+      return true;
     } catch (reason) {
       setError(errorText(reason));
+      return false;
     }
   };
 
   const closeTab = async (tabID: number) => {
+    const keepScratchpad = scratchpadActiveRef.current;
     const current = tabsRef.current;
     const index = current.findIndex((tab) => tab.id === tabID);
     if (index < 0) return;
@@ -2774,13 +2808,13 @@ function App() {
       return;
     }
     if (current.length === 1) {
-      await openEmptyTab();
+      if (!await openEmptyTab(keepScratchpad)) return;
       tabNoteCacheRef.current.delete(tabID);
       setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
       return;
     }
     const next = current[index + 1] ?? current[index - 1];
-    await switchTab(next.id);
+    if (!await switchTab(next.id, keepScratchpad)) return;
     tabNoteCacheRef.current.delete(tabID);
     setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
   };
@@ -2798,6 +2832,10 @@ function App() {
         event.preventDefault();
         void openEmptyTab();
       } else if (event.ctrlKey && event.key.toLowerCase() === "w") {
+        if (scratchpadActiveRef.current) {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         void closeTab(activeTabIDRef.current);
       }
@@ -2805,6 +2843,13 @@ function App() {
     window.addEventListener("keydown", handleTabs);
     return () => window.removeEventListener("keydown", handleTabs);
   }, [session?.locked]);
+
+  useEffect(() => {
+    const off = Events.On("cipherleaf:scratchpad-focus", () => {
+      if (unlockedRef.current) activateScratchpad();
+    });
+    return off;
+  }, []);
 
   const deleteNote = async (id = note?.id, title = note?.title, itemType: "note" | "card" = "note") => {
     if (!id) return false;
@@ -3295,6 +3340,7 @@ function App() {
   };
 
   const openCard = async (id: string) => {
+    leaveScratchpad();
     try {
       if (cardPanel && !(await closeCardPanel())) return;
       const origin = noteRef.current;
@@ -3358,6 +3404,7 @@ function App() {
   }, [cardPanel, cardPanelDirty, commandPaletteOpen, globalSearchOpen, quickSwitcherOpen]);
 
   const createCard = async () => {
+    leaveScratchpad();
     let createdID = "";
     try {
       const targetFolder = noteRef.current?.folderId ?? (selectedFolderID === "all" ? "" : selectedFolderID);
@@ -4909,9 +4956,10 @@ function App() {
             <Icon name="menu" />
           </button>
           <div className="breadcrumbs">
-            {graphOpen && <span className="breadcrumb-item"><strong>Graph view</strong></span>}
-            {timeTrackingOpen && <span className="breadcrumb-item"><strong>Time tracking</strong></span>}
-            {!graphOpen && !timeTrackingOpen && breadcrumbItems.map((crumb, index, items) => {
+            {scratchpadActive && <span className="breadcrumb-item"><strong>Scratchpad</strong></span>}
+            {!scratchpadActive && graphOpen && <span className="breadcrumb-item"><strong>Graph view</strong></span>}
+            {!scratchpadActive && timeTrackingOpen && <span className="breadcrumb-item"><strong>Time tracking</strong></span>}
+            {!scratchpadActive && !graphOpen && !timeTrackingOpen && breadcrumbItems.map((crumb, index, items) => {
               const isLast = index === items.length - 1;
               let content = <span>{crumb.title}</span>;
               if (isLast) content = <strong>{crumb.title}</strong>;
@@ -4942,50 +4990,52 @@ function App() {
               Back to previous location
             </button>
           )}
-          <div className="save-indicators">
-            {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
-            <div className={`save-status ${saveState}`}>
-              <span />
-              {saveStatusLabel}
+          {!scratchpadActive && (
+            <div className="save-indicators">
+              {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
+              <div className={`save-status ${saveState}`}>
+                <span />
+                {saveStatusLabel}
+              </div>
             </div>
-          </div>
-          <button
-            className="save-file-button"
-            disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
-            title={saveFileTitle}
-            onClick={saveFileAction}
-          >
-            {saveFileLabel}
-          </button>
-          <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
-            <span />
-            {syncLinked ? "Linked" : "Not linked"}
-          </div>
-          <button
-            className="save-and-sync-button"
-            disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
-            title={syncButtonTitle}
-            onClick={() => void saveAndSync()}
-          >
-            {syncButtonLabel}
-          </button>
-          {syncLinked && lastSyncedAt > 0 && <LastSyncLabel timestamp={lastSyncedAt} />}
-          {note && !graphOpen && !timeTrackingOpen && (
-            <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
-              <Icon name="trash" size={16} />
-            </button>
           )}
+          {!scratchpadActive && <button
+              className="save-file-button"
+              disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+              title={saveFileTitle}
+              onClick={saveFileAction}
+            >
+              {saveFileLabel}
+            </button>}
+          {!scratchpadActive && <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
+              <span />
+              {syncLinked ? "Linked" : "Not linked"}
+            </div>}
+          {!scratchpadActive && <button
+              className="save-and-sync-button"
+              disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
+              title={syncButtonTitle}
+              onClick={() => void saveAndSync()}
+            >
+              {syncButtonLabel}
+            </button>}
+          {!scratchpadActive && syncLinked && lastSyncedAt > 0 && <LastSyncLabel timestamp={lastSyncedAt} />}
+          {!scratchpadActive && note && !graphOpen && !timeTrackingOpen && (
+              <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
+                <Icon name="trash" size={16} />
+              </button>
+            )}
         </header>
   );
 
   const renderEditorTabs = () => (
         <nav className="note-tabs" aria-label="Open notes" role="tablist">
           {tabs.map((tab, index) => (
-            <div className={`note-tab ${tab.id === activeTabID ? "active" : ""}`} key={tab.id}>
+            <div className={`note-tab ${tab.id === activeTabID && !scratchpadActive ? "active" : ""}`} key={tab.id}>
               <button
                 type="button"
                 role="tab"
-                aria-selected={tab.id === activeTabID}
+                aria-selected={tab.id === activeTabID && !scratchpadActive}
                 title={`${tab.title} (Alt+${index === 9 ? 0 : index + 1})`}
                 onClick={() => void switchTab(tab.id)}
               >
@@ -4994,6 +5044,15 @@ function App() {
               <button type="button" aria-label={`Close ${tab.title}`} onClick={() => void closeTab(tab.id)}>×</button>
             </div>
           ))}
+          <button
+            type="button"
+            role="tab"
+            className={`note-tab scratchpad-tab ${scratchpadActive ? "active" : ""}`}
+            aria-selected={scratchpadActive}
+            onClick={activateScratchpad}
+          >
+            <span>Scratchpad</span>
+          </button>
           <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
         </nav>
   );
@@ -5024,7 +5083,7 @@ function App() {
   };
 
   const renderEditorTimeTracking = () => {
-    if (!timeTrackingOpen) return null;
+    if (!timeTrackingOpen || scratchpadActive) return null;
     return (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
             <TimeTrackingView key={`${session.vaultId}:${activeTimeEntry?.id ?? "idle"}`} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
@@ -5033,7 +5092,7 @@ function App() {
   };
 
   const renderEditorGraph = () => {
-    if (!graphOpen || timeTrackingOpen) return null;
+    if (!graphOpen || timeTrackingOpen || scratchpadActive) return null;
     return (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
             <GraphView
@@ -5052,8 +5111,31 @@ function App() {
     );
   };
 
+  const renderScratchpadEditor = () => {
+    if (!scratchpadActive) return null;
+    return (
+      <div className="document-body scratchpad-editor-host">
+        <Scratchpad
+          onError={(reason) => setError(errorText(reason))}
+          onOpenWikilink={(title) => void openWikilinkTitle(title)}
+          onOpenCard={openCard}
+          cardTitles={cardTitles}
+          cardData={cardMetadata}
+          onCreateCard={createCard}
+          onCreateBoard={createBoard}
+          onMoveCard={moveCard}
+          onAddCardToBoard={addCardToBoard}
+          onChangeBoardTitle={changeBoardTitle}
+          onDecreaseFontSize={decreaseEditorFontSize}
+          onIncreaseFontSize={increaseEditorFontSize}
+          defaultSectionsCollapsed={sectionDefault === "collapsed"}
+        />
+      </div>
+    );
+  };
+
   const renderConflictEditor = () => {
-    if (!conflictResolution || timeTrackingOpen || graphOpen) return null;
+    if (!conflictResolution || timeTrackingOpen || graphOpen || scratchpadActive) return null;
     return (
           <>
             <div className="document-heading conflict-heading">
@@ -5136,7 +5218,7 @@ function App() {
   };
 
   const renderNoteEditor = () => {
-    if (!note || timeTrackingOpen || graphOpen || conflictResolution) return null;
+    if (!note || timeTrackingOpen || graphOpen || conflictResolution || scratchpadActive) return null;
     return (
           <>
             <div className={`document-heading ${titleCollapsed ? "is-collapsed" : ""}`}>
@@ -5302,7 +5384,7 @@ function App() {
   };
 
   const renderEmptyEditor = () => {
-    if (timeTrackingOpen || graphOpen || conflictResolution || note) return null;
+    if (timeTrackingOpen || graphOpen || conflictResolution || note || scratchpadActive) return null;
     return (
           <div className="empty-editor">
             <div className="modal-icon"><Icon name="file" size={21} /></div>
@@ -5316,7 +5398,7 @@ function App() {
   };
 
   const renderCardPanel = () => {
-    if (!cardPanel) return null;
+    if (!cardPanel || scratchpadActive) return null;
     return (
           <aside className="card-sidebar" aria-label="Card details">
             <header className="card-sidebar-header">
@@ -5407,6 +5489,7 @@ function App() {
         {renderEditorNotifications()}
         {renderEditorTimeTracking()}
         {renderEditorGraph()}
+        {renderScratchpadEditor()}
         {renderConflictEditor()}
         {renderNoteEditor()}
         {renderEmptyEditor()}
