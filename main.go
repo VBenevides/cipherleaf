@@ -57,15 +57,58 @@ func main() {
 			application.PermissionClipboardRead: application.PermissionAllow,
 		},
 	})
+	scratchpad := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "scratchpad",
+		Title:            "Cipherleaf Scratchpad",
+		Width:            620,
+		Height:           600,
+		MinWidth:         480,
+		MinHeight:        240,
+		AlwaysOnTop:      true,
+		Frameless:        true,
+		BackgroundType:   application.BackgroundTypeTranslucent,
+		BackgroundColour: application.NewRGBA(20, 20, 24, 220),
+		InitialPosition:  application.WindowXY,
+		X:                0,
+		Y:                0,
+		Hidden:           true,
+		URL:              "/?window=scratchpad",
+		Permissions: map[application.PermissionType]application.Permission{
+			application.PermissionClipboardRead: application.PermissionAllow,
+		},
+	})
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		scratchpad.Hide()
 		event.Cancel()
 		window.EmitEvent("cipherleaf:close-requested")
 	})
 	requestVaultLock := func(*application.ApplicationEvent) {
+		scratchpad.Hide()
 		window.EmitEvent("cipherleaf:system-lock-requested")
 	}
 	app.Event.OnApplicationEvent(events.Common.SystemWillSleep, requestVaultLock)
 	app.Event.OnApplicationEvent(events.Common.ScreenLocked, requestVaultLock)
+
+	if err := app.GlobalShortcut.Register("Super+Shift+Space", func() {
+		mainWindowActive := window.IsFocused() && window.IsVisible()
+		if scratchpad.IsVisible() {
+			scratchpad.Hide()
+			if mainWindowActive {
+				window.EmitEvent("cipherleaf:scratchpad-focus")
+			}
+		} else if mainWindowActive {
+			window.EmitEvent("cipherleaf:scratchpad-focus")
+		} else if vaultService.GetSession().Locked {
+			scratchpad.Hide()
+			window.Show()
+			window.Focus()
+		} else {
+			scratchpad.Show()
+			scratchpad.Focus()
+		}
+	}); err != nil {
+		log.Printf("failed to register scratchpad global shortcut: %v", err)
+	}
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
