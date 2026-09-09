@@ -443,6 +443,7 @@ func (s *VaultService) RenameVault(newName string) (vault.Session, error) {
 	if err != nil {
 		return renamed, err
 	}
+	s.clearScratchpad()
 	if err := s.rememberVault(renamed.Path); err != nil {
 		return renamed, fmt.Errorf("vault was renamed, but its location could not be remembered: %w", err)
 	}
