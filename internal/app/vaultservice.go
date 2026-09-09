@@ -36,6 +36,7 @@ type VaultService struct {
 	statisticsMu   sync.Mutex
 	backupMu       sync.Mutex
 	process        *process.Process
+	scratchpad     scratchpadStore
 }
 
 type syncJob struct{ done chan syncJobResult }
@@ -315,6 +316,7 @@ func (s *VaultService) CreateVault(parentPath, name, secret string) (vault.Sessi
 	if err != nil {
 		return vault.Session{}, err
 	}
+	s.clearScratchpad()
 	if err := s.rememberVault(created.Path); err != nil {
 		s.store.Lock()
 		return vault.Session{}, errors.New("the vault was created, but its location could not be remembered")
@@ -327,6 +329,7 @@ func (s *VaultService) OpenVault(path, secret string) (vault.Session, error) {
 	if err != nil {
 		return vault.Session{}, err
 	}
+	s.clearScratchpad()
 	if err := s.rememberVault(opened.Path); err != nil {
 		s.store.Lock()
 		return vault.Session{}, errors.New("the vault was unlocked, but its location could not be remembered")
@@ -371,6 +374,7 @@ func (s *VaultService) CloneGitHubVault(
 		s.store.Lock()
 		return CloneVaultResult{}, errors.New("the vault was restored, but its location could not be remembered")
 	}
+	s.clearScratchpad()
 	linked := true
 	warning := downloaded.Warning
 	if err := s.sync.ActivateDownloadedVault(linkedSettings); err != nil {
@@ -446,7 +450,12 @@ func (s *VaultService) RenameVault(newName string) (vault.Session, error) {
 }
 
 func (s *VaultService) LockVault() vault.Session {
-	return s.store.Lock()
+	s.scratchpad.mu.Lock()
+	session := s.store.Lock()
+	state := s.scratchpad.clearLocked()
+	s.scratchpad.mu.Unlock()
+	s.emitScratchpadEvent("cipherleaf:scratchpad-cleared", state)
+	return session
 }
 
 // RememberVaultSecret stores the just-validated secret without retaining it
@@ -510,11 +519,12 @@ func (s *VaultService) OpenVaultRemembered(path string) (vault.Session, error) {
 		s.store.Lock()
 		return vault.Session{}, errors.New("the vault was unlocked, but its location could not be remembered")
 	}
+	s.clearScratchpad()
 	return session, nil
 }
 
 func (s *VaultService) CloseVault() (vault.Session, error) {
-	return s.store.Lock(), nil
+	return s.LockVault(), nil
 }
 
 func (s *VaultService) QuitApplication() {
@@ -746,6 +756,13 @@ func (s *VaultService) SaveNote(id, title, content string) (vault.SavedNote, err
 }
 
 func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string, error) {
+	if noteID == scratchpadNamespace || strings.HasPrefix(noteID, scratchpadNamespace+":") {
+		data, err := convertImageDataURLToWebP(imageDataURL)
+		if err != nil {
+			return "", err
+		}
+		return s.saveScratchpadAttachment(noteID, data)
+	}
 	data, err := convertImageDataURLToWebP(imageDataURL)
 	if err != nil {
 		return "", err
@@ -754,6 +771,13 @@ func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string,
 }
 
 func (s *VaultService) GetAttachment(noteID, id string) (string, error) {
+	if noteID == scratchpadNamespace || strings.HasPrefix(noteID, scratchpadNamespace+":") {
+		data, err := s.getScratchpadAttachment(noteID, id)
+		if err != nil {
+			return "", err
+		}
+		return base64.StdEncoding.EncodeToString(data), nil
+	}
 	data, err := s.store.GetAttachment(noteID, id)
 	if err != nil {
 		return "", err

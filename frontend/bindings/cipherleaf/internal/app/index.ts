@@ -12,6 +12,7 @@ export type {
     GitDiagnostics,
     LastSession,
     ProcessMemoryUsage,
+    ScratchpadState,
     SyncResult,
     SyncTimings
 } from "./models.js";
