@@ -57,6 +57,7 @@
   --notebook-margin: 60px;
   --editor-content-left: 5%;
   --editor-content-right: 5%;
+  --scratchpad-opacity: 0.5;
 }
 
 :root[data-theme="dark"] {
@@ -2833,6 +2834,7 @@ dialog.modal-backdrop {
 }
 
 .scratchpad-heading {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2857,6 +2859,7 @@ dialog.modal-backdrop {
   min-height: 0;
   display: flex;
   flex: 1;
+  overflow: hidden;
 }
 
 .scratchpad-editor-body .live-editor-frame {
@@ -2878,16 +2881,90 @@ dialog.modal-backdrop {
 }
 
 :root[data-window="scratchpad"] #root {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .scratchpad-overlay-shell {
+  min-height: 0;
   padding: 12px;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  background: color-mix(in srgb, var(--canvas) calc(var(--scratchpad-opacity, 0.5) * 100%), transparent);
   backdrop-filter: blur(18px);
   --wails-draggable: no-drag;
+}
+
+:root[data-window="scratchpad"] .editor-shell.scratchpad-overlay-shell {
+  background: color-mix(in srgb, var(--canvas) calc(var(--scratchpad-opacity, 0.5) * 100%), transparent);
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell {
+  --editor-bg: transparent;
+  --toolbar-bg: transparent;
+  --scratchpad-outline: rgb(255 255 255 / 88%);
+  text-shadow:
+    1px 0 var(--scratchpad-outline),
+    -1px 0 var(--scratchpad-outline),
+    0 1px var(--scratchpad-outline),
+    0 -1px var(--scratchpad-outline);
+}
+
+:root[data-theme="dark"][data-window="scratchpad"] .scratchpad-overlay-shell {
+  --scratchpad-outline: rgb(0 0 0 / 88%);
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .scratchpad-heading,
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .scratchpad-editor-body,
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .document-body,
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .live-editor-frame {
+  background: transparent;
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .markdown-toolbar {
+  background: transparent;
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .scratchpad-heading h1,
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .live-markdown-editor .cm-content {
+  font-weight: 500;
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .markdown-toolbar button,
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .scratchpad-close {
+  color: var(--ink);
+  text-shadow: inherit;
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .toolbar-checkbox,
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .toolbar-toggle {
+  filter: drop-shadow(0 0 1px var(--scratchpad-outline));
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .toolbar-toggle {
+  color: var(--ink);
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .markdown-toolbar button:hover {
+  color: var(--green-dark);
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .markdown-toolbar button:hover .toolbar-toggle {
+  color: var(--green-dark);
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell button:focus-visible {
+  outline: 2px solid var(--ink);
+  box-shadow: 0 0 0 1px var(--scratchpad-outline);
+}
+
+:root[data-window="scratchpad"] .scratchpad-overlay-shell .live-markdown-editor .cm-cursor {
+  border-left: 2px solid var(--ink);
+  filter: drop-shadow(0 0 1px var(--scratchpad-outline));
 }
 
 .scratchpad-overlay-shell * {

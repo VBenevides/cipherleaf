@@ -103,11 +103,20 @@ const JOURNAL_LINE_LABELS: Record<JournalLines, string> = {
   full: "Solid",
   dotted: "Dotted",
 };
+const SCRATCHPAD_OPACITY_KEY = "cipherleaf-scratchpad-opacity";
+const SCRATCHPAD_DEFAULT_OPACITY = 0.5;
 const EDITOR_VIEW_LABELS: Record<EditorView, string> = {
   live: "Live Preview",
   object: "Object Tree",
   markdown: "Markdown",
 };
+
+function readScratchpadOpacity(): number {
+  const saved = window.localStorage.getItem(SCRATCHPAD_OPACITY_KEY);
+  if (saved === null || saved.trim() === "") return SCRATCHPAD_DEFAULT_OPACITY;
+  const opacity = Number(saved);
+  return Number.isFinite(opacity) && opacity >= 0 && opacity <= 1 ? opacity : SCRATCHPAD_DEFAULT_OPACITY;
+}
 
 function NoteSortSelect({ value, onChange }: { readonly value: string; readonly onChange: (value: string) => void }) {
   const details = useRef<HTMLDetailsElement>(null);
@@ -599,6 +608,7 @@ function App() {
   const [tabs, setTabs] = useState<EditorTab[]>(() => [{ id: 1, noteID: "", title: "New tab", lastActiveAt: Date.now() }]);
   const [activeTabID, setActiveTabID] = useState(1);
   const [scratchpadActive, setScratchpadActive] = useState(false);
+  const [scratchpadOpacity, setScratchpadOpacity] = useState(() => readScratchpadOpacity());
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
   const [fileAttachments, setFileAttachments] = useState<AttachmentInfo[]>([]);
@@ -1024,6 +1034,11 @@ function App() {
     }
     void VaultService.RememberTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--scratchpad-opacity", String(scratchpadOpacity));
+    window.localStorage.setItem(SCRATCHPAD_OPACITY_KEY, String(scratchpadOpacity));
+  }, [scratchpadOpacity]);
 
   const activateEditorFont = useCallback(async (name: string, data: ArrayBuffer) => {
     const font = new FontFace(EDITOR_FONT_FAMILY, data);
@@ -2853,25 +2868,10 @@ function App() {
   }, [session?.locked]);
 
   useEffect(() => {
-    const handleScratchpadShortcut = (event: KeyboardEvent) => {
-      if (
-        event.repeat ||
-        event.ctrlKey ||
-        event.altKey ||
-        !event.metaKey ||
-        !event.shiftKey ||
-        (event.code !== "Space" && event.key !== " ") ||
-        !unlockedRef.current
-      ) return;
-      event.preventDefault();
-      activateScratchpadRef.current();
-    };
-    window.addEventListener("keydown", handleScratchpadShortcut, true);
     const off = Events.On("cipherleaf:scratchpad-focus", () => {
       if (unlockedRef.current) activateScratchpadRef.current();
     });
     return () => {
-      window.removeEventListener("keydown", handleScratchpadShortcut, true);
       off();
     };
   }, []);
@@ -4073,7 +4073,7 @@ function App() {
     },
     {
       id: "scratchpad",
-      shortcut: "Win/Super + Shift + Space",
+      shortcut: "Ctrl + F12",
       name: "Open Scratchpad",
       description: "Open the session scratchpad",
       run: activateScratchpad,
@@ -5082,7 +5082,7 @@ function App() {
             role="tab"
             className={`note-tab scratchpad-tab ${scratchpadActive ? "active" : ""}`}
             aria-selected={scratchpadActive}
-            title="Open Scratchpad (Win/Super + Shift + Space)"
+            title="Open Scratchpad (Ctrl + F12)"
             onClick={activateScratchpad}
           >
             <span>Scratchpad</span>
@@ -5716,6 +5716,7 @@ function App() {
                   <div className="settings-submenu">
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-theme")}>Theme</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-guide-lines")}>Guide lines</button>
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-scratchpad-opacity")}>Scratchpad</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-font-size")}>Text size</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-editor-font")}>Editor font</button>
                   </div>
@@ -5831,6 +5832,26 @@ function App() {
                         ))}
                       </div>
                     </fieldset>
+                    <div id="settings-scratchpad-opacity" className="settings-section settings-section-card">
+                      <label>
+                        Scratchpad background opacity
+                        <div className="appearance-size-row">
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={scratchpadOpacity}
+                            aria-label="Scratchpad background opacity"
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              if (Number.isFinite(value)) setScratchpadOpacity(Math.min(1, Math.max(0, value)));
+                            }}
+                          />
+                          <output>{Math.round(scratchpadOpacity * 100)}%</output>
+                        </div>
+                      </label>
+                    </div>
                     <div id="settings-font-size" className="settings-section settings-section-card">
                       <label>
                         Editor font size

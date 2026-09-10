@@ -19,7 +19,7 @@ test("command palette supports matching, keyboard selection, and themed presenta
 test("command palette opens the scratchpad", () => {
   const source = app.match(/\{\n      id: "scratchpad",[\s\S]*?\n    \},/);
   assert.ok(source);
-  assert.match(source[0], /shortcut: "Win\/Super \+ Shift \+ Space"/);
+  assert.match(source[0], /shortcut: "Ctrl \+ F12"/);
   assert.match(source[0], /name: "Open Scratchpad"/);
   assert.match(source[0], /description: "Open the session scratchpad"/);
   let calls = 0;

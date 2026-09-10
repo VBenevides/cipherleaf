@@ -80,6 +80,7 @@ type LiveMarkdownEditorProps = {
   readonly noteID: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
+  readonly onChangeWithCaret?: (value: string, caretOffset: number) => void;
   readonly onSave: () => void;
   readonly onError: (reason: unknown) => void;
   readonly onOpenWikilink: (title: string) => void;
@@ -3394,6 +3395,7 @@ export default function LiveMarkdownEditor({
   noteID,
   value,
   onChange,
+  onChangeWithCaret,
   onSave,
   onError,
   onOpenWikilink,
@@ -3420,6 +3422,7 @@ export default function LiveMarkdownEditor({
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const onChangeWithCaretRef = useRef(onChangeWithCaret);
   const onSaveRef = useRef(onSave);
   const onErrorRef = useRef(onError);
   const onOpenWikilinkRef = useRef(onOpenWikilink);
@@ -3467,6 +3470,7 @@ export default function LiveMarkdownEditor({
   useEffect(() => {
     const previousCardData = cardDataRef.current;
     onChangeRef.current = onChange;
+    onChangeWithCaretRef.current = onChangeWithCaret;
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
     onOpenWikilinkRef.current = onOpenWikilink;
@@ -3485,7 +3489,7 @@ export default function LiveMarkdownEditor({
     if (previousCardData !== cardData) {
       view.current?.dispatch({ effects: refreshLivePreview.of(null) });
     }
-  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -3834,15 +3838,20 @@ export default function LiveMarkdownEditor({
           }),
           searchHighlightField,
           EditorView.updateListener.of((update) => {
-            if (
-              update.docChanged &&
-              !update.transactions.some((transaction) =>
-                transaction.annotation(externalDocumentUpdate),
-              )
-            ) {
-              onChangeRef.current(update.state.doc.toString());
-            }
-            if (update.selectionSet || update.docChanged) {
+            const externalUpdate = update.transactions.some((transaction) =>
+              transaction.annotation(externalDocumentUpdate),
+            );
+            const suppressExternalCaret = externalUpdate && Boolean(onChangeWithCaretRef.current);
+            if (!externalUpdate && update.docChanged) {
+              const content = update.state.doc.toString();
+              const caretOffset = update.state.selection.main.head;
+              if (onChangeWithCaretRef.current) {
+                onChangeWithCaretRef.current(content, caretOffset);
+              } else {
+                onChangeRef.current(content);
+                onCaretChangeRef.current?.(caretOffset);
+              }
+            } else if ((update.selectionSet || update.docChanged) && !suppressExternalCaret) {
               onCaretChangeRef.current?.(update.state.selection.main.head);
             }
             if (update.docChanged || update.viewportChanged || update.geometryChanged) {

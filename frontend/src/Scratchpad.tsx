@@ -108,21 +108,24 @@ export default function Scratchpad({
     });
   }, [applyState, reportError, save]);
 
-  const updateContent = (content: string, generation: number) => {
+  const updateContent = (content: string, generation: number, caretOffset = stateRef.current.caretOffset) => {
     if (!loadedRef.current || generation !== generationRef.current) return;
     const current = stateRef.current;
+    const normalizedCaretOffset = Math.max(0, Math.min(Math.floor(caretOffset), content.length));
     const localChange = ++localChangeRef.current;
-    const next = { ...current, content };
+    const next = { ...current, content, caretOffset: normalizedCaretOffset };
     stateRef.current = next;
     setState(next);
-    void saveScratchpad(content, current.caretOffset, generation, localChange);
+    void saveScratchpad(content, normalizedCaretOffset, generation, localChange);
   };
 
   const updateCaret = (caretOffset: number, generation: number) => {
     if (!loadedRef.current || generation !== generationRef.current) return;
     const current = stateRef.current;
+    const normalizedCaretOffset = Math.max(0, Math.floor(caretOffset));
+    if (normalizedCaretOffset === current.caretOffset) return;
     const localChange = ++localChangeRef.current;
-    const next = { ...current, caretOffset: Math.max(0, Math.floor(caretOffset)) };
+    const next = { ...current, caretOffset: normalizedCaretOffset };
     stateRef.current = next;
     setState(next);
     void saveScratchpad(current.content, next.caretOffset, generation, localChange);
@@ -191,6 +194,7 @@ export default function Scratchpad({
               noteID={`scratchpad:${editorGeneration}`}
               value={state.content}
               onChange={(content) => updateContent(content, editorGeneration)}
+              onChangeWithCaret={(content, caretOffset) => updateContent(content, editorGeneration, caretOffset)}
               onSave={() => {}}
               onError={(reason) => reportError(reason, editorGeneration)}
               onOpenWikilink={onOpenWikilink}

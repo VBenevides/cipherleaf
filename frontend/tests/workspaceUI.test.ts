@@ -19,8 +19,9 @@ test("scratchpad is a fixed rightmost tab with normal-tab-only shortcuts", () =>
   assert.match(app, /className=\{`note-tab scratchpad-tab[\s\S]*<span>Scratchpad<\/span>/);
   assert.match(app, /className="new-note-tab"[\s\S]*className=\{`note-tab scratchpad-tab/);
   assert.match(app, /if \(session\?\.locked \|\| event\.shiftKey \|\| event\.metaKey\) return;/);
-  assert.match(app, /window\.addEventListener\("keydown", handleScratchpadShortcut, true\)/);
-  assert.match(app, /title="Open Scratchpad \(Win\/Super \+ Shift \+ Space\)"/);
+  assert.match(app, /title="Open Scratchpad \(Ctrl \+ F12\)"/);
+  assert.doesNotMatch(app, /handleScratchpadShortcut/);
+  assert.doesNotMatch(app, /window\.addEventListener\("keydown", handleScratchpadShortcut, true\)/);
   assert.doesNotMatch(app, /scratchpad-tab[\s\S]*Close Scratchpad/);
   assert.match(app, /if \(scratchpadActiveRef\.current\) \{[\s\S]*event\.preventDefault\(\);[\s\S]*return;/);
   assert.match(app, /const shortcut = `\$\{event\.shiftKey \? "shift\+" : ""\}\$\{key\}`;/);
@@ -43,28 +44,55 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /Window\.Hide\(\)/);
 });
 
+test("scratchpad follows valid theme storage changes", () => {
+  assert.match(main, /const SCRATCHPAD_THEME_KEY = 'cipherleaf-theme'/);
+  assert.match(main, /function parseScratchpadTheme\(saved: string \| null\): 'light' \| 'dark' \| 'archivist' \| null/);
+  assert.match(main, /saved === 'light' \|\| saved === 'dark' \|\| saved === 'archivist'/);
+  assert.match(main, /const applyScratchpadTheme = \(saved: string \| null\) => \{[\s\S]*const theme = parseScratchpadTheme\(saved\)[\s\S]*if \(theme\) document\.documentElement\.dataset\.theme = theme/);
+  assert.match(main, /const refreshScratchpadTheme = \(\) => applyScratchpadTheme\(window\.localStorage\.getItem\(SCRATCHPAD_THEME_KEY\)\)/);
+  assert.match(main, /window\.addEventListener\('storage', \(event\) => \{[\s\S]*event\.key === SCRATCHPAD_THEME_KEY[\s\S]*applyScratchpadTheme\(event\.newValue\)/);
+  assert.match(main, /window\.addEventListener\('focus', refreshScratchpadTheme\)[\s\S]*refreshScratchpadTheme\(\)/);
+  assert.equal((main.match(/addEventListener\('storage'/g) ?? []).length, 1);
+});
+
 test("native shortcut routes through the focused window or guarded overlay", () => {
   assert.match(nativeMain, /Name:\s+"scratchpad"/);
   assert.match(nativeMain, /AlwaysOnTop:\s+true/);
   assert.match(nativeMain, /Frameless:\s+true/);
   assert.match(nativeMain, /BackgroundType:\s+application\.BackgroundTypeTranslucent/);
-  assert.match(nativeMain, /GlobalShortcut\.Register\("Super\+Shift\+Space"/);
+  assert.match(nativeMain, /const scratchpadShortcut = "Ctrl\+F12"/);
+  const registrationIndex = nativeMain.indexOf("app.GlobalShortcut.Register(scratchpadShortcut");
+  const runIndex = nativeMain.indexOf("app.Run()");
+  assert.ok(registrationIndex >= 0 && registrationIndex < runIndex);
   assert.match(nativeMain, /window\.IsFocused\(\) && window\.IsVisible\(\)/);
   assert.match(nativeMain, /if\s+scratchpad\.IsVisible\(\)/);
   assert.match(nativeMain, /vaultService\.GetSession\(\)\.Locked/);
   assert.match(nativeMain, /scratchpad\.Show\(\)/);
   assert.match(nativeMain, /scratchpad\.Hide\(\)/);
+  assert.match(nativeMain, /func positionScratchpad\(/);
+  assert.match(nativeMain, /screen\.Bounds\.X/);
+  assert.match(nativeMain, /screen\.Bounds\.Y/);
+  assert.match(nativeMain, /scratchpad\.SetPosition/);
+  assert.match(nativeMain, /positionScratchpad\(app, window, scratchpad\)/);
+  assert.match(nativeMain, /else if mainWindowActive \{[\s\S]*window\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+  assert.doesNotMatch(nativeMain, /ApplicationStarted/);
+  assert.doesNotMatch(nativeMain, /window\.RegisterKeyBinding/);
   assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
 });
 
-test("scratchpad focus effect handles capture, native focus, and cleanup", () => {
-  const effectSource = app.match(/  useEffect\(\(\) => \{\n    const handleScratchpadShortcut[\s\S]*?  \}, \[\]\);\n/);
+test("scratchpad size follows the active screen and keeps its height", () => {
+  assert.match(nativeMain, /width := screen\.Bounds\.Width \* 4 \/ 5/);
+  assert.match(nativeMain, /_, height := scratchpad\.Size\(\)[\s\S]*if height <= 0 \{[\s\S]*height = 600/);
+  assert.match(nativeMain, /scratchpad\.SetSize\(width, height\)/);
+  assert.match(nativeMain, /scratchpad\.SetPosition\(screen\.Bounds\.X\+\(screen\.Bounds\.Width-width\)\/2, screen\.Bounds\.Y\)/);
+});
+
+test("scratchpad focus effect handles native focus and cleanup", () => {
+  const effectSource = app.match(/  useEffect\(\(\) => \{\n    const off = Events\.On\("cipherleaf:scratchpad-focus",[\s\S]*?  \}, \[\]\);\n/);
   assert.ok(effectSource);
   const effect = transpileModule(effectSource[0], {
     compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
   }).outputText;
-  const dom = new JSDOM("<!doctype html><html><body><div id=child></div></body></html>", { pretendToBeVisual: true });
-  const child = dom.window.document.getElementById("child")!;
   let actionCalls = 0;
   let nativeFocus: (() => void) | null = null;
   let eventsOff = 0;
@@ -73,7 +101,8 @@ test("scratchpad focus effect handles capture, native focus, and cleanup", () =>
   const activateScratchpadRef = { current: () => { actionCalls += 1; } };
   const useEffect = (callback: () => () => void) => { cleanup = callback(); };
   const Events = {
-    On: (_name: string, callback: () => void) => {
+    On: (name: string, callback: () => void) => {
+      assert.equal(name, "cipherleaf:scratchpad-focus");
       nativeFocus = callback;
       return () => {
         eventsOff += 1;
@@ -81,48 +110,23 @@ test("scratchpad focus effect handles capture, native focus, and cleanup", () =>
       };
     },
   };
-  new Function("useEffect", "Events", "window", "unlockedRef", "activateScratchpadRef", effect)(
+  new Function("useEffect", "Events", "unlockedRef", "activateScratchpadRef", effect)(
     useEffect,
     Events,
-    dom.window,
     unlockedRef,
     activateScratchpadRef,
   );
-  child.addEventListener("keydown", (event) => event.stopPropagation());
-  const dispatch = (options: KeyboardEventInit) => child.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
-    bubbles: true,
-    cancelable: true,
-    metaKey: true,
-    shiftKey: true,
-    ...options,
-  }));
-  assert.equal(dispatch({ code: "Space", key: " " }), false);
+  nativeFocus?.();
   assert.equal(actionCalls, 1);
-  assert.equal(dispatch({ code: "", key: " " }), false);
-  assert.equal(actionCalls, 2);
-  assert.equal(dispatch({ code: "Space", key: " ", metaKey: false }), true);
-  assert.equal(dispatch({ code: "Space", key: " ", shiftKey: false }), true);
-  assert.equal(dispatch({ code: "KeyA", key: "a" }), true);
-  assert.equal(actionCalls, 2);
-  assert.equal(dispatch({ code: "Space", key: " ", repeat: true }), true);
-  assert.equal(dispatch({ code: "Space", key: " ", ctrlKey: true }), true);
-  assert.equal(dispatch({ code: "Space", key: " ", altKey: true }), true);
   unlockedRef.current = false;
-  assert.equal(dispatch({ code: "Space", key: " " }), true);
+  nativeFocus?.();
+  assert.equal(actionCalls, 1);
+  unlockedRef.current = true;
   nativeFocus?.();
   assert.equal(actionCalls, 2);
-  unlockedRef.current = true;
-  activateScratchpadRef.current = () => { actionCalls += 10; };
-  assert.equal(dispatch({ code: "Space", key: " " }), false);
-  assert.equal(actionCalls, 12);
-  nativeFocus?.();
-  assert.equal(actionCalls, 22);
   cleanup?.();
   assert.equal(eventsOff, 1);
   assert.equal(nativeFocus, null);
-  assert.equal(dispatch({ code: "Space", key: " " }), true);
-  assert.equal(actionCalls, 22);
-  dom.window.close();
 });
 
 test("scratchpad activation saves once and focuses an active editor", () => {
@@ -167,14 +171,85 @@ test("scratchpad activation saves once and focuses an active editor", () => {
   dom.window.close();
 });
 
+test("scratchpad editor saves content and caret from the same local update", () => {
+  assert.match(liveEditor, /readonly onChangeWithCaret\?: \(value: string, caretOffset: number\) => void;/);
+  assert.match(liveEditor, /const onChangeWithCaretRef = useRef\(onChangeWithCaret\)/);
+  assert.match(liveEditor, /onChangeWithCaretRef\.current = onChangeWithCaret/);
+  assert.match(liveEditor, /\[onChange, onChangeWithCaret, onSave,/);
+
+  const listenerSource = liveEditor.match(/          EditorView\.updateListener\.of\(\(update\) => \{[\s\S]*?\n          \}\),/);
+  assert.ok(listenerSource);
+  const listener = listenerSource[0];
+  assert.match(listener, /const externalUpdate = update\.transactions\.some\(\(transaction\) =>[\s\S]*transaction\.annotation\(externalDocumentUpdate\)/);
+  assert.match(listener, /const suppressExternalCaret = externalUpdate && Boolean\(onChangeWithCaretRef\.current\)/);
+  assert.match(listener, /if \(!externalUpdate && update\.docChanged\) \{[\s\S]*const content = update\.state\.doc\.toString\(\);[\s\S]*const caretOffset = update\.state\.selection\.main\.head;[\s\S]*onChangeWithCaretRef\.current\(content, caretOffset\);/);
+  assert.match(listener, /else \{[\s\S]*onChangeRef\.current\(content\);[\s\S]*onCaretChangeRef\.current\?\.\(caretOffset\);/);
+  assert.match(listener, /else if \(\(update\.selectionSet \|\| update\.docChanged\) && !suppressExternalCaret\) \{[\s\S]*onCaretChangeRef\.current\?\.\(update\.state\.selection\.main\.head\);/);
+
+  const contentUpdateSource = scratchpad.match(/  const updateContent = \(content: string, generation: number, caretOffset = stateRef\.current\.caretOffset\) => \{[\s\S]*?\n  \};\n/);
+  assert.ok(contentUpdateSource);
+  assert.match(contentUpdateSource[0], /const normalizedCaretOffset = Math\.max\(0, Math\.min\(Math\.floor\(caretOffset\), content\.length\)\)/);
+  assert.match(contentUpdateSource[0], /const next = \{ \.\.\.current, content, caretOffset: normalizedCaretOffset \}/);
+  assert.match(contentUpdateSource[0], /saveScratchpad\(content, normalizedCaretOffset, generation, localChange\)/);
+  assert.equal((contentUpdateSource[0].match(/saveScratchpad\(/g) ?? []).length, 1);
+  assert.match(scratchpad, /onChangeWithCaret=\{\(content, caretOffset\) => updateContent\(content, editorGeneration, caretOffset\)\}/);
+
+  const caretUpdateSource = scratchpad.match(/  const updateCaret = \(caretOffset: number, generation: number\) => \{[\s\S]*?\n  \};\n/);
+  assert.ok(caretUpdateSource);
+  assert.match(caretUpdateSource[0], /const normalizedCaretOffset = Math\.max\(0, Math\.floor\(caretOffset\)\);[\s\S]*if \(normalizedCaretOffset === current\.caretOffset\) return;[\s\S]*const localChange/);
+});
+
 test("scratchpad styling stays accessible, responsive, translucent, and reduced-motion safe", () => {
   assert.match(style, /\.scratchpad-tab \{/);
   assert.match(style, /\.scratchpad-tab\.active \{/);
   assert.match(style, /\.scratchpad-tab:focus-visible \{/);
   assert.match(style, /:root\[data-window="scratchpad"\]/);
+  assert.match(style, /--scratchpad-opacity: 0\.5/);
+  assert.match(style, /:root\[data-window="scratchpad"\] #root \{[\s\S]*height: 100%[\s\S]*display: flex[\s\S]*flex-direction: column[\s\S]*overflow: hidden/);
+  assert.match(style, /\.scratchpad-overlay-shell \{[\s\S]*background: color-mix\(in srgb, var\(--canvas\) calc\(var\(--scratchpad-opacity, 0\.5\) \* 100%\), transparent\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.editor-shell\.scratchpad-overlay-shell \{[\s\S]*background: color-mix\(in srgb, var\(--canvas\) calc\(var\(--scratchpad-opacity, 0\.5\) \* 100%\), transparent\)/);
+  assert.match(style, /\.scratchpad-heading \{[\s\S]*flex: 0 0 auto/);
+  assert.match(style, /\.scratchpad-editor-body \{[\s\S]*min-height: 0[\s\S]*overflow: hidden/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.document-body,[\s\S]*\.live-editor-frame \{[\s\S]*background: transparent/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.markdown-toolbar \{[\s\S]*background: transparent/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \{[\s\S]*--editor-bg: transparent[\s\S]*--toolbar-bg: transparent/);
+  assert.doesNotMatch(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \{\s*--ink:/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \{[\s\S]*--scratchpad-outline: rgb\(255 255 255 \/ 88%\)[\s\S]*text-shadow:[\s\S]*1px 0 var\(--scratchpad-outline\)[\s\S]*-1px 0 var\(--scratchpad-outline\)[\s\S]*0 1px var\(--scratchpad-outline\)[\s\S]*0 -1px var\(--scratchpad-outline\)/);
+  assert.match(style, /:root\[data-theme="dark"\]\[data-window="scratchpad"\] \.scratchpad-overlay-shell \{[\s\S]*--scratchpad-outline: rgb\(0 0 0 \/ 88%\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.scratchpad-heading h1,[\s\S]*\.live-markdown-editor \.cm-content \{[\s\S]*font-weight: 500/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.markdown-toolbar button,[\s\S]*\.scratchpad-close \{[\s\S]*color: var\(--ink\)[\s\S]*text-shadow: inherit/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.toolbar-checkbox,[\s\S]*\.toolbar-toggle \{[\s\S]*filter: drop-shadow\(0 0 1px var\(--scratchpad-outline\)\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.toolbar-toggle \{[\s\S]*color: var\(--ink\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.markdown-toolbar button:hover \{[\s\S]*color: var\(--green-dark\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.markdown-toolbar button:hover \.toolbar-toggle \{[\s\S]*color: var\(--green-dark\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell button:focus-visible \{[\s\S]*outline: 2px solid var\(--ink\)[\s\S]*box-shadow: 0 0 0 1px var\(--scratchpad-outline\)/);
+  assert.match(style, /:root\[data-window="scratchpad"\] \.scratchpad-overlay-shell \.live-markdown-editor \.cm-cursor \{[\s\S]*border-left: 2px solid var\(--ink\)[\s\S]*filter: drop-shadow\(0 0 1px var\(--scratchpad-outline\)\)/);
   assert.match(style, /\.scratchpad-overlay-shell \* \{[\s\S]*--wails-draggable: no-drag/);
   assert.match(style, /@media \(max-width: 600px\)[\s\S]*\.scratchpad-overlay-shell/);
   assert.match(style, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.scratchpad-overlay-shell/);
+});
+
+test("scratchpad opacity is configurable and shared with the overlay window", () => {
+  assert.match(app, /const SCRATCHPAD_OPACITY_KEY = "cipherleaf-scratchpad-opacity"/);
+  assert.match(app, /const \[scratchpadOpacity, setScratchpadOpacity\] = useState\(\(\) => readScratchpadOpacity\(\)\)/);
+  assert.match(app, /saved === null \|\| saved\.trim\(\) === ""/);
+  assert.match(app, /Number\(saved\)/);
+  assert.match(app, /Number\.isFinite\(opacity\) && opacity >= 0 && opacity <= 1/);
+  assert.match(app, /setProperty\("--scratchpad-opacity", String\(scratchpadOpacity\)\)/);
+  assert.match(app, /setItem\(SCRATCHPAD_OPACITY_KEY, String\(scratchpadOpacity\)\)/);
+  assert.match(app, /openSettingsSection\("appearance", "settings-scratchpad-opacity"\)/);
+  assert.match(app, /id="settings-scratchpad-opacity"/);
+  assert.match(app, /type="range"[\s\S]*min="0"[\s\S]*max="1"[\s\S]*step="0\.05"[\s\S]*scratchpadOpacity/);
+  assert.match(app, /Math\.min\(1, Math\.max\(0, value\)\)/);
+  assert.match(app, /Math\.round\(scratchpadOpacity \* 100\)%/);
+  assert.match(main, /const SCRATCHPAD_OPACITY_KEY = 'cipherleaf-scratchpad-opacity'/);
+  assert.match(main, /saved === null \|\| saved\.trim\(\) === ''/);
+  assert.match(main, /Number\.isFinite\(opacity\) && opacity >= 0 && opacity <= 1/);
+  assert.match(main, /setProperty\('--scratchpad-opacity', String\(parseScratchpadOpacity\(saved\)\)\)/);
+  assert.match(main, /addEventListener\('storage'/);
+  assert.match(main, /event\.key === SCRATCHPAD_OPACITY_KEY/);
+  assert.match(main, /setScratchpadOpacity\(event\.newValue\)/);
+  assert.match(nativeMain, /BackgroundColour: application\.NewRGBA\(0, 0, 0, 0\)/);
 });
 
 test("note tabs expose navigation, close, new-tab, and idle unloading", () => {
@@ -418,7 +493,3 @@ test("board handles expose delete-only menus and block keyboard deletion", () =>
   assert.match(liveEditor, /key: "Delete"[\s\S]*run: handleBoardDelete/);
   assert.match(style, /cm-live-board-line:hover \.cm-live-object-handle/);
 });
-  assert.match(nativeMain, /ApplicationStarted/);
-  assert.match(nativeMain, /window\.RegisterKeyBinding\("Super\+Shift\+Space"/);
-  assert.match(nativeMain, /if !vaultService\.GetSession\(\)\.Locked \{[\s\S]*window\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
-  assert.doesNotMatch(nativeMain, /scratchpad\.RegisterKeyBinding/);

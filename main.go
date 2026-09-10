@@ -22,6 +22,32 @@ var assets embed.FS
 //go:embed VERSION
 var version string
 
+const scratchpadDefaultWidth = 620
+
+// positionScratchpad places the overlay at the top center of Cipherleaf's
+// current display. Wails exposes screen and window geometry in device-
+// independent pixels, so the values can be combined directly.
+func positionScratchpad(app *application.App, mainWindow, scratchpad *application.WebviewWindow) {
+	screen, err := mainWindow.GetScreen()
+	if err != nil || screen == nil {
+		screen = app.Screen.GetPrimary()
+	}
+	if screen == nil {
+		screen, _ = scratchpad.GetScreen()
+	}
+	if screen == nil || screen.Bounds.Width <= 0 {
+		return
+	}
+
+	width := screen.Bounds.Width * 4 / 5
+	_, height := scratchpad.Size()
+	if height <= 0 {
+		height = 600
+	}
+	scratchpad.SetSize(width, height)
+	scratchpad.SetPosition(screen.Bounds.X+(screen.Bounds.Width-width)/2, screen.Bounds.Y)
+}
+
 func main() {
 	appTitle := fmt.Sprintf("Cipherleaf - v%s", strings.TrimSpace(version))
 	vaultService := cipherleafapp.NewVaultService()
@@ -60,14 +86,13 @@ func main() {
 	scratchpad := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "scratchpad",
 		Title:            "Cipherleaf Scratchpad",
-		Width:            620,
+		Width:            scratchpadDefaultWidth,
 		Height:           600,
-		MinWidth:         480,
 		MinHeight:        240,
 		AlwaysOnTop:      true,
 		Frameless:        true,
 		BackgroundType:   application.BackgroundTypeTranslucent,
-		BackgroundColour: application.NewRGBA(20, 20, 24, 220),
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		InitialPosition:  application.WindowXY,
 		X:                0,
 		Y:                0,
@@ -89,33 +114,28 @@ func main() {
 	app.Event.OnApplicationEvent(events.Common.SystemWillSleep, requestVaultLock)
 	app.Event.OnApplicationEvent(events.Common.ScreenLocked, requestVaultLock)
 
-	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		window.RegisterKeyBinding("Super+Shift+Space", func(application.Window) {
-			if !vaultService.GetSession().Locked {
+	const scratchpadShortcut = "Ctrl+F12"
+	if err := app.GlobalShortcut.Register(scratchpadShortcut, func() {
+		mainWindowActive := window.IsFocused() && window.IsVisible()
+		if scratchpad.IsVisible() {
+			scratchpad.Hide()
+			if mainWindowActive {
 				window.EmitEvent("cipherleaf:scratchpad-focus")
 			}
-		})
-		if err := app.GlobalShortcut.Register("Super+Shift+Space", func() {
-			mainWindowActive := window.IsFocused() && window.IsVisible()
-			if scratchpad.IsVisible() {
-				scratchpad.Hide()
-				if mainWindowActive {
-					window.EmitEvent("cipherleaf:scratchpad-focus")
-				}
-			} else if mainWindowActive {
-				window.EmitEvent("cipherleaf:scratchpad-focus")
-			} else if vaultService.GetSession().Locked {
-				scratchpad.Hide()
-				window.Show()
-				window.Focus()
-			} else {
-				scratchpad.Show()
-				scratchpad.Focus()
-			}
-		}); err != nil {
-			log.Printf("failed to register scratchpad global shortcut: %v", err)
+		} else if mainWindowActive {
+			window.EmitEvent("cipherleaf:scratchpad-focus")
+		} else if vaultService.GetSession().Locked {
+			scratchpad.Hide()
+			window.Show()
+			window.Focus()
+		} else {
+			positionScratchpad(app, window, scratchpad)
+			scratchpad.Show()
+			scratchpad.Focus()
 		}
-	})
+	}); err != nil {
+		log.Printf("failed to register scratchpad global shortcut: %v", err)
+	}
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
