@@ -185,6 +185,7 @@ npm --prefix frontend run build
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
 | `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
 | `Ctrl/Cmd+Shift+E` | Confirm finishing the active timer |
+| `Super/Win+Shift+Space` | Open Scratchpad (global overlay when supported by desktop; app unfocused) |
 | `Ctrl+]` / `Ctrl+[` | Expand/collapse the current outline section |
 | `Ctrl+Shift+]` / `Ctrl+Shift+[` | Expand/collapse all outline sections |
 

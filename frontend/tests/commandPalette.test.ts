@@ -15,3 +15,17 @@ test("command palette supports matching, keyboard selection, and themed presenta
   assert.match(style, /\.command-palette \{[\s\S]*background-color: var\(--modal-surface\) !important;/);
   assert.match(style, /\.command-palette-command \{[\s\S]*grid-template-columns:/);
 });
+
+test("command palette opens the scratchpad", () => {
+  const source = app.match(/\{\n      id: "scratchpad",[\s\S]*?\n    \},/);
+  assert.ok(source);
+  assert.match(source[0], /shortcut: "Win\/Super \+ Shift \+ Space"/);
+  assert.match(source[0], /name: "Open Scratchpad"/);
+  assert.match(source[0], /description: "Open the session scratchpad"/);
+  let calls = 0;
+  const command = new Function("activateScratchpad", `return (${source[0].slice(0, -1)})`)(
+    () => { calls += 1; },
+  ) as { run: () => void };
+  command.run();
+  assert.equal(calls, 1);
+});

@@ -773,6 +773,7 @@ function App() {
   const globalSearchResultsKeyRef = useRef("");
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
+  const activateScratchpadRef = useRef<() => void>(() => {});
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
@@ -2718,6 +2719,12 @@ function App() {
   };
 
   const activateScratchpad = () => {
+    if (!unlockedRef.current) return;
+    if (scratchpadActiveRef.current) {
+      const editor = document.querySelector<HTMLElement>(".scratchpad-editor .cm-content");
+      if (editor instanceof HTMLElement) editor.focus();
+      return;
+    }
     saveCurrentDraft();
     setGraphOpen(false);
     setTimeTrackingOpen(false);
@@ -2726,6 +2733,7 @@ function App() {
     scratchpadActiveRef.current = true;
     setScratchpadActive(true);
   };
+  activateScratchpadRef.current = activateScratchpad;
 
   const leaveScratchpad = () => {
     scratchpadActiveRef.current = false;
@@ -2845,10 +2853,27 @@ function App() {
   }, [session?.locked]);
 
   useEffect(() => {
+    const handleScratchpadShortcut = (event: KeyboardEvent) => {
+      if (
+        event.repeat ||
+        event.ctrlKey ||
+        event.altKey ||
+        !event.metaKey ||
+        !event.shiftKey ||
+        (event.code !== "Space" && event.key !== " ") ||
+        !unlockedRef.current
+      ) return;
+      event.preventDefault();
+      activateScratchpadRef.current();
+    };
+    window.addEventListener("keydown", handleScratchpadShortcut, true);
     const off = Events.On("cipherleaf:scratchpad-focus", () => {
-      if (unlockedRef.current) activateScratchpad();
+      if (unlockedRef.current) activateScratchpadRef.current();
     });
-    return off;
+    return () => {
+      window.removeEventListener("keydown", handleScratchpadShortcut, true);
+      off();
+    };
   }, []);
 
   const deleteNote = async (id = note?.id, title = note?.title, itemType: "note" | "card" = "note") => {
@@ -4047,6 +4072,13 @@ function App() {
       run: () => persistCurrentInBackground(),
     },
     {
+      id: "scratchpad",
+      shortcut: "Win/Super + Shift + Space",
+      name: "Open Scratchpad",
+      description: "Open the session scratchpad",
+      run: activateScratchpad,
+    },
+    {
       id: "quick-switcher",
       shortcut: "Ctrl + K",
       name: "Quick note switcher",
@@ -5044,16 +5076,17 @@ function App() {
               <button type="button" aria-label={`Close ${tab.title}`} onClick={() => void closeTab(tab.id)}>×</button>
             </div>
           ))}
+          <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
           <button
             type="button"
             role="tab"
             className={`note-tab scratchpad-tab ${scratchpadActive ? "active" : ""}`}
             aria-selected={scratchpadActive}
+            title="Open Scratchpad (Win/Super + Shift + Space)"
             onClick={activateScratchpad}
           >
             <span>Scratchpad</span>
           </button>
-          <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
         </nav>
   );
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
@@ -16,7 +17,10 @@ test("scratchpad is a fixed rightmost tab with normal-tab-only shortcuts", () =>
   assert.match(app, /const scratchpadActiveRef = useRef\(scratchpadActive\)/);
   assert.match(app, /role="tab"[\s\S]*className=\{`note-tab scratchpad-tab/);
   assert.match(app, /className=\{`note-tab scratchpad-tab[\s\S]*<span>Scratchpad<\/span>/);
-  assert.match(app, /<\/button>\n          <button type="button" className="new-note-tab"/);
+  assert.match(app, /className="new-note-tab"[\s\S]*className=\{`note-tab scratchpad-tab/);
+  assert.match(app, /if \(session\?\.locked \|\| event\.shiftKey \|\| event\.metaKey\) return;/);
+  assert.match(app, /window\.addEventListener\("keydown", handleScratchpadShortcut, true\)/);
+  assert.match(app, /title="Open Scratchpad \(Win\/Super \+ Shift \+ Space\)"/);
   assert.doesNotMatch(app, /scratchpad-tab[\s\S]*Close Scratchpad/);
   assert.match(app, /if \(scratchpadActiveRef\.current\) \{[\s\S]*event\.preventDefault\(\);[\s\S]*return;/);
   assert.match(app, /const shortcut = `\$\{event\.shiftKey \? "shift\+" : ""\}\$\{key\}`;/);
@@ -39,7 +43,7 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /Window\.Hide\(\)/);
 });
 
-test("native shortcut toggles the focused window or guarded overlay", () => {
+test("native shortcut routes through the focused window or guarded overlay", () => {
   assert.match(nativeMain, /Name:\s+"scratchpad"/);
   assert.match(nativeMain, /AlwaysOnTop:\s+true/);
   assert.match(nativeMain, /Frameless:\s+true/);
@@ -51,6 +55,116 @@ test("native shortcut toggles the focused window or guarded overlay", () => {
   assert.match(nativeMain, /scratchpad\.Show\(\)/);
   assert.match(nativeMain, /scratchpad\.Hide\(\)/);
   assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
+});
+
+test("scratchpad focus effect handles capture, native focus, and cleanup", () => {
+  const effectSource = app.match(/  useEffect\(\(\) => \{\n    const handleScratchpadShortcut[\s\S]*?  \}, \[\]\);\n/);
+  assert.ok(effectSource);
+  const effect = transpileModule(effectSource[0], {
+    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
+  }).outputText;
+  const dom = new JSDOM("<!doctype html><html><body><div id=child></div></body></html>", { pretendToBeVisual: true });
+  const child = dom.window.document.getElementById("child")!;
+  let actionCalls = 0;
+  let nativeFocus: (() => void) | null = null;
+  let eventsOff = 0;
+  let cleanup: (() => void) | undefined;
+  const unlockedRef = { current: true };
+  const activateScratchpadRef = { current: () => { actionCalls += 1; } };
+  const useEffect = (callback: () => () => void) => { cleanup = callback(); };
+  const Events = {
+    On: (_name: string, callback: () => void) => {
+      nativeFocus = callback;
+      return () => {
+        eventsOff += 1;
+        nativeFocus = null;
+      };
+    },
+  };
+  new Function("useEffect", "Events", "window", "unlockedRef", "activateScratchpadRef", effect)(
+    useEffect,
+    Events,
+    dom.window,
+    unlockedRef,
+    activateScratchpadRef,
+  );
+  child.addEventListener("keydown", (event) => event.stopPropagation());
+  const dispatch = (options: KeyboardEventInit) => child.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    metaKey: true,
+    shiftKey: true,
+    ...options,
+  }));
+  assert.equal(dispatch({ code: "Space", key: " " }), false);
+  assert.equal(actionCalls, 1);
+  assert.equal(dispatch({ code: "", key: " " }), false);
+  assert.equal(actionCalls, 2);
+  assert.equal(dispatch({ code: "Space", key: " ", metaKey: false }), true);
+  assert.equal(dispatch({ code: "Space", key: " ", shiftKey: false }), true);
+  assert.equal(dispatch({ code: "KeyA", key: "a" }), true);
+  assert.equal(actionCalls, 2);
+  assert.equal(dispatch({ code: "Space", key: " ", repeat: true }), true);
+  assert.equal(dispatch({ code: "Space", key: " ", ctrlKey: true }), true);
+  assert.equal(dispatch({ code: "Space", key: " ", altKey: true }), true);
+  unlockedRef.current = false;
+  assert.equal(dispatch({ code: "Space", key: " " }), true);
+  nativeFocus?.();
+  assert.equal(actionCalls, 2);
+  unlockedRef.current = true;
+  activateScratchpadRef.current = () => { actionCalls += 10; };
+  assert.equal(dispatch({ code: "Space", key: " " }), false);
+  assert.equal(actionCalls, 12);
+  nativeFocus?.();
+  assert.equal(actionCalls, 22);
+  cleanup?.();
+  assert.equal(eventsOff, 1);
+  assert.equal(nativeFocus, null);
+  assert.equal(dispatch({ code: "Space", key: " " }), true);
+  assert.equal(actionCalls, 22);
+  dom.window.close();
+});
+
+test("scratchpad activation saves once and focuses an active editor", () => {
+  const functionSource = app.match(/  const activateScratchpad = \(\) => \{[\s\S]*?\n  \};\n/);
+  assert.ok(functionSource);
+  const functionBody = transpileModule(functionSource[0], {
+    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
+  }).outputText;
+  const dom = new JSDOM("<!doctype html><html><body><div class='scratchpad-editor'><div class='cm-content' contenteditable='true'></div></div></body></html>");
+  const scratchpadActiveRef = { current: false };
+  const unlockedRef = { current: true };
+  let saves = 0;
+  const activateScratchpad = new Function(
+    "saveCurrentDraft",
+    "setGraphOpen",
+    "setTimeTrackingOpen",
+    "setConflictResolution",
+    "setSidebarOpen",
+    "scratchpadActiveRef",
+    "setScratchpadActive",
+    "unlockedRef",
+    "document",
+    "HTMLElement",
+    `${functionBody}\nreturn activateScratchpad;`,
+  )(
+    () => { saves += 1; },
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    scratchpadActiveRef,
+    (active: boolean) => { scratchpadActiveRef.current = active; },
+    unlockedRef,
+    dom.window.document,
+    dom.window.HTMLElement,
+  ) as () => void;
+  activateScratchpad();
+  assert.equal(saves, 1);
+  activateScratchpad();
+  assert.equal(saves, 1);
+  assert.equal(dom.window.document.activeElement?.className, "cm-content");
+  dom.window.close();
 });
 
 test("scratchpad styling stays accessible, responsive, translucent, and reduced-motion safe", () => {
@@ -304,3 +418,7 @@ test("board handles expose delete-only menus and block keyboard deletion", () =>
   assert.match(liveEditor, /key: "Delete"[\s\S]*run: handleBoardDelete/);
   assert.match(style, /cm-live-board-line:hover \.cm-live-object-handle/);
 });
+  assert.match(nativeMain, /ApplicationStarted/);
+  assert.match(nativeMain, /window\.RegisterKeyBinding\("Super\+Shift\+Space"/);
+  assert.match(nativeMain, /if !vaultService\.GetSession\(\)\.Locked \{[\s\S]*window\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+  assert.doesNotMatch(nativeMain, /scratchpad\.RegisterKeyBinding/);

@@ -89,26 +89,33 @@ func main() {
 	app.Event.OnApplicationEvent(events.Common.SystemWillSleep, requestVaultLock)
 	app.Event.OnApplicationEvent(events.Common.ScreenLocked, requestVaultLock)
 
-	if err := app.GlobalShortcut.Register("Super+Shift+Space", func() {
-		mainWindowActive := window.IsFocused() && window.IsVisible()
-		if scratchpad.IsVisible() {
-			scratchpad.Hide()
-			if mainWindowActive {
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		window.RegisterKeyBinding("Super+Shift+Space", func(application.Window) {
+			if !vaultService.GetSession().Locked {
 				window.EmitEvent("cipherleaf:scratchpad-focus")
 			}
-		} else if mainWindowActive {
-			window.EmitEvent("cipherleaf:scratchpad-focus")
-		} else if vaultService.GetSession().Locked {
-			scratchpad.Hide()
-			window.Show()
-			window.Focus()
-		} else {
-			scratchpad.Show()
-			scratchpad.Focus()
+		})
+		if err := app.GlobalShortcut.Register("Super+Shift+Space", func() {
+			mainWindowActive := window.IsFocused() && window.IsVisible()
+			if scratchpad.IsVisible() {
+				scratchpad.Hide()
+				if mainWindowActive {
+					window.EmitEvent("cipherleaf:scratchpad-focus")
+				}
+			} else if mainWindowActive {
+				window.EmitEvent("cipherleaf:scratchpad-focus")
+			} else if vaultService.GetSession().Locked {
+				scratchpad.Hide()
+				window.Show()
+				window.Focus()
+			} else {
+				scratchpad.Show()
+				scratchpad.Focus()
+			}
+		}); err != nil {
+			log.Printf("failed to register scratchpad global shortcut: %v", err)
 		}
-	}); err != nil {
-		log.Printf("failed to register scratchpad global shortcut: %v", err)
-	}
+	})
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
