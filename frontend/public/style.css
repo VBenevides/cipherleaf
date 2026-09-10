@@ -2914,6 +2914,26 @@ dialog.modal-backdrop {
     0 -1px var(--scratchpad-outline);
 }
 
+:root[data-window="scratchpad"] .scratchpad-overlay-shell {
+  padding-top: 0;
+}
+
+:root[data-window="scratchpad"] .scratchpad-heading {
+  height: 29px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:root[data-window="scratchpad"] .scratchpad-heading h1 {
+  font-size: 12px;
+  line-height: 1;
+}
+
+:root[data-window="scratchpad"] .scratchpad-close {
+  width: 24px;
+  height: 24px;
+}
+
 :root[data-theme="dark"][data-window="scratchpad"] .scratchpad-overlay-shell {
   --scratchpad-outline: rgb(0 0 0 / 88%);
 }
