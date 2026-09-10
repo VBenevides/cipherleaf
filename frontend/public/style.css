@@ -4048,6 +4048,10 @@ dialog.modal-backdrop {
   max-width: none;
 }
 
+:root .document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line.cm-live-code-block {
+  width: auto;
+}
+
 .live-markdown-editor .cm-gutters,
 .live-markdown-editor .cm-foldGutter {
   display: none;

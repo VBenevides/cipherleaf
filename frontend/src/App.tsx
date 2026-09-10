@@ -5149,6 +5149,7 @@ function App() {
     return (
       <div className="document-body scratchpad-editor-host">
         <Scratchpad
+          onClose={leaveScratchpad}
           onError={(reason) => setError(errorText(reason))}
           onOpenWikilink={(title) => void openWikilinkTitle(title)}
           onOpenCard={openCard}

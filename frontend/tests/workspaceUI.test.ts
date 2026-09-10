@@ -44,6 +44,20 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /Window\.Hide\(\)/);
 });
 
+test("scratchpad Escape closes its host without stealing dialog Escape", () => {
+  assert.match(scratchpad, /readonly onClose\?: \(\) => void;/);
+  const escapeEffect = scratchpad.match(/  useEffect\(\(\) => \{\n    const handleEscape = \(event: KeyboardEvent\) => \{[\s\S]*?  \}, \[onClose, overlay\]\);\n/);
+  assert.ok(escapeEffect);
+  assert.match(escapeEffect[0], /event\.key !== "Escape" \|\| event\.defaultPrevented \|\| event\.isComposing/);
+  assert.match(escapeEffect[0], /event\.target instanceof Element && event\.target\.closest\("dialog, \[role=dialog\]"\)/);
+  assert.match(escapeEffect[0], /event\.preventDefault\(\);/);
+  assert.match(escapeEffect[0], /if \(overlay\) void Window\.Hide\(\);[\s\S]*else onClose\?\.\(\);/);
+  assert.match(escapeEffect[0], /window\.addEventListener\("keydown", handleEscape\);[\s\S]*window\.removeEventListener\("keydown", handleEscape\)/);
+  const scratchpadRender = app.match(/  const renderScratchpadEditor = \(\) => \{[\s\S]*?\n  \};\n/);
+  assert.ok(scratchpadRender);
+  assert.match(scratchpadRender[0], /<Scratchpad[\s\S]*onClose=\{leaveScratchpad\}/);
+});
+
 test("scratchpad follows valid theme storage changes", () => {
   assert.match(main, /const SCRATCHPAD_THEME_KEY = 'cipherleaf-theme'/);
   assert.match(main, /function parseScratchpadTheme\(saved: string \| null\): 'light' \| 'dark' \| 'archivist' \| null/);
@@ -193,6 +207,7 @@ test("scratchpad editor saves content and caret from the same local update", () 
   assert.match(contentUpdateSource[0], /saveScratchpad\(content, normalizedCaretOffset, generation, localChange\)/);
   assert.equal((contentUpdateSource[0].match(/saveScratchpad\(/g) ?? []).length, 1);
   assert.match(scratchpad, /onChangeWithCaret=\{\(content, caretOffset\) => updateContent\(content, editorGeneration, caretOffset\)\}/);
+  assert.doesNotMatch(scratchpad, /caretRestoreVersion\s*=/);
 
   const caretUpdateSource = scratchpad.match(/  const updateCaret = \(caretOffset: number, generation: number\) => \{[\s\S]*?\n  \};\n/);
   assert.ok(caretUpdateSource);
@@ -368,6 +383,10 @@ test("editor chrome stays compact", () => {
   assert.match(style, /\.workspace \{[\s\S]*grid-template-rows: 28px minmax\(0, 1fr\)/);
   assert.match(style, /\.editor-topbar \{[\s\S]*min-height: 33px/);
   assert.match(style, /\.sidebar \{[\s\S]*inset: 28px auto 0 0/);
+});
+
+test("workspace UI keeps rendered code lines content-sized", () => {
+  assert.match(style, /:root \.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line\.cm-live-code-block \{[\s\S]*width: auto;/);
 });
 
 test("card panel keeps metadata compact and notes in the themed editor", () => {

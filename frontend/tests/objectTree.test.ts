@@ -52,6 +52,33 @@ test("expands selection from word to object text to document", () => {
   }
 });
 
+test("expands fenced code content to the full document", () => {
+  const source = [
+    "Before",
+    "  ```ts",
+    "const answer = 42;",
+    "const next = answer + 1;",
+    "  ```",
+    "After",
+  ].join("\n");
+  const document = parseObjectDocument(source);
+  const codeStart = source.indexOf("const answer = 42;");
+  const codeEnd = source.indexOf("const next = answer + 1;") + "const next = answer + 1;".length;
+  let state = EditorState.create({ doc: source, selection: { anchor: codeStart + 6 } });
+
+  for (const expected of [
+    { from: codeStart + "const ".length, to: codeStart + "const answer".length },
+    { from: codeStart, to: codeEnd },
+    { from: 0, to: source.length },
+  ]) {
+    state = state.update({ selection: expandedSelection(state, document) }).state;
+    assert.deepEqual(
+      { from: state.selection.main.from, to: state.selection.main.to },
+      expected,
+    );
+  }
+});
+
 test("keeps an already complete selection unchanged", () => {
   const source = "> first word\nsecond element";
   const document = parseObjectDocument(source);

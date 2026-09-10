@@ -10,6 +10,7 @@ const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 
 type ScratchpadProps = {
   readonly overlay?: boolean;
+  readonly onClose?: () => void;
   readonly onError?: (reason: unknown) => void;
   readonly onOpenWikilink?: (title: string) => void;
   readonly onOpenCard?: (id: string) => void;
@@ -49,6 +50,7 @@ function scratchpadState(value: unknown): ScratchpadState | null {
 
 export default function Scratchpad({
   overlay = false,
+  onClose,
   onError,
   onOpenWikilink = () => {},
   onOpenCard,
@@ -169,6 +171,18 @@ export default function Scratchpad({
     };
   }, [applyState, reportError]);
 
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      if (event.target instanceof Element && event.target.closest("dialog, [role=dialog]")) return;
+      event.preventDefault();
+      if (overlay) void Window.Hide();
+      else onClose?.();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose, overlay]);
+
   const editorGeneration = state.generation;
   return (
     <section className={overlay ? "editor-shell scratchpad-overlay-shell" : "scratchpad-editor"} aria-labelledby="scratchpad-title">
@@ -209,7 +223,6 @@ export default function Scratchpad({
               onDecreaseFontSize={onDecreaseFontSize}
               onIncreaseFontSize={onIncreaseFontSize}
               caretOffset={state.caretOffset}
-              caretRestoreVersion={state.revision}
               onCaretChange={(offset) => updateCaret(offset, editorGeneration)}
               showToolbar
               defaultSectionsCollapsed={defaultSectionsCollapsed}
