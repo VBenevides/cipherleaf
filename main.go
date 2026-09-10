@@ -80,12 +80,16 @@ func main() {
 		},
 	})
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		scratchpad.Hide()
+		if err := vaultService.HideScratchpad(); err != nil {
+			scratchpad.Hide()
+		}
 		event.Cancel()
 		window.EmitEvent("cipherleaf:close-requested")
 	})
 	requestVaultLock := func(*application.ApplicationEvent) {
-		scratchpad.Hide()
+		if err := vaultService.HideScratchpad(); err != nil {
+			scratchpad.Hide()
+		}
 		window.EmitEvent("cipherleaf:system-lock-requested")
 	}
 	app.Event.OnApplicationEvent(events.Common.SystemWillSleep, requestVaultLock)

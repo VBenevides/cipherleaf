@@ -209,6 +209,13 @@ export function GetVaultStatistics(): $CancellablePromise<vault$0.VaultStatistic
     return $Call.ByID(3277829736);
 }
 
+/**
+ * HideScratchpad hides the Scratchpad window synchronously.
+ */
+export function HideScratchpad(): $CancellablePromise<void> {
+    return $Call.ByID(3062824244);
+}
+
 export function ImportFileAttachment(noteID: string, path: string): $CancellablePromise<vault$0.AttachmentInfo> {
     return $Call.ByID(2182536893, noteID, path);
 }

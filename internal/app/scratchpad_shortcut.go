@@ -38,6 +38,10 @@ func (s *VaultService) InitializeScratchpadShortcut() error {
 	if app == nil || app.GlobalShortcut == nil {
 		return errors.New("application global shortcuts are unavailable")
 	}
+	scratchpad, _ := app.Window.GetByName(scratchpadWindowName)
+	if err := disableScratchpadWindowTransitions(scratchpad); err != nil {
+		log.Printf("failed to disable Scratchpad window transitions: %v", err)
+	}
 	candidate := s.recent.GetScratchpadShortcut()
 	if strings.TrimSpace(candidate) == "" {
 		candidate = appsession.DefaultScratchpadShortcut
@@ -64,6 +68,20 @@ func (s *VaultService) InitializeScratchpadShortcut() error {
 	}
 	s.scratchpadShortcut = candidate
 	s.scratchpadShortcutInitialized = true
+	return nil
+}
+
+// HideScratchpad hides the Scratchpad window synchronously.
+func (s *VaultService) HideScratchpad() error {
+	app := s.application()
+	if app == nil {
+		return errors.New("application is unavailable")
+	}
+	scratchpad, ok := app.Window.GetByName(scratchpadWindowName)
+	if !ok || scratchpad == nil {
+		return errors.New("Scratchpad window is unavailable")
+	}
+	hideScratchpadWindow(scratchpad)
 	return nil
 }
 
@@ -131,14 +149,14 @@ func (s *VaultService) toggleScratchpad() {
 
 	mainWindowActive := mainWindow.IsFocused() && mainWindow.IsVisible()
 	if scratchpad.IsVisible() {
-		scratchpad.Hide()
+		hideScratchpadWindow(scratchpad)
 		if mainWindowActive {
 			mainWindow.EmitEvent("cipherleaf:scratchpad-focus")
 		}
 	} else if mainWindowActive {
 		mainWindow.EmitEvent("cipherleaf:scratchpad-focus")
 	} else if s.GetSession().Locked {
-		scratchpad.Hide()
+		hideScratchpadWindow(scratchpad)
 		mainWindow.Show()
 		mainWindow.Focus()
 	} else {
@@ -146,6 +164,16 @@ func (s *VaultService) toggleScratchpad() {
 		scratchpad.Show()
 		scratchpad.Focus()
 	}
+}
+
+func hideScratchpadWindow(window application.Window) {
+	if window == nil {
+		return
+	}
+	application.InvokeSync(func() {
+		hideScratchpadWindowImmediately(window)
+		window.Hide()
+	})
 }
 
 func positionScratchpad(app *application.App, mainWindow, scratchpad application.Window) {

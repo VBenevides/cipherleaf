@@ -133,6 +133,10 @@ export default function Scratchpad({
     void saveScratchpad(current.content, next.caretOffset, generation, localChange);
   };
 
+  const hideOverlay = useCallback(() => {
+    void VaultService.HideScratchpad().catch(() => Window.Hide());
+  }, []);
+
   useEffect(() => {
     let active = true;
     const applyEvent = (event: unknown) => {
@@ -176,12 +180,12 @@ export default function Scratchpad({
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       if (event.target instanceof Element && event.target.closest("dialog, [role=dialog]")) return;
       event.preventDefault();
-      if (overlay) void Window.Hide();
+      if (overlay) hideOverlay();
       else onClose?.();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [onClose, overlay]);
+  }, [hideOverlay, onClose, overlay]);
 
   const editorGeneration = state.generation;
   return (
@@ -194,7 +198,7 @@ export default function Scratchpad({
             className="icon-button scratchpad-close"
             aria-label="Hide scratchpad"
             title="Hide scratchpad"
-            onClick={() => void Window.Hide()}
+            onClick={hideOverlay}
           >
             ×
           </button>
