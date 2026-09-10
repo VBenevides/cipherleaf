@@ -6,8 +6,10 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"path/filepath"
 	"testing"
 
+	appsession "cipherleaf/internal/session"
 	"cipherleaf/internal/vault"
 )
 
@@ -61,6 +63,68 @@ func TestScratchpadStaleGenerationAfterLock(t *testing.T) {
 	}
 	if _, err := service.SaveScratchpad("stale", 0, state.Generation); !errors.Is(err, ErrScratchpadStaleGeneration) {
 		t.Fatalf("stale SaveScratchpad() error = %v", err)
+	}
+}
+
+func TestScratchpadHydratesAfterReopen(t *testing.T) {
+	service := NewVaultService()
+	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	secret := "scratchpad reopen secret"
+	session, err := service.CreateVault(t.TempDir(), "scratchpad", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := service.SaveScratchpad("persisted", 4, service.GetScratchpad().Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.LockVault()
+	opened, err := service.OpenVault(session.Path, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := service.GetScratchpad()
+	if got.Content != saved.Content || got.CaretOffset != saved.CaretOffset || got.Revision != saved.Revision {
+		t.Fatalf("reopened scratchpad = %#v, want persisted content/caret/revision from %#v", got, saved)
+	}
+	if got.Generation <= saved.Generation || opened.Path != session.Path {
+		t.Fatalf("reopened scratchpad generation/session = %#v, %q", got, opened.Path)
+	}
+	if _, err := service.SaveScratchpad("stale", 0, saved.Generation); !errors.Is(err, ErrScratchpadStaleGeneration) {
+		t.Fatalf("old-generation SaveScratchpad() error = %v", err)
+	}
+}
+
+func TestScratchpadAppRevisionStaysMonotonicAcrossHydrationAndSave(t *testing.T) {
+	service := newScratchpadTestService(t)
+	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	service.scratchpad.mu.Lock()
+	service.scratchpad.state = ScratchpadState{Content: "local", CaretOffset: 1, Revision: 7}
+	service.scratchpad.mu.Unlock()
+	if _, err := service.store.SaveScratchpad("remote", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.hydrateScratchpad(); err != nil {
+		t.Fatal(err)
+	}
+	hydrated := service.GetScratchpad()
+	if hydrated.Content != "remote" || hydrated.Revision != 8 {
+		t.Fatalf("hydrated scratchpad = %#v, want remote revision 8", hydrated)
+	}
+	saved, err := service.SaveScratchpad("saved", 3, hydrated.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Revision != 9 {
+		t.Fatalf("saved scratchpad revision = %d, want 9", saved.Revision)
+	}
+	path := service.store.Session().Path
+	service.LockVault()
+	if _, err := service.OpenVault(path, "scratchpad test secret"); err != nil {
+		t.Fatal(err)
+	}
+	if reopened := service.GetScratchpad(); reopened.Content != "saved" || reopened.Revision != 2 {
+		t.Fatalf("reopened scratchpad = %#v, want persisted revision 2", reopened)
 	}
 }
 

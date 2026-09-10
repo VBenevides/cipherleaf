@@ -8,6 +8,7 @@ import {
   useState,
   type ChangeEvent,
   type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Events } from "@wailsio/runtime";
@@ -105,6 +106,34 @@ const JOURNAL_LINE_LABELS: Record<JournalLines, string> = {
 };
 const SCRATCHPAD_OPACITY_KEY = "cipherleaf-scratchpad-opacity";
 const SCRATCHPAD_DEFAULT_OPACITY = 0.5;
+const DEFAULT_SCRATCHPAD_SHORTCUT = "Super+`";
+const SHORTCUT_KEY_CODES: Record<string, string> = {
+  Backquote: "`",
+  Minus: "-",
+  Equal: "=",
+  BracketLeft: "[",
+  Backslash: "\\",
+  BracketRight: "]",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Space: "Space",
+  Enter: "Enter",
+  Tab: "Tab",
+  Escape: "Escape",
+  Backspace: "Backspace",
+  Delete: "Delete",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  Home: "Home",
+  End: "End",
+  PageUp: "Page Up",
+  PageDown: "Page Down",
+};
 const EDITOR_VIEW_LABELS: Record<EditorView, string> = {
   live: "Live Preview",
   object: "Object Tree",
@@ -116,6 +145,31 @@ function readScratchpadOpacity(): number {
   if (saved === null || saved.trim() === "") return SCRATCHPAD_DEFAULT_OPACITY;
   const opacity = Number(saved);
   return Number.isFinite(opacity) && opacity >= 0 && opacity <= 1 ? opacity : SCRATCHPAD_DEFAULT_OPACITY;
+}
+
+function shortcutKeyFromEvent(event: ReactKeyboardEvent<HTMLElement>): string | null {
+  if (event.repeat || event.nativeEvent.isComposing) return null;
+  if (event.code === "NumpadAdd") return null;
+  if (event.key === "+") return "plus";
+  if (event.code in SHORTCUT_KEY_CODES) return SHORTCUT_KEY_CODES[event.code];
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
+  if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
+  if (/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(event.code)) return event.code;
+  return null;
+}
+
+function shortcutFromEvent(event: ReactKeyboardEvent<HTMLElement>): string | null {
+  if (event.key === "Escape") return "";
+  if (!(event.ctrlKey || event.altKey || event.shiftKey || event.metaKey)) return null;
+  const key = shortcutKeyFromEvent(event);
+  if (!key) return null;
+  return [
+    event.ctrlKey && "Ctrl",
+    event.altKey && "Alt",
+    event.shiftKey && "Shift",
+    event.metaKey && "Super",
+    key,
+  ].filter(Boolean).join("+");
 }
 
 function NoteSortSelect({ value, onChange }: { readonly value: string; readonly onChange: (value: string) => void }) {
@@ -608,6 +662,9 @@ function App() {
   const [tabs, setTabs] = useState<EditorTab[]>(() => [{ id: 1, noteID: "", title: "New tab", lastActiveAt: Date.now() }]);
   const [activeTabID, setActiveTabID] = useState(1);
   const [scratchpadActive, setScratchpadActive] = useState(false);
+  const [scratchpadShortcut, setScratchpadShortcut] = useState(DEFAULT_SCRATCHPAD_SHORTCUT);
+  const [scratchpadShortcutCapturing, setScratchpadShortcutCapturing] = useState(false);
+  const [scratchpadShortcutError, setScratchpadShortcutError] = useState("");
   const [scratchpadOpacity, setScratchpadOpacity] = useState(() => readScratchpadOpacity());
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
@@ -877,6 +934,43 @@ function App() {
     }
   };
 
+  const openAppearanceSettings = (sectionID?: string) => {
+    setTitlebarMenu(null);
+    bringWindowToFront("appearanceSettings");
+    setAppearanceSettingsOpen(true);
+    openSettingsSection("appearance", sectionID);
+  };
+
+  const saveScratchpadShortcut = async (shortcut: string) => {
+    setScratchpadShortcutError("");
+    try {
+      const effective = await VaultService.SetScratchpadShortcut(shortcut);
+      setScratchpadShortcut(effective || shortcut);
+      setScratchpadShortcutCapturing(false);
+    } catch (reason) {
+      setScratchpadShortcutError(errorText(reason));
+      void VaultService.GetScratchpadShortcut()
+        .then((effective) => {
+          if (effective) setScratchpadShortcut(effective);
+        })
+        .catch(() => {});
+      setScratchpadShortcutCapturing(false);
+    }
+  };
+
+  const handleScratchpadShortcutCapture = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!scratchpadShortcutCapturing || event.repeat || event.nativeEvent.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setScratchpadShortcutCapturing(false);
+      return;
+    }
+    const shortcut = shortcutFromEvent(event);
+    if (!shortcut) return;
+    event.preventDefault();
+    void saveScratchpadShortcut(shortcut);
+  };
+
   useEffect(() => {
     noteRef.current = note;
   }, [note]);
@@ -1093,6 +1187,20 @@ function App() {
 
   const decreaseEditorFontSize = useCallback(() => {
     setEditorFontSize((current) => Math.max(10, current - 1));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    VaultService.GetScratchpadShortcut()
+      .then((shortcut) => {
+        if (active) setScratchpadShortcut(shortcut || DEFAULT_SCRATCHPAD_SHORTCUT);
+      })
+      .catch(() => {
+        if (active) setScratchpadShortcut(DEFAULT_SCRATCHPAD_SHORTCUT);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const increaseEditorFontSize = useCallback(() => {
@@ -4073,7 +4181,7 @@ function App() {
     },
     {
       id: "scratchpad",
-      shortcut: "Ctrl + F12",
+      shortcut: scratchpadShortcut,
       name: "Open Scratchpad",
       description: "Open the session scratchpad",
       run: activateScratchpad,
@@ -4189,6 +4297,13 @@ function App() {
         bringWindowToFront("appearanceSettings");
         setAppearanceSettingsOpen(true);
       },
+    },
+    {
+      id: "scratchpad-shortcuts",
+      shortcut: "",
+      name: "Scratchpad shortcut settings",
+      description: "Change the global Open Scratchpad shortcut",
+      run: () => openAppearanceSettings("settings-shortcuts"),
     },
   ];
   const commandPaletteNeedle = commandPaletteQuery.trim().toLocaleLowerCase();
@@ -4664,10 +4779,12 @@ function App() {
               <div className="titlebar-menu-popover" role="menu">
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
-                  bringWindowToFront("appearanceSettings");
-                  setAppearanceSettingsOpen(true);
+                  openAppearanceSettings();
                 }}>
                   Settings…
+                </button>
+                <button role="menuitem" onClick={openCommandPalette}>
+                  Command palette <kbd>Ctrl/Cmd + Shift + P</kbd>
                 </button>
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
@@ -5082,7 +5199,7 @@ function App() {
             role="tab"
             className={`note-tab scratchpad-tab ${scratchpadActive ? "active" : ""}`}
             aria-selected={scratchpadActive}
-            title="Open Scratchpad (Ctrl + F12)"
+            title={`Open Scratchpad (${scratchpadShortcut})`}
             onClick={activateScratchpad}
           >
             <span>Scratchpad</span>
@@ -5718,6 +5835,7 @@ function App() {
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-theme")}>Theme</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-guide-lines")}>Guide lines</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-scratchpad-opacity")}>Scratchpad</button>
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-shortcuts")}>Shortcuts</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-font-size")}>Text size</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-editor-font")}>Editor font</button>
                   </div>
@@ -5853,6 +5971,29 @@ function App() {
                         </div>
                       </label>
                     </div>
+                    <fieldset id="settings-shortcuts" className="appearance-fieldset settings-section settings-section-card">
+                      <legend>Shortcuts</legend>
+                      <label>
+                        Open Scratchpad
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          aria-label="Capture Open Scratchpad shortcut"
+                          onClick={() => {
+                            setScratchpadShortcutError("");
+                            setScratchpadShortcutCapturing(true);
+                          }}
+                          onKeyDown={handleScratchpadShortcutCapture}
+                        >
+                          {scratchpadShortcutCapturing ? "Press a shortcut…" : scratchpadShortcut}
+                        </button>
+                      </label>
+                      <button type="button" className="secondary-button" onClick={() => void saveScratchpadShortcut(DEFAULT_SCRATCHPAD_SHORTCUT)}>
+                        Reset
+                      </button>
+                      {scratchpadShortcutError && <p className="error-message" role="alert">{scratchpadShortcutError}</p>}
+                      <small>Use one key with at least one modifier.</small>
+                    </fieldset>
                     <div id="settings-font-size" className="settings-section settings-section-card">
                       <label>
                         Editor font size

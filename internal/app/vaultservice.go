@@ -25,18 +25,21 @@ import (
 )
 
 type VaultService struct {
-	mu             sync.RWMutex
-	app            *application.App
-	store          *vault.Store
-	recent         *appsession.RecentVaultStore
-	secrets        *secretstore.Store
-	sync           *githubsync.Manager
-	syncWorkerOnce sync.Once
-	syncJobs       chan syncJob
-	statisticsMu   sync.Mutex
-	backupMu       sync.Mutex
-	process        *process.Process
-	scratchpad     scratchpadStore
+	mu                            sync.RWMutex
+	app                           *application.App
+	store                         *vault.Store
+	recent                        *appsession.RecentVaultStore
+	secrets                       *secretstore.Store
+	sync                          *githubsync.Manager
+	syncWorkerOnce                sync.Once
+	syncJobs                      chan syncJob
+	statisticsMu                  sync.Mutex
+	backupMu                      sync.Mutex
+	scratchpadShortcutMu          sync.Mutex
+	scratchpadShortcut            string
+	scratchpadShortcutInitialized bool
+	process                       *process.Process
+	scratchpad                    scratchpadStore
 }
 
 type syncJob struct{ done chan syncJobResult }
@@ -318,8 +321,12 @@ func (s *VaultService) CreateVault(parentPath, name, secret string) (vault.Sessi
 	}
 	s.clearScratchpad()
 	if err := s.rememberVault(created.Path); err != nil {
-		s.store.Lock()
+		s.LockVault()
 		return vault.Session{}, errors.New("the vault was created, but its location could not be remembered")
+	}
+	if err := s.hydrateScratchpad(); err != nil {
+		s.LockVault()
+		return vault.Session{}, fmt.Errorf("the vault was created, but its scratchpad could not be loaded: %w", err)
 	}
 	return created, nil
 }
@@ -331,8 +338,12 @@ func (s *VaultService) OpenVault(path, secret string) (vault.Session, error) {
 	}
 	s.clearScratchpad()
 	if err := s.rememberVault(opened.Path); err != nil {
-		s.store.Lock()
+		s.LockVault()
 		return vault.Session{}, errors.New("the vault was unlocked, but its location could not be remembered")
+	}
+	if err := s.hydrateScratchpad(); err != nil {
+		s.LockVault()
+		return vault.Session{}, fmt.Errorf("the vault was unlocked, but its scratchpad could not be loaded: %w", err)
 	}
 	return opened, nil
 }
@@ -371,10 +382,9 @@ func (s *VaultService) CloneGitHubVault(
 		return CloneVaultResult{}, err
 	}
 	if err := s.rememberVault(restored.Path); err != nil {
-		s.store.Lock()
+		s.LockVault()
 		return CloneVaultResult{}, errors.New("the vault was restored, but its location could not be remembered")
 	}
-	s.clearScratchpad()
 	linked := true
 	warning := downloaded.Warning
 	if err := s.sync.ActivateDownloadedVault(linkedSettings); err != nil {
@@ -383,6 +393,10 @@ func (s *VaultService) CloneGitHubVault(
 			warning += " "
 		}
 		warning += "The vault was restored locally, but its GitHub link settings could not be saved."
+	}
+	if err := s.hydrateScratchpad(); err != nil {
+		s.LockVault()
+		return CloneVaultResult{}, fmt.Errorf("the vault was restored, but its scratchpad could not be loaded: %w", err)
 	}
 	return CloneVaultResult{
 		Session:    restored,
@@ -518,8 +532,12 @@ func (s *VaultService) OpenVaultRemembered(path string) (vault.Session, error) {
 	}
 	s.clearScratchpad()
 	if err := s.rememberVault(session.Path); err != nil {
-		s.store.Lock()
+		s.LockVault()
 		return vault.Session{}, errors.New("the vault was unlocked, but its location could not be remembered")
+	}
+	if err := s.hydrateScratchpad(); err != nil {
+		s.LockVault()
+		return vault.Session{}, fmt.Errorf("the vault was unlocked, but its scratchpad could not be loaded: %w", err)
 	}
 	return session, nil
 }
@@ -1013,6 +1031,9 @@ func (s *VaultService) PullAndLinkGitHubVault(
 		return SyncResult{}, err
 	}
 	result.Merge = merge
+	if err := s.hydrateScratchpad(); err != nil {
+		return SyncResult{}, err
+	}
 	if err := s.sync.ActivateDownloadedVault(linkedSettings); err != nil {
 		return SyncResult{}, err
 	}
@@ -1191,6 +1212,9 @@ func (s *VaultService) pullAndMerge(vaultID string, attempt, maxAttempts int) (g
 	}
 	if err != nil {
 		return pull, vault.MergeResult{}, "Pull succeeded, but the remote changes could not be merged: " + err.Error(), false, nil
+	}
+	if err := s.hydrateScratchpad(); err != nil {
+		return pull, merge, "Pull succeeded, but the remote scratchpad could not be loaded: " + err.Error(), false, nil
 	}
 	if len(merge.Conflicts) > 0 || len(merge.TrackingConflicts) > 0 {
 		return pull, merge, "Pull succeeded, but note or time-tracking conflicts must be resolved before pushing.", false, nil

@@ -84,6 +84,45 @@ func TestRecentVaultPersistsTheme(t *testing.T) {
 	}
 }
 
+func TestRecentVaultScratchpadShortcutDefaultsAndPersists(t *testing.T) {
+	file := filepath.Join(t.TempDir(), recentFilename)
+	store := NewRecentVaultStore(file)
+	if got := store.GetScratchpadShortcut(); got != DefaultScratchpadShortcut {
+		t.Fatalf("empty Scratchpad shortcut = %q, want %q", got, DefaultScratchpadShortcut)
+	}
+	vaultPath := filepath.Join(t.TempDir(), "vault")
+	if err := os.MkdirAll(vaultPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RememberWithTheme(vaultPath, "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScratchpadShortcut("Ctrl+Shift+S"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.GetScratchpadShortcut(); got != "Ctrl+Shift+S" {
+		t.Fatalf("saved Scratchpad shortcut = %q", got)
+	}
+	if err := store.Remember(vaultPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.GetScratchpadShortcut(); got != "Ctrl+Shift+S" {
+		t.Fatalf("Remember() dropped Scratchpad shortcut = %q", got)
+	}
+	if err := store.Remove(vaultPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.GetScratchpadShortcut(); got != "Ctrl+Shift+S" {
+		t.Fatalf("Remove() dropped Scratchpad shortcut = %q", got)
+	}
+	if err := store.SetScratchpadShortcut(" "); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.GetScratchpadShortcut(); got != DefaultScratchpadShortcut {
+		t.Fatalf("blank Scratchpad shortcut = %q, want %q", got, DefaultScratchpadShortcut)
+	}
+}
+
 func TestNormalizeThemeAcceptsArchivist(t *testing.T) {
 	if got := NormalizeTheme(" Archivist "); got != "archivist" {
 		t.Fatalf("NormalizeTheme() = %q, want archivist", got)

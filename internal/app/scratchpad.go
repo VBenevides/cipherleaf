@@ -53,6 +53,33 @@ func (s *VaultService) clearScratchpad() {
 	s.emitScratchpadEvent("cipherleaf:scratchpad-cleared", state)
 }
 
+func (s *VaultService) hydrateScratchpad() error {
+	s.scratchpad.mu.Lock()
+	persisted, err := s.store.GetScratchpad()
+	if err != nil {
+		s.scratchpad.mu.Unlock()
+		return err
+	}
+
+	state := s.scratchpad.state
+	currentRevision := state.Revision
+	changed := state.Content != persisted.Content ||
+		state.CaretOffset != persisted.CaretOffset ||
+		state.Revision != persisted.Revision
+	state.Content = persisted.Content
+	state.CaretOffset = persisted.CaretOffset
+	state.Revision = persisted.Revision
+	if changed && persisted.Revision <= currentRevision {
+		state.Revision = currentRevision + 1
+	}
+	s.scratchpad.state = state
+	s.scratchpad.mu.Unlock()
+	if changed {
+		s.emitScratchpadEvent("cipherleaf:scratchpad-changed", state)
+	}
+	return nil
+}
+
 func (s *VaultService) SaveScratchpad(content string, caretOffset int, generation uint64) (ScratchpadState, error) {
 	s.scratchpad.mu.Lock()
 	if s.store.Session().Locked {
@@ -70,13 +97,22 @@ func (s *VaultService) SaveScratchpad(content string, caretOffset int, generatio
 	if caretOffset < 0 {
 		caretOffset = 0
 	}
-	s.scratchpad.state.Content = content
-	s.scratchpad.state.CaretOffset = caretOffset
-	s.scratchpad.state.Revision++
-	for id := range scratchpadAttachmentIDs(content) {
+	persisted, err := s.store.SaveScratchpad(content, caretOffset)
+	if err != nil {
+		s.scratchpad.mu.Unlock()
+		return ScratchpadState{}, err
+	}
+	currentRevision := s.scratchpad.state.Revision
+	s.scratchpad.state.Content = persisted.Content
+	s.scratchpad.state.CaretOffset = persisted.CaretOffset
+	s.scratchpad.state.Revision = persisted.Revision
+	if persisted.Revision <= currentRevision {
+		s.scratchpad.state.Revision = currentRevision + 1
+	}
+	for id := range scratchpadAttachmentIDs(persisted.Content) {
 		delete(s.scratchpad.pending, id)
 	}
-	s.scratchpad.cleanupAttachmentsLocked(content)
+	s.scratchpad.cleanupAttachmentsLocked(persisted.Content)
 	state := s.scratchpad.state
 	s.scratchpad.mu.Unlock()
 	s.emitScratchpadEvent("cipherleaf:scratchpad-changed", state)

@@ -2208,6 +2208,7 @@ func (s *Store) writeRemoteSnapshotMetadataLocked(
 		Folders:       slices.Clone(s.manifest.Folders),
 		Deleted:       slices.Clone(s.manifest.DeletedFolders),
 		Settings:      s.manifest.Settings,
+		Scratchpad:    s.manifest.Scratchpad,
 	}
 	sortFolders(folderManifest.Folders)
 	sortTombstones(folderManifest.Deleted)
@@ -2284,6 +2285,7 @@ func (s *Store) remoteSnapshotMatchesLocked(remote authenticatedRemoteSnapshot) 
 		slices.Equal(remote.Manifest.DeletedFolders, localDeletedFolders) &&
 		slices.Equal(remote.Manifest.DeletedNotes, localDeletedNotes) &&
 		remote.Manifest.Settings == s.manifest.Settings &&
+		remote.Manifest.Scratchpad == s.manifest.Scratchpad &&
 		len(remote.Objects) == len(s.manifest.Notes)+len(localDeletedNotes)
 	trackingMatches, err := s.timeTrackingSnapshotMatchesLocked(remote.Tracking)
 	if err != nil {
@@ -2663,6 +2665,7 @@ func mergeRemoteFolderDeletions(
 
 func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRemoteSnapshot) (MergeResult, error) {
 	result := MergeResult{UpToDate: true}
+	originalScratchpad := s.manifest.Scratchpad
 	if err := reconcileRemoteAttachmentDirectory(
 		filepath.Join(source, "attachments", sharedAttachmentFolder),
 		filepath.Join(s.root, "attachments", sharedAttachmentFolder),
@@ -2684,6 +2687,12 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 		result.UpdatedSettings = true
 		result.UpToDate = false
 	}
+	mergedScratchpad := s.manifest.Scratchpad
+	remoteScratchpadWon := scratchpadStateIsNewer(remote.Manifest.Scratchpad, mergedScratchpad)
+	if remoteScratchpadWon {
+		mergedScratchpad = remote.Manifest.Scratchpad
+		result.UpToDate = false
+	}
 	trackingConflicts, trackingChanged, err := s.mergeTimeTrackingSnapshotLocked(remote.Tracking)
 	if err != nil {
 		return MergeResult{}, err
@@ -2701,7 +2710,11 @@ func (s *Store) mergeRemoteSnapshotLocked(source string, remote authenticatedRem
 	s.manifest.DeletedNotes = mergedDeletedNotes
 	s.manifest.DeletedFolders = mergedDeletedFolders
 	s.manifest.Settings = mergedSettings
+	s.manifest.Scratchpad = mergedScratchpad
 	if err := s.saveManifestLocked(); err != nil {
+		if remoteScratchpadWon {
+			s.manifest.Scratchpad = originalScratchpad
+		}
 		return MergeResult{}, fmt.Errorf("save merged manifest: %w", err)
 	}
 	s.searchIndex = nil
@@ -2912,6 +2925,7 @@ type remoteSnapshotMetadata struct {
 	Folders        []Folder
 	DeletedFolders []Tombstone
 	Settings       VaultSettings
+	Scratchpad     ScratchpadState
 }
 
 func (s *Store) readRemoteSnapshotMetadataLocked(source string) (remoteSnapshotMetadata, error) {
@@ -2959,6 +2973,10 @@ func (s *Store) readRemoteSnapshotMetadataLocked(source string) (remoteSnapshotM
 		(folderManifest.Settings.ModifiedAt != 0 && metadata.Settings != folderManifest.Settings) {
 		return remoteSnapshotMetadata{}, errors.New("remote settings contain invalid data")
 	}
+	if err := validateScratchpadState(folderManifest.Scratchpad); err != nil {
+		return remoteSnapshotMetadata{}, fmt.Errorf("remote scratchpad contains invalid data: %w", err)
+	}
+	metadata.Scratchpad = folderManifest.Scratchpad
 	metadata.Folders = slices.Clone(folderManifest.Folders)
 	sortFolders(metadata.Folders)
 	metadata.DeletedFolders, err = validateRemoteFolderMetadata(metadata.Folders, folderManifest.Deleted)
@@ -3207,6 +3225,7 @@ func (s *Store) readRemoteSnapshotLocked(
 	remoteFolders := metadata.Folders
 	remoteDeletedFolders := metadata.DeletedFolders
 	remoteSettings := metadata.Settings
+	remoteScratchpad := metadata.Scratchpad
 
 	remoteNotes, noteSummaries, liveObjectCount, err := s.readRemoteSnapshotObjectsLocked(
 		source, inventory, remoteFolders, verifyAllObjects, validateDerivedMetadata,
@@ -3243,6 +3262,7 @@ func (s *Store) readRemoteSnapshotLocked(
 			DeletedFolders: remoteDeletedFolders,
 			DeletedNotes:   tombstonesFromRemoteObjects(remoteNotes),
 			Settings:       remoteSettings,
+			Scratchpad:     remoteScratchpad,
 		},
 		Objects:  remoteNotes,
 		Tracking: remoteTracking,
@@ -3730,6 +3750,9 @@ func (s *Store) readManifestAtLocked(root string) (manifest, error) {
 	}
 	if err := validateManifestTombstones(result); err != nil {
 		return manifest{}, err
+	}
+	if err := validateScratchpadState(result.Scratchpad); err != nil {
+		return manifest{}, fmt.Errorf("manifest contains invalid scratchpad data: %w", err)
 	}
 	sortTombstones(result.DeletedNotes)
 	sortTombstones(result.DeletedFolders)

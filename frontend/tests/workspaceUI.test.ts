@@ -7,6 +7,7 @@ import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const nativeMain = readFileSync(new URL("../../main.go", import.meta.url), "utf8");
+const nativeService = readFileSync(new URL("../../internal/app/scratchpad_shortcut.go", import.meta.url), "utf8");
 const scratchpad = readFileSync(new URL("../src/Scratchpad.tsx", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
@@ -19,8 +20,7 @@ test("scratchpad is a fixed rightmost tab with normal-tab-only shortcuts", () =>
   assert.match(app, /className=\{`note-tab scratchpad-tab[\s\S]*<span>Scratchpad<\/span>/);
   assert.match(app, /className="new-note-tab"[\s\S]*className=\{`note-tab scratchpad-tab/);
   assert.match(app, /if \(session\?\.locked \|\| event\.shiftKey \|\| event\.metaKey\) return;/);
-  assert.match(app, /title="Open Scratchpad \(Ctrl \+ F12\)"/);
-  assert.doesNotMatch(app, /handleScratchpadShortcut/);
+  assert.match(app, /title=\{`Open Scratchpad \(\$\{scratchpadShortcut\}\)`\}/);
   assert.doesNotMatch(app, /window\.addEventListener\("keydown", handleScratchpadShortcut, true\)/);
   assert.doesNotMatch(app, /scratchpad-tab[\s\S]*Close Scratchpad/);
   assert.match(app, /if \(scratchpadActiveRef\.current\) \{[\s\S]*event\.preventDefault\(\);[\s\S]*return;/);
@@ -74,31 +74,47 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeMain, /AlwaysOnTop:\s+true/);
   assert.match(nativeMain, /Frameless:\s+true/);
   assert.match(nativeMain, /BackgroundType:\s+application\.BackgroundTypeTranslucent/);
-  assert.match(nativeMain, /const scratchpadShortcut = "Ctrl\+F12"/);
-  const registrationIndex = nativeMain.indexOf("app.GlobalShortcut.Register(scratchpadShortcut");
+  assert.match(nativeMain, /Name:\s+"main"/);
+  assert.match(nativeMain, /app\.Event\.OnApplicationEvent\(events\.Common\.ApplicationStarted, func\(\*application\.ApplicationEvent\) \{[\s\S]*vaultService\.InitializeScratchpadShortcut\(\)/);
+  assert.doesNotMatch(nativeMain, /app\.GlobalShortcut\.Register/);
+  assert.doesNotMatch(nativeMain, /if err := vaultService\.InitializeScratchpadShortcut\(\); err != nil/);
+  const registrationIndex = nativeMain.indexOf("app.Event.OnApplicationEvent(events.Common.ApplicationStarted");
   const runIndex = nativeMain.indexOf("app.Run()");
   assert.ok(registrationIndex >= 0 && registrationIndex < runIndex);
-  assert.match(nativeMain, /window\.IsFocused\(\) && window\.IsVisible\(\)/);
-  assert.match(nativeMain, /if\s+scratchpad\.IsVisible\(\)/);
-  assert.match(nativeMain, /vaultService\.GetSession\(\)\.Locked/);
-  assert.match(nativeMain, /scratchpad\.Show\(\)/);
-  assert.match(nativeMain, /scratchpad\.Hide\(\)/);
-  assert.match(nativeMain, /func positionScratchpad\(/);
-  assert.match(nativeMain, /screen\.Bounds\.X/);
-  assert.match(nativeMain, /screen\.Bounds\.Y/);
-  assert.match(nativeMain, /scratchpad\.SetPosition/);
-  assert.match(nativeMain, /positionScratchpad\(app, window, scratchpad\)/);
-  assert.match(nativeMain, /else if mainWindowActive \{[\s\S]*window\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
-  assert.doesNotMatch(nativeMain, /ApplicationStarted/);
+  assert.match(nativeService, /mainWindow\.IsFocused\(\) && mainWindow\.IsVisible\(\)/);
+  assert.match(nativeService, /if scratchpad\.IsVisible\(\)/);
+  assert.match(nativeService, /s\.GetSession\(\)\.Locked/);
+  assert.match(nativeService, /scratchpad\.Show\(\)/);
+  assert.match(nativeService, /scratchpad\.Hide\(\)/);
+  assert.match(nativeService, /func positionScratchpad\(/);
+  assert.match(nativeService, /screen\.Bounds\.X/);
+  assert.match(nativeService, /screen\.Bounds\.Y/);
+  assert.match(nativeService, /scratchpad\.SetPosition/);
+  assert.match(nativeService, /mainWindow\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
   assert.doesNotMatch(nativeMain, /window\.RegisterKeyBinding/);
   assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
 });
 
+test("Scratchpad shortcut settings capture and persist the dynamic binding", () => {
+  assert.match(app, /const DEFAULT_SCRATCHPAD_SHORTCUT = "Super\+`"/);
+  assert.match(app, /VaultService\.GetScratchpadShortcut\(\)/);
+  assert.match(app, /VaultService\.SetScratchpadShortcut\(shortcut\)/);
+  assert.match(app, /event\.code/);
+  assert.match(app, /event\.repeat/);
+  assert.equal((app.match(/event\.nativeEvent\.isComposing/g) ?? []).length, 2);
+  assert.match(app, /if \(event\.code === "NumpadAdd"\) return null;/);
+  assert.match(app, /if \(event\.key === "\+"\) return "plus";/);
+  assert.match(app, /event\.key === "Escape"/);
+  assert.match(app, /id="settings-shortcuts"/);
+  assert.match(app, /Shortcuts/);
+  assert.match(app, />Reset<\/button>/);
+});
+
 test("scratchpad size follows the active screen and keeps its height", () => {
-  assert.match(nativeMain, /width := screen\.Bounds\.Width \* 4 \/ 5/);
-  assert.match(nativeMain, /_, height := scratchpad\.Size\(\)[\s\S]*if height <= 0 \{[\s\S]*height = 600/);
-  assert.match(nativeMain, /scratchpad\.SetSize\(width, height\)/);
-  assert.match(nativeMain, /scratchpad\.SetPosition\(screen\.Bounds\.X\+\(screen\.Bounds\.Width-width\)\/2, screen\.Bounds\.Y\)/);
+  assert.match(nativeService, /width := screen\.Bounds\.Width \* 4 \/ 5/);
+  assert.match(nativeService, /_, height := scratchpad\.Size\(\)[\s\S]*if height <= 0 \{[\s\S]*height = 600/);
+  assert.match(nativeService, /scratchpad\.SetSize\(width, height\)/);
+  assert.match(nativeService, /scratchpad\.SetPosition\(screen\.Bounds\.X\+\(screen\.Bounds\.Width-width\)\/2, screen\.Bounds\.Y\)/);
 });
 
 test("scratchpad focus effect handles native focus and cleanup", () => {

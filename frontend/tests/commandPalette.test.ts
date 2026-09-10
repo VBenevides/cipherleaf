@@ -19,13 +19,20 @@ test("command palette supports matching, keyboard selection, and themed presenta
 test("command palette opens the scratchpad", () => {
   const source = app.match(/\{\n      id: "scratchpad",[\s\S]*?\n    \},/);
   assert.ok(source);
-  assert.match(source[0], /shortcut: "Ctrl \+ F12"/);
+  assert.match(source[0], /shortcut: scratchpadShortcut/);
   assert.match(source[0], /name: "Open Scratchpad"/);
   assert.match(source[0], /description: "Open the session scratchpad"/);
   let calls = 0;
-  const command = new Function("activateScratchpad", `return (${source[0].slice(0, -1)})`)(
+  const command = new Function("activateScratchpad", "scratchpadShortcut", `return (${source[0].slice(0, -1)})`)(
     () => { calls += 1; },
+    "Super+`",
   ) as { run: () => void };
   command.run();
   assert.equal(calls, 1);
+});
+
+test("command palette exposes shortcut settings", () => {
+  assert.match(app, /id: "scratchpad-shortcuts"/);
+  assert.match(app, /openAppearanceSettings\("settings-shortcuts"\)/);
+  assert.match(app, /Command palette <kbd>Ctrl\/Cmd \+ Shift \+ P<\/kbd>/);
 });

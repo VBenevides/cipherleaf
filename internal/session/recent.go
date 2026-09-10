@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"cipherleaf/internal/atomicfile"
@@ -17,11 +18,14 @@ const recentFilename = "last-vault.json"
 const maxRecentVaults = 5
 const maxRecentAge = 7 * 24 * time.Hour
 
+const DefaultScratchpadShortcut = "Super+`"
+
 type recentVault struct {
-	Path       string           `json:"path"`
-	Paths      []string         `json:"paths,omitempty"`
-	LastOpened map[string]int64 `json:"lastOpened,omitempty"`
-	Theme      string           `json:"theme,omitempty"`
+	Path               string           `json:"path"`
+	Paths              []string         `json:"paths,omitempty"`
+	LastOpened         map[string]int64 `json:"lastOpened,omitempty"`
+	Theme              string           `json:"theme,omitempty"`
+	ScratchpadShortcut string           `json:"scratchpadShortcut,omitempty"`
 }
 
 // ErrNoLastVault is returned when an operation expects a previously opened
@@ -30,6 +34,7 @@ var ErrNoLastVault = errors.New("no last opened vault is remembered")
 
 type RecentVaultStore struct {
 	path string
+	mu   sync.Mutex
 }
 
 func NewRecentVaultStore(path string) *RecentVaultStore {
@@ -58,16 +63,25 @@ func NormalizeTheme(value string) string {
 }
 
 func (s *RecentVaultStore) Remember(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	theme := ""
 	if existing, err := s.read(); err != nil {
 		return err
 	} else {
 		theme = existing.Theme
 	}
-	return s.RememberWithTheme(path, theme)
+	return s.rememberWithTheme(path, theme)
 }
 
 func (s *RecentVaultStore) RememberWithTheme(path, theme string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rememberWithTheme(path, theme)
+}
+
+func (s *RecentVaultStore) rememberWithTheme(path, theme string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return errors.New("recent vault path is required")
@@ -97,19 +111,24 @@ func (s *RecentVaultStore) RememberWithTheme(path, theme string) error {
 	}
 	lastOpened[cleaned] = time.Now().Unix()
 	return s.write(recentVault{
-		Path:       cleaned,
-		Paths:      paths,
-		LastOpened: lastOpened,
-		Theme:      NormalizeTheme(theme),
+		Path:               cleaned,
+		Paths:              paths,
+		LastOpened:         lastOpened,
+		Theme:              NormalizeTheme(theme),
+		ScratchpadShortcut: current.ScratchpadShortcut,
 	})
 }
 
 func (s *RecentVaultStore) LastPath() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recent, err := s.read()
 	return recent.Path, err
 }
 
 func (s *RecentVaultStore) LastTheme() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recent, err := s.read()
 	if err != nil {
 		return ""
@@ -119,6 +138,8 @@ func (s *RecentVaultStore) LastTheme() string {
 
 // Paths returns up to five vault paths in access order, from oldest to newest.
 func (s *RecentVaultStore) Paths() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	recent, err := s.read()
 	if err != nil {
 		return nil, err
@@ -127,6 +148,12 @@ func (s *RecentVaultStore) Paths() ([]string, error) {
 }
 
 func (s *RecentVaultStore) Remove(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.remove(path)
+}
+
+func (s *RecentVaultStore) remove(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
@@ -158,6 +185,31 @@ func (s *RecentVaultStore) Remove(path string) error {
 	if len(paths) > 0 {
 		recent.Path = paths[len(paths)-1]
 	}
+	return s.write(recent)
+}
+
+func (s *RecentVaultStore) GetScratchpadShortcut() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recent, err := s.read()
+	if err != nil || strings.TrimSpace(recent.ScratchpadShortcut) == "" {
+		return DefaultScratchpadShortcut
+	}
+	return strings.TrimSpace(recent.ScratchpadShortcut)
+}
+
+func (s *RecentVaultStore) SetScratchpadShortcut(shortcut string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recent, err := s.read()
+	if err != nil {
+		return err
+	}
+	shortcut = strings.TrimSpace(shortcut)
+	if shortcut == "" {
+		shortcut = DefaultScratchpadShortcut
+	}
+	recent.ScratchpadShortcut = shortcut
 	return s.write(recent)
 }
 
@@ -247,6 +299,8 @@ func (s *RecentVaultStore) write(recent recentVault) error {
 }
 
 func (s *RecentVaultStore) Forget() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove recent vault file: %w", err)
 	}
