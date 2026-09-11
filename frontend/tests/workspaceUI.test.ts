@@ -46,12 +46,13 @@ test("scratchpad overlay and backend state are generation fenced", () => {
 
 test("scratchpad Escape closes its host without stealing dialog Escape", () => {
   assert.match(scratchpad, /readonly onClose\?: \(\) => void;/);
-  const escapeEffect = scratchpad.match(/  useEffect\(\(\) => \{\n    const handleEscape = \(event: KeyboardEvent\) => \{[\s\S]*?  \}, \[onClose, overlay\]\);\n/);
+  const escapeEffect = scratchpad.match(/  useEffect\(\(\) => \{\n    const handleEscape = \(event: KeyboardEvent\) => \{[\s\S]*?  \}, \[hideOverlay, onClose, overlay\]\);\n/);
   assert.ok(escapeEffect);
   assert.match(escapeEffect[0], /event\.key !== "Escape" \|\| event\.defaultPrevented \|\| event\.isComposing/);
   assert.match(escapeEffect[0], /event\.target instanceof Element && event\.target\.closest\("dialog, \[role=dialog\]"\)/);
   assert.match(escapeEffect[0], /event\.preventDefault\(\);/);
-  assert.match(escapeEffect[0], /if \(overlay\) void Window\.Hide\(\);[\s\S]*else onClose\?\.\(\);/);
+  assert.match(escapeEffect[0], /if \(overlay\) hideOverlay\(\);[\s\S]*else onClose\?\.\(\);/);
+  assert.match(scratchpad, /VaultService\.HideScratchpad\(\)\.catch\(\(\) => Window\.Hide\(\)\)/);
   assert.match(escapeEffect[0], /window\.addEventListener\("keydown", handleEscape\);[\s\S]*window\.removeEventListener\("keydown", handleEscape\)/);
   const scratchpadRender = app.match(/  const renderScratchpadEditor = \(\) => \{[\s\S]*?\n  \};\n/);
   assert.ok(scratchpadRender);
@@ -77,7 +78,7 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeMain, /Name:\s+"main"/);
   assert.match(nativeMain, /app\.Event\.OnApplicationEvent\(events\.Common\.ApplicationStarted, func\(\*application\.ApplicationEvent\) \{[\s\S]*vaultService\.InitializeScratchpadShortcut\(\)/);
   assert.doesNotMatch(nativeMain, /app\.GlobalShortcut\.Register/);
-  assert.doesNotMatch(nativeMain, /if err := vaultService\.InitializeScratchpadShortcut\(\); err != nil/);
+  assert.match(nativeMain, /if err := vaultService\.InitializeScratchpadShortcut\(\); err != nil \{[\s\S]*log\.Printf\("failed to register scratchpad global shortcut: %v", err\)/);
   const registrationIndex = nativeMain.indexOf("app.Event.OnApplicationEvent(events.Common.ApplicationStarted");
   const runIndex = nativeMain.indexOf("app.Run()");
   assert.ok(registrationIndex >= 0 && registrationIndex < runIndex);
@@ -85,7 +86,7 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeService, /if scratchpad\.IsVisible\(\)/);
   assert.match(nativeService, /s\.GetSession\(\)\.Locked/);
   assert.match(nativeService, /scratchpad\.Show\(\)/);
-  assert.match(nativeService, /scratchpad\.Hide\(\)/);
+  assert.match(nativeService, /hideScratchpadWindow\(scratchpad\)/);
   assert.match(nativeService, /func positionScratchpad\(/);
   assert.match(nativeService, /screen\.Bounds\.X/);
   assert.match(nativeService, /screen\.Bounds\.Y/);
@@ -272,7 +273,7 @@ test("scratchpad opacity is configurable and shared with the overlay window", ()
   assert.match(app, /id="settings-scratchpad-opacity"/);
   assert.match(app, /type="range"[\s\S]*min="0"[\s\S]*max="1"[\s\S]*step="0\.05"[\s\S]*scratchpadOpacity/);
   assert.match(app, /Math\.min\(1, Math\.max\(0, value\)\)/);
-  assert.match(app, /Math\.round\(scratchpadOpacity \* 100\)%/);
+  assert.match(app, /Math\.round\(scratchpadOpacity \* 100\)\}%/);
   assert.match(main, /const SCRATCHPAD_OPACITY_KEY = 'cipherleaf-scratchpad-opacity'/);
   assert.match(main, /saved === null \|\| saved\.trim\(\) === ''/);
   assert.match(main, /Number\.isFinite\(opacity\) && opacity >= 0 && opacity <= 1/);

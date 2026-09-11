@@ -232,11 +232,15 @@ type sequenceGitRunner struct {
 	outputs [][]byte
 	errors  []error
 	calls   int
+	onRun   func([]string)
 }
 
-func (r *sequenceGitRunner) Run(_ context.Context, _ string, _ []string, _ []string) ([]byte, error) {
+func (r *sequenceGitRunner) Run(_ context.Context, _ string, args []string, _ []string) ([]byte, error) {
 	index := r.calls
 	r.calls++
+	if r.onRun != nil {
+		r.onRun(args)
+	}
 	var output []byte
 	if index < len(r.outputs) {
 		output = r.outputs[index]
@@ -504,5 +508,134 @@ func TestCoverageGitLayoutIdentityAndCacheHelpers(t *testing.T) {
 	buffer := &limitedBuffer{limit: 3}
 	if written, err := buffer.Write([]byte("12345")); err != nil || written != 5 || string(buffer.Bytes()) != "123" {
 		t.Fatalf("limited buffer = %q, %d, %v", buffer.Bytes(), written, err)
+	}
+}
+
+type coverageRemoteSnapshot struct{}
+
+func (coverageRemoteSnapshot) ExportRemoteSnapshot(root string) error {
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o700); err != nil {
+		return err
+	}
+	for _, path := range []string{"vault.json", "sync/manifest.enc", "sync/folders.enc"} {
+		fullPath := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+			return err
+		}
+		data := []byte("data")
+		if path == "vault.json" {
+			data = []byte(`{"format_version":1,"vault_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","algorithm":"XChaCha20-Poly1305"}`)
+		}
+		if err := os.WriteFile(fullPath, data, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (coverageRemoteSnapshot) ValidateRemoteSnapshot(string) (bool, error) { return true, nil }
+
+func TestCoverageGitHubProviderTopLevelSeams(t *testing.T) {
+	settings := DefaultSettings(strings.Repeat("a", 32))
+	settings.RepositorySSH = "git@github.com:owner/repository.git"
+	settings.Branch = "main"
+	settings.PrivateKeyPath = filepath.Join(t.TempDir(), "id")
+
+	linkRunner := &sequenceGitRunner{outputs: [][]byte{
+		{}, nil, nil, nil, nil, nil, []byte(strings.Repeat("b", 40)),
+	}, onRun: func(args []string) {
+		if len(args) > 0 && args[0] == "clone" {
+			_ = os.MkdirAll(filepath.Join(args[len(args)-1], ".git"), 0o700)
+		}
+	}}
+	linkProvider := &GitHubSSHProvider{runner: linkRunner, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}
+	if result, err := linkProvider.Link(context.Background(), settings, coverageRemoteSnapshot{}); err != nil || !result.Linked {
+		t.Fatalf("scripted empty link = %#v, %v", result, err)
+	}
+
+	failedLink := &GitHubSSHProvider{
+		runner:     &coverageGitRunner{err: errors.New("transport failed")},
+		runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second,
+	}
+	if _, err := failedLink.Link(context.Background(), settings, coverageRemoteSnapshot{}); err == nil {
+		t.Fatal("failed scripted link unexpectedly succeeded")
+	}
+
+	failedDownload := &GitHubSSHProvider{
+		runner:     &coverageGitRunner{connectionOutput: []byte("dead refs/heads/main\n")},
+		runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second,
+	}
+	if _, err := failedDownload.Download(context.Background(), settings); err == nil {
+		t.Fatal("scripted download without a branch reference unexpectedly succeeded")
+	}
+	emptyDownload := &GitHubSSHProvider{
+		runner:     &coverageGitRunner{},
+		runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second,
+	}
+	if _, err := emptyDownload.Download(context.Background(), settings); err == nil {
+		t.Fatal("empty scripted download unexpectedly succeeded")
+	}
+
+	downloadRunner := &sequenceGitRunner{outputs: [][]byte{
+		[]byte("deadbeef\trefs/heads/main\n"), nil,
+		[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil,
+		[]byte(strings.Repeat("c", 40)),
+	}, onRun: func(args []string) {
+		if len(args) > 0 && args[0] == "clone" {
+			root := args[len(args)-1]
+			_ = (coverageRemoteSnapshot{}).ExportRemoteSnapshot(root)
+		}
+	}}
+	downloadProvider := &GitHubSSHProvider{runner: downloadRunner, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}
+	if result, err := downloadProvider.Download(context.Background(), settings); err != nil || result.VaultID != settings.VaultID || result.LastCommit != strings.Repeat("c", 40) {
+		t.Fatalf("scripted download = %#v, %v", result, err)
+	}
+
+	pushProvider := &GitHubSSHProvider{runner: &sequenceGitRunner{outputs: [][]byte{
+		[]byte(" M vault.json\x00"), nil, []byte("vault.json\n"), nil, nil,
+		[]byte(strings.Repeat("d", 40)), nil,
+	}}, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}
+	pushSettings := settings
+	if err := os.MkdirAll(filepath.Join(pushProvider.cacheRepositoryPath(pushSettings), ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := pushProvider.Push(context.Background(), pushSettings, coverageRemoteSnapshot{}); err != nil || result.UpToDate || result.LastCommit != strings.Repeat("d", 40) {
+		t.Fatalf("scripted push = %#v, %v", result, err)
+	}
+	if _, err := (&GitHubSSHProvider{runtimeDir: t.TempDir(), cacheRoot: t.TempDir()}).Push(context.Background(), settings, coverageRemoteSnapshot{}); err == nil {
+		t.Fatal("push without a linked cache unexpectedly succeeded")
+	}
+
+	pullRunner := &sequenceGitRunner{outputs: [][]byte{
+		nil, []byte(strings.Repeat("e", 40)), nil, []byte(strings.Repeat("f", 40)),
+		[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), []byte("A\x00vault.json\x00"), nil, nil, nil, nil,
+		[]byte(strings.Repeat("f", 40)),
+	}, onRun: func(args []string) {
+		if len(args) > 0 && args[0] == "clone" {
+			_ = (coverageRemoteSnapshot{}).ExportRemoteSnapshot(args[len(args)-1])
+		}
+	}}
+	pullProvider := &GitHubSSHProvider{runner: pullRunner, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}
+	if result, err := pullProvider.Pull(context.Background(), settings); err != nil || result.UpToDate || result.LastCommit != strings.Repeat("f", 40) {
+		t.Fatalf("scripted pull = %#v, %v", result, err)
+	}
+	if _, err := (&GitHubSSHProvider{runner: &coverageGitRunner{err: errors.New("clone failed")}, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}).Pull(context.Background(), settings); err == nil {
+		t.Fatal("failed scripted pull unexpectedly succeeded")
+	}
+
+	for _, output := range []string{strings.Repeat("a", 40), strings.Repeat("b", 64)} {
+		provider := &GitHubSSHProvider{runner: &sequenceGitRunner{outputs: [][]byte{[]byte(output)}}}
+		if got, err := provider.resolveReference(context.Background(), "cache", "HEAD"); err != nil || got != output {
+			t.Fatalf("resolveReference(%d) = %q, %v", len(output), got, err)
+		}
+	}
+	for _, output := range []string{"", "short", strings.Repeat("a", 65)} {
+		provider := &GitHubSSHProvider{runner: &sequenceGitRunner{outputs: [][]byte{[]byte(output)}}}
+		if _, err := provider.resolveCommit(context.Background(), "cache"); err == nil {
+			t.Fatalf("invalid commit %q accepted", output)
+		}
+	}
+	if _, err := (&GitHubSSHProvider{runner: &sequenceGitRunner{errors: []error{errors.New("rev parse failed")}}}).resolveCommit(context.Background(), "cache"); err == nil {
+		t.Fatal("failed commit resolution unexpectedly succeeded")
 	}
 }

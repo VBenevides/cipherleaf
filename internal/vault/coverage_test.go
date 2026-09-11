@@ -1831,3 +1831,48 @@ func TestCoverageTrackingLabelUpdateBranches(t *testing.T) {
 		t.Fatalf("client conflict = %#v", conflict)
 	}
 }
+
+func TestCoverageFileSizeAndCanonicalDocumentHelpers(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "missing")
+	if sameRegularFileSize(missing, missing) {
+		t.Fatal("missing files reported equal")
+	}
+	directory := filepath.Join(root, "directory")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if sameRegularFileSize(directory, directory) {
+		t.Fatal("directories reported as equal regular files")
+	}
+	left := filepath.Join(root, "left")
+	right := filepath.Join(root, "right")
+	if err := os.WriteFile(left, []byte("same"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(right, []byte("same"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !sameRegularFileSize(left, right) {
+		t.Fatal("equal-size regular files reported different")
+	}
+	if err := os.WriteFile(right, []byte("different"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if sameRegularFileSize(left, right) {
+		t.Fatal("different-size regular files reported equal")
+	}
+
+	canonical := `{"format":"cipherleaf.object-document","version":1,"objects":[]}`
+	if !isCanonicalObjectDocument(canonical) || canonicalizeNoteContent(canonical) != canonical {
+		t.Fatal("canonical object document was not preserved")
+	}
+	for _, content := range []string{"", `{}`, `{"format":"cipherleaf-object-document","version":2}`} {
+		if isCanonicalObjectDocument(content) {
+			t.Fatalf("invalid canonical object document accepted: %q", content)
+		}
+	}
+	if got := canonicalizeNoteContent("# title"); !isCanonicalObjectDocument(got) {
+		t.Fatalf("Markdown was not canonicalized: %q", got)
+	}
+}
