@@ -211,8 +211,10 @@ assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-editor"), editorNod
 assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-live-board"), boardNode);
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-description")?.textContent, "Organize and track your cards across different states.");
 assert.equal(board.querySelectorAll<HTMLInputElement>(".cm-live-board-column-name").length, 4);
 assert.equal(board.querySelectorAll<HTMLInputElement>(".cm-live-board-column-color").length, 4);
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "1", "1"]);
 assert.ok(board.querySelector("button[aria-label=\"Add board column\"]"));
 assert.equal(board.querySelectorAll("button[aria-label=\"Remove column\"]").length, 4);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
@@ -229,16 +231,19 @@ assert.deepEqual([...boardTagFilter.options].map((option) => option.textContent)
 boardTagFilter.value = "work";
 boardTagFilter.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 2);
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "0", "0"]);
 const clearBoardFilters = [...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-controls button")].find((button) => button.textContent === "Clear")!;
 clearBoardFilters.click();
 assert.equal(boardTagFilter.value, "");
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 4);
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "1", "1"]);
 const boardFilter = board.querySelector<HTMLInputElement>("input[aria-label=\"Filter board cards by title\"]")!;
 boardFilter.value = "Renamed";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 1);
 boardFilter.value = "";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "1", "1"]);
 const boardCard = board.querySelector<HTMLButtonElement>(".status-not-started .cm-live-board-card")!;
 const blockedColumn = board.querySelector<HTMLElement>(".status-blocked")!;
 const elementFromPoint = document.elementFromPoint;
@@ -269,18 +274,20 @@ boardCard.dispatchEvent(pointer("pointerdown", 0, 0));
 document.dispatchEvent(pointer("pointerup", 0, 0));
 boardCard.click();
 assert.equal(opened, openedBeforeBoardClick + 1);
-const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
-minimizeBoard.click();
+const boardToggle = board.querySelector<HTMLButtonElement>(".cm-live-board-toggle")!;
+boardToggle.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1 · Concluded: 1");
-assert.equal(minimizeBoard.textContent, "Maximize");
-minimizeBoard.click();
+assert.equal(boardToggle.textContent, "›");
+assert.equal(boardToggle.getAttribute("aria-expanded"), "false");
+boardToggle.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, false);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, false);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, false);
-assert.equal(minimizeBoard.textContent, "Minimize");
+assert.equal(boardToggle.textContent, "⌄");
+assert.equal(boardToggle.getAttribute("aria-expanded"), "true");
 const boardTitle = board.querySelector<HTMLInputElement>(".cm-live-board-title")!;
 boardTitle.value = "Updated board";
 boardTitle.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -290,7 +297,7 @@ filter.value = "card";
 filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.click();
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-board.querySelector<HTMLButtonElement>(".cm-live-board-controls .secondary-button")?.click();
+([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-controls .secondary-button")].find((button) => button.textContent === "New card"))?.click();
 board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
   input.value = "";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -319,21 +326,25 @@ await act(async () => { multiBoard.root.unmount(); });
 multiBoard.shell.remove();
 
 let dynamicColumns: readonly BoardColumn[] = [];
-let selectedBoardTemplate = "";
+let dynamicDeleted: readonly BoardColumn[] = [];
+let dynamicOrphans: readonly string[] = [];
 let createdBoardTemplate = "";
 const dynamic = mount("dynamic-board-host");
 await act(async () => {
   dynamic.root.render(createElement(LiveMarkdownEditor, {
     noteID: "dynamic", value: boardMarker("dynamic", [], "Dynamic", {
       columns: [
-        { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] },
+        { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1", "card-2", "card-3"] },
         { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
       ],
     }),
     onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
-    cardData: cards, onMoveCardInBoard: () => {}, onChangeBoardColumns: (_boardID, columns) => { dynamicColumns = columns; },
+    cardData: cards, onMoveCardInBoard: () => {}, onChangeBoardColumns: (_boardID, columns, deleted, orphans) => {
+      dynamicColumns = columns;
+      dynamicDeleted = deleted ?? [];
+      dynamicOrphans = orphans ?? [];
+    },
     cardTemplates: [{ id: "template-1", name: "Template" }],
-    onChangeBoardTemplate: (_boardID, templateID) => { selectedBoardTemplate = templateID; },
     onCreateBoardTemplate: (boardID) => { createdBoardTemplate = boardID; },
     onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
   }));
@@ -341,13 +352,8 @@ await act(async () => {
 });
 const dynamicBoard = dynamic.body.querySelector<HTMLElement>(".cm-live-board")!;
 assert.equal(dynamicBoard.querySelectorAll(".cm-live-board-column").length, 2);
-const dynamicTemplate = dynamicBoard.querySelector<HTMLSelectElement>("select[aria-label=\"Card Template\"]")!;
-assert.deepEqual([...dynamicTemplate.options].map((option) => option.textContent), ["No template", "Template"]);
-dynamicTemplate.value = "template-1";
-dynamicTemplate.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-assert.equal(selectedBoardTemplate, "template-1");
-const newBoardTemplate = [...dynamicBoard.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "New template")!;
-newBoardTemplate.click();
+const editBoardTemplate = [...dynamicBoard.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Edit Card Template")!;
+editBoardTemplate.click();
 assert.equal(createdBoardTemplate, "dynamic");
 const dynamicName = dynamicBoard.querySelector<HTMLInputElement>(".cm-live-board-column-name")!;
 dynamicName.value = "Ready";
@@ -358,9 +364,83 @@ dynamicColor.value = "#654321";
 dynamicColor.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 assert.equal(dynamicColumns[0]?.color, "#654321");
 dynamicBoard.querySelector<HTMLButtonElement>("button[aria-label=\"Remove column\"]")!.click();
-assert.deepEqual(dynamicColumns, [{ id: "done", name: "Done", color: "#ABCDEF", cardIDs: ["card-1"] }]);
+assert.deepEqual(dynamicColumns, [{ id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] }]);
+assert.deepEqual(dynamicDeleted, [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1", "card-2", "card-3"] }]);
+assert.deepEqual(dynamicOrphans, ["card-1", "card-2", "card-3"]);
 await act(async () => { dynamic.root.unmount(); });
 dynamic.shell.remove();
+
+const sameTitleCards = new Map([...cards].map(([id, card]) => [id, { ...card, title: "Same title" }]));
+let orphanColumns: readonly BoardColumn[] = [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-4"] }];
+let orphanIDs: readonly string[] = ["card-1", "card-2", "card-3"];
+const orphan = mount("orphan-board-host");
+const renderOrphanBoard = async () => {
+  await act(async () => {
+    orphan.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "orphan", value: boardMarker("orphan", ["card-1", "card-2", "card-3", "card-4"], "Orphans", {
+        columns: orphanColumns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })),
+        orphanCardIDs: [...orphanIDs],
+      }),
+      onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {}, cardData: sameTitleCards,
+      onChangeBoardColumns: (_boardID, columns, _deleted, orphans) => {
+        orphanColumns = columns;
+        orphanIDs = orphans ?? [];
+      },
+      onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+};
+await renderOrphanBoard();
+let orphanBoard = orphan.body.querySelector<HTMLElement>(".cm-live-board")!;
+orphanBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-recovery-button")[1]!.click();
+assert.equal(orphanBoard.querySelectorAll(".cm-live-board-recovery-panel:not([hidden]) .cm-live-board-recovery-row").length, 3);
+for (const expected of [["card-2", "card-3"], ["card-3"], []]) {
+  orphanBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-panel:not([hidden]) .secondary-button")!.click();
+  assert.deepEqual(orphanIDs, expected);
+  assert.equal(orphanColumns[0]?.cardIDs.length, 4 - expected.length);
+  if (expected.length > 0) {
+    await renderOrphanBoard();
+    orphanBoard = orphan.body.querySelector<HTMLElement>(".cm-live-board")!;
+    orphanBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-recovery-button")[1]!.click();
+  }
+}
+assert.deepEqual(orphanColumns[0]?.cardIDs, ["card-4", "card-1", "card-2", "card-3"]);
+await act(async () => { orphan.root.unmount(); });
+orphan.shell.remove();
+
+let recoveryColumns: readonly BoardColumn[] = [];
+let recoveryDeleted: readonly BoardColumn[] = [];
+let recoveryOrphans: readonly string[] = [];
+const recovery = mount("recovery-board-host");
+await act(async () => {
+  recovery.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "recovery", value: boardMarker("recovery", ["card-1", "card-2", "card-3"], "Recovery", {
+      columns: [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] }],
+      deletedColumns: [{ id: "archive", name: "Archived", color: "#654321", cardIDs: ["card-2"] }],
+      orphanCardIDs: [],
+    }),
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {}, cardData: cards,
+    onChangeBoardColumns: (_boardID, columns, deleted, orphans) => {
+      recoveryColumns = columns;
+      recoveryDeleted = deleted ?? [];
+      recoveryOrphans = orphans ?? [];
+    },
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const recoveryBoard = recovery.body.querySelector<HTMLElement>(".cm-live-board")!;
+assert.match(recoveryBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-button")?.textContent ?? "", /Deleted Columns 1/);
+assert.match(recoveryBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-recovery-button")[1]?.textContent ?? "", /Orphan Cards 2/);
+recoveryBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-button")!.click();
+recoveryBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-panel:not([hidden]) .secondary-button")!.click();
+assert.equal(recoveryColumns.length, 2);
+assert.equal(recoveryDeleted.length, 0);
+assert.deepEqual(recoveryOrphans, ["card-3"]);
+assert.deepEqual(recoveryColumns[1]?.cardIDs, ["card-2"]);
+await act(async () => { recovery.root.unmount(); });
+recovery.shell.remove();
 
 const cardsWithoutTags = new Map([...updatedCards].map(([id, card]) => [id, { ...card, tags: [] }]));
 await act(async () => {

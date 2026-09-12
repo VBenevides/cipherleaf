@@ -69,10 +69,17 @@ test("configured board markers keep ordered columns and validate colors", () => 
       { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
     ],
     templateID: "template-1",
+    deletedColumns: [{ id: "archive", name: "Archived", color: "#654321", cardIDs: ["card-2"] }],
+    orphanCardIDs: ["card-3"],
   };
   const source = boardMarker("board-1", [], "Roadmap", options);
   assert.deepEqual(parseBoardMarker(source), { id: "board-1", title: "Roadmap", cardIDs: [], options });
   assert.deepEqual(boardColumnsForMarker(parseBoardMarker(source)!, cards), options.columns);
+  const archivedOrphans = parseBoardMarker(boardMarker("board-1", [], "Roadmap", {
+    ...options,
+    orphanCardIDs: ["card-2", "card-3"],
+  }));
+  assert.deepEqual(archivedOrphans?.options?.orphanCardIDs, ["card-2", "card-3"]);
   assert.deepEqual(boardColumnsForMarker(parseBoardMarker(boardMarker("board-1", ["card-1", "missing"]))!, cards).map((column) => column.cardIDs), [["missing"], [], ["card-1"], []]);
   const duplicate = boardMarker("board-1", [], "Roadmap", { columns: [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1", "card-1"] }] });
   assert.deepEqual(parseBoardMarker(duplicate)?.options?.columns[0].cardIDs, ["card-1"]);

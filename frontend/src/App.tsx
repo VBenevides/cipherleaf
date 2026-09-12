@@ -328,13 +328,7 @@ type CardPanelState = {
   note: Note;
   metadata: CardMetadata;
   body: string;
-};
-
-type BoardTemplatePanelState = {
-  boardID: string;
-  note: Note;
-  template: CardTemplate;
-  dirty: boolean;
+  kind?: "template";
 };
 
 type CloneVaultSubmission = {
@@ -843,10 +837,11 @@ function App() {
   const [cardPanelDirty, setCardPanelDirty] = useState(false);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
-  const [boardTemplatePanel, setBoardTemplatePanel] = useState<BoardTemplatePanelState | null>(null);
-  const [boardTemplateSaving, setBoardTemplateSaving] = useState(false);
   const saveCardPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const cardPanelRef = useRef<CardPanelState | null>(null);
+  const templateRequestRef = useRef(0);
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
+  cardPanelRef.current = cardPanel;
   const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
@@ -3594,22 +3589,25 @@ function App() {
 
   const openCard = async (id: string) => {
     leaveScratchpad();
+    const request = ++templateRequestRef.current;
     try {
-      if (cardPanel && !(await closeCardPanel())) return;
+      if (cardPanel && !(await closeCardPanel(false, true))) return;
       const origin = noteRef.current;
       cardOriginRef.current = origin ? { noteID: origin.id, offset: noteCaretOffsetsRef.current.get(origin.id) ?? 0 } : null;
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) throw new Error("This reference is not a card.");
+      if (request !== templateRequestRef.current) return;
       setSelectedTemplateID("");
       setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
       setCardPanelDirty(false);
     } catch (reason) {
-      setError(errorText(reason));
+      if (request === templateRequestRef.current) setError(errorText(reason));
     }
   };
 
-  const closeCardPanel = async (force = false) => {
+  const closeCardPanel = async (force = false, preserveTemplateRequest = false) => {
+    if (!preserveTemplateRequest) templateRequestRef.current += 1;
     if (!cardPanel) return true;
     if (!force && cardPanelDirty && !(await requestAppConfirm({
       kind: "confirm",
@@ -3627,6 +3625,7 @@ function App() {
     }
     cardOriginRef.current = null;
     setCardPanel(null);
+    cardPanelRef.current = null;
     setCardPanelDirty(false);
     return true;
   };
@@ -3658,6 +3657,7 @@ function App() {
 
   const createCard = async () => {
     leaveScratchpad();
+    const request = ++templateRequestRef.current;
     let createdID = "";
     try {
       const targetFolder = noteRef.current?.folderId ?? (selectedFolderID === "all" ? "" : selectedFolderID);
@@ -3666,6 +3666,7 @@ function App() {
       const metadata = newCardMetadata(created.id, new Date(created.createdAt), cardWriteChangesToEditorDefault);
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
       updateSummary(saved.summary);
+      if (request !== templateRequestRef.current) return cardReference(created.id);
       setSelectedTemplateID("");
       setCardPanel({ note: saved.note, metadata, body: "" });
       setCardPanelDirty(false);
@@ -3685,21 +3686,6 @@ function App() {
     return boardMarker(id);
   };
 
-  const closeBoardTemplatePanel = async (force = false) => {
-    if (!boardTemplatePanel) return true;
-    if (!force && boardTemplatePanel.dirty && !(await requestAppConfirm({
-      kind: "confirm",
-      eyebrow: "Template changes",
-      title: "Discard unsaved changes?",
-      message: "This template has unsaved changes. Close it without saving?",
-      confirmLabel: "Discard",
-      danger: true,
-      icon: "trash",
-    }))) return false;
-    setBoardTemplatePanel(null);
-    return true;
-  };
-
   const changeBoardTemplate = (boardID: string, templateID: string) => {
     const current = noteRef.current;
     if (!current) return;
@@ -3712,64 +3698,88 @@ function App() {
     if (content !== source) editNote({ content }, true);
   };
 
+  const openTemplateCard = async (
+    note: Note,
+    template: CardTemplate,
+    panelClosed = false,
+    request = templateRequestRef.current,
+  ) => {
+    if (request !== templateRequestRef.current) return false;
+    const origin = noteRef.current;
+    if (!panelClosed && cardPanel && !(await closeCardPanel(false, true))) return false;
+    if (request !== templateRequestRef.current || cardPanelRef.current) return false;
+    cardOriginRef.current = origin ? { noteID: origin.id, offset: noteCaretOffsetsRef.current.get(origin.id) ?? 0 } : null;
+    const metadata = {
+      ...newCardMetadata(note.id, new Date(note.createdAt)),
+      title: template.name.trim() || "Untitled",
+      status: template.status,
+      tags: normalizeCardTags(template.tags),
+    };
+    setSelectedTemplateID(note.id);
+    setCardPanel({ note, metadata, body: template.body, kind: "template" });
+    setCardPanelDirty(false);
+    return true;
+  };
+
   const openBoardTemplate = async (boardID: string, templateID: string) => {
-    if (!templateID || !(await closeBoardTemplatePanel())) return;
+    const request = ++templateRequestRef.current;
+    if (!templateID) return createBoardTemplate(boardID, request);
     try {
       const loaded = await VaultService.GetNote(templateID);
       const parsed = parseTemplateDocument(loaded.content, templateID);
       if (!parsed) {
-        changeBoardTemplate(boardID, "");
+        await createBoardTemplate(boardID, request);
         return;
       }
-      setBoardTemplatePanel({ boardID, note: loaded, template: parsed.template, dirty: false });
-    } catch {
-      changeBoardTemplate(boardID, "");
+      await openTemplateCard(loaded, parsed.template, false, request);
+    } catch (reason) {
+      const message = errorText(reason);
+      if (message.toLocaleLowerCase().includes("note not found")) await createBoardTemplate(boardID, request);
+      else if (request === templateRequestRef.current) setError(message);
     }
   };
 
-  const createBoardTemplate = async (boardID: string) => {
-    if (!(await closeBoardTemplatePanel())) return;
+  const createBoardTemplate = async (boardID: string, request = ++templateRequestRef.current) => {
+    if (request !== templateRequestRef.current) return;
+    if (cardPanel && !(await closeCardPanel(false, true))) return;
+    if (request !== templateRequestRef.current || cardPanelRef.current) return;
     const current = noteRef.current;
     if (!current) return;
+    const sourceNoteID = current.id;
     const board = markdownForEditing(current.content).split("\n")
       .map((line) => parseBoardMarker(line))
       .find((marker) => marker?.id === boardID);
     if (!board) return;
     try {
       const template = await VaultService.CreateNote(`Template: ${board.title}`);
+      if (request !== templateRequestRef.current || cardPanelRef.current) {
+        await VaultService.DeleteNote(template.id).catch(() => {});
+        return;
+      }
       const draft: CardTemplate = { id: template.id, name: `${board.title} card`, status: "not-started", tags: [], body: "" };
-      const saved = await VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft));
+      const saved = await runSerializedSave(() => VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft)));
+      if (request !== templateRequestRef.current || cardPanelRef.current) {
+        await VaultService.DeleteNote(template.id).catch(() => {});
+        return;
+      }
+      const latestSource = noteRef.current?.id === sourceNoteID ? markdownForEditing(noteRef.current.content) : null;
+      const latestBoard = latestSource?.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
+      if (!latestSource || !latestBoard) {
+        await VaultService.DeleteNote(template.id).catch(() => {});
+        return;
+      }
       updateSummary(saved.summary);
       changeBoardTemplate(boardID, template.id);
-      setBoardTemplatePanel({ boardID, note: saved.note, template: draft, dirty: false });
+      await openTemplateCard(saved.note, draft, true, request);
     } catch (reason) {
       setError(errorText(reason));
     }
-  };
-
-  const saveBoardTemplate = async () => {
-    const panel = boardTemplatePanel;
-    if (!panel) return;
-    setBoardTemplateSaving(true);
-    try {
-      const template = { ...panel.template, name: panel.template.name.trim() || "Untitled", tags: normalizeCardTags(panel.template.tags) };
-      const saved = await VaultService.SaveNote(panel.note.id, `Template: ${template.name}`, serializeTemplateDocument(template));
-      updateSummary(saved.summary);
-      setBoardTemplatePanel((current) => current?.template.id === template.id ? { ...current, note: saved.note, template, dirty: false } : current);
-    } catch (reason) {
-      setError(errorText(reason));
-    } finally {
-      setBoardTemplateSaving(false);
-    }
-  };
-
-  const updateBoardTemplate = (patch: Partial<CardTemplate>) => {
-    setBoardTemplatePanel((current) => current ? { ...current, template: { ...current.template, ...patch }, dirty: true } : current);
   };
 
   const addCardToBoard = async (boardID: string) => {
     const current = noteRef.current;
     if (!current) return;
+    const request = ++templateRequestRef.current;
     const sourceNoteID = current.id;
     const source = markdownForEditing(current.content);
     const board = source.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
@@ -3803,9 +3813,11 @@ function App() {
         return;
       }
       updateSummary(saved.summary);
-      setSelectedTemplateID("");
-      setCardPanel({ note: saved.note, metadata, body: template?.body ?? "" });
-      setCardPanelDirty(false);
+      if (request === templateRequestRef.current) {
+        setSelectedTemplateID("");
+        setCardPanel({ note: saved.note, metadata, body: template?.body ?? "" });
+        setCardPanelDirty(false);
+      }
       const content = replaceBoardMarker(latestSource, boardID, (board) => ({
         ...board,
         ...(board.options
@@ -3831,14 +3843,24 @@ function App() {
     if (content !== source) editNote({ content }, true);
   };
 
-  const changeBoardColumns = (boardID: string, columns: readonly BoardColumn[]) => {
+  const changeBoardColumns = (
+    boardID: string,
+    columns: readonly BoardColumn[],
+    deletedColumns?: readonly BoardColumn[],
+    orphanCardIDs?: readonly string[],
+  ) => {
     const current = noteRef.current;
     if (!current) return;
     const source = markdownForEditing(current.content);
-    const content = replaceBoardMarker(source, boardID, (board) => ({
-      ...board,
-      options: { ...board.options, columns: columns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })) },
-    }));
+    const content = replaceBoardMarker(source, boardID, (board) => {
+      const options = {
+        ...board.options,
+        columns: columns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })),
+        ...(deletedColumns === undefined ? {} : { deletedColumns: deletedColumns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })) }),
+        ...(orphanCardIDs === undefined ? {} : { orphanCardIDs: [...new Set(orphanCardIDs)] }),
+      };
+      return { ...board, options };
+    });
     if (content !== source) editNote({ content }, true);
   };
 
@@ -3869,10 +3891,26 @@ function App() {
 
   const saveCardPanel = async () => {
     if (!cardPanel) return;
+    const panelAtStart = cardPanel;
     setCardPanelSaving(true);
     try {
       const title = cardPanel.metadata.title.trim() || "Untitled";
       const metadata = { ...cardPanel.metadata, title, tags: normalizeCardTags(cardPanel.metadata.tags) };
+      if (cardPanel.kind === "template") {
+        const template: CardTemplate = {
+          id: cardPanel.note.id,
+          name: title,
+          status: metadata.status,
+          tags: metadata.tags,
+          body: cardPanel.body,
+        };
+        const saved = await runSerializedSave(() => VaultService.SaveNote(cardPanel.note.id, `Template: ${title}`, serializeTemplateDocument(template)));
+        updateSummary(saved.summary);
+        if (cardPanelRef.current !== panelAtStart) return;
+        setCardPanel({ note: saved.note, metadata, body: cardPanel.body, kind: "template" });
+        setCardPanelDirty(false);
+        return;
+      }
       const previousBody = stripCardJournalEntries(
         parseCardDocument(cardPanel.note.content, cardPanel.note.id, cardPanel.note.title)?.body ?? cardPanel.body,
       );
@@ -3888,11 +3926,12 @@ function App() {
         serializeCardDocument(metadata, body),
       );
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata, body });
       if (journaledMain && mainNote) {
         editNote({ content: journaledMain }, false);
         await persistCurrent();
       }
+      if (cardPanelRef.current !== panelAtStart) return;
+      setCardPanel({ note: saved.note, metadata, body });
       setCardPanelDirty(false);
     } catch (reason) {
       setError(errorText(reason));
@@ -3940,10 +3979,13 @@ function App() {
 
   const applyCardTemplate = async (id: string) => {
     if (!cardPanel || !id) return;
+    const panelAtStart = cardPanel;
+    templateRequestRef.current += 1;
     try {
       const template = await VaultService.GetNote(id);
       const parsed = parseTemplateDocument(template.content, id);
       if (!parsed) return;
+      if (cardPanelRef.current !== panelAtStart) return;
       setCardPanelDirty(true);
       setCardPanel((current) => current ? {
         ...current,
@@ -3958,6 +4000,7 @@ function App() {
   const deleteCardTemplate = async () => {
     if (!selectedTemplateID) return;
     const templateID = selectedTemplateID;
+    const editingTemplate = cardPanel?.kind === "template" && cardPanel.note.id === templateID;
     try {
       await VaultService.DeleteNote(templateID);
       const current = noteRef.current;
@@ -3972,7 +4015,7 @@ function App() {
       }
       setNotes((current) => current.filter((summary) => summary.id !== templateID));
       setSelectedTemplateID("");
-      setBoardTemplatePanel((current) => current?.template.id === templateID ? null : current);
+      if (editingTemplate) await closeCardPanel(true);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -3982,6 +4025,7 @@ function App() {
     const exists = notes.some((item) => item.id === id);
     const current = cardMetadata.get(id);
     if (!exists || !current || current.status === status) return;
+    const request = ++templateRequestRef.current;
     try {
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
@@ -3989,7 +4033,7 @@ function App() {
       const metadata = transitionCard(parsed.metadata, status);
       const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
-      if (cardPanel?.note.id === id) {
+      if (request === templateRequestRef.current && cardPanelRef.current?.note.id === id) {
         setCardPanel({ note: saved.note, metadata, body: parsed.body });
         setCardPanelDirty(false);
       }
@@ -5963,7 +6007,7 @@ function App() {
               <div className="card-sidebar-field"><span>Status</span><CardStatusPicker value={cardPanel.metadata.status} onChange={(status) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, status) } : current); }} /></div>
               <div className="card-sidebar-field"><span>Tags</span><CardTagsEditor tags={cardPanel.metadata.tags} suggestions={cardTagSuggestions} onChange={(tags) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags } } : current); }} /></div>
             </div>
-            {cardTemplates.length > 0 && (
+            {cardTemplates.length > 0 && !cardPanel.kind && (
               <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
                 <option value="">Choose a template</option>
                 {cardTemplates.map((template) => <option value={template.id} key={template.id}>{String(template.properties?.["cipherleaf-card-template-name"] ?? template.title)}</option>)}
@@ -6001,7 +6045,7 @@ function App() {
                 />
               </Suspense>
             </section>
-            <label className="card-editor-journal-toggle">
+            {!cardPanel.kind && <label className="card-editor-journal-toggle">
               <input
                 type="checkbox"
                 aria-label="Write changes to editor"
@@ -6012,12 +6056,12 @@ function App() {
                 }}
               />{" "}
               Write changes to editor
-            </label>
+            </label>}
             <div className="card-sidebar-actions">
-              <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>
-              <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>
-              {selectedTemplateID && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
-              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
+              {!cardPanel.kind && <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>}
+              {!cardPanel.kind && <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>}
+              {(cardPanel.kind || selectedTemplateID) && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
+              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : cardPanel.kind ? "Save template" : "Save card"}</button>
             </div>
           </aside>
     );
@@ -6038,24 +6082,6 @@ function App() {
         {renderScratchpadEditor()}
         {renderConflictEditor()}
         {renderNoteEditor()}
-        {boardTemplatePanel && (
-          <section className="board-template-panel" aria-label="Card Template">
-            <header>
-              <strong>Card Template</strong>
-              <button type="button" className="icon-button" aria-label="Close Card Template" onClick={() => void closeBoardTemplatePanel()}><Icon name="x" size={16} /></button>
-            </header>
-            <label>Name<input aria-label="Template name" value={boardTemplatePanel.template.name} onChange={(event) => updateBoardTemplate({ name: event.target.value })} /></label>
-            <label>Status<select aria-label="Template status" value={boardTemplatePanel.template.status} onChange={(event) => updateBoardTemplate({ status: event.target.value as CardStatus })}>
-              {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
-            </select></label>
-            <label>Tags<input aria-label="Template tags" value={boardTemplatePanel.template.tags.join(", ")} onChange={(event) => updateBoardTemplate({ tags: event.target.value.split(",") })} /></label>
-            <label>Body<textarea aria-label="Template body" value={boardTemplatePanel.template.body} onChange={(event) => updateBoardTemplate({ body: event.target.value })} /></label>
-            <div className="board-template-actions">
-              <button type="button" className="secondary-button" onClick={() => void closeBoardTemplatePanel(true)}>Discard</button>
-              <button type="button" className="primary-button" disabled={boardTemplateSaving} onClick={() => void saveBoardTemplate()}>{boardTemplateSaving ? "Saving…" : "Save template"}</button>
-            </div>
-          </section>
-        )}
         {renderEmptyEditor()}
         {renderCardPanel()}
       </section>

@@ -52,7 +52,12 @@ export type CardTemplate = {
 };
 
 export type BoardColumn = { id: string; name: string; color: string; cardIDs: string[] };
-export type BoardMarkerOptions = { columns: BoardColumn[]; templateID?: string };
+export type BoardMarkerOptions = {
+  columns: BoardColumn[];
+  templateID?: string;
+  deletedColumns?: BoardColumn[];
+  orphanCardIDs?: string[];
+};
 
 export function boardCardsForColumns(
   cards: ReadonlyMap<string, CardMetadata>,
@@ -271,7 +276,7 @@ function validBoardOptions(value: unknown): value is BoardMarkerOptions {
   if (!Array.isArray(options.columns) || options.columns.length === 0) return false;
   const ids = new Set<string>();
   if (options.templateID !== undefined && typeof options.templateID !== "string") return false;
-  return options.columns.every((column) => {
+  const validColumn = (column: unknown) => {
     if (!column || typeof column !== "object") return false;
     const candidate = column as Partial<BoardColumn>;
     if (typeof candidate.id !== "string" || !candidate.id || ids.has(candidate.id) ||
@@ -280,21 +285,29 @@ function validBoardOptions(value: unknown): value is BoardMarkerOptions {
       !Array.isArray(candidate.cardIDs) || !candidate.cardIDs.every((id) => typeof id === "string")) return false;
     ids.add(candidate.id);
     return true;
-  });
+  };
+  if (!options.columns.every(validColumn)) return false;
+  if (options.deletedColumns !== undefined && (!Array.isArray(options.deletedColumns) || !options.deletedColumns.every(validColumn))) return false;
+  return options.orphanCardIDs === undefined || (Array.isArray(options.orphanCardIDs) && options.orphanCardIDs.every((id) => typeof id === "string"));
 }
 
 function normalizeBoardOptions(options: BoardMarkerOptions): BoardMarkerOptions {
-  const seenCards = new Set<string>();
+  const activeCardIDs = new Set<string>();
+  const normalizeColumns = (columns: readonly BoardColumn[] = [], seenCards = new Set<string>()) => columns.map((column) => ({
+    ...column,
+    cardIDs: column.cardIDs.filter((id) => {
+      if (seenCards.has(id)) return false;
+      seenCards.add(id);
+      return true;
+    }),
+  }));
+  const columns = normalizeColumns(options.columns, activeCardIDs);
+  const deletedColumns = options.deletedColumns ? normalizeColumns(options.deletedColumns, new Set(activeCardIDs)) : undefined;
   return {
     ...options,
-    columns: options.columns.map((column) => ({
-      ...column,
-      cardIDs: column.cardIDs.filter((id) => {
-        if (seenCards.has(id)) return false;
-        seenCards.add(id);
-        return true;
-      }),
-    })),
+    columns,
+    ...(deletedColumns ? { deletedColumns } : {}),
+    ...(options.orphanCardIDs ? { orphanCardIDs: [...new Set(options.orphanCardIDs)].filter((id) => !activeCardIDs.has(id)) } : {}),
   };
 }
 

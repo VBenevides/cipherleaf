@@ -22,7 +22,7 @@ type ScratchpadProps = {
   readonly onMoveCardInBoard?: (boardID: string, cardID: string, columnID: string) => void;
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
-  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[]) => void;
+  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void;
   readonly cardTemplates?: readonly { id: string; name: string }[];
   readonly onChangeBoardTemplate?: (boardID: string, templateID: string) => void;
   readonly onOpenBoardTemplate?: (boardID: string, templateID: string) => void;

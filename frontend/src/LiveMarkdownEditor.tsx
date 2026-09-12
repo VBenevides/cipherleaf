@@ -95,7 +95,7 @@ type LiveMarkdownEditorProps = {
   readonly onMoveCardInBoard?: (boardID: string, cardID: string, columnID: string) => void;
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
-  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[]) => void;
+  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void;
   readonly cardTemplates?: readonly BoardTemplateChoice[];
   readonly onChangeBoardTemplate?: (boardID: string, templateID: string) => void;
   readonly onOpenBoardTemplate?: (boardID: string, templateID: string) => void;
@@ -1175,6 +1175,8 @@ class BoardWidget extends WidgetType {
     readonly title: string,
     readonly cardIDs: readonly string[],
     readonly columns: readonly BoardColumn[],
+    readonly deletedColumns: readonly BoardColumn[],
+    readonly orphanCardIDs: readonly string[],
     readonly configured: boolean,
     readonly cards: ReadonlyMap<string, CardMetadata>,
     readonly openCard: (id: string) => void,
@@ -1182,7 +1184,7 @@ class BoardWidget extends WidgetType {
     readonly moveCardInBoard: (boardID: string, cardID: string, columnID: string) => void,
     readonly addCard: (boardID: string) => void,
     readonly changeTitle: (boardID: string, title: string) => void,
-    readonly changeColumns: (boardID: string, columns: readonly BoardColumn[]) => void,
+    readonly changeColumns: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void,
     readonly templates: readonly BoardTemplateChoice[],
     readonly templateID: string,
     readonly changeTemplate: (boardID: string, templateID: string) => void,
@@ -1192,11 +1194,18 @@ class BoardWidget extends WidgetType {
 
   eq(other: BoardWidget) {
     if (other.boardID !== this.boardID || other.title !== this.title || other.configured !== this.configured || other.templateID !== this.templateID ||
-      other.cardIDs.length !== this.cardIDs.length || other.columns.length !== this.columns.length) return false;
+      other.cardIDs.length !== this.cardIDs.length || other.columns.length !== this.columns.length ||
+      other.deletedColumns.length !== this.deletedColumns.length || other.orphanCardIDs.length !== this.orphanCardIDs.length) return false;
     for (let index = 0; index < this.cardIDs.length; index++) {
       if (other.cardIDs[index] !== this.cardIDs[index]) return false;
       const previous = this.cards.get(this.cardIDs[index]);
       const current = other.cards.get(other.cardIDs[index]);
+      if (previous === current) continue;
+      if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+    }
+    for (const id of new Set([...this.deletedColumns.flatMap((column) => column.cardIDs), ...this.orphanCardIDs])) {
+      const previous = this.cards.get(id);
+      const current = other.cards.get(id);
       if (previous === current) continue;
       if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
     }
@@ -1206,25 +1215,41 @@ class BoardWidget extends WidgetType {
       if (current.id !== otherColumn.id || current.name !== otherColumn.name || current.color !== otherColumn.color ||
         current.cardIDs.length !== otherColumn.cardIDs.length || current.cardIDs.some((id, cardIndex) => id !== otherColumn.cardIDs[cardIndex])) return false;
     }
+    for (let index = 0; index < this.deletedColumns.length; index++) {
+      const current = this.deletedColumns[index];
+      const otherColumn = other.deletedColumns[index];
+      if (current.id !== otherColumn.id || current.name !== otherColumn.name || current.color !== otherColumn.color ||
+        current.cardIDs.length !== otherColumn.cardIDs.length || current.cardIDs.some((id, cardIndex) => id !== otherColumn.cardIDs[cardIndex])) return false;
+    }
+    if (this.orphanCardIDs.some((id, index) => id !== other.orphanCardIDs[index])) return false;
     if (this.templates.length !== other.templates.length || this.templates.some((template, index) =>
       template.id !== other.templates[index].id || template.name !== other.templates[index].name)) return false;
     return true;
   }
 
   updateDOM(dom: HTMLElement, _view: EditorView, from: BoardWidget) {
-    if (this.boardID !== from.boardID || this.title !== from.title || this.configured !== from.configured ||
+    if (this.boardID !== from.boardID || this.title !== from.title || this.configured !== from.configured || this.templateID !== from.templateID ||
       this.cardIDs.length !== from.cardIDs.length || this.cardIDs.some((id, index) => id !== from.cardIDs[index]) ||
       this.columns.length !== from.columns.length || this.columns.some((column, index) => {
         const previous = from.columns[index];
         return column.id !== previous.id || column.name !== previous.name || column.color !== previous.color ||
           column.cardIDs.length !== previous.cardIDs.length || column.cardIDs.some((id, cardIndex) => id !== previous.cardIDs[cardIndex]);
-      })) return false;
+      }) || this.deletedColumns.length !== from.deletedColumns.length || this.deletedColumns.some((column, index) => {
+        const previous = from.deletedColumns[index];
+        return column.id !== previous.id || column.name !== previous.name || column.color !== previous.color ||
+          column.cardIDs.length !== previous.cardIDs.length || column.cardIDs.some((id, cardIndex) => id !== previous.cardIDs[cardIndex]);
+      }) || this.orphanCardIDs.length !== from.orphanCardIDs.length || this.orphanCardIDs.some((id, index) => id !== from.orphanCardIDs[index])) return false;
     boardCardData.set(dom, this.cards);
     const cardElements = new Map<string, HTMLButtonElement>();
     dom.querySelectorAll<HTMLButtonElement>(".cm-live-board-card").forEach((item) => {
       if (item.dataset.cardId) cardElements.set(item.dataset.cardId, item);
     });
-    for (const id of new Set([...this.cardIDs, ...this.columns.flatMap((column) => column.cardIDs)])) {
+    for (const id of new Set([
+      ...this.cardIDs,
+      ...this.columns.flatMap((column) => column.cardIDs),
+      ...this.deletedColumns.flatMap((column) => column.cardIDs),
+      ...this.orphanCardIDs,
+    ])) {
       const previous = from.cards.get(id);
       const card = this.cards.get(id);
       if (!previous || !card || previous.status !== card.status) return false;
@@ -1260,6 +1285,10 @@ class BoardWidget extends WidgetType {
     name.value = columnConfig.name;
     name.className = "cm-live-board-column-name";
     name.setAttribute("aria-label", "Column name");
+    const count = heading.appendChild(document.createElement("span"));
+    count.className = "cm-live-board-column-count";
+    count.textContent = String(cards.length);
+    count.setAttribute("aria-label", `${cards.length} cards`);
     const color = heading.appendChild(document.createElement("input"));
     color.type = "color";
     color.value = columnConfig.color;
@@ -1306,11 +1335,11 @@ class BoardWidget extends WidgetType {
     remove.addEventListener("click", () => {
       if (this.columns.length <= 1) return;
       const index = this.columns.findIndex((current) => current.id === columnConfig.id);
-      const target = this.columns[index + 1] ?? this.columns[0];
-      if (!target) return;
-      this.changeColumns(this.boardID, this.columns
-        .filter((current) => current.id !== columnConfig.id)
-        .map((current) => current.id === target.id ? { ...current, cardIDs: [...new Set([...current.cardIDs, ...columnConfig.cardIDs])] } : current));
+      if (index < 0) return;
+      this.changeColumns(this.boardID, this.columns.filter((current) => current.id !== columnConfig.id), [
+        ...this.deletedColumns,
+        { ...columnConfig, cardIDs: [...columnConfig.cardIDs] },
+      ], [...new Set([...this.orphanCardIDs, ...columnConfig.cardIDs])]);
     });
     heading.addEventListener("dragstart", (event) => {
       this.draggedColumnID = columnConfig.id;
@@ -1343,11 +1372,21 @@ class BoardWidget extends WidgetType {
     });
     const empty = column.appendChild(document.createElement("p"));
     empty.className = "cm-live-board-empty";
-    empty.textContent = "No cards";
+    const emptyIcon = empty.appendChild(document.createElement("span"));
+    emptyIcon.className = "cm-live-board-empty-icon";
+    emptyIcon.textContent = "▤";
+    emptyIcon.setAttribute("aria-hidden", "true");
+    const emptyMessage = empty.appendChild(document.createElement("span"));
+    emptyMessage.className = "cm-live-board-empty-message";
+    emptyMessage.textContent = "No cards in this column";
+    const emptyHint = empty.appendChild(document.createElement("span"));
+    emptyHint.className = "cm-live-board-empty-hint";
+    emptyHint.textContent = "Cards will appear here when added to this column.";
     for (const card of cards) {
       const item = column.appendChild(document.createElement("button"));
       item.type = "button";
       item.className = "cm-live-board-card";
+      item.style.setProperty("--board-card-color", columnConfig.color);
       const summary = item.appendChild(document.createElement("span"));
       summary.className = "cm-live-board-card-summary";
       const cardTitle = summary.appendChild(document.createElement("span"));
@@ -1471,19 +1510,38 @@ class BoardWidget extends WidgetType {
     board.className = "cm-live-board";
     const header = board.appendChild(document.createElement("div"));
     header.className = "cm-live-board-header";
+    const boardToggle = header.appendChild(document.createElement("button"));
+    boardToggle.type = "button";
+    boardToggle.className = "icon-button cm-live-board-toggle";
+    boardToggle.textContent = "⌄";
+    boardToggle.setAttribute("aria-label", "Collapse board");
+    boardToggle.setAttribute("aria-expanded", "true");
+    const boardIcon = header.appendChild(document.createElement("span"));
+    boardIcon.className = "cm-live-board-icon";
+    boardIcon.textContent = "▦";
+    boardIcon.setAttribute("aria-hidden", "true");
     const title = header.appendChild(document.createElement("input"));
     title.className = "cm-live-board-title";
     title.type = "text";
     title.value = this.title || DEFAULT_BOARD_TITLE;
     title.setAttribute("aria-label", "Board title");
+    const headerActions = header.appendChild(document.createElement("div"));
+    headerActions.className = "cm-live-board-header-actions";
+    const deletedColumnsButton = headerActions.appendChild(document.createElement("button"));
+    deletedColumnsButton.type = "button";
+    deletedColumnsButton.className = "secondary-button cm-live-board-recovery-button";
+    deletedColumnsButton.textContent = `Deleted Columns ${this.deletedColumns.length}`;
+    deletedColumnsButton.setAttribute("aria-label", `Deleted Columns, ${this.deletedColumns.length}`);
+    deletedColumnsButton.setAttribute("aria-expanded", "false");
+    const orphanCardsButton = headerActions.appendChild(document.createElement("button"));
+    orphanCardsButton.type = "button";
+    orphanCardsButton.className = "secondary-button cm-live-board-recovery-button";
+    orphanCardsButton.textContent = `Orphan Cards ${this.orphanCardIDs.length}`;
+    orphanCardsButton.setAttribute("aria-label", `Orphan Cards, ${this.orphanCardIDs.length}`);
+    orphanCardsButton.setAttribute("aria-expanded", "false");
     const minimized = header.appendChild(document.createElement("span"));
     minimized.className = "cm-live-board-minimized";
     minimized.hidden = true;
-    const minimize = header.appendChild(document.createElement("button"));
-    minimize.type = "button";
-    minimize.className = "secondary-button cm-live-board-minimize";
-    minimize.textContent = "Minimize";
-    minimize.setAttribute("aria-label", "Minimize board");
     const stopEditorEvent = (event: Event) => event.stopPropagation();
     for (const eventName of ["mousedown", "click", "input", "change"])
       title.addEventListener(eventName, stopEditorEvent);
@@ -1500,13 +1558,18 @@ class BoardWidget extends WidgetType {
       }
     });
     board.setAttribute("aria-label", title.value);
+    const description = board.appendChild(document.createElement("p"));
+    description.className = "cm-live-board-description";
+    description.textContent = "Organize and track your cards across different states.";
     const controls = board.appendChild(document.createElement("div"));
     controls.className = "cm-live-board-controls";
-    const filter = controls.appendChild(document.createElement("input"));
+    const filterRow = controls.appendChild(document.createElement("div"));
+    filterRow.className = "cm-live-board-filter-row";
+    const filter = filterRow.appendChild(document.createElement("input"));
     filter.type = "search";
     filter.placeholder = "Filter cards by title";
     filter.setAttribute("aria-label", "Filter board cards by title");
-    const tagFilter = controls.appendChild(document.createElement("select"));
+    const tagFilter = filterRow.appendChild(document.createElement("select"));
     tagFilter.setAttribute("aria-label", "Filter board cards by tags");
     tagFilter.appendChild(document.createElement("option")).value = "";
     for (const tag of normalizeCardTags(this.columns.flatMap((column) => column.cardIDs.flatMap((id) => this.cards.get(id)?.tags ?? [])))) {
@@ -1514,7 +1577,9 @@ class BoardWidget extends WidgetType {
       option.value = tag;
       option.textContent = tag;
     }
-    const add = controls.appendChild(document.createElement("button"));
+    const actions = controls.appendChild(document.createElement("div"));
+    actions.className = "cm-live-board-actions";
+    const add = actions.appendChild(document.createElement("button"));
     add.type = "button";
     add.className = "secondary-button";
     add.textContent = "New card";
@@ -1522,7 +1587,7 @@ class BoardWidget extends WidgetType {
       event.stopPropagation();
       this.addCard(this.boardID);
     });
-    const addColumn = controls.appendChild(document.createElement("button"));
+    const addColumn = actions.appendChild(document.createElement("button"));
     addColumn.type = "button";
     addColumn.className = "secondary-button";
     addColumn.textContent = "Add column";
@@ -1532,34 +1597,14 @@ class BoardWidget extends WidgetType {
       const id = typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `column-${Date.now().toString(36)}`;
       this.changeColumns(this.boardID, [...this.columns, { id, name: "New column", color: "#888888", cardIDs: [] }]);
     });
-    const templateLabel = controls.appendChild(document.createElement("label"));
-    templateLabel.className = "cm-live-board-template-control";
-    templateLabel.textContent = "Card Template";
-    const template = templateLabel.appendChild(document.createElement("select"));
-    template.setAttribute("aria-label", "Card Template");
-    template.appendChild(document.createElement("option")).textContent = "No template";
-    for (const choice of this.templates) {
-      const option = template.appendChild(document.createElement("option"));
-      option.value = choice.id;
-      option.textContent = choice.name;
-    }
-    template.value = this.templates.some((choice) => choice.id === this.templateID) ? this.templateID : "";
-    template.addEventListener("change", () => {
-      editTemplate.disabled = !template.value;
-      this.changeTemplate(this.boardID, template.value);
-    });
-    const editTemplate = controls.appendChild(document.createElement("button"));
+    const editTemplate = actions.appendChild(document.createElement("button"));
     editTemplate.type = "button";
     editTemplate.className = "secondary-button";
-    editTemplate.textContent = "Edit template";
-    editTemplate.disabled = !template.value;
-    editTemplate.addEventListener("click", () => this.openTemplate(this.boardID, template.value));
-    const newTemplate = controls.appendChild(document.createElement("button"));
-    newTemplate.type = "button";
-    newTemplate.className = "secondary-button";
-    newTemplate.textContent = "New template";
-    newTemplate.addEventListener("click", () => this.createTemplate(this.boardID));
-    const clear = controls.appendChild(document.createElement("button"));
+    editTemplate.textContent = "Edit Card Template";
+    editTemplate.addEventListener("click", () => this.templateID
+      ? this.openTemplate(this.boardID, this.templateID)
+      : this.createTemplate(this.boardID));
+    const clear = filterRow.appendChild(document.createElement("button"));
     clear.type = "button";
     clear.className = "secondary-button";
     clear.textContent = "Clear";
@@ -1569,10 +1614,87 @@ class BoardWidget extends WidgetType {
       tagFilter.value = "";
       updateFilter();
     });
+    const makeRecoveryPanel = (titleText: string) => {
+      const panel = board.appendChild(document.createElement("section"));
+      panel.className = "cm-live-board-recovery-panel";
+      panel.hidden = true;
+      const panelHeader = panel.appendChild(document.createElement("header"));
+      const panelTitle = panelHeader.appendChild(document.createElement("strong"));
+      panelTitle.textContent = titleText;
+      const close = panelHeader.appendChild(document.createElement("button"));
+      close.type = "button";
+      close.className = "icon-button";
+      close.textContent = "×";
+      close.setAttribute("aria-label", `Close ${titleText}`);
+      const list = panel.appendChild(document.createElement("div"));
+      list.className = "cm-live-board-recovery-list";
+      close.addEventListener("click", () => {
+        panel.hidden = true;
+        deletedColumnsButton.setAttribute("aria-expanded", "false");
+        orphanCardsButton.setAttribute("aria-expanded", "false");
+      });
+      return { panel, list };
+    };
+    const deletedView = makeRecoveryPanel("Deleted Columns");
+    const orphanView = makeRecoveryPanel("Orphan Cards");
+    const refreshRecoveryPanels = () => {
+      deletedView.list.replaceChildren();
+      for (const deleted of this.deletedColumns) {
+        const row = deletedView.list.appendChild(document.createElement("div"));
+        row.className = "cm-live-board-recovery-row";
+        const label = row.appendChild(document.createElement("span"));
+        label.textContent = `${deleted.name} (${deleted.cardIDs.length})`;
+        const restore = row.appendChild(document.createElement("button"));
+        restore.type = "button";
+        restore.className = "secondary-button";
+        restore.textContent = "Restore";
+        restore.addEventListener("click", () => {
+          const activeCardIDs = new Set(this.columns.flatMap((column) => column.cardIDs));
+          const restored = { ...deleted, cardIDs: deleted.cardIDs.filter((id) => !activeCardIDs.has(id)) };
+          this.changeColumns(this.boardID, [...this.columns, restored], this.deletedColumns.filter((column) => column.id !== deleted.id), this.orphanCardIDs.filter((id) => !restored.cardIDs.includes(id)));
+        });
+      }
+      if (this.deletedColumns.length === 0) deletedView.list.textContent = "No deleted columns";
+      orphanView.list.replaceChildren();
+      for (const cardID of this.orphanCardIDs) {
+        const row = orphanView.list.appendChild(document.createElement("div"));
+        row.className = "cm-live-board-recovery-row";
+        const label = row.appendChild(document.createElement("span"));
+        label.textContent = this.cards.get(cardID)?.title || cardID;
+        const target = row.appendChild(document.createElement("select"));
+        target.setAttribute("aria-label", `Column for ${label.textContent}`);
+        for (const column of this.columns) {
+          const option = target.appendChild(document.createElement("option"));
+          option.value = column.id;
+          option.textContent = column.name;
+        }
+        const assign = row.appendChild(document.createElement("button"));
+        assign.type = "button";
+        assign.className = "secondary-button";
+        assign.textContent = "Add to column";
+        assign.disabled = this.columns.length === 0;
+        assign.addEventListener("click", () => {
+          const nextColumns = this.columns.map((column) => column.id === target.value
+            ? { ...column, cardIDs: [...new Set([...column.cardIDs, cardID])] }
+            : column);
+          this.changeColumns(this.boardID, nextColumns, this.deletedColumns, this.orphanCardIDs.filter((id) => id !== cardID));
+        });
+      }
+      if (this.orphanCardIDs.length === 0) orphanView.list.textContent = "No orphan cards";
+    };
+    const toggleRecoveryPanel = (panel: HTMLElement, button: HTMLButtonElement, other: HTMLElement, otherButton: HTMLButtonElement) => {
+      const open = panel.hidden;
+      panel.hidden = !open;
+      other.hidden = true;
+      button.setAttribute("aria-expanded", String(open));
+      otherButton.setAttribute("aria-expanded", "false");
+      if (open) refreshRecoveryPanels();
+    };
+    deletedColumnsButton.addEventListener("click", () => toggleRecoveryPanel(deletedView.panel, deletedColumnsButton, orphanView.panel, orphanCardsButton));
+    orphanCardsButton.addEventListener("click", () => toggleRecoveryPanel(orphanView.panel, orphanCardsButton, deletedView.panel, deletedColumnsButton));
+    refreshRecoveryPanels();
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
-    columns.style.gridTemplateColumns = `repeat(${this.columns.length}, minmax(0, 1fr))`;
-    columns.style.setProperty("--board-column-count", String(this.columns.length));
     const fitTitles = () => fitBoardCardTexts(board);
     const allCards = new Map<string, CardMetadata[]>();
     for (const column of this.columns) {
@@ -1591,15 +1713,16 @@ class BoardWidget extends WidgetType {
         .join(" · ");
       board.classList.toggle("is-minimized", isMinimized);
       title.hidden = isMinimized;
+      description.hidden = isMinimized;
       minimized.hidden = !isMinimized;
       controls.hidden = isMinimized;
       columns.hidden = isMinimized;
       minimized.textContent = `[BOARD] ${boardTitle} · ${counts}`;
-      minimize.textContent = isMinimized ? "Maximize" : "Minimize";
-      minimize.setAttribute("aria-label", `${isMinimized ? "Maximize" : "Minimize"} board`);
-      minimize.setAttribute("aria-expanded", String(!isMinimized));
+      boardToggle.textContent = isMinimized ? "›" : "⌄";
+      boardToggle.setAttribute("aria-label", `${isMinimized ? "Expand" : "Collapse"} board`);
+      boardToggle.setAttribute("aria-expanded", String(!isMinimized));
     };
-    minimize.addEventListener("click", (event) => {
+    boardToggle.addEventListener("click", (event) => {
       event.stopPropagation();
       isMinimized = !isMinimized;
       updateMinimizedState();
@@ -1614,13 +1737,27 @@ class BoardWidget extends WidgetType {
         const visible = new Set((titleQuery || tagFilter.value ? sourceCards.filter((card) =>
           (!titleQuery || card.title.toLocaleLowerCase().includes(titleQuery)) &&
           (!tagFilter.value || card.tags.some((tag) => tag.toLocaleLowerCase() === tagFilter.value.toLocaleLowerCase()))) : sourceCards).map((card) => card.id));
+        const filtered = Boolean(titleQuery || tagFilter.value);
         const columnElement = [...board.querySelectorAll<HTMLElement>(".cm-live-board-column")]
           .find((item) => item.dataset.columnId === column.id);
+        const count = columnElement?.querySelector<HTMLElement>(".cm-live-board-column-count");
+        if (count) {
+          count.textContent = String(filtered ? visible.size : sourceCards.length);
+          count.setAttribute("aria-label", `${filtered ? visible.size : sourceCards.length} ${filtered ? "matching " : ""}cards`);
+        }
         for (const item of columnElement?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
           item.hidden = !visible.has(item.dataset.cardId ?? "");
         }
         const empty = columnElement?.querySelector<HTMLElement>(".cm-live-board-empty");
-        if (empty) empty.hidden = visible.size > 0;
+        if (empty) {
+          empty.hidden = visible.size > 0;
+          empty.querySelector<HTMLElement>(".cm-live-board-empty-message")!.textContent = filtered && sourceCards.length > 0
+            ? "No matching cards"
+            : "No cards in this column";
+          empty.querySelector<HTMLElement>(".cm-live-board-empty-hint")!.textContent = filtered && sourceCards.length > 0
+            ? "Try a different filter."
+            : "Cards will appear here when added to this column.";
+        }
       }
     };
     filter.addEventListener("input", updateFilter);
@@ -2057,7 +2194,7 @@ type LivePreviewOptions = {
   moveCardInBoard: (boardID: string, cardID: string, columnID: string) => void;
   addCard: (boardID: string) => void;
   changeBoardTitle: (boardID: string, title: string) => void;
-  changeBoardColumns: (boardID: string, columns: readonly BoardColumn[]) => void;
+  changeBoardColumns: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void;
   cardTemplates: readonly BoardTemplateChoice[];
   changeBoardTemplate: (boardID: string, templateID: string) => void;
   openBoardTemplate: (boardID: string, templateID: string) => void;
@@ -2263,6 +2400,14 @@ function renderBoardLine(
   const board = parseBoardMarker(line.text);
   if (board) {
     const { decorations, atomicRanges, options } = context;
+    const columns = boardColumnsForMarker(board, options.cards());
+    const deletedColumns = board.options?.deletedColumns ?? [];
+    const assignedCardIDs = new Set(columns.flatMap((column) => column.cardIDs));
+    const orphanCardIDs = [...new Set([
+      ...(board.options?.orphanCardIDs ?? []),
+      ...deletedColumns.flatMap((column) => column.cardIDs),
+      ...(board.options ? board.cardIDs.filter((id) => !assignedCardIDs.has(id)) : []),
+    ])].filter((id) => !assignedCardIDs.has(id));
     decorations.push(
       Decoration.line({ attributes: { class: "cm-live-board-line" } }).range(line.from),
       Decoration.widget({
@@ -2279,7 +2424,9 @@ function renderBoardLine(
         board.id,
         board.title,
         board.cardIDs,
-        boardColumnsForMarker(board, options.cards()),
+        columns,
+        deletedColumns,
+        orphanCardIDs,
         Boolean(board.options),
         options.cards(),
         options.openCard,
@@ -4076,7 +4223,7 @@ export default function LiveMarkdownEditor({
             moveCardInBoard: (boardID, cardID, columnID) => onMoveCardInBoardRef.current?.(boardID, cardID, columnID),
             addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
             changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
-            changeBoardColumns: (boardID, columns) => onChangeBoardColumnsRef.current?.(boardID, columns),
+            changeBoardColumns: (boardID, columns, deletedColumns, orphanCardIDs) => onChangeBoardColumnsRef.current?.(boardID, columns, deletedColumns, orphanCardIDs),
             cardTemplates: cardTemplatesRef.current,
             changeBoardTemplate: (boardID, templateID) => onChangeBoardTemplateRef.current?.(boardID, templateID),
             openBoardTemplate: (boardID, templateID) => onOpenBoardTemplateRef.current?.(boardID, templateID),

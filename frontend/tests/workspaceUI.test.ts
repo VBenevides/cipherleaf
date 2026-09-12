@@ -452,7 +452,7 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /key: "Mod-s"[\s\S]*onSaveRef\.current\(\)/);
   assert.match(liveEditor, /cm-live-board-card-title/);
   assert.match(liveEditor, /cm-live-board-card-date/);
-  assert.match(liveEditor, /cm-live-board-minimize/);
+  assert.match(liveEditor, /cm-live-board-toggle/);
   assert.match(liveEditor, /\[BOARD\] \$\{boardTitle\}/);
   assert.match(liveEditor, /boardColumnsForMarker\(board, options\.cards\(\)\)/);
   assert.match(liveEditor, /allCards\.get\(column\.id\)/);
@@ -461,6 +461,7 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /document\.createElement\("select"\)/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
+  assert.match(style, /\.live-markdown-editor \.cm-line \{[\s\S]*min-height: 1\.75em/);
   assert.match(style, /\.cm-live-board-card \{[\s\S]*display: flex[\s\S]*justify-content: space-between/);
   assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
@@ -479,12 +480,17 @@ test("card saving is opt-in for editor journaling and keeps the panel open", () 
   assert.match(app, /cipherleaf-card-write-changes-to-editor/);
   assert.match(app, /Write changes to editor by default/);
   assert.match(app, /cardWriteChangesToEditorDefault/);
-  assert.match(app, /const closeCardPanel = async \(force = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
+  assert.match(app, /const closeCardPanel = async \(force = false, preserveTemplateRequest = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
   assert.match(app, /message: "This card has unsaved changes\. Close it without saving\?"/);
-  assert.match(app, /boardTemplatePanel/);
-  assert.match(app, /aria-label="Card Template"/);
-  assert.match(app, /aria-label="Template body"/);
-  assert.match(app, /closeBoardTemplatePanel\(true\)/);
+  assert.doesNotMatch(app, /boardTemplatePanel/);
+  assert.match(app, /kind\?: "template"/);
+  assert.match(app, /cardPanel\.kind === "template"/);
+  assert.match(app, /cardPanelRef\.current !== panelAtStart/);
+  assert.match(app, /const templateRequestRef = useRef\(0\)/);
+  assert.match(app, /closeCardPanel\(false, true\)/);
+  assert.match(app, /openTemplateCard/);
+  assert.match(app, /openTemplateCard\(saved\.note, draft, true, request\)/);
+  assert.match(app, /runSerializedSave\(\(\) => VaultService\.SaveNote\(cardPanel\.note\.id/);
   assert.match(app, /serializeTemplateDocument\(template\)/);
   assert.match(app, /options: \{ \.\.\.marker\.options!?[,}] templateID: undefined \}/);
   assert.match(app, /newCardMetadata\(created\.id, new Date\(created\.createdAt\), false\)/);
@@ -553,6 +559,8 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(auto-fit, minmax\(180px, 1fr\)\)/);
   assert.match(style, /\.cm-live-board-column-header \{[\s\S]*cursor: grab/);
+  assert.match(style, /\.cm-live-board-column \{[\s\S]*background: color-mix\(in srgb, var\(--board-column-color/);
+  assert.doesNotMatch(style, /\.cm-live-board-column\.status-(?:in-progress|blocked|finished) \{ background:/);
   assert.match(style, /\.cm-live-board-column\.is-column-drop-before/);
   assert.match(style, /\.cm-live-board-column\.is-column-drop-after/);
   assert.match(style, /\.cm-live-board-card\.is-dragging \{[\s\S]*cursor: grabbing/);
