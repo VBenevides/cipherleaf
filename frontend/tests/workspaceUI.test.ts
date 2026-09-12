@@ -553,6 +553,16 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(style, /\.cm-selectionLayer \{[\s\S]*clip-path: inset\(0 var\(--editor-content-right\) 0 var\(--editor-content-left\)\)/);
 });
 
+test("board card creation keeps the selected source marker stable", () => {
+  assert.match(app, /const sourceNoteID = current\.id/);
+  assert.match(app, /const latestSource = noteRef\.current\?\.id === sourceNoteID \? markdownForEditing\(noteRef\.current\.content\) : null/);
+  assert.match(app, /if \(!latestSource \|\| !latestBoard\) \{[\s\S]*VaultService\.DeleteNote\(created\.id\)/);
+  assert.match(app, /replaceBoardMarker\(latestSource, boardID/);
+  assert.match(app, /new Set\(\[\.\.\.column\.cardIDs, created\.id\]\)/);
+  const addCardSource = app.slice(app.indexOf("const addCardToBoard"), app.indexOf("const changeBoardTitle"));
+  assert.doesNotMatch(addCardSource, /replaceBoardMarker\(source, boardID/);
+});
+
 test("board handles expose delete-only menus and block keyboard deletion", () => {
   assert.match(liveEditor, /if \(board\) \{[\s\S]*new DragHandleWidget\(lineNumber\)/);
   assert.match(liveEditor, /showObjectHandleMenu\([\s\S]*parseBoardMarker\(contextView\.state\.doc\.line\(sourceLine\)\.text\)/);

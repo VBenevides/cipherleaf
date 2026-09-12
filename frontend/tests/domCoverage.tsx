@@ -298,6 +298,26 @@ board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
 board.querySelectorAll("button[aria-label]").forEach((button) => button.click());
 assert.ok(opened > 0 && moved > 0 && added > 0);
 
+const multiBoard = mount("multi-board-host");
+const addedBoardIDs: string[] = [];
+await act(async () => {
+  multiBoard.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "multi-board", value: [boardMarker("board-a", [], "First"), boardMarker("board-b", [], "Second")].join("\n"),
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
+    cardData: cards, onCreateBoard: async () => null, onAddCardToBoard: (boardID) => { addedBoardIDs.push(boardID); },
+    onMoveCard: () => {}, onChangeBoardTitle: () => {}, onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const multiBoards = multiBoard.body.querySelectorAll<HTMLElement>(".cm-live-board");
+assert.equal(multiBoards.length, 2);
+const secondBoardNewCard = [...multiBoards[1].querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "New card")!;
+secondBoardNewCard.click();
+assert.deepEqual(addedBoardIDs, ["board-b"]);
+await act(async () => { multiBoard.root.unmount(); });
+multiBoard.shell.remove();
+
 let dynamicColumns: readonly BoardColumn[] = [];
 let selectedBoardTemplate = "";
 let createdBoardTemplate = "";

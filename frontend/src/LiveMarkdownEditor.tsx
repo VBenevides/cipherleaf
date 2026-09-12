@@ -1310,7 +1310,7 @@ class BoardWidget extends WidgetType {
       if (!target) return;
       this.changeColumns(this.boardID, this.columns
         .filter((current) => current.id !== columnConfig.id)
-        .map((current) => current.id === target.id ? { ...current, cardIDs: [...current.cardIDs, ...columnConfig.cardIDs] } : current));
+        .map((current) => current.id === target.id ? { ...current, cardIDs: [...new Set([...current.cardIDs, ...columnConfig.cardIDs])] } : current));
     });
     heading.addEventListener("dragstart", (event) => {
       this.draggedColumnID = columnConfig.id;

@@ -3764,6 +3764,7 @@ function App() {
   const addCardToBoard = async (boardID: string) => {
     const current = noteRef.current;
     if (!current) return;
+    const sourceNoteID = current.id;
     const source = markdownForEditing(current.content);
     const board = source.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
     if (!board) return;
@@ -3789,17 +3790,23 @@ function App() {
         ? { ...transitionCard(base, template.status), title: template.name.trim() || "Untitled", tags: normalizeCardTags(template.tags) }
         : base;
       const saved = await VaultService.SaveNote(created.id, metadata.title, serializeCardDocument(metadata, template?.body ?? ""));
+      const latestSource = noteRef.current?.id === sourceNoteID ? markdownForEditing(noteRef.current.content) : null;
+      const latestBoard = latestSource?.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
+      if (!latestSource || !latestBoard) {
+        await VaultService.DeleteNote(created.id).catch(() => {});
+        return;
+      }
       updateSummary(saved.summary);
       setSelectedTemplateID("");
       setCardPanel({ note: saved.note, metadata, body: template?.body ?? "" });
       setCardPanelDirty(false);
-      const content = replaceBoardMarker(source, boardID, (board) => ({
+      const content = replaceBoardMarker(latestSource, boardID, (board) => ({
         ...board,
         ...(board.options
-          ? { options: { ...board.options, templateID: missingTemplate ? undefined : board.options.templateID, columns: board.options.columns.map((column, index) => index === 0 ? { ...column, cardIDs: [...column.cardIDs, created.id] } : column) } }
-          : { cardIDs: [...board.cardIDs, created.id] }),
+          ? { options: { ...board.options, templateID: missingTemplate ? undefined : board.options.templateID, columns: board.options.columns.map((column, index) => index === 0 ? { ...column, cardIDs: [...new Set([...column.cardIDs, created.id])] } : { ...column, cardIDs: column.cardIDs.filter((id) => id !== created.id) }) } }
+          : { cardIDs: board.cardIDs.includes(created.id) ? board.cardIDs : [...board.cardIDs, created.id] }),
       }));
-      if (content === source) {
+      if (content === latestSource) {
         await VaultService.DeleteNote(created.id);
         return;
       }
