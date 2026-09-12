@@ -393,6 +393,31 @@ assert.ok(interactionChanges >= 0 && interactionErrors >= 0);
 await act(async () => { interaction.root.unmount(); });
 interaction.shell.remove();
 
+const indentation = mount("indentation-host");
+await act(async () => {
+  indentation.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "indentation",
+    value: "> Parent\n  \n  following",
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false,
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const indentationEditor = indentation.body.querySelector<HTMLElement>(".cm-content");
+const indentationView = EditorView.findFromDOM(indentationEditor!);
+assert.ok(indentationView);
+const blankLineFrom = indentationView!.state.doc.line(2).from;
+indentationView!.dispatch({ selection: EditorSelection.cursor(blankLineFrom) });
+const inputHandler = indentationView!.state.facet(EditorView.inputHandler).find((handler) =>
+  handler(indentationView!, blankLineFrom, blankLineFrom, "typed"),
+);
+assert.ok(inputHandler);
+assert.equal(indentationView!.state.doc.toString(), "> Parent\n  typed\n  following");
+assert.equal(indentationView!.state.selection.main.head, blankLineFrom + 2 + "typed".length);
+await act(async () => { indentation.root.unmount(); });
+indentation.shell.remove();
+
 const source = mount("source-host");
 let scrollSyncs = 0;
 const scrollSync = {

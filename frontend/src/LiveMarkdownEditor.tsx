@@ -3355,6 +3355,19 @@ function normalizeEditorInput(
   let changeFrom = from;
   let changeTo = to;
   let inserted = text;
+  const line = view.state.doc.lineAt(from);
+  const owner = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (
+    owner &&
+    owner.lineNumber !== line.number &&
+    line.text.trim() === "" &&
+    from <= line.to &&
+    !text.includes("\n")
+  ) {
+    changeFrom = line.from;
+    changeTo = line.to;
+    inserted = (line.text || " ".repeat(owner?.contentIndent ?? 0)) + inserted;
+  }
   if (
     changeFrom > 0 &&
     view.state.sliceDoc(changeFrom - 1, changeFrom) === "-" &&
@@ -3388,7 +3401,9 @@ function normalizeEditorInput(
     inserted += "-";
   }
   const normalized = normalizeArrowText(inserted);
-  return normalized === inserted ? null : { from: changeFrom, to: changeTo, text: normalized };
+  return changeFrom === from && changeTo === to && normalized === text
+    ? null
+    : { from: changeFrom, to: changeTo, text: normalized };
 }
 
 export default function LiveMarkdownEditor({
