@@ -2764,6 +2764,12 @@ function App() {
     setFolderPasswordVisible(false);
   };
 
+  const closeAppearanceSettings = () => {
+    setSettingsDraft(null);
+    setSettingsSaveError("");
+    setAppearanceSettingsOpen(false);
+  };
+
   useEffect(() => {
     const dialogs: { open: boolean; layer: WindowLayer; close: () => void }[] = [
       {
@@ -6190,12 +6196,6 @@ function App() {
 
     </>
   );
-
-  const closeAppearanceSettings = () => {
-    setSettingsDraft(null);
-    setSettingsSaveError("");
-    setAppearanceSettingsOpen(false);
-  };
 
   const renderAppearanceSettings = () => (
     <>
