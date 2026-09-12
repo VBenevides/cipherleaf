@@ -221,6 +221,7 @@ let openCardMode = false;
 let emptyAppMode = false;
 let linkedAppMode = false;
 let lockedAction: "create" | "clone" = "create";
+let vaultSettings = { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
 setTransport({
   call: async (_objectID, _method, _windowName, request) => {
     if (timeTrackingMode === "error" && [308561412, 1766611694, 2155705394, 259867052].includes(request?.methodID ?? -1)) throw new Error("time tracking failed");
@@ -229,7 +230,7 @@ setTransport({
       case 3632998615: return { path: "/vault", theme: "light" };
       case 1694639620: return ["/vault", "/other-vault"];
       case 2923257755: return linkedAppMode ? { linked: true, lastSyncedAt: 1, repositorySsh: "git@github.com:owner/repo.git", privateKeyPath: "/key", branch: "main", repositoryPrivate: true } : { linked: false, lastSyncedAt: 0 };
-      case 4079532670: return { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
+      case 4079532670: return vaultSettings;
       case 308561412: return timeTrackingMode === "empty" ? { clients: [], projects: [], tags: [] } : { clients: [...clients, { id: "old-client", name: "Old client", archivedAtUtc: "2026-01-01" }], projects: [...projects, archivedProject], tags: [...tags, archivedTag] };
       case 259867052: return timeTrackingMode === "empty" ? { projectCount: 0, tagCount: 0, totalSeconds: 0, averageDaySeconds: 0, clients: [], projects: [], tags: [], tasks: [], days: [] } : { projectCount: 1, tagCount: 1, totalSeconds: 3600, averageDaySeconds: 600, clients: [{ id: "client", name: "Client", totalSeconds: 3600 }], projects: [{ id: "project", name: "Project", totalSeconds: 3600 }], tags: [{ id: "tag", name: "Tag", totalSeconds: 3600 }], tasks: [{ name: "Task", totalSeconds: 3600, entryCount: 1 }], days: [{ localDate: "2026-01-01", totalSeconds: 3600 }] };
       case 516244023: return [];
@@ -284,7 +285,10 @@ setTransport({
       case 4116603909: return [];
       case 3315011432: return "secret";
       case 1416189504: return { success: true, message: "Connection verified", warning: "", branch: "main" };
-      case 3499492715: return { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
+      case 3499492715: {
+        vaultSettings = { ...vaultSettings, ...(request?.args?.[0] ?? {}), revision: vaultSettings.revision + 1, modifiedAt: vaultSettings.modifiedAt + 1 };
+        return vaultSettings;
+      }
       case 1224618098: return "/backup";
       case 1927621820: return { notes: 1, attachments: 0, path: "/export" };
       case 1577812963: return { notes: 1, folders: 0, attachments: 0 };
@@ -556,6 +560,56 @@ await clickApp("Georgia");
 windowStub.setTimeout = originalWindowTimeout;
 await clickApp("Reset");
 await clickApp("Close settings");
+await clickApp("Settings");
+await clickApp("Settings…");
+await clickApp("General");
+const dailyFormatInput = () => appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder === "YYYY-MM-DD")[0];
+await act(async () => { dailyFormatInput()?.props.onChange({ target: { value: "DD/MM/YYYY" } }); });
+await clickApp("Save and Exit");
+await waitForApp();
+await clickApp("Settings");
+await clickApp("Settings…");
+await clickApp("General");
+assert.equal(dailyFormatInput()?.props.value, "DD/MM/YYYY");
+await act(async () => { dailyFormatInput()?.props.onChange({ target: { value: "MM/DD/YYYY" } }); });
+await clickApp("Exit without Saving");
+await clickApp("Settings");
+await clickApp("Settings…");
+await clickApp("General");
+assert.equal(dailyFormatInput()?.props.value, "DD/MM/YYYY");
+await clickApp("Close settings");
+
+const originalHTMLElement = (globalThis as { HTMLElement?: unknown }).HTMLElement;
+if (typeof originalHTMLElement !== "function") Object.assign(globalThis, { HTMLElement: class {} });
+try {
+  dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
+  await waitForApp();
+  const shortcutButton = (label: string) => appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === label)[0];
+  const shortcutEvent = (key: string, code: string, shiftKey = false) => ({ code, key, ctrlKey: true, altKey: false, shiftKey, metaKey: false, repeat: false, nativeEvent: { isComposing: false }, preventDefault: onChange });
+  const editShortcut = async (command: string, event: ReturnType<typeof shortcutEvent>) => {
+    const button = shortcutButton(`Edit shortcut for ${command}`);
+    assert.ok(button, `missing shortcut button: ${command}`);
+    await act(async () => { button.props.onClick?.({ stopPropagation: onChange }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const captureButton = shortcutButton(`Edit shortcut for ${command}`);
+    assert.ok(captureButton, `missing shortcut capture button: ${command}`);
+    await act(async () => { captureButton.props.onKeyDown?.(event); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  };
+  await editShortcut("Save note", shortcutEvent("l", "KeyL"));
+  assert.match(textContent(shortcutButton("Edit shortcut for Save note") ?? { children: [] }), /Ctrl \+ L/);
+  await editShortcut("New note", shortcutEvent("l", "KeyL"));
+  assert.match(textContent(appRenderer?.root.findAll((node) => node.props.role === "alert")[0] ?? { children: [] }), /already assigned to save-note/);
+  await editShortcut("New note", shortcutEvent("P", "KeyP", true));
+  assert.match(textContent(appRenderer?.root.findAll((node) => node.props.role === "alert")[0] ?? { children: [] }), /reserved for the command palette/);
+  const resetSaveShortcut = shortcutButton("Reset shortcut for Save note");
+  assert.ok(resetSaveShortcut, "missing Save note shortcut reset");
+  await act(async () => { resetSaveShortcut.props.onClick?.({ stopPropagation: onChange }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.match(textContent(shortcutButton("Edit shortcut for Save note") ?? { children: [] }), /Ctrl \+ S/);
+  await clickApp("Reset all shortcuts");
+  await clickApp("Close command palette");
+} finally {
+  if (originalHTMLElement === undefined) delete (globalThis as { HTMLElement?: unknown }).HTMLElement;
+  else Object.assign(globalThis, { HTMLElement: originalHTMLElement });
+}
 await clickApp("Settings");
 await clickApp("Application statistics…");
 await clickApp("Close statistics");
