@@ -87,6 +87,26 @@ type CommandPaletteCommand = {
   description: string;
   run: () => void;
 };
+type EditorFontDraft =
+  | { kind: "unchanged" }
+  | { kind: "default" }
+  | { kind: "system"; name: string }
+  | { kind: "file"; name: string; data: ArrayBuffer };
+type SettingsDraft = {
+  dailyNoteFormat: string;
+  dailyNoteFolderID: string;
+  dailyTemplateNoteID: string;
+  autosaveIntervalSeconds: number;
+  autoSyncMinutes: number;
+  autoLockMinutes: number;
+  sectionDefault: SectionDefault;
+  cardWriteChangesToEditorDefault: boolean;
+  theme: Theme;
+  journalLines: JournalLines;
+  scratchpadOpacity: number;
+  editorFontSize: number;
+  editorFont: EditorFontDraft;
+};
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
   { value: "light", label: "Light (Nord)", swatch: "light" },
@@ -721,6 +741,9 @@ function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [statisticsOpen, setStatisticsOpen] = useState(false);
   const [statistics, setStatistics] = useState<ApplicationStatistics | null>(null);
   const [statisticsError, setStatisticsError] = useState("");
@@ -850,6 +873,29 @@ function App() {
   const vaultSettingsSnapshotRef = useRef("");
   const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
 
+  const createSettingsDraft = (): SettingsDraft => ({
+    dailyNoteFormat,
+    dailyNoteFolderID: dailyNoteFolderID,
+    dailyTemplateNoteID,
+    autosaveIntervalSeconds,
+    autoSyncMinutes,
+    autoLockMinutes,
+    sectionDefault,
+    cardWriteChangesToEditorDefault,
+    theme,
+    journalLines,
+    scratchpadOpacity,
+    editorFontSize,
+    editorFont: { kind: "unchanged" },
+  });
+  const settingsValues = settingsDraft ?? createSettingsDraft();
+  const settingsEditorFontName = settingsValues.editorFont.kind === "unchanged"
+    ? editorFontName
+    : settingsValues.editorFont.kind === "default" ? "" : settingsValues.editorFont.name;
+  const updateSettingsDraft = (change: Partial<SettingsDraft>) => {
+    setSettingsDraft((current) => current ? { ...current, ...change } : current);
+  };
+
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
     dailyNoteFormat,
     dailyNoteFolderId: dailyNoteFolderID,
@@ -904,12 +950,13 @@ function App() {
     return false;
   };
 
-  const saveVaultSettings = async (force = false) => {
-    if (!session || session.locked || vaultSettingsLoadedForRef.current !== session.vaultId) return;
-    const snapshot = settingsSnapshot(portableVaultSettings);
-    if (!force && snapshot === vaultSettingsSnapshotRef.current) return;
-    const saved = await VaultService.SaveVaultSettings(portableVaultSettings);
+  const saveVaultSettings = async (settings = portableVaultSettings, force = false): Promise<VaultSettings | null> => {
+    if (!session || session.locked || vaultSettingsLoadedForRef.current !== session.vaultId) return null;
+    const snapshot = settingsSnapshot(settings);
+    if (!force && snapshot === vaultSettingsSnapshotRef.current) return settings;
+    const saved = await VaultService.SaveVaultSettings(settings);
     vaultSettingsSnapshotRef.current = settingsSnapshot(saved);
+    return saved;
   };
 
   const bringWindowToFront = useCallback((layer: WindowLayer) => {
@@ -2399,7 +2446,7 @@ function App() {
     console.warn("Git force-push triggered");
     try {
       await persistCurrent();
-      await saveVaultSettings(true);
+      await saveVaultSettings(undefined, true);
       const result = await VaultService.ForcePushNow();
       setSyncConflicts([]);
       const settings = await VaultService.GetSyncSettings();
@@ -2679,7 +2726,7 @@ function App() {
       {
         open: appearanceSettingsOpen,
         layer: "appearanceSettings",
-        close: () => setAppearanceSettingsOpen(false),
+        close: closeAppearanceSettings,
       },
       { open: statisticsOpen, layer: "statistics", close: () => setStatisticsOpen(false) },
     ];
@@ -3889,16 +3936,15 @@ function App() {
     event.target.value = "";
     if (!file) return;
     if (!file.name.toLocaleLowerCase().endsWith(".ttf")) {
-      setError("Select a TrueType (.ttf) font file.");
+      setSettingsSaveError("Select a TrueType (.ttf) font file.");
       return;
     }
     try {
       const data = await file.arrayBuffer();
-      await activateEditorFont(file.name, data);
-      await writeStoredEditorFont({ name: file.name, data });
-      setError("");
+      updateSettingsDraft({ editorFont: { kind: "file", name: file.name, data } });
+      setSettingsSaveError("");
     } catch (reason) {
-      setError(`Could not load font: ${errorText(reason)}`);
+      setSettingsSaveError(`Could not load font: ${errorText(reason)}`);
     }
   };
 
@@ -3923,29 +3969,69 @@ function App() {
 
   const chooseInstalledFont = (family: string) => {
     if (!family) return;
+    updateSettingsDraft({ editorFont: { kind: "system", name: family } });
+  };
+
+  const resetEditorFont = () => {
+    updateSettingsDraft({ editorFont: { kind: "default" } });
+  };
+
+  const applyEditorFontDraft = async (choice: EditorFontDraft) => {
+    if (choice.kind === "unchanged") return;
+    if (choice.kind === "file") {
+      await activateEditorFont(choice.name, choice.data);
+      await writeStoredEditorFont({ name: choice.name, data: choice.data });
+      return;
+    }
     if (activeEditorFontRef.current) {
       document.fonts.delete(activeEditorFontRef.current);
       activeEditorFontRef.current = null;
     }
-    document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(family));
-    document.documentElement.dataset.editorFont = "custom";
-    setEditorFontName(family);
-    window.localStorage.setItem(EDITOR_SYSTEM_FONT_KEY, family);
+    if (choice.kind === "system") {
+      document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(choice.name));
+      document.documentElement.dataset.editorFont = "custom";
+      setEditorFontName(choice.name);
+      window.localStorage.setItem(EDITOR_SYSTEM_FONT_KEY, choice.name);
+      return;
+    }
+    delete document.documentElement.dataset.editorFont;
+    document.documentElement.style.removeProperty("--selected-editor-font");
+    setEditorFontName("");
+    window.localStorage.removeItem(EDITOR_SYSTEM_FONT_KEY);
+    await removeStoredEditorFont();
   };
 
-  const resetEditorFont = async () => {
+  const saveAppearanceSettings = async () => {
+    const draft = settingsDraft;
+    if (!draft) return;
+    setSettingsSaving(true);
+    setSettingsSaveError("");
     try {
-      if (activeEditorFontRef.current) {
-        document.fonts.delete(activeEditorFontRef.current);
-        activeEditorFontRef.current = null;
-      }
-      delete document.documentElement.dataset.editorFont;
-      document.documentElement.style.removeProperty("--selected-editor-font");
-      setEditorFontName("");
-      window.localStorage.removeItem(EDITOR_SYSTEM_FONT_KEY);
-      await removeStoredEditorFont();
+      const saved = await saveVaultSettings({
+        dailyNoteFormat: draft.dailyNoteFormat,
+        dailyNoteFolderId: draft.dailyNoteFolderID,
+        dailyTemplateNoteId: draft.dailyTemplateNoteID,
+        autosaveIntervalSeconds: draft.autosaveIntervalSeconds,
+        autoSyncMinutes: draft.autoSyncMinutes,
+        autoLockMinutes: draft.autoLockMinutes,
+        fileHistoryLimit,
+        sectionDefault: draft.sectionDefault,
+        cardWriteChangesToEditorDefault: draft.cardWriteChangesToEditorDefault,
+        revision: 0,
+        modifiedAt: 0,
+      });
+      if (!saved) throw new Error("The vault is not available.");
+      applyVaultSettings(saved);
+      setTheme(draft.theme);
+      setJournalLines(draft.journalLines);
+      setScratchpadOpacity(draft.scratchpadOpacity);
+      setEditorFontSize(draft.editorFontSize);
+      await applyEditorFontDraft(draft.editorFont);
+      closeAppearanceSettings();
     } catch (reason) {
-      setError(`Could not reset font: ${errorText(reason)}`);
+      setSettingsSaveError(errorText(reason));
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -3992,7 +4078,7 @@ function App() {
     console.info("GitHub link triggered");
     try {
       await persistCurrent();
-      await saveVaultSettings(true);
+      await saveVaultSettings(undefined, true);
       const linked = await VaultService.LinkGitHubVault(syncSettings);
       const saved = await VaultService.GetSyncSettings();
       setSyncSettings(saved);
@@ -4294,8 +4380,7 @@ function App() {
       name: "Settings",
       description: "Change application appearance and preferences",
       run: () => {
-        bringWindowToFront("appearanceSettings");
-        setAppearanceSettingsOpen(true);
+        openAppearanceSettings();
       },
     },
     {
@@ -5784,6 +5869,12 @@ function App() {
     </>
   );
 
+  const closeAppearanceSettings = () => {
+    setSettingsDraft(null);
+    setSettingsSaveError("");
+    setAppearanceSettingsOpen(false);
+  };
+
   const renderAppearanceSettings = () => (
     <>
       {appearanceSettingsOpen && (
@@ -5796,7 +5887,8 @@ function App() {
               type="button"
               className="icon-button modal-close"
               aria-label="Close settings"
-              onClick={() => setAppearanceSettingsOpen(false)}
+              disabled={settingsSaving}
+              onClick={closeAppearanceSettings}
             >
               <Icon name="x" />
             </button>
@@ -5835,7 +5927,6 @@ function App() {
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-theme")}>Theme</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-guide-lines")}>Guide lines</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-scratchpad-opacity")}>Scratchpad</button>
-                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-shortcuts")}>Shortcuts</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-font-size")}>Text size</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-editor-font")}>Editor font</button>
                   </div>
@@ -5849,18 +5940,18 @@ function App() {
                       <legend>Daily notes</legend>
                       <label>
                         Title format{" "}
-                        <input value={dailyNoteFormat} onChange={(event) => setDailyNoteFormat(event.target.value)} placeholder="YYYY-MM-DD" />
+                        <input value={settingsValues.dailyNoteFormat} onChange={(event) => updateSettingsDraft({ dailyNoteFormat: event.target.value })} placeholder="YYYY-MM-DD" />
                       </label>
                       <label>
                         Folder{" "}
-                        <select value={dailyNoteFolderID} onChange={(event) => setDailyNoteFolderID(event.target.value)}>
+                        <select value={settingsValues.dailyNoteFolderID} onChange={(event) => updateSettingsDraft({ dailyNoteFolderID: event.target.value })}>
                           <option value="">Unfiled</option>
                           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                         </select>
                       </label>
                       <label>
                         Template note{" "}
-                        <select value={dailyTemplateNoteID} onChange={(event) => setDailyTemplateNoteID(event.target.value)}>
+                        <select value={settingsValues.dailyTemplateNoteID} onChange={(event) => updateSettingsDraft({ dailyTemplateNoteID: event.target.value })}>
                           <option value="">Default heading</option>
                           {notes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
                         </select>
@@ -5874,8 +5965,8 @@ function App() {
                           type="number"
                           min="60"
                           step="1"
-                          value={autosaveIntervalSeconds}
-                          onChange={(event) => setAutosaveIntervalSeconds(Math.max(60, Number(event.target.value) || 60))}
+                          value={settingsValues.autosaveIntervalSeconds}
+                          onChange={(event) => updateSettingsDraft({ autosaveIntervalSeconds: Math.max(60, Number(event.target.value) || 60) })}
                         />
                       </label>
                     </div>
@@ -5886,8 +5977,8 @@ function App() {
                           type="number"
                           min="1"
                           step="1"
-                          value={autoSyncMinutes}
-                          onChange={(event) => setAutoSyncMinutes(Math.max(1, Number(event.target.value) || 1))}
+                          value={settingsValues.autoSyncMinutes}
+                          onChange={(event) => updateSettingsDraft({ autoSyncMinutes: Math.max(1, Number(event.target.value) || 1) })}
                         />
                       </label>
                     </div>
@@ -5898,8 +5989,8 @@ function App() {
                           type="number"
                           min="1"
                           step="1"
-                          value={autoLockMinutes}
-                          onChange={(event) => setAutoLockMinutes(Math.max(1, Number(event.target.value) || 1))}
+                          value={settingsValues.autoLockMinutes}
+                          onChange={(event) => updateSettingsDraft({ autoLockMinutes: Math.max(1, Number(event.target.value) || 1) })}
                         />
                       </label>
                     </div>
@@ -5910,9 +6001,9 @@ function App() {
                           <button
                             key={value}
                             type="button"
-                            className={sectionDefault === value ? "active" : ""}
-                            aria-pressed={sectionDefault === value}
-                            onClick={() => setSectionDefault(value)}
+                            className={settingsValues.sectionDefault === value ? "active" : ""}
+                            aria-pressed={settingsValues.sectionDefault === value}
+                            onClick={() => updateSettingsDraft({ sectionDefault: value })}
                           >
                             {value === "expanded" ? "Expanded" : "Collapsed"}
                           </button>
@@ -5922,7 +6013,7 @@ function App() {
                     <fieldset id="settings-card-editor-default" className="appearance-fieldset settings-section settings-section-card">
                       <legend>Card editor</legend>
                       <label>
-                        <input type="checkbox" checked={cardWriteChangesToEditorDefault} onChange={(event) => setCardWriteChangesToEditorDefault(event.target.checked)} />{" "}
+                        <input type="checkbox" checked={settingsValues.cardWriteChangesToEditorDefault} onChange={(event) => updateSettingsDraft({ cardWriteChangesToEditorDefault: event.target.checked })} />{" "}
                         Write changes to editor by default
                       </label>
                     </fieldset>
@@ -5934,7 +6025,7 @@ function App() {
                       <legend>Theme</legend>
                       <div className="appearance-theme-options">
                         {THEME_OPTIONS.map((item) => (
-                          <button key={item.value} type="button" className={theme === item.value ? "active" : ""} aria-pressed={theme === item.value} onClick={() => setTheme(item.value)}>
+                          <button key={item.value} type="button" className={settingsValues.theme === item.value ? "active" : ""} aria-pressed={settingsValues.theme === item.value} onClick={() => updateSettingsDraft({ theme: item.value })}>
                             <span className={`theme-swatch ${item.swatch}`} />
                             {item.label}
                           </button>
@@ -5945,7 +6036,7 @@ function App() {
                       <legend>Writing guide lines</legend>
                       <div className="appearance-theme-options">
                         {(["none", "full", "dotted"] as JournalLines[]).map((value) => (
-                          <button key={value} type="button" className={journalLines === value ? "active" : ""} aria-pressed={journalLines === value} onClick={() => setJournalLines(value)}>
+                          <button key={value} type="button" className={settingsValues.journalLines === value ? "active" : ""} aria-pressed={settingsValues.journalLines === value} onClick={() => updateSettingsDraft({ journalLines: value })}>
                             {JOURNAL_LINE_LABELS[value]}
                           </button>
                         ))}
@@ -5960,53 +6051,30 @@ function App() {
                             min="0"
                             max="1"
                             step="0.05"
-                            value={scratchpadOpacity}
+                            value={settingsValues.scratchpadOpacity}
                             aria-label="Scratchpad background opacity"
                             onChange={(event) => {
                               const value = Number(event.target.value);
-                              if (Number.isFinite(value)) setScratchpadOpacity(Math.min(1, Math.max(0, value)));
+                              if (Number.isFinite(value)) updateSettingsDraft({ scratchpadOpacity: Math.min(1, Math.max(0, value)) });
                             }}
                           />
-                          <output>{Math.round(scratchpadOpacity * 100)}%</output>
+                          <output>{Math.round(settingsValues.scratchpadOpacity * 100)}%</output>
                         </div>
                       </label>
                     </div>
-                    <fieldset id="settings-shortcuts" className="appearance-fieldset settings-section settings-section-card">
-                      <legend>Shortcuts</legend>
-                      <label>
-                        Open Scratchpad
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          aria-label="Capture Open Scratchpad shortcut"
-                          onClick={() => {
-                            setScratchpadShortcutError("");
-                            setScratchpadShortcutCapturing(true);
-                          }}
-                          onKeyDown={handleScratchpadShortcutCapture}
-                        >
-                          {scratchpadShortcutCapturing ? "Press a shortcut…" : scratchpadShortcut}
-                        </button>
-                      </label>
-                      <button type="button" className="secondary-button" onClick={() => void saveScratchpadShortcut(DEFAULT_SCRATCHPAD_SHORTCUT)}>
-                        Reset
-                      </button>
-                      {scratchpadShortcutError && <p className="error-message" role="alert">{scratchpadShortcutError}</p>}
-                      <small>Use one key with at least one modifier.</small>
-                    </fieldset>
                     <div id="settings-font-size" className="settings-section settings-section-card">
                       <label>
                         Editor font size
                         <div className="appearance-size-row">
-                          <input type="range" min="10" max="32" step="1" value={editorFontSize} onChange={(event) => setEditorFontSize(Number(event.target.value))} />
-                          <output>{editorFontSize}px</output>
+                          <input type="range" min="10" max="32" step="1" value={settingsValues.editorFontSize} onChange={(event) => updateSettingsDraft({ editorFontSize: Number(event.target.value) })} />
+                          <output>{settingsValues.editorFontSize}px</output>
                         </div>
                       </label>
                     </div>
                     <div id="settings-editor-font" className="appearance-font-field settings-section settings-section-card">
                       <span>Editor font</span>
                       <dl className="appearance-font-details">
-                        <div><dt>Name:</dt><dd title={editorFontName}>{editorFontName || "Default (Charter)"}</dd></div>
+                        <div><dt>Name:</dt><dd title={settingsEditorFontName}>{settingsEditorFontName || "Default (Charter)"}</dd></div>
                         <div><dt>Sample:</dt><dd className="appearance-font-sample" style={{ fontFamily: "var(--selected-editor-font, var(--editor-font))" }}>The quick brown fox jumps over the lazy dog 1234567890</dd></div>
                       </dl>
                       <div className="appearance-font-actions">
@@ -6021,13 +6089,18 @@ function App() {
                           <button type="button" className="secondary-button" disabled={installedFontsLoading} onClick={() => void loadInstalledFonts()}>{installedFontsLoading ? "Loading fonts…" : "Installed fonts…"}</button>
                         )}
                         <button type="button" className="secondary-button" onClick={() => editorFontInputRef.current?.click()}>Select .ttf…</button>
-                        <button type="button" className="secondary-button" disabled={!editorFontName} onClick={() => void resetEditorFont()}>Reset</button>
+                        <button type="button" className="secondary-button" disabled={!settingsEditorFontName} onClick={resetEditorFont}>Reset</button>
                         <input ref={editorFontInputRef} className="appearance-font-input" type="file" accept=".ttf,font/ttf" onChange={(event) => void chooseEditorFont(event)} />
                       </div>
                     </div>
                   </>
                 )}
               </div>
+            </div>
+            {settingsSaveError && <p className="error-message" role="alert">{settingsSaveError}</p>}
+            <div className="settings-actions">
+              <button type="button" className="secondary-button" disabled={settingsSaving} onClick={closeAppearanceSettings}>Exit without Saving</button>
+              <button type="button" className="primary-button" disabled={settingsSaving} onClick={() => void saveAppearanceSettings()}>{settingsSaving ? "Saving…" : "Save and Exit"}</button>
             </div>
           </dialog>
         </div>
