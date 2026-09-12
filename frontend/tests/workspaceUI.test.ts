@@ -532,7 +532,7 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(style, /--editor-content-left: 5%;[\s\S]*--editor-content-right: 5%;/);
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
-  assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(auto-fit, minmax\(180px, 1fr\)\)/);
   assert.match(style, /\.cm-live-board-column-header \{[\s\S]*cursor: grab/);
   assert.match(style, /\.cm-live-board-column\.is-column-drop-before/);
   assert.match(style, /\.cm-live-board-column\.is-column-drop-after/);

@@ -283,17 +283,37 @@ function validBoardOptions(value: unknown): value is BoardMarkerOptions {
   });
 }
 
+function normalizeBoardOptions(options: BoardMarkerOptions): BoardMarkerOptions {
+  const seenCards = new Set<string>();
+  return {
+    ...options,
+    columns: options.columns.map((column) => ({
+      ...column,
+      cardIDs: column.cardIDs.filter((id) => {
+        if (seenCards.has(id)) return false;
+        seenCards.add(id);
+        return true;
+      }),
+    })),
+  };
+}
+
 export function boardColumnsForMarker(
   marker: BoardMarker,
   cards: ReadonlyMap<string, CardMetadata>,
 ): BoardColumn[] {
-  if (marker.options) return marker.options.columns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] }));
-  return BOARD_COLUMNS.map((status) => ({
+  if (marker.options) return normalizeBoardOptions(marker.options).columns;
+  const columns = BOARD_COLUMNS.map((status) => ({
     id: status,
     name: BOARD_COLUMN_LABELS[status],
     color: BOARD_COLUMN_COLORS[status],
-    cardIDs: marker.cardIDs.filter((id) => cards.get(id)?.status === status),
+    cardIDs: [] as string[],
   }));
+  for (const id of marker.cardIDs) {
+    const status = cards.get(id)?.status;
+    columns.find((column) => column.id === status)?.cardIDs.push(id) ?? columns[0].cardIDs.push(id);
+  }
+  return columns;
 }
 
 export function boardMarker(
@@ -304,7 +324,7 @@ export function boardMarker(
 ): string {
   if (!options) return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")} -->`;
   if (!validBoardOptions(options)) throw new Error("Invalid board column options");
-  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")}:${encodeURIComponent(JSON.stringify(options))} -->`;
+  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")}:${encodeURIComponent(JSON.stringify(normalizeBoardOptions(options)))} -->`;
 }
 
 export function parseBoardMarker(line: string): BoardMarker | null {
@@ -331,7 +351,7 @@ export function parseBoardMarker(line: string): BoardMarker | null {
     try {
       const candidate = JSON.parse(decodeURIComponent(fields[fields.length - 1] ?? "")) as unknown;
       if (validBoardOptions(candidate)) {
-        options = candidate;
+        options = normalizeBoardOptions(candidate);
         fields.pop();
       }
     } catch {
