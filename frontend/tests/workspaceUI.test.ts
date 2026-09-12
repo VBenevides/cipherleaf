@@ -443,9 +443,10 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /cm-live-board-card-date/);
   assert.match(liveEditor, /cm-live-board-minimize/);
   assert.match(liveEditor, /\[BOARD\] \$\{boardTitle\}/);
-  assert.match(liveEditor, /BOARD_COLUMN_LABELS\[status\][\s\S]*allCards\.get\(status\)/);
+  assert.match(liveEditor, /boardColumnsForMarker\(board, options\.cards\(\)\)/);
+  assert.match(liveEditor, /allCards\.get\(column\.id\)/);
   assert.match(liveEditor, /cm-live-board-card-tags/);
-  assert.match(liveEditor, /normalizeCardTags\(this\.cardIDs\.flatMap/);
+  assert.match(liveEditor, /normalizeCardTags\(this\.columns\.flatMap/);
   assert.match(liveEditor, /document\.createElement\("select"\)/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
@@ -518,6 +519,12 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.doesNotMatch(liveEditor, /rule\.style\.left/);
   assert.match(liveEditor, /cm-live-board-title[\s\S]*value = this\.title \|\| DEFAULT_BOARD_TITLE/);
   assert.match(liveEditor, /onChangeBoardTitle/);
+  assert.match(liveEditor, /Add column/);
+  assert.match(liveEditor, /Column name/);
+  assert.match(liveEditor, /Column color/);
+  assert.match(liveEditor, /Move column before/);
+  assert.match(liveEditor, /Move column after/);
+  assert.match(liveEditor, /Remove column/);
   assert.match(liveEditor, /item\.addEventListener\("pointerdown"/);
   assert.match(liveEditor, /document\.addEventListener\("pointermove", move\)/);
   assert.match(liveEditor, /targetColumn\?\.classList\.add\("is-drop-target"\)/);
@@ -526,6 +533,9 @@ test("embedded boards fill the usable editor line with equal columns", () => {
   assert.match(style, /\.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line \{[\s\S]*width: 100%[\s\S]*max-width: none/);
   assert.match(style, /\.cm-live-board \{[\s\S]*width: 100%[\s\S]*margin: 6px 0/);
   assert.match(style, /\.cm-live-board-columns \{[\s\S]*repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(style, /\.cm-live-board-column-header \{[\s\S]*cursor: grab/);
+  assert.match(style, /\.cm-live-board-column\.is-column-drop-before/);
+  assert.match(style, /\.cm-live-board-column\.is-column-drop-after/);
   assert.match(style, /\.cm-live-board-card\.is-dragging \{[\s\S]*cursor: grabbing/);
   assert.match(style, /\.cm-live-board-card\.is-drag-preview \{[\s\S]*border-style: dashed/);
   assert.match(style, /\.cm-journal-rules \{[\s\S]*inset: 0 var\(--editor-content-right\) 0 var\(--editor-content-left\)/);

@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { cardReference, boardMarker, type CardMetadata } from "../src/cards";
+import { cardReference, boardMarker, type BoardColumn, type CardMetadata } from "../src/cards";
 import LiveMarkdownEditor, { clipboardClaimsImage, clipboardImage, clipboardMayContainImage, imageDataURL } from "../src/LiveMarkdownEditor";
 import ObjectTreeView from "../src/ObjectTreeView";
 import SourceMarkdownEditor from "../src/SourceMarkdownEditor";
@@ -211,6 +211,10 @@ assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-editor"), editorNod
 assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-live-board"), boardNode);
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.equal(board.querySelectorAll<HTMLInputElement>(".cm-live-board-column-name").length, 4);
+assert.equal(board.querySelectorAll<HTMLInputElement>(".cm-live-board-column-color").length, 4);
+assert.ok(board.querySelector("button[aria-label=\"Add board column\"]"));
+assert.equal(board.querySelectorAll("button[aria-label=\"Remove column\"]").length, 4);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
 assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
 assert.ok(board.querySelector(".cm-live-board-card-tags"));
@@ -270,7 +274,7 @@ minimizeBoard.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, true);
-assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1");
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1 · Concluded: 1");
 assert.equal(minimizeBoard.textContent, "Maximize");
 minimizeBoard.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, false);
@@ -293,6 +297,37 @@ board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
 });
 board.querySelectorAll("button[aria-label]").forEach((button) => button.click());
 assert.ok(opened > 0 && moved > 0 && added > 0);
+
+let dynamicColumns: readonly BoardColumn[] = [];
+const dynamic = mount("dynamic-board-host");
+await act(async () => {
+  dynamic.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "dynamic", value: boardMarker("dynamic", [], "Dynamic", {
+      columns: [
+        { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] },
+        { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
+      ],
+    }),
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
+    cardData: cards, onMoveCardInBoard: () => {}, onChangeBoardColumns: (_boardID, columns) => { dynamicColumns = columns; },
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const dynamicBoard = dynamic.body.querySelector<HTMLElement>(".cm-live-board")!;
+assert.equal(dynamicBoard.querySelectorAll(".cm-live-board-column").length, 2);
+const dynamicName = dynamicBoard.querySelector<HTMLInputElement>(".cm-live-board-column-name")!;
+dynamicName.value = "Ready";
+dynamicName.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert.equal(dynamicColumns[0]?.name, "Ready");
+const dynamicColor = dynamicBoard.querySelector<HTMLInputElement>(".cm-live-board-column-color")!;
+dynamicColor.value = "#654321";
+dynamicColor.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert.equal(dynamicColumns[0]?.color, "#654321");
+dynamicBoard.querySelector<HTMLButtonElement>("button[aria-label=\"Remove column\"]")!.click();
+assert.deepEqual(dynamicColumns, [{ id: "done", name: "Done", color: "#ABCDEF", cardIDs: ["card-1"] }]);
+await act(async () => { dynamic.root.unmount(); });
+dynamic.shell.remove();
 
 const cardsWithoutTags = new Map([...updatedCards].map(([id, card]) => [id, { ...card, tags: [] }]));
 await act(async () => {

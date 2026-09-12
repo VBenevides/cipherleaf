@@ -72,7 +72,7 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, normalizeCardTags, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumn, boardColumnsForMarker, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, normalizeCardTags, parseBoardMarker, parseCardReference, type BoardColumn, type CardMetadata, type CardStatus } from "./cards";
 import { localDateKey } from "./timeTracking";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
@@ -90,8 +90,10 @@ type LiveMarkdownEditorProps = {
   readonly onCreateCard?: () => Promise<string | null>;
   readonly onCreateBoard?: () => Promise<string | null>;
   readonly onMoveCard?: (id: string, status: CardStatus) => void;
+  readonly onMoveCardInBoard?: (boardID: string, cardID: string, columnID: string) => void;
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
+  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[]) => void;
   readonly onDecreaseFontSize: () => void;
   readonly onIncreaseFontSize: () => void;
   readonly searchTarget?: SearchTarget | null;
@@ -1147,7 +1149,7 @@ function updateBoardCardTitle(item: HTMLButtonElement, card: CardMetadata, statu
   if (!title) return false;
   title.textContent = card.title || DEFAULT_CARD_TITLE;
   item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
-  item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
+  item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${item.dataset.columnName || BOARD_COLUMN_LABELS[status]}`);
   fitBoardCardTexts(item);
   return true;
 }
@@ -1160,20 +1162,26 @@ function alignmentLabel(align: "left" | "center" | "right"): string {
 
 class BoardWidget extends WidgetType {
   private titleResizeObserver: ResizeObserver | null = null;
+  private draggedColumnID: string | null = null;
 
   constructor(
     readonly boardID: string,
     readonly title: string,
     readonly cardIDs: readonly string[],
+    readonly columns: readonly BoardColumn[],
+    readonly configured: boolean,
     readonly cards: ReadonlyMap<string, CardMetadata>,
     readonly openCard: (id: string) => void,
     readonly moveCard: (id: string, status: CardStatus) => void,
+    readonly moveCardInBoard: (boardID: string, cardID: string, columnID: string) => void,
     readonly addCard: (boardID: string) => void,
     readonly changeTitle: (boardID: string, title: string) => void,
+    readonly changeColumns: (boardID: string, columns: readonly BoardColumn[]) => void,
   ) { super(); }
 
   eq(other: BoardWidget) {
-    if (other.boardID !== this.boardID || other.title !== this.title || other.cardIDs.length !== this.cardIDs.length) return false;
+    if (other.boardID !== this.boardID || other.title !== this.title || other.configured !== this.configured ||
+      other.cardIDs.length !== this.cardIDs.length || other.columns.length !== this.columns.length) return false;
     for (let index = 0; index < this.cardIDs.length; index++) {
       if (other.cardIDs[index] !== this.cardIDs[index]) return false;
       const previous = this.cards.get(this.cardIDs[index]);
@@ -1181,16 +1189,29 @@ class BoardWidget extends WidgetType {
       if (previous === current) continue;
       if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
     }
+    for (let index = 0; index < this.columns.length; index++) {
+      const current = this.columns[index];
+      const otherColumn = other.columns[index];
+      if (current.id !== otherColumn.id || current.name !== otherColumn.name || current.color !== otherColumn.color ||
+        current.cardIDs.length !== otherColumn.cardIDs.length || current.cardIDs.some((id, cardIndex) => id !== otherColumn.cardIDs[cardIndex])) return false;
+    }
     return true;
   }
 
   updateDOM(dom: HTMLElement, _view: EditorView, from: BoardWidget) {
+    if (this.boardID !== from.boardID || this.title !== from.title || this.configured !== from.configured ||
+      this.cardIDs.length !== from.cardIDs.length || this.cardIDs.some((id, index) => id !== from.cardIDs[index]) ||
+      this.columns.length !== from.columns.length || this.columns.some((column, index) => {
+        const previous = from.columns[index];
+        return column.id !== previous.id || column.name !== previous.name || column.color !== previous.color ||
+          column.cardIDs.length !== previous.cardIDs.length || column.cardIDs.some((id, cardIndex) => id !== previous.cardIDs[cardIndex]);
+      })) return false;
     boardCardData.set(dom, this.cards);
     const cardElements = new Map<string, HTMLButtonElement>();
     dom.querySelectorAll<HTMLButtonElement>(".cm-live-board-card").forEach((item) => {
       if (item.dataset.cardId) cardElements.set(item.dataset.cardId, item);
     });
-    for (const id of this.cardIDs) {
+    for (const id of new Set([...this.cardIDs, ...this.columns.flatMap((column) => column.cardIDs)])) {
       const previous = from.cards.get(id);
       const card = this.cards.get(id);
       if (!previous || !card || previous.status !== card.status) return false;
@@ -1206,16 +1227,107 @@ class BoardWidget extends WidgetType {
 
   private renderColumn(
     columns: HTMLElement,
-    status: CardStatus,
+    columnConfig: BoardColumn,
     cards: readonly CardMetadata[],
   ) {
     const column = columns.appendChild(document.createElement("div"));
-    column.className = `cm-live-board-column status-${status}`;
-    column.dataset.status = status;
+    const status = BOARD_COLUMNS.includes(columnConfig.id as CardStatus) ? columnConfig.id : "";
+    column.className = `cm-live-board-column${status ? ` status-${status}` : ""}`;
+    column.dataset.columnId = columnConfig.id;
+    column.style.setProperty("--board-column-color", columnConfig.color);
     column.setAttribute("role", "group");
-    column.setAttribute("aria-label", BOARD_COLUMN_LABELS[status]);
-    const heading = column.appendChild(document.createElement("h4"));
-    heading.textContent = BOARD_COLUMN_LABELS[status];
+    column.setAttribute("aria-label", columnConfig.name);
+    const heading = column.appendChild(document.createElement("div"));
+    heading.className = "cm-live-board-column-header";
+    heading.draggable = true;
+    heading.dataset.columnId = columnConfig.id;
+    const stopEditorEvent = (event: Event) => event.stopPropagation();
+    const name = heading.appendChild(document.createElement("input"));
+    name.type = "text";
+    name.value = columnConfig.name;
+    name.className = "cm-live-board-column-name";
+    name.setAttribute("aria-label", "Column name");
+    const color = heading.appendChild(document.createElement("input"));
+    color.type = "color";
+    color.value = columnConfig.color;
+    color.className = "cm-live-board-column-color";
+    color.setAttribute("aria-label", "Column color");
+    for (const eventName of ["mousedown", "click", "input", "change", "keydown"])
+      heading.addEventListener(eventName, stopEditorEvent);
+    const updateColumn = (update: (column: BoardColumn) => BoardColumn) => {
+      this.changeColumns(this.boardID, this.columns.map((current) => current.id === columnConfig.id ? update(current) : current));
+    };
+    name.addEventListener("change", () => updateColumn((current) => ({ ...current, name: name.value.trim() || current.name })));
+    color.addEventListener("change", () => updateColumn((current) => ({ ...current, color: /^#[0-9A-Fa-f]{6}$/.test(color.value) ? color.value.toUpperCase() : current.color })));
+    const moveColumn = (offset: -1 | 1) => {
+      const index = this.columns.findIndex((current) => current.id === columnConfig.id);
+      const target = index + offset;
+      if (index < 0 || target < 0 || target >= this.columns.length) return;
+      const next = [...this.columns];
+      [next[index], next[target]] = [next[target], next[index]];
+      this.changeColumns(this.boardID, next);
+    };
+    const before = heading.appendChild(document.createElement("button"));
+    before.type = "button";
+    before.className = "icon-button cm-live-board-column-move";
+    before.textContent = "←";
+    before.title = "Move column before";
+    before.setAttribute("aria-label", "Move column before");
+    before.disabled = this.columns[0]?.id === columnConfig.id;
+    before.addEventListener("click", () => moveColumn(-1));
+    const after = heading.appendChild(document.createElement("button"));
+    after.type = "button";
+    after.className = "icon-button cm-live-board-column-move";
+    after.textContent = "→";
+    after.title = "Move column after";
+    after.setAttribute("aria-label", "Move column after");
+    after.disabled = this.columns[this.columns.length - 1]?.id === columnConfig.id;
+    after.addEventListener("click", () => moveColumn(1));
+    const remove = heading.appendChild(document.createElement("button"));
+    remove.type = "button";
+    remove.className = "icon-button cm-live-board-column-remove";
+    remove.textContent = "×";
+    remove.title = "Remove column";
+    remove.setAttribute("aria-label", "Remove column");
+    remove.disabled = this.columns.length <= 1;
+    remove.addEventListener("click", () => {
+      if (this.columns.length <= 1) return;
+      const index = this.columns.findIndex((current) => current.id === columnConfig.id);
+      const target = this.columns[index + 1] ?? this.columns[0];
+      if (!target) return;
+      this.changeColumns(this.boardID, this.columns
+        .filter((current) => current.id !== columnConfig.id)
+        .map((current) => current.id === target.id ? { ...current, cardIDs: [...current.cardIDs, ...columnConfig.cardIDs] } : current));
+    });
+    heading.addEventListener("dragstart", (event) => {
+      this.draggedColumnID = columnConfig.id;
+      event.dataTransfer?.setData("text/plain", columnConfig.id);
+    });
+    heading.addEventListener("dragend", () => {
+      this.draggedColumnID = null;
+      columns.querySelectorAll<HTMLElement>(".is-column-drop-before, .is-column-drop-after").forEach((item) => item.classList.remove("is-column-drop-before", "is-column-drop-after"));
+    });
+    column.addEventListener("dragover", (event) => {
+      const sourceID = this.draggedColumnID || event.dataTransfer?.getData("text/plain");
+      if (!sourceID || sourceID === columnConfig.id) return;
+      event.preventDefault();
+      const afterTarget = event.clientX > column.getBoundingClientRect().left + column.offsetWidth / 2;
+      column.classList.toggle("is-column-drop-before", !afterTarget);
+      column.classList.toggle("is-column-drop-after", afterTarget);
+    });
+    column.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const sourceID = this.draggedColumnID || event.dataTransfer?.getData("text/plain");
+      if (!sourceID || sourceID === columnConfig.id) return;
+      const sourceIndex = this.columns.findIndex((current) => current.id === sourceID);
+      const targetIndex = this.columns.findIndex((current) => current.id === columnConfig.id);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const next = [...this.columns];
+      const [source] = next.splice(sourceIndex, 1);
+      const insertAt = next.findIndex((current) => current.id === columnConfig.id) + (event.clientX > column.getBoundingClientRect().left + column.offsetWidth / 2 ? 1 : 0);
+      next.splice(insertAt, 0, source);
+      this.changeColumns(this.boardID, next);
+    });
     const empty = column.appendChild(document.createElement("p"));
     empty.className = "cm-live-board-empty";
     empty.textContent = "No cards";
@@ -1278,7 +1390,7 @@ class BoardWidget extends WidgetType {
           if (nextTarget === targetColumn) return;
           clearTarget();
           targetColumn = nextTarget;
-          if (targetColumn?.dataset.status === status) return;
+          if (targetColumn?.dataset.columnId === columnConfig.id) return;
           targetColumn?.classList.add("is-drop-target");
           if (targetColumn) {
             preview = item.cloneNode(true) as HTMLButtonElement;
@@ -1300,8 +1412,11 @@ class BoardWidget extends WidgetType {
           if (!dragging) return;
           upEvent.preventDefault();
           const target = columnAt(upEvent.clientX, upEvent.clientY);
-          const nextStatus = target?.dataset.status as CardStatus | undefined;
-          if (nextStatus && nextStatus !== status) this.moveCard(card.id, nextStatus);
+          const nextColumnID = target?.dataset.columnId;
+          if (nextColumnID && nextColumnID !== columnConfig.id) {
+            if (this.configured) this.moveCardInBoard(this.boardID, card.id, nextColumnID);
+            else if (BOARD_COLUMNS.includes(nextColumnID as CardStatus)) this.moveCard(card.id, nextColumnID as CardStatus);
+          }
         };
         const cancel = (cancelEvent: PointerEvent) => {
           if (cancelEvent.pointerId === event.pointerId) cleanup();
@@ -1318,16 +1433,19 @@ class BoardWidget extends WidgetType {
         }
         this.openCard(card.id);
       });
-      item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
+      item.dataset.columnName = columnConfig.name;
+      item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${columnConfig.name}`);
       item.addEventListener("keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        const index = BOARD_COLUMNS.indexOf(status);
+        const index = this.columns.findIndex((current) => current.id === columnConfig.id);
         const nextIndex = index + (event.key === "ArrowRight" ? 1 : -1);
-        if (nextIndex < 0 || nextIndex >= BOARD_COLUMNS.length) return;
+        if (nextIndex < 0 || nextIndex >= this.columns.length) return;
         event.preventDefault();
-        this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
+        const nextColumn = this.columns[nextIndex];
+        if (this.configured) this.moveCardInBoard(this.boardID, card.id, nextColumn.id);
+        else if (BOARD_COLUMNS.includes(nextColumn.id as CardStatus)) this.moveCard(card.id, nextColumn.id as CardStatus);
       });
-      const date = boardCardDate(card, status);
+      const date = boardCardDate(card, card.status);
       const cardDate = item.appendChild(document.createElement("time"));
       cardDate.className = "cm-live-board-card-date";
       cardDate.dateTime = date ?? "";
@@ -1378,7 +1496,7 @@ class BoardWidget extends WidgetType {
     const tagFilter = controls.appendChild(document.createElement("select"));
     tagFilter.setAttribute("aria-label", "Filter board cards by tags");
     tagFilter.appendChild(document.createElement("option")).value = "";
-    for (const tag of normalizeCardTags(this.cardIDs.flatMap((id) => this.cards.get(id)?.tags ?? []))) {
+    for (const tag of normalizeCardTags(this.columns.flatMap((column) => column.cardIDs.flatMap((id) => this.cards.get(id)?.tags ?? [])))) {
       const option = tagFilter.appendChild(document.createElement("option"));
       option.value = tag;
       option.textContent = tag;
@@ -1390,6 +1508,16 @@ class BoardWidget extends WidgetType {
     add.addEventListener("click", (event) => {
       event.stopPropagation();
       this.addCard(this.boardID);
+    });
+    const addColumn = controls.appendChild(document.createElement("button"));
+    addColumn.type = "button";
+    addColumn.className = "secondary-button";
+    addColumn.textContent = "Add column";
+    addColumn.setAttribute("aria-label", "Add board column");
+    addColumn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `column-${Date.now().toString(36)}`;
+      this.changeColumns(this.boardID, [...this.columns, { id, name: "New column", color: "#888888", cardIDs: [] }]);
     });
     const clear = controls.appendChild(document.createElement("button"));
     clear.type = "button";
@@ -1403,17 +1531,22 @@ class BoardWidget extends WidgetType {
     });
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
+    columns.style.gridTemplateColumns = `repeat(${this.columns.length}, minmax(0, 1fr))`;
     const fitTitles = () => fitBoardCardTexts(board);
-    const allCards = boardCardsForColumns(this.cards, this.cardIDs);
-    for (const status of BOARD_COLUMNS) {
-      this.renderColumn(columns, status, allCards.get(status) ?? []);
+    const allCards = new Map<string, CardMetadata[]>();
+    for (const column of this.columns) {
+      const columnCards = this.configured
+        ? column.cardIDs.map((id) => this.cards.get(id)).filter((card): card is CardMetadata => Boolean(card))
+        : boardCardsForColumn(this.cards, this.cardIDs, column.id as CardStatus);
+      allCards.set(column.id, columnCards);
+      this.renderColumn(columns, column, columnCards);
     }
     boardCardData.set(board, this.cards);
     let isMinimized = false;
     const updateMinimizedState = () => {
       const boardTitle = title.value || DEFAULT_BOARD_TITLE;
-      const counts = BOARD_COLUMNS.slice(0, 3)
-        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${allCards.get(status)?.length ?? 0}`)
+      const counts = this.columns
+        .map((column) => `${column.name}: ${allCards.get(column.id)?.length ?? 0}`)
         .join(" · ");
       board.classList.toggle("is-minimized", isMinimized);
       title.hidden = isMinimized;
@@ -1433,15 +1566,20 @@ class BoardWidget extends WidgetType {
     const updateFilter = () => {
       const currentCards = boardCardData.get(board) ?? this.cards;
       const titleQuery = filter.value.trim().toLocaleLowerCase();
-      const filteredCards = titleQuery || tagFilter.value
-        ? boardCardsForColumns(currentCards, this.cardIDs, titleQuery, [tagFilter.value])
-        : allCards;
-      for (const status of BOARD_COLUMNS) {
-        const visible = new Set((filteredCards.get(status) ?? []).map((card) => card.id));
-        for (const item of board.querySelectorAll<HTMLButtonElement>(`.status-${status} .cm-live-board-card`)) {
+      for (const column of this.columns) {
+        const sourceCards = this.configured
+          ? column.cardIDs.map((id) => currentCards.get(id)).filter((card): card is CardMetadata => Boolean(card))
+          : boardCardsForColumn(currentCards, this.cardIDs, column.id as CardStatus);
+        const visible = new Set((titleQuery || tagFilter.value ? sourceCards.filter((card) =>
+          (!titleQuery || card.title.toLocaleLowerCase().includes(titleQuery)) &&
+          (!tagFilter.value || card.tags.some((tag) => tag.toLocaleLowerCase() === tagFilter.value.toLocaleLowerCase()))) : sourceCards).map((card) => card.id));
+        const columnElement = [...board.querySelectorAll<HTMLElement>(".cm-live-board-column")]
+          .find((item) => item.dataset.columnId === column.id);
+        for (const item of columnElement?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
           item.hidden = !visible.has(item.dataset.cardId ?? "");
         }
-        board.querySelector<HTMLElement>(`.status-${status} .cm-live-board-empty`)!.hidden = visible.size > 0;
+        const empty = columnElement?.querySelector<HTMLElement>(".cm-live-board-empty");
+        if (empty) empty.hidden = visible.size > 0;
       }
     };
     filter.addEventListener("input", updateFilter);
@@ -1875,8 +2013,10 @@ type LivePreviewOptions = {
   cardTitle: (id: string) => string | null;
   cards: () => ReadonlyMap<string, CardMetadata>;
   moveCard: (id: string, status: CardStatus) => void;
+  moveCardInBoard: (boardID: string, cardID: string, columnID: string) => void;
   addCard: (boardID: string) => void;
   changeBoardTitle: (boardID: string, title: string) => void;
+  changeBoardColumns: (boardID: string, columns: readonly BoardColumn[]) => void;
   noteID: string;
   onError: (reason: unknown) => void;
   highlightLineNumbers: ReadonlySet<number>;
@@ -2089,11 +2229,15 @@ function renderBoardLine(
         board.id,
         board.title,
         board.cardIDs,
+        boardColumnsForMarker(board, options.cards()),
+        Boolean(board.options),
         options.cards(),
         options.openCard,
         options.moveCard,
+        options.moveCardInBoard,
         options.addCard,
         options.changeBoardTitle,
+        options.changeBoardColumns,
       ),
     );
     return lineNumber + 1;
@@ -3428,8 +3572,10 @@ export default function LiveMarkdownEditor({
   onCreateCard,
   onCreateBoard,
   onMoveCard,
+  onMoveCardInBoard,
   onAddCardToBoard,
   onChangeBoardTitle,
+  onChangeBoardColumns,
   onDecreaseFontSize,
   onIncreaseFontSize,
   searchTarget = null,
@@ -3455,8 +3601,10 @@ export default function LiveMarkdownEditor({
   const onCreateCardRef = useRef(onCreateCard);
   const onCreateBoardRef = useRef(onCreateBoard);
   const onMoveCardRef = useRef(onMoveCard);
+  const onMoveCardInBoardRef = useRef(onMoveCardInBoard);
   const onAddCardToBoardRef = useRef(onAddCardToBoard);
   const onChangeBoardTitleRef = useRef(onChangeBoardTitle);
+  const onChangeBoardColumnsRef = useRef(onChangeBoardColumns);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
@@ -3501,8 +3649,10 @@ export default function LiveMarkdownEditor({
     onCreateCardRef.current = onCreateCard;
     onCreateBoardRef.current = onCreateBoard;
     onMoveCardRef.current = onMoveCard;
+    onMoveCardInBoardRef.current = onMoveCardInBoard;
     onAddCardToBoardRef.current = onAddCardToBoard;
     onChangeBoardTitleRef.current = onChangeBoardTitle;
+    onChangeBoardColumnsRef.current = onChangeBoardColumns;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
@@ -3510,7 +3660,7 @@ export default function LiveMarkdownEditor({
     if (previousCardData !== cardData) {
       view.current?.dispatch({ effects: refreshLivePreview.of(null) });
     }
-  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -3850,8 +4000,10 @@ export default function LiveMarkdownEditor({
             cardTitle: (id) => cardTitlesRef.current.get(id) ?? null,
             cards: () => cardDataRef.current,
             moveCard: (id, status) => onMoveCardRef.current?.(id, status),
+            moveCardInBoard: (boardID, cardID, columnID) => onMoveCardInBoardRef.current?.(boardID, cardID, columnID),
             addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
             changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
+            changeBoardColumns: (boardID, columns) => onChangeBoardColumnsRef.current?.(boardID, columns),
             noteID,
             onError: (reason) => onErrorRef.current(reason),
             highlightLineNumbers,

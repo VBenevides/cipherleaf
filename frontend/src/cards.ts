@@ -17,6 +17,13 @@ export const BOARD_COLUMN_LABELS: Record<CardStatus, string> = {
 
 export const BOARD_COLUMNS = ["not-started", "in-progress", "blocked", "finished"] as const;
 
+export const BOARD_COLUMN_COLORS: Record<CardStatus, string> = {
+  "not-started": "#888888",
+  "in-progress": "#2588D8",
+  blocked: "#D84C4C",
+  finished: "#2CA36B",
+};
+
 export type CardMetadata = {
   id: string;
   title: string;
@@ -43,6 +50,9 @@ export type CardTemplate = {
   tags: string[];
   body: string;
 };
+
+export type BoardColumn = { id: string; name: string; color: string; cardIDs: string[] };
+export type BoardMarkerOptions = { columns: BoardColumn[]; templateID?: string };
 
 export function boardCardsForColumns(
   cards: ReadonlyMap<string, CardMetadata>,
@@ -253,14 +263,48 @@ export function serializeTemplateDocument(template: CardTemplate): string {
 }
 
 export const DEFAULT_BOARD_TITLE = "Kanban Board";
-export type BoardMarker = { id: string; title: string; cardIDs: string[] };
+export type BoardMarker = { id: string; title: string; cardIDs: string[]; options?: BoardMarkerOptions };
+
+function validBoardOptions(value: unknown): value is BoardMarkerOptions {
+  if (!value || typeof value !== "object") return false;
+  const options = value as Partial<BoardMarkerOptions>;
+  if (!Array.isArray(options.columns) || options.columns.length === 0) return false;
+  const ids = new Set<string>();
+  if (options.templateID !== undefined && typeof options.templateID !== "string") return false;
+  return options.columns.every((column) => {
+    if (!column || typeof column !== "object") return false;
+    const candidate = column as Partial<BoardColumn>;
+    if (typeof candidate.id !== "string" || !candidate.id || ids.has(candidate.id) ||
+      typeof candidate.name !== "string" || typeof candidate.color !== "string" ||
+      !/^#[0-9A-Fa-f]{6}$/.test(candidate.color) ||
+      !Array.isArray(candidate.cardIDs) || !candidate.cardIDs.every((id) => typeof id === "string")) return false;
+    ids.add(candidate.id);
+    return true;
+  });
+}
+
+export function boardColumnsForMarker(
+  marker: BoardMarker,
+  cards: ReadonlyMap<string, CardMetadata>,
+): BoardColumn[] {
+  if (marker.options) return marker.options.columns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] }));
+  return BOARD_COLUMNS.map((status) => ({
+    id: status,
+    name: BOARD_COLUMN_LABELS[status],
+    color: BOARD_COLUMN_COLORS[status],
+    cardIDs: marker.cardIDs.filter((id) => cards.get(id)?.status === status),
+  }));
+}
 
 export function boardMarker(
   boardID: string,
   cardIDs: readonly string[] = [],
   title = DEFAULT_BOARD_TITLE,
+  options?: BoardMarkerOptions,
 ): string {
-  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")} -->`;
+  if (!options) return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")} -->`;
+  if (!validBoardOptions(options)) throw new Error("Invalid board column options");
+  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")}:${encodeURIComponent(JSON.stringify(options))} -->`;
 }
 
 export function parseBoardMarker(line: string): BoardMarker | null {
@@ -282,8 +326,22 @@ export function parseBoardMarker(line: string): BoardMarker | null {
   if (encodedTitle) {
     try { title = decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { title = encodedTitle; }
   }
+  let options: BoardMarkerOptions | undefined;
+  if (hasTitle && fields.length > 1) {
+    try {
+      const candidate = JSON.parse(decodeURIComponent(fields[fields.length - 1] ?? "")) as unknown;
+      if (validBoardOptions(candidate)) {
+        options = candidate;
+        fields.pop();
+      }
+    } catch {
+      // Legacy card IDs can contain colons.
+    }
+  }
   const ids = (hasTitle ? fields.join(":") : payload);
-  return { id, title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
+  const markerResult: BoardMarker = { id, title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
+  if (options) markerResult.options = options;
+  return markerResult;
 }
 
 export function replaceBoardMarker(
@@ -296,6 +354,6 @@ export function replaceBoardMarker(
   return markdown.replace(marker, (line) => {
     const current = parseBoardMarker(line);
     const next = current && update(current);
-    return next ? boardMarker(next.id, next.cardIDs, next.title) : line;
+    return next ? boardMarker(next.id, next.cardIDs, next.title, next.options) : line;
   });
 }

@@ -4,6 +4,7 @@ import {
   boardMarker,
   boardCardsForColumns,
   boardCardsForColumn,
+  boardColumnsForMarker,
   cardReference,
   newCardMetadata,
   normalizeCardTags,
@@ -56,6 +57,24 @@ test("template and board markers round-trip", () => {
   assert.deepEqual(parseBoardMarker("<!-- cipherleaf-board:board-1: -->"), {
     id: "board-1", title: "Kanban Board", cardIDs: [],
   });
+});
+
+test("configured board markers keep ordered columns and validate colors", () => {
+  const cards = new Map([
+    ["card-1", { ...newCardMetadata("card-1"), status: "blocked" as const }],
+  ]);
+  const options = {
+    columns: [
+      { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] },
+      { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
+    ],
+    templateID: "template-1",
+  };
+  const source = boardMarker("board-1", [], "Roadmap", options);
+  assert.deepEqual(parseBoardMarker(source), { id: "board-1", title: "Roadmap", cardIDs: [], options });
+  assert.deepEqual(boardColumnsForMarker(parseBoardMarker(source)!, cards), options.columns);
+  assert.deepEqual(boardColumnsForMarker(parseBoardMarker(boardMarker("board-1", ["card-1"]))!, cards).map((column) => column.cardIDs), [[], [], ["card-1"], []]);
+  assert.throws(() => boardMarker("board-1", [], "Roadmap", { columns: [{ id: "todo", name: "Todo", color: "blue", cardIDs: [] }] }), /Invalid board column options/);
 });
 
 test("tags trim and deduplicate without losing first display casing", () => {

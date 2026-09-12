@@ -4,7 +4,7 @@ import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { ScratchpadState } from "../bindings/cipherleaf/internal/app/models";
 import { errorText } from "./errors";
 import { createSerialTaskRunner } from "./serialTask";
-import type { CardMetadata, CardStatus } from "./cards";
+import type { BoardColumn, CardMetadata, CardStatus } from "./cards";
 
 const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 
@@ -19,8 +19,10 @@ type ScratchpadProps = {
   readonly onCreateCard?: () => Promise<string | null>;
   readonly onCreateBoard?: () => Promise<string | null>;
   readonly onMoveCard?: (id: string, status: CardStatus) => void;
+  readonly onMoveCardInBoard?: (boardID: string, cardID: string, columnID: string) => void;
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
+  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[]) => void;
   readonly onDecreaseFontSize?: () => void;
   readonly onIncreaseFontSize?: () => void;
   readonly defaultSectionsCollapsed?: boolean;
@@ -59,8 +61,10 @@ export default function Scratchpad({
   onCreateCard,
   onCreateBoard,
   onMoveCard,
+  onMoveCardInBoard,
   onAddCardToBoard,
   onChangeBoardTitle,
+  onChangeBoardColumns,
   onDecreaseFontSize = () => {},
   onIncreaseFontSize = () => {},
   defaultSectionsCollapsed = true,
@@ -222,8 +226,10 @@ export default function Scratchpad({
               onCreateCard={onCreateCard}
               onCreateBoard={onCreateBoard}
               onMoveCard={onMoveCard}
+              onMoveCardInBoard={onMoveCardInBoard}
               onAddCardToBoard={onAddCardToBoard}
               onChangeBoardTitle={onChangeBoardTitle}
+              onChangeBoardColumns={onChangeBoardColumns}
               onDecreaseFontSize={onDecreaseFontSize}
               onIncreaseFontSize={onIncreaseFontSize}
               caretOffset={state.caretOffset}

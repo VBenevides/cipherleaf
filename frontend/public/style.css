@@ -4278,12 +4278,17 @@ dialog.modal-backdrop {
 .cm-live-board-controls input,
 .cm-live-board-controls select { min-width: 0; flex: 1; }
 .cm-live-board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.cm-live-board-column { min-height: 100px; max-height: 420px; overflow: auto; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.cm-live-board-column { min-height: 100px; max-height: 420px; overflow: auto; padding: 8px; border-top: 3px solid var(--board-column-color, var(--muted)); border-radius: 8px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .cm-live-board-column.status-in-progress { background: color-mix(in srgb, #2588d8 18%, transparent); }
 .cm-live-board-column.status-blocked { background: color-mix(in srgb, #d84c4c 18%, transparent); }
 .cm-live-board-column.status-finished { background: color-mix(in srgb, #2ca36b 18%, transparent); }
 .cm-live-board-column.is-drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
-.cm-live-board-column h4 { margin: 0 0 8px; font-size: .85em; }
+.cm-live-board-column-header { display: flex; align-items: center; gap: 3px; margin: 0 0 8px; cursor: grab; }
+.cm-live-board-column-name { min-width: 0; flex: 1 1 auto; padding: 2px 0; color: var(--ink); border: 0; background: transparent; font: inherit; font-size: .85em; font-weight: 700; }
+.cm-live-board-column-color { width: 24px; height: 24px; min-height: 0; padding: 1px; }
+.cm-live-board-column-move, .cm-live-board-column-remove { flex: 0 0 auto; min-width: 24px; min-height: 24px; padding: 0; }
+.cm-live-board-column.is-column-drop-before { box-shadow: inset 3px 0 var(--accent); }
+.cm-live-board-column.is-column-drop-after { box-shadow: inset -3px 0 var(--accent); }
 .cm-live-board-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin: 5px 0; padding: 7px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: grab; }
 .cm-live-board-card.is-dragging { opacity: .55; cursor: grabbing; }
 .cm-live-board-card.is-drag-preview { border-style: dashed; opacity: .7; pointer-events: none; }

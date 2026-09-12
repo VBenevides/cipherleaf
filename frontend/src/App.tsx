@@ -58,6 +58,7 @@ import {
   BOARD_COLUMNS,
   CARD_STATUS_LABELS,
   boardMarker,
+  boardColumnsForMarker,
   newCardMetadata,
   cardReference,
   normalizeCardTags,
@@ -70,6 +71,7 @@ import {
   transitionCard,
   type CardMetadata,
   type CardStatus,
+  type BoardColumn,
 } from "./cards";
 
 type VaultAction = "create" | "open" | "clone";
@@ -3499,13 +3501,9 @@ function App() {
   );
   const cardTagSuggestions = useMemo(() => {
     const tags = new Set<string>();
-    for (const card of cardMetadata.values()) {
-      if (!cardPanel?.metadata.boardID || card.boardID === cardPanel.metadata.boardID) {
-        for (const tag of card.tags) tags.add(tag);
-      }
-    }
+    for (const card of cardMetadata.values()) for (const tag of card.tags) tags.add(tag);
     return [...tags].sort((left, right) => left.localeCompare(right));
-  }, [cardMetadata, cardPanel?.metadata.boardID]);
+  }, [cardMetadata]);
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
   useEffect(() => {
@@ -3678,19 +3676,20 @@ function App() {
       createdID = id;
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
-      if (!parsed || parsed.metadata.boardID) {
+      if (!parsed) {
         await VaultService.DeleteNote(id).catch(() => {});
         return;
       }
-      const metadata = { ...parsed.metadata, boardID };
-      const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
+      const saved = await VaultService.SaveNote(id, parsed.metadata.title, serializeCardDocument(parsed.metadata, parsed.body));
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata, body: parsed.body });
+      setCardPanel({ note: saved.note, metadata: parsed.metadata, body: parsed.body });
       setCardPanelDirty(false);
       const source = markdownForEditing(current.content);
       const content = replaceBoardMarker(source, boardID, (board) => ({
         ...board,
-        cardIDs: [...board.cardIDs, id],
+        ...(board.options
+          ? { options: { ...board.options, columns: board.options.columns.map((column, index) => index === 0 ? { ...column, cardIDs: [...column.cardIDs, id] } : column) } }
+          : { cardIDs: [...board.cardIDs, id] }),
       }));
       if (content === source) {
         await VaultService.DeleteNote(id);
@@ -3708,6 +3707,32 @@ function App() {
     if (!current) return;
     const source = markdownForEditing(current.content);
     const content = replaceBoardMarker(source, boardID, (board) => ({ ...board, title }));
+    if (content !== source) editNote({ content }, true);
+  };
+
+  const changeBoardColumns = (boardID: string, columns: readonly BoardColumn[]) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => ({
+      ...board,
+      options: { ...board.options, columns: columns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })) },
+    }));
+    if (content !== source) editNote({ content }, true);
+  };
+
+  const moveCardInBoard = (boardID: string, cardID: string, columnID: string) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => {
+      const columns = board.options?.columns ?? boardColumnsForMarker(board, cardMetadata);
+      const next = columns.map((column) => ({ ...column, cardIDs: column.cardIDs.filter((id) => id !== cardID) }));
+      const target = next.find((column) => column.id === columnID);
+      if (!target) return board;
+      target.cardIDs.push(cardID);
+      return { ...board, options: { ...board.options, columns: next } };
+    });
     if (content !== source) editNote({ content }, true);
   };
 
@@ -5494,8 +5519,10 @@ function App() {
           onCreateCard={createCard}
           onCreateBoard={createBoard}
           onMoveCard={moveCard}
+          onMoveCardInBoard={moveCardInBoard}
           onAddCardToBoard={addCardToBoard}
           onChangeBoardTitle={changeBoardTitle}
+          onChangeBoardColumns={changeBoardColumns}
           onDecreaseFontSize={decreaseEditorFontSize}
           onIncreaseFontSize={increaseEditorFontSize}
           defaultSectionsCollapsed={sectionDefault === "collapsed"}
@@ -5670,8 +5697,10 @@ function App() {
                       onCreateCard={createCard}
                       onCreateBoard={createBoard}
                       onMoveCard={moveCard}
+                      onMoveCardInBoard={moveCardInBoard}
                       onAddCardToBoard={addCardToBoard}
                       onChangeBoardTitle={changeBoardTitle}
+                      onChangeBoardColumns={changeBoardColumns}
                       onDecreaseFontSize={decreaseEditorFontSize}
                       onIncreaseFontSize={increaseEditorFontSize}
                       searchTarget={globalSearchTarget}
@@ -5816,8 +5845,10 @@ function App() {
                   onCreateCard={createCard}
                   onCreateBoard={createBoard}
                   onMoveCard={moveCard}
+                  onMoveCardInBoard={moveCardInBoard}
                   onAddCardToBoard={addCardToBoard}
                   onChangeBoardTitle={changeCardBoardTitle}
+                  onChangeBoardColumns={changeBoardColumns}
                   onDecreaseFontSize={decreaseEditorFontSize}
                   onIncreaseFontSize={increaseEditorFontSize}
                   showToolbar={false}
