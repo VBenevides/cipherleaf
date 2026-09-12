@@ -418,6 +418,36 @@ assert.equal(indentationView!.state.selection.main.head, blankLineFrom + 2 + "ty
 await act(async () => { indentation.root.unmount(); });
 indentation.shell.remove();
 
+const searchTargetHost = mount("search-target-host");
+await act(async () => {
+  searchTargetHost.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "search-target",
+    value: "phrase here\nother phrase",
+    searchTarget: {
+      noteID: "search-target",
+      offset: 0,
+      matchLength: 6,
+      utf16Offset: 0,
+      utf16MatchLength: 6,
+      query: "phrase",
+    },
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false,
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const searchTargetEditor = searchTargetHost.body.querySelector<HTMLElement>(".cm-content");
+const searchTargetView = EditorView.findFromDOM(searchTargetEditor!);
+assert.ok(searchTargetView);
+assert.equal(searchTargetView!.state.selection.main.from, 0);
+assert.equal(searchTargetView!.state.selection.main.to, 6);
+assert.equal(searchTargetHost.body.querySelectorAll(".cm-live-search-highlight").length, 1);
+searchTargetView!.dispatch({ changes: { from: 0, insert: "x" } });
+assert.equal(searchTargetHost.body.querySelectorAll(".cm-live-search-highlight").length, 0);
+await act(async () => { searchTargetHost.root.unmount(); });
+searchTargetHost.shell.remove();
+
 const source = mount("source-host");
 let scrollSyncs = 0;
 const scrollSync = {

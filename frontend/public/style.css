@@ -3487,7 +3487,7 @@ dialog.modal-backdrop {
 
 .live-markdown-editor .cm-live-search-highlight {
   border-bottom: 1px solid var(--warning);
-  background: color-mix(in srgb, var(--warning) 58%, transparent);
+  background: transparent;
   border-radius: 2px;
 }
 
@@ -4970,7 +4970,7 @@ dialog.modal-backdrop {
 }
 
 :root[data-theme="dark"] .live-markdown-editor .cm-live-search-highlight {
-  background: color-mix(in srgb, var(--warning) 42%, transparent);
+  background: transparent;
 }
 
 :root[data-theme="dark"] .welcome-card h1,
