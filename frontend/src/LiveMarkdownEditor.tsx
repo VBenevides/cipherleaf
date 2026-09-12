@@ -76,6 +76,8 @@ import { boardCardsForColumn, boardColumnsForMarker, BOARD_COLUMNS, BOARD_COLUMN
 import { localDateKey } from "./timeTracking";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 
+type BoardTemplateChoice = { id: string; name: string };
+
 type LiveMarkdownEditorProps = {
   readonly noteID: string;
   readonly value: string;
@@ -94,6 +96,10 @@ type LiveMarkdownEditorProps = {
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
   readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[]) => void;
+  readonly cardTemplates?: readonly BoardTemplateChoice[];
+  readonly onChangeBoardTemplate?: (boardID: string, templateID: string) => void;
+  readonly onOpenBoardTemplate?: (boardID: string, templateID: string) => void;
+  readonly onCreateBoardTemplate?: (boardID: string) => void;
   readonly onDecreaseFontSize: () => void;
   readonly onIncreaseFontSize: () => void;
   readonly searchTarget?: SearchTarget | null;
@@ -1177,10 +1183,15 @@ class BoardWidget extends WidgetType {
     readonly addCard: (boardID: string) => void,
     readonly changeTitle: (boardID: string, title: string) => void,
     readonly changeColumns: (boardID: string, columns: readonly BoardColumn[]) => void,
+    readonly templates: readonly BoardTemplateChoice[],
+    readonly templateID: string,
+    readonly changeTemplate: (boardID: string, templateID: string) => void,
+    readonly openTemplate: (boardID: string, templateID: string) => void,
+    readonly createTemplate: (boardID: string) => void,
   ) { super(); }
 
   eq(other: BoardWidget) {
-    if (other.boardID !== this.boardID || other.title !== this.title || other.configured !== this.configured ||
+    if (other.boardID !== this.boardID || other.title !== this.title || other.configured !== this.configured || other.templateID !== this.templateID ||
       other.cardIDs.length !== this.cardIDs.length || other.columns.length !== this.columns.length) return false;
     for (let index = 0; index < this.cardIDs.length; index++) {
       if (other.cardIDs[index] !== this.cardIDs[index]) return false;
@@ -1195,6 +1206,8 @@ class BoardWidget extends WidgetType {
       if (current.id !== otherColumn.id || current.name !== otherColumn.name || current.color !== otherColumn.color ||
         current.cardIDs.length !== otherColumn.cardIDs.length || current.cardIDs.some((id, cardIndex) => id !== otherColumn.cardIDs[cardIndex])) return false;
     }
+    if (this.templates.length !== other.templates.length || this.templates.some((template, index) =>
+      template.id !== other.templates[index].id || template.name !== other.templates[index].name)) return false;
     return true;
   }
 
@@ -1519,6 +1532,33 @@ class BoardWidget extends WidgetType {
       const id = typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `column-${Date.now().toString(36)}`;
       this.changeColumns(this.boardID, [...this.columns, { id, name: "New column", color: "#888888", cardIDs: [] }]);
     });
+    const templateLabel = controls.appendChild(document.createElement("label"));
+    templateLabel.className = "cm-live-board-template-control";
+    templateLabel.textContent = "Card Template";
+    const template = templateLabel.appendChild(document.createElement("select"));
+    template.setAttribute("aria-label", "Card Template");
+    template.appendChild(document.createElement("option")).textContent = "No template";
+    for (const choice of this.templates) {
+      const option = template.appendChild(document.createElement("option"));
+      option.value = choice.id;
+      option.textContent = choice.name;
+    }
+    template.value = this.templates.some((choice) => choice.id === this.templateID) ? this.templateID : "";
+    template.addEventListener("change", () => {
+      editTemplate.disabled = !template.value;
+      this.changeTemplate(this.boardID, template.value);
+    });
+    const editTemplate = controls.appendChild(document.createElement("button"));
+    editTemplate.type = "button";
+    editTemplate.className = "secondary-button";
+    editTemplate.textContent = "Edit template";
+    editTemplate.disabled = !template.value;
+    editTemplate.addEventListener("click", () => this.openTemplate(this.boardID, template.value));
+    const newTemplate = controls.appendChild(document.createElement("button"));
+    newTemplate.type = "button";
+    newTemplate.className = "secondary-button";
+    newTemplate.textContent = "New template";
+    newTemplate.addEventListener("click", () => this.createTemplate(this.boardID));
     const clear = controls.appendChild(document.createElement("button"));
     clear.type = "button";
     clear.className = "secondary-button";
@@ -1532,6 +1572,7 @@ class BoardWidget extends WidgetType {
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
     columns.style.gridTemplateColumns = `repeat(${this.columns.length}, minmax(0, 1fr))`;
+    columns.style.setProperty("--board-column-count", String(this.columns.length));
     const fitTitles = () => fitBoardCardTexts(board);
     const allCards = new Map<string, CardMetadata[]>();
     for (const column of this.columns) {
@@ -2017,6 +2058,10 @@ type LivePreviewOptions = {
   addCard: (boardID: string) => void;
   changeBoardTitle: (boardID: string, title: string) => void;
   changeBoardColumns: (boardID: string, columns: readonly BoardColumn[]) => void;
+  cardTemplates: readonly BoardTemplateChoice[];
+  changeBoardTemplate: (boardID: string, templateID: string) => void;
+  openBoardTemplate: (boardID: string, templateID: string) => void;
+  createBoardTemplate: (boardID: string) => void;
   noteID: string;
   onError: (reason: unknown) => void;
   highlightLineNumbers: ReadonlySet<number>;
@@ -2238,6 +2283,11 @@ function renderBoardLine(
         options.addCard,
         options.changeBoardTitle,
         options.changeBoardColumns,
+        options.cardTemplates,
+        board.options?.templateID ?? "",
+        options.changeBoardTemplate,
+        options.openBoardTemplate,
+        options.createBoardTemplate,
       ),
     );
     return lineNumber + 1;
@@ -3576,6 +3626,10 @@ export default function LiveMarkdownEditor({
   onAddCardToBoard,
   onChangeBoardTitle,
   onChangeBoardColumns,
+  cardTemplates = [],
+  onChangeBoardTemplate,
+  onOpenBoardTemplate,
+  onCreateBoardTemplate,
   onDecreaseFontSize,
   onIncreaseFontSize,
   searchTarget = null,
@@ -3605,6 +3659,10 @@ export default function LiveMarkdownEditor({
   const onAddCardToBoardRef = useRef(onAddCardToBoard);
   const onChangeBoardTitleRef = useRef(onChangeBoardTitle);
   const onChangeBoardColumnsRef = useRef(onChangeBoardColumns);
+  const cardTemplatesRef = useRef(cardTemplates);
+  const onChangeBoardTemplateRef = useRef(onChangeBoardTemplate);
+  const onOpenBoardTemplateRef = useRef(onOpenBoardTemplate);
+  const onCreateBoardTemplateRef = useRef(onCreateBoardTemplate);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
@@ -3638,6 +3696,7 @@ export default function LiveMarkdownEditor({
 
   useEffect(() => {
     const previousCardData = cardDataRef.current;
+    const previousCardTemplates = cardTemplatesRef.current;
     onChangeRef.current = onChange;
     onChangeWithCaretRef.current = onChangeWithCaret;
     onSaveRef.current = onSave;
@@ -3653,14 +3712,18 @@ export default function LiveMarkdownEditor({
     onAddCardToBoardRef.current = onAddCardToBoard;
     onChangeBoardTitleRef.current = onChangeBoardTitle;
     onChangeBoardColumnsRef.current = onChangeBoardColumns;
+    cardTemplatesRef.current = cardTemplates;
+    onChangeBoardTemplateRef.current = onChangeBoardTemplate;
+    onOpenBoardTemplateRef.current = onOpenBoardTemplate;
+    onCreateBoardTemplateRef.current = onCreateBoardTemplate;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
-    if (previousCardData !== cardData) {
+    if (previousCardData !== cardData || previousCardTemplates !== cardTemplates) {
       view.current?.dispatch({ effects: refreshLivePreview.of(null) });
     }
-  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -4004,6 +4067,10 @@ export default function LiveMarkdownEditor({
             addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
             changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
             changeBoardColumns: (boardID, columns) => onChangeBoardColumnsRef.current?.(boardID, columns),
+            cardTemplates: cardTemplatesRef.current,
+            changeBoardTemplate: (boardID, templateID) => onChangeBoardTemplateRef.current?.(boardID, templateID),
+            openBoardTemplate: (boardID, templateID) => onOpenBoardTemplateRef.current?.(boardID, templateID),
+            createBoardTemplate: (boardID) => onCreateBoardTemplateRef.current?.(boardID),
             noteID,
             onError: (reason) => onErrorRef.current(reason),
             highlightLineNumbers,

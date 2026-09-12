@@ -470,6 +470,14 @@ test("card saving is opt-in for editor journaling and keeps the panel open", () 
   assert.match(app, /cardWriteChangesToEditorDefault/);
   assert.match(app, /const closeCardPanel = async \(force = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
   assert.match(app, /message: "This card has unsaved changes\. Close it without saving\?"/);
+  assert.match(app, /boardTemplatePanel/);
+  assert.match(app, /aria-label="Card Template"/);
+  assert.match(app, /aria-label="Template body"/);
+  assert.match(app, /closeBoardTemplatePanel\(true\)/);
+  assert.match(app, /serializeTemplateDocument\(template\)/);
+  assert.match(app, /options: \{ \.\.\.marker\.options!?[,}] templateID: undefined \}/);
+  assert.match(app, /newCardMetadata\(created\.id, new Date\(created\.createdAt\), false\)/);
+  assert.match(app, /VaultService\.SaveNote\(template\.id, template\.title, serializeTemplateDocument\(draft\)\)/);
   assert.doesNotMatch(app, /const saveCardPanel = async \(\) => \{[\s\S]*?\n  \} catch[\s\S]*await closeCardPanel\(true\);/);
   assert.match(app, /onClick=\{\(\) => void closeCardPanel\(\)\}/);
   assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);

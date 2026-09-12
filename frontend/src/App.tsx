@@ -63,12 +63,13 @@ import {
   cardReference,
   normalizeCardTags,
   parseCardDocument,
-  parseCardReference,
+  parseBoardMarker,
   replaceBoardMarker,
   parseTemplateDocument,
   serializeTemplateDocument,
   serializeCardDocument,
   transitionCard,
+  type CardTemplate,
   type CardMetadata,
   type CardStatus,
   type BoardColumn,
@@ -327,6 +328,13 @@ type CardPanelState = {
   note: Note;
   metadata: CardMetadata;
   body: string;
+};
+
+type BoardTemplatePanelState = {
+  boardID: string;
+  note: Note;
+  template: CardTemplate;
+  dirty: boolean;
 };
 
 type CloneVaultSubmission = {
@@ -835,6 +843,8 @@ function App() {
   const [cardPanelDirty, setCardPanelDirty] = useState(false);
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
+  const [boardTemplatePanel, setBoardTemplatePanel] = useState<BoardTemplatePanelState | null>(null);
+  const [boardTemplateSaving, setBoardTemplateSaving] = useState(false);
   const saveCardPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
   const [autosaveVersion, setAutosaveVersion] = useState(0);
@@ -3499,6 +3509,10 @@ function App() {
     () => notes.filter((summary) => summary.properties?.["cipherleaf-card-template"] === true || summary.properties?.["cipherleaf-card-template"] === "true"),
     [notes],
   );
+  const cardTemplateChoices = useMemo(
+    () => cardTemplates.map((template) => ({ id: template.id, name: String(template.properties?.["cipherleaf-card-template-name"] ?? template.title) })),
+    [cardTemplates],
+  );
   const cardTagSuggestions = useMemo(() => {
     const tags = new Set<string>();
     for (const card of cardMetadata.values()) for (const tag of card.tags) tags.add(tag);
@@ -3665,34 +3679,128 @@ function App() {
     return boardMarker(id);
   };
 
+  const closeBoardTemplatePanel = async (force = false) => {
+    if (!boardTemplatePanel) return true;
+    if (!force && boardTemplatePanel.dirty && !(await requestAppConfirm({
+      kind: "confirm",
+      eyebrow: "Template changes",
+      title: "Discard unsaved changes?",
+      message: "This template has unsaved changes. Close it without saving?",
+      confirmLabel: "Discard",
+      danger: true,
+      icon: "trash",
+    }))) return false;
+    setBoardTemplatePanel(null);
+    return true;
+  };
+
+  const changeBoardTemplate = (boardID: string, templateID: string) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => {
+      if (!templateID && !board.options) return board;
+      const options = board.options ?? { columns: boardColumnsForMarker(board, cardMetadata) };
+      return { ...board, options: { ...options, templateID: templateID || undefined } };
+    });
+    if (content !== source) editNote({ content }, true);
+  };
+
+  const openBoardTemplate = async (boardID: string, templateID: string) => {
+    if (!templateID || !(await closeBoardTemplatePanel())) return;
+    try {
+      const loaded = await VaultService.GetNote(templateID);
+      const parsed = parseTemplateDocument(loaded.content, templateID);
+      if (!parsed) {
+        changeBoardTemplate(boardID, "");
+        return;
+      }
+      setBoardTemplatePanel({ boardID, note: loaded, template: parsed.template, dirty: false });
+    } catch {
+      changeBoardTemplate(boardID, "");
+    }
+  };
+
+  const createBoardTemplate = async (boardID: string) => {
+    if (!(await closeBoardTemplatePanel())) return;
+    const current = noteRef.current;
+    if (!current) return;
+    const board = markdownForEditing(current.content).split("\n")
+      .map((line) => parseBoardMarker(line))
+      .find((marker) => marker?.id === boardID);
+    if (!board) return;
+    try {
+      const template = await VaultService.CreateNote(`Template: ${board.title}`);
+      const draft: CardTemplate = { id: template.id, name: `${board.title} card`, status: "not-started", tags: [], body: "" };
+      const saved = await VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft));
+      updateSummary(saved.summary);
+      changeBoardTemplate(boardID, template.id);
+      setBoardTemplatePanel({ boardID, note: saved.note, template: draft, dirty: false });
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
+  const saveBoardTemplate = async () => {
+    const panel = boardTemplatePanel;
+    if (!panel) return;
+    setBoardTemplateSaving(true);
+    try {
+      const template = { ...panel.template, name: panel.template.name.trim() || "Untitled", tags: normalizeCardTags(panel.template.tags) };
+      const saved = await VaultService.SaveNote(panel.note.id, `Template: ${template.name}`, serializeTemplateDocument(template));
+      updateSummary(saved.summary);
+      setBoardTemplatePanel((current) => current?.template.id === template.id ? { ...current, note: saved.note, template, dirty: false } : current);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBoardTemplateSaving(false);
+    }
+  };
+
+  const updateBoardTemplate = (patch: Partial<CardTemplate>) => {
+    setBoardTemplatePanel((current) => current ? { ...current, template: { ...current.template, ...patch }, dirty: true } : current);
+  };
+
   const addCardToBoard = async (boardID: string) => {
     const current = noteRef.current;
     if (!current) return;
+    const source = markdownForEditing(current.content);
+    const board = source.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
+    if (!board) return;
     let createdID = "";
+    let template: CardTemplate | null = null;
+    let missingTemplate = false;
     try {
-      const reference = await createCard();
-      const id = reference ? parseCardReference(reference) : null;
-      if (!id) return;
-      createdID = id;
-      const loaded = await VaultService.GetNote(id);
-      const parsed = parseCardDocument(loaded.content, id, loaded.title);
-      if (!parsed) {
-        await VaultService.DeleteNote(id).catch(() => {});
-        return;
+      const templateID = board.options?.templateID;
+      if (templateID) {
+        try {
+          const loadedTemplate = await VaultService.GetNote(templateID);
+          template = parseTemplateDocument(loadedTemplate.content, templateID)?.template ?? null;
+        } catch {
+          template = null;
+        }
+        missingTemplate = !template;
       }
-      const saved = await VaultService.SaveNote(id, parsed.metadata.title, serializeCardDocument(parsed.metadata, parsed.body));
+      const targetFolder = current.folderId;
+      const created = await VaultService.CreateNoteInFolder(template?.name.trim() || "Untitled", targetFolder);
+      createdID = created.id;
+      const base = newCardMetadata(created.id, new Date(created.createdAt), false);
+      const metadata = template
+        ? { ...transitionCard(base, template.status), title: template.name.trim() || "Untitled", tags: normalizeCardTags(template.tags) }
+        : base;
+      const saved = await VaultService.SaveNote(created.id, metadata.title, serializeCardDocument(metadata, template?.body ?? ""));
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata: parsed.metadata, body: parsed.body });
+      setSelectedTemplateID("");
+      setCardPanel({ note: saved.note, metadata, body: template?.body ?? "" });
       setCardPanelDirty(false);
-      const source = markdownForEditing(current.content);
       const content = replaceBoardMarker(source, boardID, (board) => ({
         ...board,
         ...(board.options
-          ? { options: { ...board.options, columns: board.options.columns.map((column, index) => index === 0 ? { ...column, cardIDs: [...column.cardIDs, id] } : column) } }
-          : { cardIDs: [...board.cardIDs, id] }),
+          ? { options: { ...board.options, templateID: missingTemplate ? undefined : board.options.templateID, columns: board.options.columns.map((column, index) => index === 0 ? { ...column, cardIDs: [...column.cardIDs, created.id] } : column) } }
+          : { cardIDs: [...board.cardIDs, created.id] }),
       }));
       if (content === source) {
-        await VaultService.DeleteNote(id);
+        await VaultService.DeleteNote(created.id);
         return;
       }
       editNote({ content }, true);
@@ -3836,10 +3944,22 @@ function App() {
 
   const deleteCardTemplate = async () => {
     if (!selectedTemplateID) return;
+    const templateID = selectedTemplateID;
     try {
-      await VaultService.DeleteNote(selectedTemplateID);
-      setNotes((current) => current.filter((summary) => summary.id !== selectedTemplateID));
+      await VaultService.DeleteNote(templateID);
+      const current = noteRef.current;
+      if (current) {
+        const source = markdownForEditing(current.content);
+        const content = source.split("\n").reduce((next, line) => {
+          const board = parseBoardMarker(line);
+          if (board?.options?.templateID !== templateID || !board.options) return next;
+          return replaceBoardMarker(next, board.id, (marker) => ({ ...marker, options: { ...marker.options!, templateID: undefined } }));
+        }, source);
+        if (content !== source) editNote({ content }, true);
+      }
+      setNotes((current) => current.filter((summary) => summary.id !== templateID));
       setSelectedTemplateID("");
+      setBoardTemplatePanel((current) => current?.template.id === templateID ? null : current);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -5523,6 +5643,10 @@ function App() {
           onAddCardToBoard={addCardToBoard}
           onChangeBoardTitle={changeBoardTitle}
           onChangeBoardColumns={changeBoardColumns}
+          cardTemplates={cardTemplateChoices}
+          onChangeBoardTemplate={changeBoardTemplate}
+          onOpenBoardTemplate={(boardID, templateID) => void openBoardTemplate(boardID, templateID)}
+          onCreateBoardTemplate={(boardID) => void createBoardTemplate(boardID)}
           onDecreaseFontSize={decreaseEditorFontSize}
           onIncreaseFontSize={increaseEditorFontSize}
           defaultSectionsCollapsed={sectionDefault === "collapsed"}
@@ -5701,6 +5825,10 @@ function App() {
                       onAddCardToBoard={addCardToBoard}
                       onChangeBoardTitle={changeBoardTitle}
                       onChangeBoardColumns={changeBoardColumns}
+                      cardTemplates={cardTemplateChoices}
+                      onChangeBoardTemplate={changeBoardTemplate}
+                      onOpenBoardTemplate={(boardID, templateID) => void openBoardTemplate(boardID, templateID)}
+                      onCreateBoardTemplate={(boardID) => void createBoardTemplate(boardID)}
                       onDecreaseFontSize={decreaseEditorFontSize}
                       onIncreaseFontSize={increaseEditorFontSize}
                       searchTarget={globalSearchTarget}
@@ -5849,6 +5977,10 @@ function App() {
                   onAddCardToBoard={addCardToBoard}
                   onChangeBoardTitle={changeCardBoardTitle}
                   onChangeBoardColumns={changeBoardColumns}
+                  cardTemplates={cardTemplateChoices}
+                  onChangeBoardTemplate={changeBoardTemplate}
+                  onOpenBoardTemplate={(boardID, templateID) => void openBoardTemplate(boardID, templateID)}
+                  onCreateBoardTemplate={(boardID) => void createBoardTemplate(boardID)}
                   onDecreaseFontSize={decreaseEditorFontSize}
                   onIncreaseFontSize={increaseEditorFontSize}
                   showToolbar={false}
@@ -5893,6 +6025,24 @@ function App() {
         {renderScratchpadEditor()}
         {renderConflictEditor()}
         {renderNoteEditor()}
+        {boardTemplatePanel && (
+          <section className="board-template-panel" aria-label="Card Template">
+            <header>
+              <strong>Card Template</strong>
+              <button type="button" className="icon-button" aria-label="Close Card Template" onClick={() => void closeBoardTemplatePanel()}><Icon name="x" size={16} /></button>
+            </header>
+            <label>Name<input aria-label="Template name" value={boardTemplatePanel.template.name} onChange={(event) => updateBoardTemplate({ name: event.target.value })} /></label>
+            <label>Status<select aria-label="Template status" value={boardTemplatePanel.template.status} onChange={(event) => updateBoardTemplate({ status: event.target.value as CardStatus })}>
+              {BOARD_COLUMNS.map((status) => <option value={status} key={status}>{CARD_STATUS_LABELS[status]}</option>)}
+            </select></label>
+            <label>Tags<input aria-label="Template tags" value={boardTemplatePanel.template.tags.join(", ")} onChange={(event) => updateBoardTemplate({ tags: event.target.value.split(",") })} /></label>
+            <label>Body<textarea aria-label="Template body" value={boardTemplatePanel.template.body} onChange={(event) => updateBoardTemplate({ body: event.target.value })} /></label>
+            <div className="board-template-actions">
+              <button type="button" className="secondary-button" onClick={() => void closeBoardTemplatePanel(true)}>Discard</button>
+              <button type="button" className="primary-button" disabled={boardTemplateSaving} onClick={() => void saveBoardTemplate()}>{boardTemplateSaving ? "Saving…" : "Save template"}</button>
+            </div>
+          </section>
+        )}
         {renderEmptyEditor()}
         {renderCardPanel()}
       </section>

@@ -23,6 +23,10 @@ type ScratchpadProps = {
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
   readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[]) => void;
+  readonly cardTemplates?: readonly { id: string; name: string }[];
+  readonly onChangeBoardTemplate?: (boardID: string, templateID: string) => void;
+  readonly onOpenBoardTemplate?: (boardID: string, templateID: string) => void;
+  readonly onCreateBoardTemplate?: (boardID: string) => void;
   readonly onDecreaseFontSize?: () => void;
   readonly onIncreaseFontSize?: () => void;
   readonly defaultSectionsCollapsed?: boolean;
@@ -65,6 +69,10 @@ export default function Scratchpad({
   onAddCardToBoard,
   onChangeBoardTitle,
   onChangeBoardColumns,
+  cardTemplates,
+  onChangeBoardTemplate,
+  onOpenBoardTemplate,
+  onCreateBoardTemplate,
   onDecreaseFontSize = () => {},
   onIncreaseFontSize = () => {},
   defaultSectionsCollapsed = true,
@@ -230,6 +238,10 @@ export default function Scratchpad({
               onAddCardToBoard={onAddCardToBoard}
               onChangeBoardTitle={onChangeBoardTitle}
               onChangeBoardColumns={onChangeBoardColumns}
+              cardTemplates={cardTemplates}
+              onChangeBoardTemplate={onChangeBoardTemplate}
+              onOpenBoardTemplate={onOpenBoardTemplate}
+              onCreateBoardTemplate={onCreateBoardTemplate}
               onDecreaseFontSize={onDecreaseFontSize}
               onIncreaseFontSize={onIncreaseFontSize}
               caretOffset={state.caretOffset}

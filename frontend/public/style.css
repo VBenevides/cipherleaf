@@ -4353,6 +4353,29 @@ dialog.modal-backdrop {
 .card-sidebar .card-editor-journal-toggle input[type="checkbox"] { width: 1em; height: 1em; min-height: 0; flex: 0 0 1em; margin: 0; padding: 0; accent-color: var(--green-dark); }
 .card-sidebar-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card-sidebar-actions .card-save-button { margin-left: auto; }
+.board-template-panel {
+  position: absolute;
+  z-index: 20;
+  top: 52px;
+  right: 18px;
+  display: grid;
+  width: min(460px, calc(100% - 36px));
+  max-height: calc(100% - 70px);
+  overflow: auto;
+  gap: 12px;
+  padding: 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--editor-bg);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 18%);
+}
+.board-template-panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.board-template-panel label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.board-template-panel input, .board-template-panel select, .board-template-panel textarea { width: 100%; box-sizing: border-box; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: var(--editor-bg); }
+.board-template-panel input, .board-template-panel select { min-height: 32px; padding: 0 8px; }
+.board-template-panel textarea { min-height: 160px; padding: 8px; resize: vertical; }
+.board-template-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .card-save-button.is-dirty { color: #fff; border-color: #1e73b5; background: #1e73b5; }
 .card-save-button.is-dirty:hover { background: #155a91; }
 

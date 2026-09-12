@@ -299,6 +299,8 @@ board.querySelectorAll("button[aria-label]").forEach((button) => button.click())
 assert.ok(opened > 0 && moved > 0 && added > 0);
 
 let dynamicColumns: readonly BoardColumn[] = [];
+let selectedBoardTemplate = "";
+let createdBoardTemplate = "";
 const dynamic = mount("dynamic-board-host");
 await act(async () => {
   dynamic.root.render(createElement(LiveMarkdownEditor, {
@@ -310,12 +312,23 @@ await act(async () => {
     }),
     onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
     cardData: cards, onMoveCardInBoard: () => {}, onChangeBoardColumns: (_boardID, columns) => { dynamicColumns = columns; },
+    cardTemplates: [{ id: "template-1", name: "Template" }],
+    onChangeBoardTemplate: (_boardID, templateID) => { selectedBoardTemplate = templateID; },
+    onCreateBoardTemplate: (boardID) => { createdBoardTemplate = boardID; },
     onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
   }));
   await wait();
 });
 const dynamicBoard = dynamic.body.querySelector<HTMLElement>(".cm-live-board")!;
 assert.equal(dynamicBoard.querySelectorAll(".cm-live-board-column").length, 2);
+const dynamicTemplate = dynamicBoard.querySelector<HTMLSelectElement>("select[aria-label=\"Card Template\"]")!;
+assert.deepEqual([...dynamicTemplate.options].map((option) => option.textContent), ["No template", "Template"]);
+dynamicTemplate.value = "template-1";
+dynamicTemplate.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert.equal(selectedBoardTemplate, "template-1");
+const newBoardTemplate = [...dynamicBoard.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "New template")!;
+newBoardTemplate.click();
+assert.equal(createdBoardTemplate, "dynamic");
 const dynamicName = dynamicBoard.querySelector<HTMLInputElement>(".cm-live-board-column-name")!;
 dynamicName.value = "Ready";
 dynamicName.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
