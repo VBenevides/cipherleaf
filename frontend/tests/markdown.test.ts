@@ -16,6 +16,11 @@ import {
 } from "../src/markdown.ts";
 
 const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+
+test("keeps the caret at the active text metric", () => {
+  assert.match(style, /\.live-markdown-editor \.cm-cursor \{[\s\S]*height: 1em !important;/);
+});
 
 test("section disclosures use shared chevrons", () => {
   assert.match(editor, /cm-live-toggle-button[\s\S]*disclosure-chevron/);
