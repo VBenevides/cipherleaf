@@ -420,6 +420,17 @@ test("workspace UI keeps rendered code lines content-sized", () => {
   assert.match(style, /:root \.document-body \.live-markdown-editor:not\(.source-markdown-editor\) \.cm-line\.cm-live-code-block \{[\s\S]*width: auto;/);
 });
 
+test("live marker lines break unbroken content beside their marker", () => {
+  assert.match(style, /\.live-markdown-editor \.cm-live-unbroken-line \{[\s\S]*word-break: break-all;/);
+  assert.match(liveEditor, /const content = line\.slice\(offset\)\.trim\(\)/);
+  assert.match(liveEditor, /hasUnbrokenObjectContent\(line\.text, toggle\.object\.sourcePrefix\.length\)/);
+  assert.match(liveEditor, /hasUnbrokenObjectContent\(line\.text, object\.sourcePrefix\.length\)/);
+  assert.match(liveEditor, /cm-live-unbroken-line/);
+  assert.match(style, /\.cm-live-list-symbol \{[\s\S]*vertical-align: middle;/);
+  assert.match(style, /\.cm-live-list-marker \{[\s\S]*vertical-align: middle;/);
+  assert.match(liveEditor, /\.cm-live-toggle-button[\s\S]*verticalAlign: "middle"/);
+});
+
 test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(app, /className="card-sidebar-title"/);
   assert.match(app, /Created At: \{localDateKey\(new Date\(cardPanel\.metadata\.createdAt\)\)\}/);

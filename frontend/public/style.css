@@ -4533,7 +4533,7 @@ dialog.modal-backdrop {
   margin-right: 0.4em;
   color: var(--green) !important;
   font-weight: 800;
-  vertical-align: baseline;
+  vertical-align: middle;
 }
 
 .live-markdown-editor .cm-live-list-marker {
@@ -4542,11 +4542,16 @@ dialog.modal-backdrop {
   color: var(--green-dark);
   font-weight: 700;
   text-align: left;
+  vertical-align: middle;
 }
 
 .live-markdown-editor .cm-live-list-line {
   padding-left: calc(var(--live-list-indent, 0px) + 0.4em);
   text-indent: 0;
+}
+
+.live-markdown-editor .cm-live-unbroken-line {
+  word-break: break-all;
 }
 
 .live-markdown-editor .cm-line.cm-live-toggle-line {

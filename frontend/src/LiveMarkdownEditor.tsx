@@ -411,7 +411,7 @@ const liveMarkdownTheme = EditorView.theme(
       width: "var(--toggle-button-width)",
       justifyContent: "flex-start",
       alignItems: "center",
-      verticalAlign: "baseline",
+      verticalAlign: "middle",
       background: "transparent",
       border: "0",
       color: "inherit",
@@ -2250,6 +2250,11 @@ function decoratePreviewText(
   });
 }
 
+function hasUnbrokenObjectContent(line: string, offset: number): boolean {
+  const content = line.slice(offset).trim();
+  return content.length > 0 && !/\s/.test(content);
+}
+
 function renderBoardLine(
   context: LivePreviewRenderContext,
   lineNumber: number,
@@ -2418,6 +2423,7 @@ function renderToggleLine(
   const line = state.doc.line(lineNumber);
   const toggle = toggleLine(objectDocument, lineNumber, line.text);
   if (!toggle) return null;
+  const unbrokenContent = hasUnbrokenObjectContent(line.text, toggle.object.sourcePrefix.length);
   const toggleAttachment = parseAttachmentMarkdown(toggle.content);
   const sectionEndLineNumber = toggleSectionEnd(objectDocument, lineNumber);
   const hasChildren = sectionEndLineNumber > lineNumber;
@@ -2442,6 +2448,7 @@ function renderToggleLine(
     toggleAttachment ? "cm-live-attachment-line" : "",
     isTask ? "cm-live-task-line" : "",
     isTask || listKind ? "cm-live-list-line" : "",
+    unbrokenContent ? "cm-live-unbroken-line" : "",
   ].filter(Boolean).join(" ");
 
   let lineStyle = toggleLineStyle();
@@ -2628,6 +2635,9 @@ function renderPlainLine(
     ? objectDocument.byLine.get(lineNumber) ?? null
     : null;
   const barePrefixSize = object?.barePrefixSize ?? 0;
+  const unbrokenContent = object
+    ? hasUnbrokenObjectContent(line.text, object.sourcePrefix.length)
+    : false;
   if (barePrefixSize > 0 && object?.checked === undefined && !object?.listMarker) {
     addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
   }
@@ -2643,7 +2653,7 @@ function renderPlainLine(
     decorations.push(Decoration.line({
       attributes: objectLineAttributes(
         lineNumber,
-        "cm-live-task-line cm-live-list-line",
+        `cm-live-task-line cm-live-list-line${unbrokenContent ? " cm-live-unbroken-line" : ""}`,
         listLineStyle(),
         depthByLine.get(lineNumber) ?? 0,
       ),
@@ -2653,7 +2663,7 @@ function renderPlainLine(
     decorations.push(Decoration.line({
       attributes: objectLineAttributes(
         lineNumber,
-        "cm-live-list-line",
+        `cm-live-list-line${unbrokenContent ? " cm-live-unbroken-line" : ""}`,
         listLineStyle(),
         depthByLine.get(lineNumber) ?? 0,
       ),
