@@ -22,6 +22,10 @@ test("keeps the caret at the active text metric", () => {
   assert.match(style, /\.live-markdown-editor \.cm-cursor \{[\s\S]*height: 1em !important;/);
 });
 
+test("keeps the dark scratchpad overlay readable and translucent", () => {
+  assert.match(style, /:root\[data-theme="dark"\]\[data-window="scratchpad"\] \.scratchpad-overlay-shell \{[\s\S]*--ink: #fff;[\s\S]*background: color-mix\(in srgb, #111827 calc\(var\(--scratchpad-opacity, 0\.5\) \* 100%\), transparent\)/);
+});
+
 test("section disclosures use shared chevrons", () => {
   assert.match(editor, /cm-live-toggle-button[\s\S]*disclosure-chevron/);
   assert.match(editor, /toolbar-toggle disclosure-chevron is-expanded/);

@@ -2935,7 +2935,9 @@ dialog.modal-backdrop {
 }
 
 :root[data-theme="dark"][data-window="scratchpad"] .scratchpad-overlay-shell {
+  --ink: #fff;
   --scratchpad-outline: rgb(0 0 0 / 88%);
+  background: color-mix(in srgb, #111827 calc(var(--scratchpad-opacity, 0.5) * 100%), transparent);
 }
 
 :root[data-window="scratchpad"] .scratchpad-overlay-shell .scratchpad-heading,
