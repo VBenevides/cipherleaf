@@ -3748,7 +3748,6 @@ function App() {
         await persistCurrent();
       }
       setCardPanelDirty(false);
-      await closeCardPanel(true);
     } catch (reason) {
       setError(errorText(reason));
     } finally {

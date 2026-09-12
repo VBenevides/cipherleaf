@@ -458,7 +458,7 @@ await act(async () => { cardTagInput?.props.onChange({ target: { value: "urgent"
 const addTag = appRenderer?.root.findAll((node) => node.type === "button" && textContent(node) === "Add tag")[0];
 await act(async () => { addTag?.props.onClick(); });
 await clickApp("Save card");
-assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 1);
 await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => {
   dispatchWindow("keydown", {
@@ -471,7 +471,7 @@ await act(async () => {
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 1);
 await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await clickApp("Save as template");
 await clickApp("Delete template");

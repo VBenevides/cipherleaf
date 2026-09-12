@@ -459,7 +459,7 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.card-tag-picker \.tag-multi-select-options input \{[\s\S]*width: 100% !important[\s\S]*height: 30px !important/);
 });
 
-test("card saving is opt-in for editor journaling and closes safely", () => {
+test("card saving is opt-in for editor journaling and keeps the panel open", () => {
   assert.match(app, /const \[cardWriteChangesToEditorDefault, setCardWriteChangesToEditorDefault\] = useState\(false\)/);
   assert.match(app, /aria-label="Write changes to editor"/);
   assert.match(app, /checked=\{cardPanel\.metadata\.writeChangesToEditor\}/);
@@ -469,7 +469,7 @@ test("card saving is opt-in for editor journaling and closes safely", () => {
   assert.match(app, /cardWriteChangesToEditorDefault/);
   assert.match(app, /const closeCardPanel = async \(force = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);
   assert.match(app, /message: "This card has unsaved changes\. Close it without saving\?"/);
-  assert.match(app, /setCardPanelDirty\(false\);[\s\S]*await closeCardPanel\(true\);/);
+  assert.doesNotMatch(app, /const saveCardPanel = async \(\) => \{[\s\S]*?\n  \} catch[\s\S]*await closeCardPanel\(true\);/);
   assert.match(app, /onClick=\{\(\) => void closeCardPanel\(\)\}/);
   assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);
   assert.match(app, /window\.addEventListener\("keydown", closeOnEscape\)/);
