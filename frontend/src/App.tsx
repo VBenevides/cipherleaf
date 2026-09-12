@@ -127,6 +127,19 @@ const JOURNAL_LINE_LABELS: Record<JournalLines, string> = {
 const SCRATCHPAD_OPACITY_KEY = "cipherleaf-scratchpad-opacity";
 const SCRATCHPAD_DEFAULT_OPACITY = 0.5;
 const DEFAULT_SCRATCHPAD_SHORTCUT = "Super+`";
+const SHORTCUTS_STORAGE_KEY = "cipherleaf-shortcuts";
+const DEFAULT_SHORTCUTS: Record<string, string> = {
+  "new-note": "Ctrl+N",
+  "save-note": "Ctrl+S",
+  "quick-switcher": "Ctrl+K",
+  "toggle-sidebar": "Ctrl+B",
+  "find-notes": "Ctrl+Shift+F",
+  "start-timer": "Ctrl+Shift+T",
+  "finish-timer": "Ctrl+Shift+E",
+  "save-sync": "Ctrl+Shift+S",
+  "sync-vault": "Ctrl+Shift+R",
+};
+const RESERVED_SHORTCUTS = new Set(["Ctrl+Shift+P", "Super+Shift+P", "Ctrl+Shift+H", "Super+Shift+H"]);
 const SHORTCUT_KEY_CODES: Record<string, string> = {
   Backquote: "`",
   Minus: "-",
@@ -167,8 +180,48 @@ function readScratchpadOpacity(): number {
   return Number.isFinite(opacity) && opacity >= 0 && opacity <= 1 ? opacity : SCRATCHPAD_DEFAULT_OPACITY;
 }
 
-function shortcutKeyFromEvent(event: ReactKeyboardEvent<HTMLElement>): string | null {
-  if (event.repeat || event.nativeEvent.isComposing) return null;
+function normalizeShortcut(shortcut: string): string {
+  return shortcut.split("+").map((part) => part.trim()).filter(Boolean).join("+");
+}
+
+function isValidStoredShortcut(shortcut: string): boolean {
+  const parts = normalizeShortcut(shortcut).split("+");
+  const key = parts[parts.length - 1] ?? "";
+  if (parts.length < 2 || key === "Escape") return false;
+  const modifiers = parts.slice(0, -1);
+  if (modifiers.some((part) => !["Ctrl", "Alt", "Shift", "Super"].includes(part)) || new Set(modifiers).size !== modifiers.length) return false;
+  return key === "plus" || Object.values(SHORTCUT_KEY_CODES).includes(key) || /^Key[A-Z]$/.test(`Key${key}`) || /^Digit[0-9]$/.test(`Digit${key}`) || /^F(?:[1-9]|1[0-9]|2[0-4])$/.test(key);
+}
+
+function readShortcutMap(): Record<string, string> {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SHORTCUTS_STORAGE_KEY) || "null") as Record<string, unknown> | null;
+    const used = new Set(RESERVED_SHORTCUTS);
+    return Object.fromEntries(Object.keys(DEFAULT_SHORTCUTS).map((id) => {
+      const candidate = typeof stored?.[id] === "string" ? normalizeShortcut(stored[id]) : "";
+      const fallback = Object.values(DEFAULT_SHORTCUTS).map(normalizeShortcut).find((value) => !used.has(value)) ?? normalizeShortcut(DEFAULT_SHORTCUTS[id]);
+      const shortcut = candidate && isValidStoredShortcut(candidate) && !used.has(candidate) ? candidate : fallback;
+      used.add(shortcut);
+      return [id, shortcut];
+    }));
+  } catch {
+    return { ...DEFAULT_SHORTCUTS };
+  }
+}
+
+type ShortcutEvent = {
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+  repeat: boolean;
+  isComposing?: boolean;
+  nativeEvent?: { isComposing?: boolean };
+};
+
+function shortcutKeyFromEvent(event: Pick<ShortcutEvent, "code" | "key">): string | null {
   if (event.code === "NumpadAdd") return null;
   if (event.key === "+") return "plus";
   if (event.code in SHORTCUT_KEY_CODES) return SHORTCUT_KEY_CODES[event.code];
@@ -178,8 +231,9 @@ function shortcutKeyFromEvent(event: ReactKeyboardEvent<HTMLElement>): string | 
   return null;
 }
 
-function shortcutFromEvent(event: ReactKeyboardEvent<HTMLElement>): string | null {
+function shortcutFromEvent(event: ShortcutEvent): string | null {
   if (event.key === "Escape") return "";
+  if (event.repeat || event.isComposing || event.nativeEvent?.isComposing) return null;
   if (!(event.ctrlKey || event.altKey || event.shiftKey || event.metaKey)) return null;
   const key = shortcutKeyFromEvent(event);
   if (!key) return null;
@@ -190,6 +244,10 @@ function shortcutFromEvent(event: ReactKeyboardEvent<HTMLElement>): string | nul
     event.metaKey && "Super",
     key,
   ].filter(Boolean).join("+");
+}
+
+function formatShortcut(shortcut: string): string {
+  return shortcut ? normalizeShortcut(shortcut).split("+").join(" + ") : "";
 }
 
 function NoteSortSelect({ value, onChange }: { readonly value: string; readonly onChange: (value: string) => void }) {
@@ -683,8 +741,6 @@ function App() {
   const [activeTabID, setActiveTabID] = useState(1);
   const [scratchpadActive, setScratchpadActive] = useState(false);
   const [scratchpadShortcut, setScratchpadShortcut] = useState(DEFAULT_SCRATCHPAD_SHORTCUT);
-  const [scratchpadShortcutCapturing, setScratchpadShortcutCapturing] = useState(false);
-  const [scratchpadShortcutError, setScratchpadShortcutError] = useState("");
   const [scratchpadOpacity, setScratchpadOpacity] = useState(() => readScratchpadOpacity());
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
@@ -788,6 +844,9 @@ function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
+  const [shortcutMap, setShortcutMap] = useState<Record<string, string>>(() => readShortcutMap());
+  const [shortcutEditingID, setShortcutEditingID] = useState<string | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
@@ -984,38 +1043,34 @@ function App() {
   const openAppearanceSettings = (sectionID?: string) => {
     setTitlebarMenu(null);
     bringWindowToFront("appearanceSettings");
+    setSettingsDraft(createSettingsDraft());
+    setSettingsSaveError("");
     setAppearanceSettingsOpen(true);
     openSettingsSection("appearance", sectionID);
   };
 
-  const saveScratchpadShortcut = async (shortcut: string) => {
-    setScratchpadShortcutError("");
+  const saveScratchpadShortcut = async (shortcut: string): Promise<boolean> => {
     try {
       const effective = await VaultService.SetScratchpadShortcut(shortcut);
       setScratchpadShortcut(effective || shortcut);
-      setScratchpadShortcutCapturing(false);
+      setShortcutEditingID(null);
+      setShortcutError("");
+      return true;
     } catch (reason) {
-      setScratchpadShortcutError(errorText(reason));
-      void VaultService.GetScratchpadShortcut()
-        .then((effective) => {
-          if (effective) setScratchpadShortcut(effective);
-        })
-        .catch(() => {});
-      setScratchpadShortcutCapturing(false);
+      setShortcutError(errorText(reason));
+      return false;
     }
   };
 
-  const handleScratchpadShortcutCapture = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (!scratchpadShortcutCapturing || event.repeat || event.nativeEvent.isComposing) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setScratchpadShortcutCapturing(false);
-      return;
+  const persistShortcutMap = (next: Record<string, string>): boolean => {
+    try {
+      window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(next));
+      setShortcutMap(next);
+      return true;
+    } catch (reason) {
+      setShortcutError(errorText(reason));
+      return false;
     }
-    const shortcut = shortcutFromEvent(event);
-    if (!shortcut) return;
-    event.preventDefault();
-    void saveScratchpadShortcut(shortcut);
   };
 
   useEffect(() => {
@@ -1352,11 +1407,9 @@ function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      const isQuickSearch =
-        (event.ctrlKey || event.metaKey) &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === "k";
-      const isFind = (event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "F" || event.key === "f");
+      const shortcut = formatShortcut(shortcutFromEvent(event) ?? "");
+      const isQuickSearch = shortcut === formatShortcut(shortcutMap["quick-switcher"]);
+      const isFind = shortcut === formatShortcut(shortcutMap["find-notes"]);
       const isReplace = (event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "H" || event.key === "h");
       if (!isFind && !isReplace && !isQuickSearch) return;
       if (session?.locked) return;
@@ -1373,7 +1426,7 @@ function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [bringWindowToFront, session?.locked]);
+  }, [bringWindowToFront, session?.locked, shortcutMap]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1929,29 +1982,31 @@ function App() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
+      if (session?.locked) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("dialog, [role=dialog]")) return;
       if (target?.closest(".card-sidebar")) return;
-      const key = event.key.toLowerCase();
-      const shortcut = `${event.shiftKey ? "shift+" : ""}${key}`;
-      if (scratchpadActiveRef.current && shortcut === "s") return;
-      const action = new Map<string, () => void>([
-        ["shift+t", () => openStartTimerDialog()],
-        ["shift+e", () => { setTimerError(""); setTimerDialog("finish"); }],
-        ["b", () => setSidebarCollapsed((current) => !current)],
-        ["s", () => persistCurrentInBackground()],
-        ["shift+s", () => void saveAndSync()],
-        ["shift+r", () => void syncNow()],
-        ["n", () => void createNote()],
-      ]).get(shortcut);
-      if (!action || (target?.closest("input, textarea, select") && !new Set(["shift+t", "shift+e", "b"]).has(shortcut))) return;
+      const shortcut = formatShortcut(shortcutFromEvent(event) ?? "");
+      if (scratchpadActiveRef.current && shortcut === formatShortcut(shortcutMap["save-note"])) return;
+      const actions: Record<string, () => void> = {
+        "new-note": () => void createNote(),
+        "save-note": () => persistCurrentInBackground(),
+        "toggle-sidebar": () => setSidebarCollapsed((current) => !current),
+        "start-timer": () => openStartTimerDialog(),
+        "finish-timer": () => { setTimerError(""); setTimerDialog("finish"); },
+        "save-sync": () => void saveAndSync(),
+        "sync-vault": () => void syncNow(),
+      };
+      const actionID = Object.keys(actions).find((id) => formatShortcut(shortcutMap[id]) === shortcut);
+      const action = actionID ? actions[actionID] : undefined;
+      const inputShortcutAllowed = actionID ? new Set(["start-timer", "finish-timer", "toggle-sidebar"]).has(actionID) : false;
+      if (!action || (target?.closest("input, textarea, select") && !inputShortcutAllowed)) return;
       event.preventDefault();
       action();
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [session?.locked, selectedFolderID, syncLinked, syncing]);
+  }, [session?.locked, selectedFolderID, shortcutMap, syncLinked, syncing]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -4250,31 +4305,111 @@ function App() {
     }
   };
 
+  const beginShortcutCapture = (id: string) => {
+    setShortcutEditingID(id);
+    setShortcutError("");
+  };
+
+  const handleCommandPaletteShortcutCapture = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const id = shortcutEditingID;
+    if (!id) return;
+    if (event.repeat || event.nativeEvent.isComposing || event.target instanceof HTMLElement && event.target.closest("input, textarea, select")) return;
+    const shortcut = shortcutFromEvent(event);
+    if (shortcut === "") {
+      event.preventDefault();
+      setShortcutEditingID(null);
+      setShortcutError("");
+      return;
+    }
+    if (!shortcut) {
+      if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key.length === 1) {
+        setShortcutError("Use one key with at least one modifier.");
+      }
+      return;
+    }
+    event.preventDefault();
+    if (RESERVED_SHORTCUTS.has(shortcut)) {
+      setShortcutError("That shortcut is reserved for the command palette.");
+      return;
+    }
+    const conflict = Object.entries({ ...shortcutMap, scratchpad: scratchpadShortcut })
+      .find(([owner, value]) => owner !== id && value === shortcut);
+    if (conflict) {
+      setShortcutError(`That shortcut is already assigned to ${conflict[0]}.`);
+      return;
+    }
+    if (id === "scratchpad") {
+      void saveScratchpadShortcut(shortcut);
+      return;
+    }
+    if (!persistShortcutMap({ ...shortcutMap, [id]: shortcut })) return;
+    setShortcutEditingID(null);
+    setShortcutError("");
+  };
+
+  const resetShortcut = async (id: string) => {
+    const shortcut = id === "scratchpad" ? DEFAULT_SCRATCHPAD_SHORTCUT : DEFAULT_SHORTCUTS[id];
+    if (!shortcut) return;
+    const conflict = Object.entries({ ...shortcutMap, scratchpad: scratchpadShortcut })
+      .find(([owner, value]) => owner !== id && value === shortcut);
+    if (conflict) {
+      setShortcutError(`That shortcut is already assigned to ${conflict[0]}.`);
+      return;
+    }
+    if (id === "scratchpad") {
+      await saveScratchpadShortcut(shortcut);
+      return;
+    }
+    if (!persistShortcutMap({ ...shortcutMap, [id]: shortcut })) return;
+    setShortcutError("");
+  };
+
+  const resetAllShortcuts = async () => {
+    const previousMap = shortcutMap;
+    try {
+      window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(DEFAULT_SHORTCUTS));
+    } catch (reason) {
+      setShortcutError(errorText(reason));
+      return;
+    }
+    if (!(await saveScratchpadShortcut(DEFAULT_SCRATCHPAD_SHORTCUT))) {
+      try {
+        window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(previousMap));
+      } catch {
+        // Keep the in-memory binding unchanged if rollback storage is unavailable.
+      }
+      return;
+    }
+    setShortcutMap({ ...DEFAULT_SHORTCUTS });
+    setShortcutEditingID(null);
+    setShortcutError("");
+  };
+
   const commandPaletteCommands: CommandPaletteCommand[] = [
     {
       id: "new-note",
-      shortcut: "Ctrl + N",
+      shortcut: formatShortcut(shortcutMap["new-note"]),
       name: "New note",
       description: "Create a new encrypted note",
       run: () => void createNote(),
     },
     {
       id: "save-note",
-      shortcut: "Ctrl + S",
+      shortcut: formatShortcut(shortcutMap["save-note"]),
       name: "Save note",
       description: "Save the current note",
       run: () => persistCurrentInBackground(),
     },
     {
       id: "scratchpad",
-      shortcut: scratchpadShortcut,
+      shortcut: formatShortcut(scratchpadShortcut),
       name: "Open Scratchpad",
       description: "Open the session scratchpad",
       run: activateScratchpad,
     },
     {
       id: "quick-switcher",
-      shortcut: "Ctrl + K",
+      shortcut: formatShortcut(shortcutMap["quick-switcher"]),
       name: "Quick note switcher",
       description: "Open a note by title",
       run: () => {
@@ -4285,14 +4420,14 @@ function App() {
     },
     {
       id: "toggle-sidebar",
-      shortcut: "Ctrl + B",
+      shortcut: formatShortcut(shortcutMap["toggle-sidebar"]),
       name: "Toggle sidebar",
       description: "Expand or collapse the sidebar",
       run: () => setSidebarCollapsed((current) => !current),
     },
     {
       id: "find-notes",
-      shortcut: "Ctrl + Shift + F",
+      shortcut: formatShortcut(shortcutMap["find-notes"]),
       name: "Find in all notes",
       description: "Search text across your vault",
       run: () => {
@@ -4303,14 +4438,14 @@ function App() {
     },
     {
       id: "start-timer",
-      shortcut: "Ctrl + Shift + T",
+      shortcut: formatShortcut(shortcutMap["start-timer"]),
       name: "Start timer",
       description: "Start tracking time without leaving this note",
       run: openStartTimerDialog,
     },
     {
       id: "finish-timer",
-      shortcut: "Ctrl + Shift + E",
+      shortcut: formatShortcut(shortcutMap["finish-timer"]),
       name: "Finish timer",
       description: "Finish the active timer",
       run: () => {
@@ -4354,8 +4489,15 @@ function App() {
       },
     },
     {
+      id: "save-sync",
+      shortcut: formatShortcut(shortcutMap["save-sync"]),
+      name: "Save and sync",
+      description: "Save the current note and sync encrypted changes",
+      run: () => void saveAndSync(),
+    },
+    {
       id: "sync-vault",
-      shortcut: "Ctrl + Shift + R",
+      shortcut: formatShortcut(shortcutMap["sync-vault"]),
       name: "Sync vault",
       description: "Pull and push encrypted changes",
       run: () => void syncNow(),
@@ -4382,13 +4524,6 @@ function App() {
       run: () => {
         openAppearanceSettings();
       },
-    },
-    {
-      id: "scratchpad-shortcuts",
-      shortcut: "",
-      name: "Scratchpad shortcut settings",
-      description: "Change the global Open Scratchpad shortcut",
-      run: () => openAppearanceSettings("settings-shortcuts"),
     },
   ];
   const commandPaletteNeedle = commandPaletteQuery.trim().toLocaleLowerCase();
@@ -6860,8 +6995,7 @@ function App() {
             </div>
             <div className="command-palette-results" role="listbox" aria-label="Matching commands">
               {matchingCommandPaletteCommands.map((command, index) => (
-                <button
-                  type="button"
+                <div
                   key={command.id}
                   id={`command-palette-${command.id}`}
                   className="command-palette-command"
@@ -6870,13 +7004,39 @@ function App() {
                   onMouseEnter={() => setCommandPaletteIndex(index)}
                   onClick={() => runCommandPaletteCommand(command)}
                 >
-                  <kbd>{command.shortcut || "—"}</kbd>
+                  {((command.id in DEFAULT_SHORTCUTS) || command.id === "scratchpad") ? (
+                    <div className="command-palette-shortcut-actions">
+                      <button
+                        type="button"
+                        aria-label={`Edit shortcut for ${command.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          beginShortcutCapture(command.id);
+                        }}
+                        onKeyDown={handleCommandPaletteShortcutCapture}
+                      >
+                        <kbd>{shortcutEditingID === command.id ? "Press a shortcut…" : command.shortcut || "—"}</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Reset shortcut for ${command.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void resetShortcut(command.id);
+                        }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  ) : <kbd>{command.shortcut || "—"}</kbd>}
                   <strong>{command.name}</strong>
                   <span>{command.description}</span>
-                </button>
+                </div>
               ))}
               {!matchingCommandPaletteCommands.length && <p className="command-palette-empty">No matching commands.</p>}
             </div>
+            {shortcutError && <p className="error-message" role="alert">{shortcutError}</p>}
+            <button type="button" className="secondary-button" onClick={() => void resetAllShortcuts()}>Reset all shortcuts</button>
           </dialog>
         </div>
       )}

@@ -11,7 +11,8 @@ test("command palette supports matching, keyboard selection, and themed presenta
   assert.match(app, /event\.key === "ArrowDown"/);
   assert.match(app, /event\.key === "Enter"/);
   assert.match(app, /event\.key === "Escape"/);
-  assert.match(app, /<kbd>\{command\.shortcut \|\| "—"\}<\/kbd>/);
+  assert.match(app, /formatShortcut\(shortcutMap\["new-note"\]\)/);
+  assert.match(app, /shortcutEditingID === command\.id/);
   assert.match(style, /\.command-palette \{[\s\S]*background-color: var\(--modal-surface\) !important;/);
   assert.match(style, /\.command-palette-command \{[\s\S]*grid-template-columns:/);
 });
@@ -19,20 +20,30 @@ test("command palette supports matching, keyboard selection, and themed presenta
 test("command palette opens the scratchpad", () => {
   const source = app.match(/\{\n      id: "scratchpad",[\s\S]*?\n    \},/);
   assert.ok(source);
-  assert.match(source[0], /shortcut: scratchpadShortcut/);
+  assert.match(source[0], /shortcut: formatShortcut\(scratchpadShortcut\)/);
   assert.match(source[0], /name: "Open Scratchpad"/);
   assert.match(source[0], /description: "Open the session scratchpad"/);
   let calls = 0;
-  const command = new Function("activateScratchpad", "scratchpadShortcut", `return (${source[0].slice(0, -1)})`)(
+  const command = new Function("activateScratchpad", "scratchpadShortcut", "formatShortcut", `return (${source[0].slice(0, -1)})`)(
     () => { calls += 1; },
     "Super+`",
+    (shortcut: string) => shortcut,
   ) as { run: () => void };
   command.run();
   assert.equal(calls, 1);
 });
 
-test("command palette exposes shortcut settings", () => {
-  assert.match(app, /id: "scratchpad-shortcuts"/);
-  assert.match(app, /openAppearanceSettings\("settings-shortcuts"\)/);
+test("command palette edits dynamic shortcuts without closing", () => {
+  assert.match(app, /const SHORTCUTS_STORAGE_KEY = "cipherleaf-shortcuts"/);
+  assert.match(app, /const \[shortcutMap, setShortcutMap\] = useState/);
+  assert.match(app, /const handleCommandPaletteShortcutCapture/);
+  assert.match(app, /RESERVED_SHORTCUTS\.has\(shortcut\)/);
+  assert.match(app, /Object\.entries\(\{ \.\.\.shortcutMap, scratchpad: scratchpadShortcut \}\)/);
+  assert.match(app, /That shortcut is already assigned to/);
+  assert.match(app, /resetShortcut\(command\.id\)/);
+  assert.match(app, /Reset all shortcuts/);
+  assert.match(app, /event\.stopPropagation\(\)/);
+  assert.doesNotMatch(app, /id: "scratchpad-shortcuts"/);
+  assert.doesNotMatch(app, /settings-shortcuts/);
   assert.match(app, /Command palette <kbd>Ctrl\/Cmd \+ Shift \+ P<\/kbd>/);
 });

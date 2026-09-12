@@ -24,8 +24,8 @@ test("scratchpad is a fixed rightmost tab with normal-tab-only shortcuts", () =>
   assert.doesNotMatch(app, /window\.addEventListener\("keydown", handleScratchpadShortcut, true\)/);
   assert.doesNotMatch(app, /scratchpad-tab[\s\S]*Close Scratchpad/);
   assert.match(app, /if \(scratchpadActiveRef\.current\) \{[\s\S]*event\.preventDefault\(\);[\s\S]*return;/);
-  assert.match(app, /const shortcut = `\$\{event\.shiftKey \? "shift\+" : ""\}\$\{key\}`;/);
-  assert.match(app, /scratchpadActiveRef\.current && shortcut === "s"/);
+  assert.match(app, /const shortcut = formatShortcut\(shortcutFromEvent\(event\) \?\? ""\);/);
+  assert.match(app, /scratchpadActiveRef\.current && shortcut === formatShortcut\(shortcutMap\["save-note"\]\)/);
 });
 
 test("scratchpad overlay and backend state are generation fenced", () => {
@@ -96,19 +96,33 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
 });
 
-test("Scratchpad shortcut settings capture and persist the dynamic binding", () => {
+test("settings edits stay draft-only until Save and Exit", () => {
+  assert.match(app, /const \[settingsDraft, setSettingsDraft\] = useState/);
+  assert.match(app, /setSettingsDraft\(createSettingsDraft\(\)\)/);
+  assert.match(app, /value=\{settingsValues\.dailyNoteFormat\}/);
+  assert.match(app, /updateSettingsDraft\(\{ dailyNoteFormat: event\.target\.value \}\)/);
+  assert.match(app, /await saveVaultSettings\(\{/);
+  assert.match(app, /Save and Exit/);
+  assert.match(app, /Exit without Saving/);
+  assert.match(app, /onClick=\{closeAppearanceSettings\}/);
+  assert.match(app, /close: closeAppearanceSettings/);
+  assert.match(app, /setSettingsDraft\(null\)/);
+});
+
+test("Scratchpad shortcut capture persists from the command palette", () => {
   assert.match(app, /const DEFAULT_SCRATCHPAD_SHORTCUT = "Super\+`"/);
   assert.match(app, /VaultService\.GetScratchpadShortcut\(\)/);
   assert.match(app, /VaultService\.SetScratchpadShortcut\(shortcut\)/);
   assert.match(app, /event\.code/);
   assert.match(app, /event\.repeat/);
-  assert.equal((app.match(/event\.nativeEvent\.isComposing/g) ?? []).length, 2);
+  assert.match(app, /event\.nativeEvent\?\.isComposing/);
   assert.match(app, /if \(event\.code === "NumpadAdd"\) return null;/);
   assert.match(app, /if \(event\.key === "\+"\) return "plus";/);
   assert.match(app, /event\.key === "Escape"/);
-  assert.match(app, /id="settings-shortcuts"/);
-  assert.match(app, /Shortcuts/);
-  assert.match(app, />Reset<\/button>/);
+  assert.match(app, /id: "scratchpad"/);
+  assert.match(app, /handleCommandPaletteShortcutCapture/);
+  assert.doesNotMatch(app, /id="settings-shortcuts"/);
+  assert.doesNotMatch(app, /openSettingsSection\("appearance", "settings-shortcuts"\)/);
 });
 
 test("scratchpad size follows the active screen and keeps its height", () => {
@@ -273,7 +287,7 @@ test("scratchpad opacity is configurable and shared with the overlay window", ()
   assert.match(app, /id="settings-scratchpad-opacity"/);
   assert.match(app, /type="range"[\s\S]*min="0"[\s\S]*max="1"[\s\S]*step="0\.05"[\s\S]*scratchpadOpacity/);
   assert.match(app, /Math\.min\(1, Math\.max\(0, value\)\)/);
-  assert.match(app, /Math\.round\(scratchpadOpacity \* 100\)\}%/);
+  assert.match(app, /Math\.round\(settingsValues\.scratchpadOpacity \* 100\)\}%/);
   assert.match(main, /const SCRATCHPAD_OPACITY_KEY = 'cipherleaf-scratchpad-opacity'/);
   assert.match(main, /saved === null \|\| saved\.trim\(\) === ''/);
   assert.match(main, /Number\.isFinite\(opacity\) && opacity >= 0 && opacity <= 1/);
