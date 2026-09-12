@@ -541,6 +541,83 @@ assert.ok(interactionChanges >= 0 && interactionErrors >= 0);
 await act(async () => { interaction.root.unmount(); });
 interaction.shell.remove();
 
+const boundary = mount("board-boundary-host");
+const boundaryBoards = [boardMarker("boundary-a"), "", boardMarker("boundary-b")];
+await act(async () => {
+  boundary.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "board-boundary",
+    value: boundaryBoards.join("\n"),
+    onChange: () => {},
+    onSave: () => {},
+    onError: () => {},
+    onOpenWikilink: () => {},
+    onOpenCard: () => {},
+    cardTitles: new Map(),
+    cardData: new Map(),
+    onCreateCard: async () => null,
+    onCreateBoard: async () => null,
+    onMoveCard: () => {},
+    onAddCardToBoard: () => {},
+    onChangeBoardTitle: () => {},
+    onDecreaseFontSize: () => {},
+    onIncreaseFontSize: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const boundaryEditor = boundary.body.querySelector<HTMLElement>(".cm-content")!;
+const boundaryView = EditorView.findFromDOM(boundaryEditor)!;
+const blankLine = boundaryView.state.doc.line(2);
+assert.ok([...boundary.body.querySelectorAll<HTMLElement>(".cm-line.cm-live-empty-line")].some((line) => (
+  line.lastElementChild?.tagName === "BR"
+)));
+boundaryView.dispatch({ selection: EditorSelection.cursor(blankLine.from) });
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), [boundaryBoards[0], boundaryBoards[2]].join("\n"));
+boundaryView.dispatch({
+  changes: { from: 0, to: boundaryView.state.doc.length, insert: boundaryBoards.join("\n") },
+});
+boundaryView.dispatch({ selection: EditorSelection.cursor(boundaryView.state.doc.line(2).to) });
+await act(async () => {
+  key(boundaryEditor, "Delete");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), [boundaryBoards[0], boundaryBoards[2]].join("\n"));
+boundaryView.dispatch({
+  changes: { from: 0, to: boundaryView.state.doc.length, insert: [boundaryBoards[0], "text"].join("\n") },
+});
+boundaryView.dispatch({ selection: EditorSelection.cursor(boundaryView.state.doc.line(2).from) });
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), [boundaryBoards[0], "text"].join("\n"));
+boundaryView.dispatch({
+  changes: { from: 0, to: boundaryView.state.doc.length, insert: boundaryBoards.join("\n") },
+});
+boundaryView.dispatch({ selection: EditorSelection.range(0, 1) });
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), boundaryBoards.join("\n"));
+boundaryView.dispatch({
+  selection: EditorSelection.range(
+    boundaryView.state.doc.line(2).from - 1,
+    boundaryView.state.doc.line(3).from,
+  ),
+});
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), boundaryBoards.join("\n"));
+await act(async () => { boundary.root.unmount(); });
+boundary.shell.remove();
+
 const indentation = mount("indentation-host");
 await act(async () => {
   indentation.root.render(createElement(LiveMarkdownEditor, {

@@ -247,7 +247,10 @@ test("scratchpad editor saves content and caret from the same local update", () 
 
 test("scratchpad styling stays accessible, responsive, translucent, and reduced-motion safe", () => {
   assert.match(style, /\.scratchpad-tab \{/);
+  assert.match(style, /\.scratchpad-tab span \{[\s\S]*font-size: 1em/);
   assert.match(style, /\.scratchpad-tab\.active \{/);
+  assert.match(style, /:root\[data-theme="dark"\] \.scratchpad-tab \{[\s\S]*color: var\(--ink\)[\s\S]*background: var\(--surface\)/);
+  assert.match(style, /:root\[data-theme="dark"\] \.scratchpad-tab\.active \{[\s\S]*border-color: var\(--green-dark\)[\s\S]*background: var\(--surface-active\)/);
   assert.match(style, /\.scratchpad-tab:focus-visible \{/);
   assert.match(style, /:root\[data-window="scratchpad"\]/);
   assert.match(style, /--scratchpad-opacity: 0\.5/);
@@ -461,7 +464,8 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(liveEditor, /document\.createElement\("select"\)/);
   assert.match(style, /\.card-sidebar \{[\s\S]*background: var\(--editor-bg\)/);
   assert.match(style, /\.card-sidebar-notes \.live-markdown-editor \.cm-content/);
-  assert.match(style, /\.live-markdown-editor \.cm-line \{[\s\S]*min-height: 1\.75em/);
+  assert.match(liveEditor, /cm-live-empty-line/);
+  assert.match(style, /\.live-markdown-editor \.cm-line\.cm-live-empty-line \{[\s\S]*height: 1lh;[\s\S]*max-height: 1lh/);
   assert.match(style, /\.cm-live-board-card \{[\s\S]*display: flex[\s\S]*justify-content: space-between/);
   assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
@@ -586,7 +590,8 @@ test("board handles expose delete-only menus and block keyboard deletion", () =>
   assert.match(liveEditor, /if \(board\) \{[\s\S]*new DragHandleWidget\(lineNumber\)/);
   assert.match(liveEditor, /showObjectHandleMenu\([\s\S]*parseBoardMarker\(contextView\.state\.doc\.line\(sourceLine\)\.text\)/);
   assert.match(liveEditor, /if \(!board\) \{[\s\S]*textContent = "Duplicate"/);
-  assert.match(liveEditor, /boardMarkerAtDeletionBoundary\(view\)/);
+  assert.match(liveEditor, /view\.state\.selection\.ranges\.flatMap/);
+  assert.match(liveEditor, /deletionChangesBoardMarkers\(view\.state, changes\)/);
   assert.match(liveEditor, /key: "Delete"[\s\S]*run: handleBoardDelete/);
   assert.match(style, /cm-live-board-line:hover \.cm-live-object-handle/);
 });

@@ -2819,7 +2819,7 @@ function renderPlainLine(
   if (!task && !listKind) {
     decorations.push(
       Decoration.line({
-        attributes: context.lineAttributes(lineNumber),
+        attributes: context.lineAttributes(lineNumber, line.text.length === 0 ? "cm-live-empty-line" : ""),
       }).range(line.from),
     );
   }
@@ -3165,21 +3165,37 @@ function restoreArrowSubstitution(view: EditorView): boolean {
   return true;
 }
 
-function boardMarkerAtDeletionBoundary(view: EditorView): boolean {
-  const range = view.state.selection.main;
-  if (!range.empty) return rangeTouchesBoard(view.state, range.from, range.to);
-  const positions = [range.head, range.head - 1, range.head + 1];
-  return positions.some((position) =>
-    position >= 0 && position <= view.state.doc.length && parseBoardMarker(view.state.doc.lineAt(position).text) !== null,
-  );
+function deletionChangesBoardMarkers(
+  state: EditorState,
+  changes: readonly { from: number; to: number }[],
+): boolean {
+  if (changes.length === 0) return false;
+  const boardMarkers = (text: string) => text.split("\n").filter((line) => parseBoardMarker(line));
+  const source = state.doc.toString();
+  const before = boardMarkers(source);
+  const afterSource = [...changes]
+    .sort((a, b) => b.from - a.from)
+    .reduce((text, change) => text.slice(0, change.from) + text.slice(change.to), source);
+  const after = boardMarkers(afterSource);
+  return before.length !== after.length || before.some((marker, index) => marker !== after[index]);
+}
+
+function boardMarkerAtDeletionBoundary(view: EditorView, direction: "backspace" | "delete"): boolean {
+  const length = view.state.doc.length;
+  const changes = view.state.selection.ranges.flatMap((range) => {
+    const from = range.empty ? (direction === "backspace" ? range.head - 1 : range.head) : range.from;
+    const to = range.empty ? (direction === "backspace" ? range.head : range.head + 1) : range.to;
+    return from >= 0 && to <= length && to > from ? [{ from, to }] : [];
+  });
+  return deletionChangesBoardMarkers(view.state, changes);
 }
 
 function handleBackspace(view: EditorView): boolean {
-  return boardMarkerAtDeletionBoundary(view) || restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
+  return boardMarkerAtDeletionBoundary(view, "backspace") || restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
 }
 
 function handleBoardDelete(view: EditorView): boolean {
-  return boardMarkerAtDeletionBoundary(view);
+  return boardMarkerAtDeletionBoundary(view, "delete");
 }
 
 function snippetCompletion(

@@ -2763,6 +2763,23 @@ dialog.modal-backdrop {
   outline-offset: -2px;
 }
 
+:root[data-theme="dark"] .scratchpad-tab {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .scratchpad-tab.active {
+  color: var(--ink);
+  border-color: var(--green-dark);
+  background: var(--surface-active);
+}
+
+:root[data-theme="dark"] .scratchpad-tab:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
 .note-tab button,
 .new-note-tab {
   min-width: 0;
@@ -2785,6 +2802,10 @@ dialog.modal-backdrop {
   text-overflow: ellipsis;
   font-size: 0.66em;
   white-space: nowrap;
+}
+
+.scratchpad-tab span {
+  font-size: 1em;
 }
 
 .note-tab.active button:first-child,
@@ -4062,8 +4083,13 @@ dialog.modal-backdrop {
 }
 
 .live-markdown-editor .cm-line {
-  min-height: 1.75em;
   padding: var(--editor-line-spacing) 0;
+}
+
+.live-markdown-editor .cm-line.cm-live-empty-line {
+  min-height: 0;
+  height: 1lh;
+  max-height: 1lh;
 }
 
 .document-body .live-markdown-editor:not(.source-markdown-editor) .cm-line {
