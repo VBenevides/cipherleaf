@@ -3330,6 +3330,14 @@ function completeTypedEditorInput(
     });
     return true;
   }
+  if (line.text.trim() === "") {
+    const inserted = line.text + text;
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: inserted },
+      selection: EditorSelection.cursor(line.from + inserted.length),
+    });
+    return true;
+  }
   const normalizedPrefix = normalizeStackedExclusiveObjectPrefix(prospective, previousLine);
   if (normalizedPrefix === prospective) return false;
   const prefixLength = /^[ \t]*(?:(?:>+|[-*]|\d+[.)])[ \t]+|<[ \t]?)/.exec(normalizedPrefix)?.[0].length ?? 0;
@@ -3463,10 +3471,8 @@ export default function LiveMarkdownEditor({
     const editorHost = host.current;
     if (!editorHost) return;
 
-    const editorShell = editorHost.closest<HTMLElement>(".editor-shell");
-    const documentBody = editorShell?.querySelector<HTMLElement>(".document-body");
-
-    if (!editorShell || !documentBody) return;
+    const documentBody = editorHost.closest<HTMLElement>(".document-body");
+    if (!documentBody) return;
 
     const toolbar = document.createElement("div");
     toolbar.className = "markdown-toolbar";

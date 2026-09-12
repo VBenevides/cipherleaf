@@ -448,6 +448,49 @@ assert.equal(searchTargetHost.body.querySelectorAll(".cm-live-search-highlight")
 await act(async () => { searchTargetHost.root.unmount(); });
 searchTargetHost.shell.remove();
 
+const scratchpadToolbarShell = document.createElement("section");
+scratchpadToolbarShell.className = "scratchpad-editor";
+const scratchpadHeading = scratchpadToolbarShell.appendChild(document.createElement("header"));
+scratchpadHeading.className = "scratchpad-heading";
+const scratchpadBody = scratchpadToolbarShell.appendChild(document.createElement("div"));
+scratchpadBody.className = "document-body scratchpad-editor-body";
+document.body.append(scratchpadToolbarShell);
+const scratchpadRoot = createRoot(scratchpadBody);
+await act(async () => {
+  scratchpadRoot.render(createElement(LiveMarkdownEditor, {
+    noteID: "scratchpad-toolbar",
+    value: "Scratchpad",
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const scratchpadToolbar = scratchpadToolbarShell.querySelector(".markdown-toolbar");
+assert.equal(scratchpadHeading.nextElementSibling, scratchpadToolbar);
+assert.equal(scratchpadToolbar?.nextElementSibling, scratchpadBody);
+await act(async () => { scratchpadRoot.unmount(); });
+scratchpadToolbarShell.remove();
+
+const noteToolbar = mount("note-toolbar-host");
+const noteHeading = document.createElement("header");
+noteToolbar.shell.insertBefore(noteHeading, noteToolbar.body);
+await act(async () => {
+  noteToolbar.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "note-toolbar",
+    value: "Note",
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const noteToolbarElement = noteToolbar.shell.querySelector(".markdown-toolbar");
+assert.equal(noteHeading.nextElementSibling, noteToolbarElement);
+assert.equal(noteToolbarElement?.nextElementSibling, noteToolbar.body);
+await act(async () => { noteToolbar.root.unmount(); });
+noteToolbar.shell.remove();
+
 const source = mount("source-host");
 let scrollSyncs = 0;
 const scrollSync = {
