@@ -8,6 +8,7 @@ const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
 const nativeMain = readFileSync(new URL("../../main.go", import.meta.url), "utf8");
 const nativeService = readFileSync(new URL("../../internal/app/scratchpad_shortcut.go", import.meta.url), "utf8");
+const nativeVaultService = readFileSync(new URL("../../internal/app/vaultservice.go", import.meta.url), "utf8");
 const scratchpad = readFileSync(new URL("../src/Scratchpad.tsx", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
@@ -408,6 +409,16 @@ test("sync refreshes lists without replacing a draft changed during pull", () =>
   assert.match(sync[0], /await refreshFolders\(\)/);
   assert.match(sync[0], /if \(note && !preserveLocalDraft\)/);
   assert.match(sync[0], /Remote changes synced; your active draft was preserved\./);
+});
+
+test("same-note conflicts stay visible and block pushing", () => {
+  const pullAndMerge = nativeVaultService.match(/func \(s \*VaultService\) pullAndMerge\([\s\S]*?\n}\n/);
+  assert.ok(pullAndMerge);
+  assert.match(pullAndMerge[0], /len\(merge\.Conflicts\) > 0 \|\| len\(merge\.TrackingConflicts\) > 0/);
+  assert.match(pullAndMerge[0], /conflicts must be resolved before pushing/);
+  assert.doesNotMatch(pullAndMerge[0], /PushVault/);
+  assert.match(app, /setSyncConflicts\(result\.merge\.conflicts\)/);
+  assert.match(app, /void startConflictResolution\(result\.merge\.conflicts\[0\]\)/);
 });
 
 test("vault settings configure scheduled encrypted backups", () => {
