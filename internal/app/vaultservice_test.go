@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cipherleaf/internal/githubsync"
@@ -141,6 +142,73 @@ func TestSelectClipboardImageType(t *testing.T) {
 	}
 	if got := selectClipboardImageType("text/plain\ntext/html\n"); got != "" {
 		t.Fatalf("selected non-image MIME type %q", got)
+	}
+}
+
+func TestReadClipboardImageUsesSupportedClipboardFallbacks(t *testing.T) {
+	bin := t.TempDir()
+	writeClipboardHelper := func(name, script string) {
+		t.Helper()
+		path := filepath.Join(bin, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	writeClipboardHelper("wl-paste", `case "$*" in *--list-types*) printf 'text/plain\nimage/jpeg\n';; *) printf 'wayland-image';; esac`)
+	service := NewVaultService()
+	value, err := service.ReadClipboardImage()
+	if err != nil || !strings.HasPrefix(value, "data:image/jpeg;base64,") {
+		t.Fatalf("Wayland clipboard image = %q, %v", value, err)
+	}
+
+	if err := os.Remove(filepath.Join(bin, "wl-paste")); err != nil {
+		t.Fatal(err)
+	}
+	writeClipboardHelper("xclip", `printf 'xclip-image'`)
+	value, err = service.ReadClipboardImage()
+	if err != nil || !strings.HasPrefix(value, "data:image/png;base64,") {
+		t.Fatalf("Xclip clipboard image = %q, %v", value, err)
+	}
+}
+
+func TestVaultServiceSessionAndTerminalBranches(t *testing.T) {
+	service := NewVaultService()
+	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	if err := service.RememberTheme("dark"); err != nil {
+		t.Fatal(err)
+	}
+	vaultPath := filepath.Join(t.TempDir(), "vault")
+	if err := os.MkdirAll(vaultPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.recent.RememberWithTheme(vaultPath, "light"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RememberTheme("dark"); err != nil {
+		t.Fatal(err)
+	}
+	if session, err := service.GetLastSession(); err != nil || session.Theme != "dark" {
+		t.Fatalf("last session = %#v, %v", session, err)
+	}
+
+	service, provider, _ := newAppSyncCoverageService(t)
+	if err := os.MkdirAll(filepath.Join(provider.workingDir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	terminal := t.TempDir()
+	if err := os.WriteFile(filepath.Join(terminal, "x-terminal-emulator"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", terminal)
+	if err := service.OpenGitTerminal(); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.UnlinkGitHubSync(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.GetSyncSettings(); err != nil || got.Linked {
+		t.Fatalf("removed sync settings = %#v, %v", got, err)
 	}
 }
 

@@ -8,6 +8,7 @@ import {
   useState,
   type ChangeEvent,
   type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Events } from "@wailsio/runtime";
@@ -35,7 +36,7 @@ import type {
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/internal/app/models";
-import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
+import { syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import { createSerialTaskRunner } from "./serialTask";
 import { canReplaceSearch, isAdvancedSearchQuery, searchResultsKey } from "./globalSearch";
@@ -52,22 +53,26 @@ import { formatDailyTitle, renderNoteTemplate } from "./dailyNotes";
 import { appendCardJournalToMainEditor, stripCardJournalEntries } from "./cardJournal";
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, localDateKey, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
+import Scratchpad from "./Scratchpad";
 import {
   BOARD_COLUMNS,
   CARD_STATUS_LABELS,
   boardMarker,
+  boardColumnsForMarker,
   newCardMetadata,
   cardReference,
   normalizeCardTags,
   parseCardDocument,
-  parseCardReference,
+  parseBoardMarker,
   replaceBoardMarker,
   parseTemplateDocument,
   serializeTemplateDocument,
   serializeCardDocument,
   transitionCard,
+  type CardTemplate,
   type CardMetadata,
   type CardStatus,
+  type BoardColumn,
 } from "./cards";
 
 type VaultAction = "create" | "open" | "clone";
@@ -84,6 +89,26 @@ type CommandPaletteCommand = {
   name: string;
   description: string;
   run: () => void;
+};
+type EditorFontDraft =
+  | { kind: "unchanged" }
+  | { kind: "default" }
+  | { kind: "system"; name: string }
+  | { kind: "file"; name: string; data: ArrayBuffer };
+type SettingsDraft = {
+  dailyNoteFormat: string;
+  dailyNoteFolderID: string;
+  dailyTemplateNoteID: string;
+  autosaveIntervalSeconds: number;
+  autoSyncMinutes: number;
+  autoLockMinutes: number;
+  sectionDefault: SectionDefault;
+  cardWriteChangesToEditorDefault: boolean;
+  theme: Theme;
+  journalLines: JournalLines;
+  scratchpadOpacity: number;
+  editorFontSize: number;
+  editorFont: EditorFontDraft;
 };
 
 const THEME_OPTIONS: { value: Theme; label: string; swatch: string }[] = [
@@ -102,11 +127,131 @@ const JOURNAL_LINE_LABELS: Record<JournalLines, string> = {
   full: "Solid",
   dotted: "Dotted",
 };
+const SCRATCHPAD_OPACITY_KEY = "cipherleaf-scratchpad-opacity";
+const SCRATCHPAD_DEFAULT_OPACITY = 0.5;
+const DEFAULT_SCRATCHPAD_SHORTCUT = "Super+`";
+const SHORTCUTS_STORAGE_KEY = "cipherleaf-shortcuts";
+const DEFAULT_SHORTCUTS: Record<string, string> = {
+  "new-note": "Ctrl+N",
+  "save-note": "Ctrl+S",
+  "quick-switcher": "Ctrl+K",
+  "toggle-sidebar": "Ctrl+B",
+  "find-notes": "Ctrl+Shift+F",
+  "start-timer": "Ctrl+Shift+T",
+  "finish-timer": "Ctrl+Shift+E",
+  "save-sync": "Ctrl+Shift+S",
+  "sync-vault": "Ctrl+Shift+R",
+};
+const RESERVED_SHORTCUTS = new Set(["Ctrl+Shift+P", "Super+Shift+P", "Ctrl+Shift+H", "Super+Shift+H"]);
+const SHORTCUT_KEY_CODES: Record<string, string> = {
+  Backquote: "`",
+  Minus: "-",
+  Equal: "=",
+  BracketLeft: "[",
+  Backslash: "\\",
+  BracketRight: "]",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Space: "Space",
+  Enter: "Enter",
+  Tab: "Tab",
+  Escape: "Escape",
+  Backspace: "Backspace",
+  Delete: "Delete",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  Home: "Home",
+  End: "End",
+  PageUp: "Page Up",
+  PageDown: "Page Down",
+};
 const EDITOR_VIEW_LABELS: Record<EditorView, string> = {
   live: "Live Preview",
   object: "Object Tree",
   markdown: "Markdown",
 };
+
+function readScratchpadOpacity(): number {
+  const saved = window.localStorage.getItem(SCRATCHPAD_OPACITY_KEY);
+  if (saved === null || saved.trim() === "") return SCRATCHPAD_DEFAULT_OPACITY;
+  const opacity = Number(saved);
+  return Number.isFinite(opacity) && opacity >= 0 && opacity <= 1 ? opacity : SCRATCHPAD_DEFAULT_OPACITY;
+}
+
+function normalizeShortcut(shortcut: string): string {
+  return shortcut.split("+").map((part) => part.trim()).filter(Boolean).join("+");
+}
+
+function isValidStoredShortcut(shortcut: string): boolean {
+  const parts = normalizeShortcut(shortcut).split("+");
+  const key = parts[parts.length - 1] ?? "";
+  if (parts.length < 2 || key === "Escape") return false;
+  const modifiers = parts.slice(0, -1);
+  if (modifiers.some((part) => !["Ctrl", "Alt", "Shift", "Super"].includes(part)) || new Set(modifiers).size !== modifiers.length) return false;
+  return key === "plus" || Object.values(SHORTCUT_KEY_CODES).includes(key) || /^Key[A-Z]$/.test(`Key${key}`) || /^Digit\d$/.test(`Digit${key}`) || /^F(?:[1-9]|1\d|2[0-4])$/.test(key);
+}
+
+function readShortcutMap(): Record<string, string> {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SHORTCUTS_STORAGE_KEY) || "null") as Record<string, unknown> | null;
+    const used = new Set(RESERVED_SHORTCUTS);
+    return Object.fromEntries(Object.keys(DEFAULT_SHORTCUTS).map((id) => {
+      const candidate = typeof stored?.[id] === "string" ? normalizeShortcut(stored[id]) : "";
+      const fallback = Object.values(DEFAULT_SHORTCUTS).map(normalizeShortcut).find((value) => !used.has(value)) ?? normalizeShortcut(DEFAULT_SHORTCUTS[id]);
+      const shortcut = candidate && isValidStoredShortcut(candidate) && !used.has(candidate) ? candidate : fallback;
+      used.add(shortcut);
+      return [id, shortcut];
+    }));
+  } catch {
+    return { ...DEFAULT_SHORTCUTS };
+  }
+}
+
+type ShortcutEvent = {
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+  repeat: boolean;
+  isComposing?: boolean;
+  nativeEvent?: { isComposing?: boolean };
+};
+
+function shortcutKeyFromEvent(event: Pick<ShortcutEvent, "code" | "key">): string | null {
+  if (event.code === "NumpadAdd") return null;
+  if (event.key === "+") return "plus";
+  if (event.code in SHORTCUT_KEY_CODES) return SHORTCUT_KEY_CODES[event.code];
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
+  if (/^Digit\d$/.test(event.code)) return event.code.slice(5);
+  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(event.code)) return event.code;
+  return null;
+}
+
+function shortcutFromEvent(event: ShortcutEvent): string | null {
+  if (event.key === "Escape") return "";
+  if (event.repeat || event.isComposing || event.nativeEvent?.isComposing) return null;
+  if (!(event.ctrlKey || event.altKey || event.shiftKey || event.metaKey)) return null;
+  const key = shortcutKeyFromEvent(event);
+  if (!key) return null;
+  return [
+    event.ctrlKey && "Ctrl",
+    event.altKey && "Alt",
+    event.shiftKey && "Shift",
+    event.metaKey && "Super",
+    key,
+  ].filter(Boolean).join("+");
+}
+
+function formatShortcut(shortcut: string): string {
+  return shortcut ? normalizeShortcut(shortcut).split("+").join(" + ") : "";
+}
 
 function NoteSortSelect({ value, onChange }: { readonly value: string; readonly onChange: (value: string) => void }) {
   const details = useRef<HTMLDetailsElement>(null);
@@ -183,6 +328,7 @@ type CardPanelState = {
   note: Note;
   metadata: CardMetadata;
   body: string;
+  kind?: "template";
 };
 
 type CloneVaultSubmission = {
@@ -590,6 +736,57 @@ export function VaultStatisticsGrid({ statistics }: { readonly statistics: Vault
   </div>;
 }
 
+function workspaceLabels({
+  syncing,
+  syncLinked,
+  saveState,
+  dirty,
+  hasNote,
+  hasConflict,
+  settingsLinked,
+  settingsBusy,
+}: {
+  readonly syncing: boolean;
+  readonly syncLinked: boolean;
+  readonly saveState: SaveState;
+  readonly dirty: boolean;
+  readonly hasNote: boolean;
+  readonly hasConflict: boolean;
+  readonly settingsLinked: boolean;
+  readonly settingsBusy: boolean;
+}) {
+  let syncMenuTitle = "Pull then push the vault to GitHub";
+  if (syncing) syncMenuTitle = "Syncing…";
+  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
+
+  const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
+    ?? (dirty ? "Unsaved" : "Saved locally");
+  let saveFileTitle = "Save this note (Ctrl + S)";
+  if (!hasNote) saveFileTitle = "No note open";
+  if (hasConflict) saveFileTitle = "Save the merged conflict result";
+  let saveFileLabel = "Save file";
+  if (hasConflict) saveFileLabel = "Save merged file";
+  if (saveState === "saving") saveFileLabel = "Encrypting…";
+
+  let syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
+  if (syncLinked) syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
+  if (!hasNote) syncButtonTitle = "No note open";
+  const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
+  let settingsSubmitLabel = "Link vault";
+  if (settingsLinked) settingsSubmitLabel = "Verify link";
+  if (settingsBusy) settingsSubmitLabel = "Linking…";
+
+  return {
+    syncMenuTitle,
+    saveStatusLabel,
+    saveFileTitle,
+    saveFileLabel,
+    syncButtonTitle,
+    syncButtonLabel,
+    settingsSubmitLabel,
+  };
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -597,6 +794,9 @@ function App() {
   const [note, setNote] = useState<Note | null>(null);
   const [tabs, setTabs] = useState<EditorTab[]>(() => [{ id: 1, noteID: "", title: "New tab", lastActiveAt: Date.now() }]);
   const [activeTabID, setActiveTabID] = useState(1);
+  const [scratchpadActive, setScratchpadActive] = useState(false);
+  const [scratchpadShortcut, setScratchpadShortcut] = useState(DEFAULT_SCRATCHPAD_SHORTCUT);
+  const [scratchpadOpacity, setScratchpadOpacity] = useState(() => readScratchpadOpacity());
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
   const [fileAttachments, setFileAttachments] = useState<AttachmentInfo[]>([]);
@@ -652,6 +852,9 @@ function App() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const consoleEntryIDRef = useRef(0);
   const [appearanceSettingsOpen, setAppearanceSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [statisticsOpen, setStatisticsOpen] = useState(false);
   const [statistics, setStatistics] = useState<ApplicationStatistics | null>(null);
   const [statisticsError, setStatisticsError] = useState("");
@@ -686,7 +889,10 @@ function App() {
   const [cardPanelSaving, setCardPanelSaving] = useState(false);
   const [selectedTemplateID, setSelectedTemplateID] = useState("");
   const saveCardPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const cardPanelRef = useRef<CardPanelState | null>(null);
+  const templateRequestRef = useRef(0);
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
+  cardPanelRef.current = cardPanel;
   const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
@@ -696,6 +902,9 @@ function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
+  const [shortcutMap, setShortcutMap] = useState<Record<string, string>>(() => readShortcutMap());
+  const [shortcutEditingID, setShortcutEditingID] = useState<string | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
   const [globalSearchReplace, setGlobalSearchReplace] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchReplacement, setGlobalSearchReplacement] = useState("");
@@ -763,6 +972,7 @@ function App() {
   const noteRef = useRef<Note | null>(null);
   const tabsRef = useRef(tabs);
   const activeTabIDRef = useRef(activeTabID);
+  const scratchpadActiveRef = useRef(scratchpadActive);
   const nextTabIDRef = useRef(2);
   const tabNoteCacheRef = useRef(new Map<number, Note>());
   const noteCaretOffsetsRef = useRef(new Map<string, number>());
@@ -770,6 +980,7 @@ function App() {
   const globalSearchResultsKeyRef = useRef("");
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
+  const activateScratchpadRef = useRef<() => void>(() => {});
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
@@ -778,6 +989,30 @@ function App() {
   const vaultSettingsLoadedForRef = useRef("");
   const vaultSettingsSnapshotRef = useRef("");
   const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
+  const syncInFlightRef = useRef(false);
+
+  const createSettingsDraft = (): SettingsDraft => ({
+    dailyNoteFormat,
+    dailyNoteFolderID: dailyNoteFolderID,
+    dailyTemplateNoteID,
+    autosaveIntervalSeconds,
+    autoSyncMinutes,
+    autoLockMinutes,
+    sectionDefault,
+    cardWriteChangesToEditorDefault,
+    theme,
+    journalLines,
+    scratchpadOpacity,
+    editorFontSize,
+    editorFont: { kind: "unchanged" },
+  });
+  const settingsValues = settingsDraft ?? createSettingsDraft();
+  let settingsEditorFontName = editorFontName;
+  if (settingsValues.editorFont.kind === "default") settingsEditorFontName = "";
+  else if (settingsValues.editorFont.kind !== "unchanged") settingsEditorFontName = settingsValues.editorFont.name;
+  const updateSettingsDraft = (change: Partial<SettingsDraft>) => {
+    setSettingsDraft((current) => current ? { ...current, ...change } : current);
+  };
 
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
     dailyNoteFormat,
@@ -833,12 +1068,13 @@ function App() {
     return false;
   };
 
-  const saveVaultSettings = async (force = false) => {
-    if (!session || session.locked || vaultSettingsLoadedForRef.current !== session.vaultId) return;
-    const snapshot = settingsSnapshot(portableVaultSettings);
-    if (!force && snapshot === vaultSettingsSnapshotRef.current) return;
-    const saved = await VaultService.SaveVaultSettings(portableVaultSettings);
+  const saveVaultSettings = async (settings = portableVaultSettings, force = false): Promise<VaultSettings | null> => {
+    if (!session || session.locked || vaultSettingsLoadedForRef.current !== session.vaultId) return null;
+    const snapshot = settingsSnapshot(settings);
+    if (!force && snapshot === vaultSettingsSnapshotRef.current) return settings;
+    const saved = await VaultService.SaveVaultSettings(settings);
     vaultSettingsSnapshotRef.current = settingsSnapshot(saved);
+    return saved;
   };
 
   const bringWindowToFront = useCallback((layer: WindowLayer) => {
@@ -863,12 +1099,46 @@ function App() {
     }
   };
 
+  const openAppearanceSettings = (sectionID?: string) => {
+    setTitlebarMenu(null);
+    bringWindowToFront("appearanceSettings");
+    setSettingsDraft(createSettingsDraft());
+    setSettingsSaveError("");
+    setAppearanceSettingsOpen(true);
+    openSettingsSection("appearance", sectionID);
+  };
+
+  const saveScratchpadShortcut = async (shortcut: string): Promise<boolean> => {
+    try {
+      const effective = await VaultService.SetScratchpadShortcut(shortcut);
+      setScratchpadShortcut(effective || shortcut);
+      setShortcutEditingID(null);
+      setShortcutError("");
+      return true;
+    } catch (reason) {
+      setShortcutError(errorText(reason));
+      return false;
+    }
+  };
+
+  const persistShortcutMap = (next: Record<string, string>): boolean => {
+    try {
+      window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(next));
+      setShortcutMap(next);
+      return true;
+    } catch (reason) {
+      setShortcutError(errorText(reason));
+      return false;
+    }
+  };
+
   useEffect(() => {
     noteRef.current = note;
   }, [note]);
 
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { activeTabIDRef.current = activeTabID; }, [activeTabID]);
+  useEffect(() => { scratchpadActiveRef.current = scratchpadActive; }, [scratchpadActive]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1020,6 +1290,11 @@ function App() {
     void VaultService.RememberTheme(theme);
   }, [theme]);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--scratchpad-opacity", String(scratchpadOpacity));
+    window.localStorage.setItem(SCRATCHPAD_OPACITY_KEY, String(scratchpadOpacity));
+  }, [scratchpadOpacity]);
+
   const activateEditorFont = useCallback(async (name: string, data: ArrayBuffer) => {
     const font = new FontFace(EDITOR_FONT_FAMILY, data);
     await font.load();
@@ -1073,6 +1348,20 @@ function App() {
 
   const decreaseEditorFontSize = useCallback(() => {
     setEditorFontSize((current) => Math.max(10, current - 1));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    VaultService.GetScratchpadShortcut()
+      .then((shortcut) => {
+        if (active) setScratchpadShortcut(shortcut || DEFAULT_SCRATCHPAD_SHORTCUT);
+      })
+      .catch(() => {
+        if (active) setScratchpadShortcut(DEFAULT_SCRATCHPAD_SHORTCUT);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const increaseEditorFontSize = useCallback(() => {
@@ -1177,11 +1466,9 @@ function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      const isQuickSearch =
-        (event.ctrlKey || event.metaKey) &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === "k";
-      const isFind = (event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "F" || event.key === "f");
+      const shortcut = formatShortcut(shortcutFromEvent(event) ?? "");
+      const isQuickSearch = shortcut === formatShortcut(shortcutMap["quick-switcher"]);
+      const isFind = shortcut === formatShortcut(shortcutMap["find-notes"]);
       const isReplace = (event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === "H" || event.key === "h");
       if (!isFind && !isReplace && !isQuickSearch) return;
       if (session?.locked) return;
@@ -1198,7 +1485,7 @@ function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [bringWindowToFront, session?.locked]);
+  }, [bringWindowToFront, session?.locked, shortcutMap]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1454,9 +1741,10 @@ function App() {
     return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [vaultMenuOpen]);
 
-  const refreshNotes = async (preferredID?: string, preferredNote?: Note) => {
+  const refreshNotes = async (preferredID?: string, preferredNote?: Note, preserveCurrent = false) => {
     const result = (await VaultService.ListNotes()) ?? [];
     setNotes(result);
+    if (preserveCurrent) return;
     const firstVisible = result.find((item) => !isStructuredSummary(item));
     const targetID = preferredID ?? noteRef.current?.id ?? firstVisible?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
@@ -1499,8 +1787,6 @@ function App() {
       syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
       if (result.warning) {
         setError(result.warning);
-      } else {
-        setSyncNotification(syncFinishedMessage(syncElapsed));
       }
       const settings = await VaultService.GetSyncSettings();
       setLastSyncedAt(settings.lastSyncedAt);
@@ -1617,25 +1903,26 @@ function App() {
   }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
 
   useEffect(() => {
-    if (!session || session.locked || !syncLinked || autoSyncMinutes === autoLockMinutes) return;
+    if (!session || session.locked || !syncLinked) return;
     const delay = autoSyncMinutes * 60 * 1000;
-    let timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
-    const reset = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
-    };
-    const events: (keyof WindowEventMap)[] = [
-      "pointerdown",
-      "keydown",
-      "mousemove",
-      "touchstart",
-    ];
-    events.forEach((event) => window.addEventListener(event, reset, { passive: true }));
+    const interval = window.setInterval(() => void autoSyncVaultRef.current(), delay);
     return () => {
-      window.clearTimeout(timer);
-      events.forEach((event) => window.removeEventListener(event, reset));
+      window.clearInterval(interval);
     };
-  }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
+  }, [autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
+
+  useEffect(() => {
+    if (!session || session.locked || !syncLinked) return;
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") void autoSyncVaultRef.current();
+    };
+    window.addEventListener("focus", syncWhenVisible);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    return () => {
+      window.removeEventListener("focus", syncWhenVisible);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
+  }, [session?.vaultId, session?.locked, syncLinked]);
 
   useEffect(() => {
     if (!session || session.locked) return;
@@ -1754,28 +2041,31 @@ function App() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || session?.locked) return;
+      if (session?.locked) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("dialog, [role=dialog]")) return;
       if (target?.closest(".card-sidebar")) return;
-      const key = event.key.toLowerCase();
-      const shortcut = `${event.shiftKey ? "shift+" : ""}${key}`;
-      const action = new Map<string, () => void>([
-        ["shift+t", () => openStartTimerDialog()],
-        ["shift+e", () => { setTimerError(""); setTimerDialog("finish"); }],
-        ["b", () => setSidebarCollapsed((current) => !current)],
-        ["s", () => persistCurrentInBackground()],
-        ["shift+s", () => void saveAndSync()],
-        ["shift+r", () => void syncNow()],
-        ["n", () => void createNote()],
-      ]).get(shortcut);
-      if (!action || (target?.closest("input, textarea, select") && !new Set(["shift+t", "shift+e", "b"]).has(shortcut))) return;
+      const shortcut = formatShortcut(shortcutFromEvent(event) ?? "");
+      if (scratchpadActiveRef.current && shortcut === formatShortcut(shortcutMap["save-note"])) return;
+      const actions: Record<string, () => void> = {
+        "new-note": () => void createNote(),
+        "save-note": () => persistCurrentInBackground(),
+        "toggle-sidebar": () => setSidebarCollapsed((current) => !current),
+        "start-timer": () => openStartTimerDialog(),
+        "finish-timer": () => { setTimerError(""); setTimerDialog("finish"); },
+        "save-sync": () => void saveAndSync(),
+        "sync-vault": () => void syncNow(),
+      };
+      const actionID = Object.keys(actions).find((id) => formatShortcut(shortcutMap[id]) === shortcut);
+      const action = actionID ? actions[actionID] : undefined;
+      const inputShortcutAllowed = actionID ? new Set(["start-timer", "finish-timer", "toggle-sidebar"]).has(actionID) : false;
+      if (!action || (target?.closest("input, textarea, select") && !inputShortcutAllowed)) return;
       event.preventDefault();
       action();
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [session?.locked, selectedFolderID, syncLinked, syncing]);
+  }, [session?.locked, selectedFolderID, shortcutMap, syncLinked, syncing]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -1843,6 +2133,7 @@ function App() {
 
   const resetToLocked = (locked: Session) => {
     unlockedRef.current = false;
+    scratchpadActiveRef.current = false;
     noteCaretOffsetsRef.current.clear();
     tabNoteCacheRef.current.clear();
     const emptyTab = { id: nextTabIDRef.current++, noteID: "", title: "New tab", lastActiveAt: Date.now() };
@@ -1850,6 +2141,7 @@ function App() {
     activeTabIDRef.current = emptyTab.id;
     setTabs([emptyTab]);
     setActiveTabID(emptyTab.id);
+    setScratchpadActive(false);
     setUnlockedFolderIDs(new Set());
     setSession(locked);
     setFolders([]);
@@ -2100,9 +2392,11 @@ function App() {
   };
 
   const syncNow = async () => {
-    if (syncing) return;
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
     setSyncing(true);
     setSyncNotification("");
+    const syncEditVersion = editVersion.current;
     try {
       await persistCurrent();
       await saveVaultSettings();
@@ -2114,10 +2408,11 @@ function App() {
       }
       const syncElapsed = performance.now() - syncStartedAt;
       syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
-      await refreshNotes();
+      const preserveLocalDraft = editVersion.current !== syncEditVersion || dirtyRef.current;
+      await refreshNotes(undefined, undefined, preserveLocalDraft);
       await refreshFolders();
       const note = noteRef.current;
-      if (note) {
+      if (note && !preserveLocalDraft) {
         try {
           const fresh = await VaultService.GetNote(note.id);
           applyLoadedNote(fresh);
@@ -2133,9 +2428,10 @@ function App() {
       }
       if (result.warning) {
         setError(result.warning);
+      } else if (preserveLocalDraft) {
+        setSyncNotification("Remote changes synced; your active draft was preserved.");
       } else if (result.message) {
         setSaveState("saved");
-        setSyncNotification(syncFinishedMessage(syncElapsed));
       }
       if (result.merge.conflicts?.length) {
         bringWindowToFront("syncConflicts");
@@ -2146,12 +2442,13 @@ function App() {
     } catch (reason) {
       setError(errorText(reason));
     } finally {
+      syncInFlightRef.current = false;
       setSyncing(false);
     }
   };
 
   autoSyncVaultRef.current = async () => {
-    if (!syncLinked || syncing) return;
+    if (!syncLinked || syncInFlightRef.current) return;
     await syncNow();
   };
 
@@ -2268,7 +2565,7 @@ function App() {
     console.warn("Git force-push triggered");
     try {
       await persistCurrent();
-      await saveVaultSettings(true);
+      await saveVaultSettings(undefined, true);
       const result = await VaultService.ForcePushNow();
       setSyncConflicts([]);
       const settings = await VaultService.GetSyncSettings();
@@ -2382,6 +2679,7 @@ function App() {
   };
 
   const createNote = async (title = "Untitled") => {
+    leaveScratchpad();
     setError("");
     try {
       await persistCurrent();
@@ -2397,6 +2695,7 @@ function App() {
   };
 
   const openDailyNote = async (date: Date) => {
+    leaveScratchpad();
     const title = formatDailyTitle(date, dailyNoteFormat);
     const existing = notes.find((item) => item.title === title && item.folderId === dailyNoteFolderID);
     setCalendarOpen(false);
@@ -2517,6 +2816,27 @@ function App() {
     setFolderPasswordVisible(false);
   };
 
+  const closeAppearanceSettings = () => {
+    setSettingsDraft(null);
+    setSettingsSaveError("");
+    setAppearanceSettingsOpen(false);
+  };
+
+  useEffect(() => {
+    let selector = "";
+    if (appDialog) {
+      if (appDialog.kind === "prompt") selector = ".app-dialog-modal input";
+    } else if (folderPasswordPrompt) selector = ".folder-password-modal input";
+    else if (vaultAction) {
+      selector = vaultAction === "create" || vaultAction === "clone"
+        ? ".vault-action-backdrop input:not([type='checkbox'])"
+        : ".vault-action-backdrop input[type='password']";
+    } else if (vaultSettingsOpen && syncSettings) {
+      selector = ".vault-settings-backdrop input[placeholder^='git@github.com']";
+    }
+    if (selector) document.querySelector<HTMLInputElement>(selector)?.focus();
+  }, [appDialog?.kind, folderPasswordPrompt, syncSettings !== null, vaultAction, vaultSettingsOpen]);
+
   useEffect(() => {
     const dialogs: { open: boolean; layer: WindowLayer; close: () => void }[] = [
       {
@@ -2546,7 +2866,7 @@ function App() {
       {
         open: appearanceSettingsOpen,
         layer: "appearanceSettings",
-        close: () => setAppearanceSettingsOpen(false),
+        close: closeAppearanceSettings,
       },
       { open: statisticsOpen, layer: "statistics", close: () => setStatisticsOpen(false) },
     ];
@@ -2674,6 +2994,8 @@ function App() {
     id: string,
     options: { appendTrail?: boolean; replaceTrail?: NoteCrumb[] } = {},
   ) => {
+    scratchpadActiveRef.current = false;
+    setScratchpadActive(false);
     setTimeTrackingOpen(false);
     if (note?.id === id) {
       setSidebarOpen(false);
@@ -2706,7 +3028,30 @@ function App() {
     }
   };
 
+  const activateScratchpad = () => {
+    if (!unlockedRef.current) return;
+    if (scratchpadActiveRef.current) {
+      const editor = document.querySelector<HTMLElement>(".scratchpad-editor .cm-content");
+      if (editor instanceof HTMLElement) editor.focus();
+      return;
+    }
+    saveCurrentDraft();
+    setGraphOpen(false);
+    setTimeTrackingOpen(false);
+    setConflictResolution(null);
+    setSidebarOpen(false);
+    scratchpadActiveRef.current = true;
+    setScratchpadActive(true);
+  };
+  activateScratchpadRef.current = activateScratchpad;
+
+  const leaveScratchpad = () => {
+    scratchpadActiveRef.current = false;
+    setScratchpadActive(false);
+  };
+
   const openNoteInNewTab = async (id: string) => {
+    leaveScratchpad();
     try {
       const saved = await persistCurrent();
       if (saved) tabNoteCacheRef.current.set(activeTabIDRef.current, saved);
@@ -2720,7 +3065,8 @@ function App() {
     }
   };
 
-  const openEmptyTab = async () => {
+  const openEmptyTab = async (keepScratchpad = false) => {
+    if (!keepScratchpad) leaveScratchpad();
     try {
       await persistCurrent();
       const currentTab = tabsRef.current.find((tab) => tab.id === activeTabIDRef.current);
@@ -2735,20 +3081,23 @@ function App() {
       setTimeTrackingOpen(false);
       applyLoadedNote(null);
       setNoteTrail([]);
+      return true;
     } catch {
       // persistCurrent already presents the actionable error.
+      return false;
     }
   };
 
-  const switchTab = async (tabID: number) => {
-    if (tabID === activeTabIDRef.current) return;
+  const switchTab = async (tabID: number, keepScratchpad = false) => {
+    if (!keepScratchpad) leaveScratchpad();
+    if (tabID === activeTabIDRef.current) return true;
     try {
       const saved = await persistCurrent();
       const previousID = activeTabIDRef.current;
       if (saved) tabNoteCacheRef.current.set(previousID, saved);
       const now = Date.now();
       const target = tabsRef.current.find((tab) => tab.id === tabID);
-      if (!target) return;
+      if (!target) return false;
       setTabs((current) => current.map((tab) => tab.id === previousID || tab.id === tabID ? { ...tab, lastActiveAt: now } : tab));
       setActiveTabID(tabID);
       activeTabIDRef.current = tabID;
@@ -2759,12 +3108,15 @@ function App() {
       else if (target.noteID) applyLoadedNote(await VaultService.GetNote(target.noteID));
       else applyLoadedNote(null);
       setNoteTrail([]);
+      return true;
     } catch (reason) {
       setError(errorText(reason));
+      return false;
     }
   };
 
   const closeTab = async (tabID: number) => {
+    const keepScratchpad = scratchpadActiveRef.current;
     const current = tabsRef.current;
     const index = current.findIndex((tab) => tab.id === tabID);
     if (index < 0) return;
@@ -2774,13 +3126,13 @@ function App() {
       return;
     }
     if (current.length === 1) {
-      await openEmptyTab();
+      if (!await openEmptyTab(keepScratchpad)) return;
       tabNoteCacheRef.current.delete(tabID);
       setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
       return;
     }
     const next = current[index + 1] ?? current[index - 1];
-    await switchTab(next.id);
+    if (!await switchTab(next.id, keepScratchpad)) return;
     tabNoteCacheRef.current.delete(tabID);
     setTabs((tabs) => tabs.filter((tab) => tab.id !== tabID));
   };
@@ -2798,6 +3150,10 @@ function App() {
         event.preventDefault();
         void openEmptyTab();
       } else if (event.ctrlKey && event.key.toLowerCase() === "w") {
+        if (scratchpadActiveRef.current) {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         void closeTab(activeTabIDRef.current);
       }
@@ -2805,6 +3161,15 @@ function App() {
     window.addEventListener("keydown", handleTabs);
     return () => window.removeEventListener("keydown", handleTabs);
   }, [session?.locked]);
+
+  useEffect(() => {
+    const off = Events.On("cipherleaf:scratchpad-focus", () => {
+      if (unlockedRef.current) activateScratchpadRef.current();
+    });
+    return () => {
+      off();
+    };
+  }, []);
 
   const deleteNote = async (id = note?.id, title = note?.title, itemType: "note" | "card" = "note") => {
     if (!id) return false;
@@ -3217,15 +3582,15 @@ function App() {
     () => notes.filter((summary) => summary.properties?.["cipherleaf-card-template"] === true || summary.properties?.["cipherleaf-card-template"] === "true"),
     [notes],
   );
+  const cardTemplateChoices = useMemo(
+    () => cardTemplates.map((template) => ({ id: template.id, name: String(template.properties?.["cipherleaf-card-template-name"] ?? template.title) })),
+    [cardTemplates],
+  );
   const cardTagSuggestions = useMemo(() => {
     const tags = new Set<string>();
-    for (const card of cardMetadata.values()) {
-      if (!cardPanel?.metadata.boardID || card.boardID === cardPanel.metadata.boardID) {
-        for (const tag of card.tags) tags.add(tag);
-      }
-    }
+    for (const card of cardMetadata.values()) for (const tag of card.tags) tags.add(tag);
     return [...tags].sort((left, right) => left.localeCompare(right));
-  }, [cardMetadata, cardPanel?.metadata.boardID]);
+  }, [cardMetadata]);
   const [portableNoteMarkdown, setPortableNoteMarkdown] = useState("");
 
   useEffect(() => {
@@ -3295,22 +3660,26 @@ function App() {
   };
 
   const openCard = async (id: string) => {
+    leaveScratchpad();
+    const request = ++templateRequestRef.current;
     try {
-      if (cardPanel && !(await closeCardPanel())) return;
+      if (cardPanel && !(await closeCardPanel(false, true))) return;
       const origin = noteRef.current;
       cardOriginRef.current = origin ? { noteID: origin.id, offset: noteCaretOffsetsRef.current.get(origin.id) ?? 0 } : null;
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) throw new Error("This reference is not a card.");
+      if (request !== templateRequestRef.current) return;
       setSelectedTemplateID("");
       setCardPanel({ note: loaded, metadata: parsed.metadata, body: parsed.body });
       setCardPanelDirty(false);
     } catch (reason) {
-      setError(errorText(reason));
+      if (request === templateRequestRef.current) setError(errorText(reason));
     }
   };
 
-  const closeCardPanel = async (force = false) => {
+  const closeCardPanel = async (force = false, preserveTemplateRequest = false) => {
+    if (!preserveTemplateRequest) templateRequestRef.current += 1;
     if (!cardPanel) return true;
     if (!force && cardPanelDirty && !(await requestAppConfirm({
       kind: "confirm",
@@ -3328,6 +3697,7 @@ function App() {
     }
     cardOriginRef.current = null;
     setCardPanel(null);
+    cardPanelRef.current = null;
     setCardPanelDirty(false);
     return true;
   };
@@ -3358,6 +3728,8 @@ function App() {
   }, [cardPanel, cardPanelDirty, commandPaletteOpen, globalSearchOpen, quickSwitcherOpen]);
 
   const createCard = async () => {
+    leaveScratchpad();
+    const request = ++templateRequestRef.current;
     let createdID = "";
     try {
       const targetFolder = noteRef.current?.folderId ?? (selectedFolderID === "all" ? "" : selectedFolderID);
@@ -3366,6 +3738,7 @@ function App() {
       const metadata = newCardMetadata(created.id, new Date(created.createdAt), cardWriteChangesToEditorDefault);
       const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
       updateSummary(saved.summary);
+      if (request !== templateRequestRef.current) return cardReference(created.id);
       setSelectedTemplateID("");
       setCardPanel({ note: saved.note, metadata, body: "" });
       setCardPanelDirty(false);
@@ -3385,33 +3758,147 @@ function App() {
     return boardMarker(id);
   };
 
+  const changeBoardTemplate = (boardID: string, templateID: string) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => {
+      if (!templateID && !board.options) return board;
+      const options = board.options ?? { columns: boardColumnsForMarker(board, cardMetadata) };
+      return { ...board, options: { ...options, templateID: templateID || undefined } };
+    });
+    if (content !== source) editNote({ content }, true);
+  };
+
+  const openTemplateCard = async (
+    note: Note,
+    template: CardTemplate,
+    panelClosed = false,
+    request = templateRequestRef.current,
+  ) => {
+    if (request !== templateRequestRef.current) return false;
+    const origin = noteRef.current;
+    if (!panelClosed && cardPanel && !(await closeCardPanel(false, true))) return false;
+    if (request !== templateRequestRef.current || cardPanelRef.current) return false;
+    cardOriginRef.current = origin ? { noteID: origin.id, offset: noteCaretOffsetsRef.current.get(origin.id) ?? 0 } : null;
+    const metadata = {
+      ...newCardMetadata(note.id, new Date(note.createdAt)),
+      title: template.name.trim() || "Untitled",
+      status: template.status,
+      tags: normalizeCardTags(template.tags),
+      writeChangesToEditor: template.writeChangesToEditor,
+    };
+    setSelectedTemplateID(note.id);
+    setCardPanel({ note, metadata, body: template.body, kind: "template" });
+    setCardPanelDirty(false);
+    return true;
+  };
+
+  const openBoardTemplate = async (boardID: string, templateID: string) => {
+    const request = ++templateRequestRef.current;
+    if (!templateID) return createBoardTemplate(boardID, request);
+    try {
+      const loaded = await VaultService.GetNote(templateID);
+      const parsed = parseTemplateDocument(loaded.content, templateID);
+      if (!parsed) {
+        await createBoardTemplate(boardID, request);
+        return;
+      }
+      await openTemplateCard(loaded, parsed.template, false, request);
+    } catch (reason) {
+      const message = errorText(reason);
+      if (message.toLocaleLowerCase().includes("note not found")) await createBoardTemplate(boardID, request);
+      else if (request === templateRequestRef.current) setError(message);
+    }
+  };
+
+  const createBoardTemplate = async (boardID: string, request = ++templateRequestRef.current) => {
+    if (request !== templateRequestRef.current) return;
+    if (cardPanel && !(await closeCardPanel(false, true))) return;
+    if (request !== templateRequestRef.current || cardPanelRef.current) return;
+    const current = noteRef.current;
+    if (!current) return;
+    const sourceNoteID = current.id;
+    const board = markdownForEditing(current.content).split("\n")
+      .map((line) => parseBoardMarker(line))
+      .find((marker) => marker?.id === boardID);
+    if (!board) return;
+    try {
+      const template = await VaultService.CreateNote(`Template: ${board.title}`);
+      if (request !== templateRequestRef.current || cardPanelRef.current) {
+        await VaultService.DeleteNote(template.id).catch(() => {});
+        return;
+      }
+      const draft: CardTemplate = { id: template.id, name: `${board.title} card`, status: "not-started", tags: [], writeChangesToEditor: false, body: "" };
+      const saved = await runSerializedSave(() => VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft)));
+      if (request !== templateRequestRef.current || cardPanelRef.current) {
+        await VaultService.DeleteNote(template.id).catch(() => {});
+        return;
+      }
+      const latestSource = noteRef.current?.id === sourceNoteID ? markdownForEditing(noteRef.current.content) : null;
+      const latestBoard = latestSource?.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
+      if (!latestSource || !latestBoard) {
+        await VaultService.DeleteNote(template.id).catch(() => {});
+        return;
+      }
+      updateSummary(saved.summary);
+      changeBoardTemplate(boardID, template.id);
+      await openTemplateCard(saved.note, draft, true, request);
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+
   const addCardToBoard = async (boardID: string) => {
     const current = noteRef.current;
     if (!current) return;
+    const request = ++templateRequestRef.current;
+    const sourceNoteID = current.id;
+    const source = markdownForEditing(current.content);
+    const board = source.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
+    if (!board) return;
     let createdID = "";
+    let template: CardTemplate | null = null;
+    let missingTemplate = false;
     try {
-      const reference = await createCard();
-      const id = reference ? parseCardReference(reference) : null;
-      if (!id) return;
-      createdID = id;
-      const loaded = await VaultService.GetNote(id);
-      const parsed = parseCardDocument(loaded.content, id, loaded.title);
-      if (!parsed || parsed.metadata.boardID) {
-        await VaultService.DeleteNote(id).catch(() => {});
+      const templateID = board.options?.templateID;
+      if (templateID) {
+        try {
+          const loadedTemplate = await VaultService.GetNote(templateID);
+          template = parseTemplateDocument(loadedTemplate.content, templateID)?.template ?? null;
+        } catch {
+          template = null;
+        }
+        missingTemplate = !template;
+      }
+      const targetFolder = current.folderId;
+      const created = await VaultService.CreateNoteInFolder(template?.name.trim() || "Untitled", targetFolder);
+      createdID = created.id;
+      const base = newCardMetadata(created.id, new Date(created.createdAt), template?.writeChangesToEditor ?? false);
+      const metadata = template
+        ? { ...transitionCard(base, template.status), title: template.name.trim() || "Untitled", tags: normalizeCardTags(template.tags) }
+        : base;
+      const saved = await VaultService.SaveNote(created.id, metadata.title, serializeCardDocument(metadata, template?.body ?? ""));
+      const latestSource = noteRef.current?.id === sourceNoteID ? markdownForEditing(noteRef.current.content) : null;
+      const latestBoard = latestSource?.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
+      if (!latestSource || !latestBoard) {
+        await VaultService.DeleteNote(created.id).catch(() => {});
         return;
       }
-      const metadata = { ...parsed.metadata, boardID };
-      const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata, body: parsed.body });
-      setCardPanelDirty(false);
-      const source = markdownForEditing(current.content);
-      const content = replaceBoardMarker(source, boardID, (board) => ({
+      if (request === templateRequestRef.current) {
+        setSelectedTemplateID(template?.id ?? "");
+        setCardPanel({ note: saved.note, metadata, body: template?.body ?? "" });
+        setCardPanelDirty(false);
+      }
+      const content = replaceBoardMarker(latestSource, boardID, (board) => ({
         ...board,
-        cardIDs: [...board.cardIDs, id],
+        ...(board.options
+          ? { options: { ...board.options, templateID: missingTemplate ? undefined : board.options.templateID, columns: board.options.columns.map((column, index) => index === 0 ? { ...column, cardIDs: [...new Set([...column.cardIDs, created.id])] } : { ...column, cardIDs: column.cardIDs.filter((id) => id !== created.id) }) } }
+          : { cardIDs: board.cardIDs.includes(created.id) ? board.cardIDs : [...board.cardIDs, created.id] }),
       }));
-      if (content === source) {
-        await VaultService.DeleteNote(id);
+      if (content === latestSource) {
+        await VaultService.DeleteNote(created.id);
         return;
       }
       editNote({ content }, true);
@@ -3429,6 +3916,42 @@ function App() {
     if (content !== source) editNote({ content }, true);
   };
 
+  const changeBoardColumns = (
+    boardID: string,
+    columns: readonly BoardColumn[],
+    deletedColumns?: readonly BoardColumn[],
+    orphanCardIDs?: readonly string[],
+  ) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => {
+      const options = {
+        ...board.options,
+        columns: columns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })),
+        ...(deletedColumns === undefined ? {} : { deletedColumns: deletedColumns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })) }),
+        ...(orphanCardIDs === undefined ? {} : { orphanCardIDs: [...new Set(orphanCardIDs)] }),
+      };
+      return { ...board, options };
+    });
+    if (content !== source) editNote({ content }, true);
+  };
+
+  const moveCardInBoard = (boardID: string, cardID: string, columnID: string) => {
+    const current = noteRef.current;
+    if (!current) return;
+    const source = markdownForEditing(current.content);
+    const content = replaceBoardMarker(source, boardID, (board) => {
+      const columns = board.options?.columns ?? boardColumnsForMarker(board, cardMetadata);
+      const next = columns.map((column) => ({ ...column, cardIDs: column.cardIDs.filter((id) => id !== cardID) }));
+      const target = next.find((column) => column.id === columnID);
+      if (!target) return board;
+      target.cardIDs.push(cardID);
+      return { ...board, options: { ...board.options, columns: next } };
+    });
+    if (content !== source) editNote({ content }, true);
+  };
+
   const changeCardBoardTitle = (boardID: string, title: string) => {
     if (cardPanel) setCardPanelDirty(true);
     setCardPanel((current) => {
@@ -3441,10 +3964,27 @@ function App() {
 
   const saveCardPanel = async () => {
     if (!cardPanel) return;
+    const panelAtStart = cardPanel;
     setCardPanelSaving(true);
     try {
       const title = cardPanel.metadata.title.trim() || "Untitled";
       const metadata = { ...cardPanel.metadata, title, tags: normalizeCardTags(cardPanel.metadata.tags) };
+      if (cardPanel.kind === "template") {
+        const template: CardTemplate = {
+          id: cardPanel.note.id,
+          name: title,
+          status: metadata.status,
+          tags: metadata.tags,
+          writeChangesToEditor: metadata.writeChangesToEditor,
+          body: cardPanel.body,
+        };
+        const saved = await runSerializedSave(() => VaultService.SaveNote(cardPanel.note.id, `Template: ${title}`, serializeTemplateDocument(template)));
+        updateSummary(saved.summary);
+        if (cardPanelRef.current !== panelAtStart) return;
+        setCardPanel({ note: saved.note, metadata, body: cardPanel.body, kind: "template" });
+        setCardPanelDirty(false);
+        return;
+      }
       const previousBody = stripCardJournalEntries(
         parseCardDocument(cardPanel.note.content, cardPanel.note.id, cardPanel.note.title)?.body ?? cardPanel.body,
       );
@@ -3460,13 +4000,13 @@ function App() {
         serializeCardDocument(metadata, body),
       );
       updateSummary(saved.summary);
-      setCardPanel({ note: saved.note, metadata, body });
       if (journaledMain && mainNote) {
         editNote({ content: journaledMain }, false);
         await persistCurrent();
       }
+      if (cardPanelRef.current !== panelAtStart) return;
+      setCardPanel({ note: saved.note, metadata, body });
       setCardPanelDirty(false);
-      await closeCardPanel(true);
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -3502,6 +4042,7 @@ function App() {
         name: cardPanel.metadata.title || "Untitled",
         status: cardPanel.metadata.status,
         tags: cardPanel.metadata.tags,
+        writeChangesToEditor: cardPanel.metadata.writeChangesToEditor,
         body: cardPanel.body,
       }));
       updateSummary(saved.summary);
@@ -3513,15 +4054,18 @@ function App() {
 
   const applyCardTemplate = async (id: string) => {
     if (!cardPanel || !id) return;
+    const panelAtStart = cardPanel;
+    templateRequestRef.current += 1;
     try {
       const template = await VaultService.GetNote(id);
       const parsed = parseTemplateDocument(template.content, id);
       if (!parsed) return;
+      if (cardPanelRef.current !== panelAtStart) return;
       setCardPanelDirty(true);
       setCardPanel((current) => current ? {
         ...current,
-        metadata: { ...current.metadata, status: parsed.template.status, tags: parsed.template.tags },
         body: parsed.template.body,
+        metadata: { ...current.metadata, status: parsed.template.status, tags: parsed.template.tags, writeChangesToEditor: parsed.template.writeChangesToEditor },
       } : current);
     } catch (reason) {
       setError(errorText(reason));
@@ -3530,10 +4074,23 @@ function App() {
 
   const deleteCardTemplate = async () => {
     if (!selectedTemplateID) return;
+    const templateID = selectedTemplateID;
+    const editingTemplate = cardPanel?.kind === "template" && cardPanel.note.id === templateID;
     try {
-      await VaultService.DeleteNote(selectedTemplateID);
-      setNotes((current) => current.filter((summary) => summary.id !== selectedTemplateID));
+      await VaultService.DeleteNote(templateID);
+      const current = noteRef.current;
+      if (current) {
+        const source = markdownForEditing(current.content);
+        const content = source.split("\n").reduce((next, line) => {
+          const board = parseBoardMarker(line);
+          if (board?.options?.templateID !== templateID || !board.options) return next;
+          return replaceBoardMarker(next, board.id, (marker) => ({ ...marker, options: { ...marker.options!, templateID: undefined } }));
+        }, source);
+        if (content !== source) editNote({ content }, true);
+      }
+      setNotes((current) => current.filter((summary) => summary.id !== templateID));
       setSelectedTemplateID("");
+      if (editingTemplate) await closeCardPanel(true);
     } catch (reason) {
       setError(errorText(reason));
     }
@@ -3543,6 +4100,7 @@ function App() {
     const exists = notes.some((item) => item.id === id);
     const current = cardMetadata.get(id);
     if (!exists || !current || current.status === status) return;
+    const request = ++templateRequestRef.current;
     try {
       const loaded = await VaultService.GetNote(id);
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
@@ -3550,7 +4108,7 @@ function App() {
       const metadata = transitionCard(parsed.metadata, status);
       const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
       updateSummary(saved.summary);
-      if (cardPanel?.note.id === id) {
+      if (request === templateRequestRef.current && cardPanelRef.current?.note.id === id) {
         setCardPanel({ note: saved.note, metadata, body: parsed.body });
         setCardPanelDirty(false);
       }
@@ -3709,16 +4267,15 @@ function App() {
     event.target.value = "";
     if (!file) return;
     if (!file.name.toLocaleLowerCase().endsWith(".ttf")) {
-      setError("Select a TrueType (.ttf) font file.");
+      setSettingsSaveError("Select a TrueType (.ttf) font file.");
       return;
     }
     try {
       const data = await file.arrayBuffer();
-      await activateEditorFont(file.name, data);
-      await writeStoredEditorFont({ name: file.name, data });
-      setError("");
+      updateSettingsDraft({ editorFont: { kind: "file", name: file.name, data } });
+      setSettingsSaveError("");
     } catch (reason) {
-      setError(`Could not load font: ${errorText(reason)}`);
+      setSettingsSaveError(`Could not load font: ${errorText(reason)}`);
     }
   };
 
@@ -3743,29 +4300,69 @@ function App() {
 
   const chooseInstalledFont = (family: string) => {
     if (!family) return;
+    updateSettingsDraft({ editorFont: { kind: "system", name: family } });
+  };
+
+  const resetEditorFont = () => {
+    updateSettingsDraft({ editorFont: { kind: "default" } });
+  };
+
+  const applyEditorFontDraft = async (choice: EditorFontDraft) => {
+    if (choice.kind === "unchanged") return;
+    if (choice.kind === "file") {
+      await activateEditorFont(choice.name, choice.data);
+      await writeStoredEditorFont({ name: choice.name, data: choice.data });
+      return;
+    }
     if (activeEditorFontRef.current) {
       document.fonts.delete(activeEditorFontRef.current);
       activeEditorFontRef.current = null;
     }
-    document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(family));
-    document.documentElement.dataset.editorFont = "custom";
-    setEditorFontName(family);
-    window.localStorage.setItem(EDITOR_SYSTEM_FONT_KEY, family);
+    if (choice.kind === "system") {
+      document.documentElement.style.setProperty("--selected-editor-font", JSON.stringify(choice.name));
+      document.documentElement.dataset.editorFont = "custom";
+      setEditorFontName(choice.name);
+      window.localStorage.setItem(EDITOR_SYSTEM_FONT_KEY, choice.name);
+      return;
+    }
+    delete document.documentElement.dataset.editorFont;
+    document.documentElement.style.removeProperty("--selected-editor-font");
+    setEditorFontName("");
+    window.localStorage.removeItem(EDITOR_SYSTEM_FONT_KEY);
+    await removeStoredEditorFont();
   };
 
-  const resetEditorFont = async () => {
+  const saveAppearanceSettings = async () => {
+    const draft = settingsDraft;
+    if (!draft) return;
+    setSettingsSaving(true);
+    setSettingsSaveError("");
     try {
-      if (activeEditorFontRef.current) {
-        document.fonts.delete(activeEditorFontRef.current);
-        activeEditorFontRef.current = null;
-      }
-      delete document.documentElement.dataset.editorFont;
-      document.documentElement.style.removeProperty("--selected-editor-font");
-      setEditorFontName("");
-      window.localStorage.removeItem(EDITOR_SYSTEM_FONT_KEY);
-      await removeStoredEditorFont();
+      const saved = await saveVaultSettings({
+        dailyNoteFormat: draft.dailyNoteFormat,
+        dailyNoteFolderId: draft.dailyNoteFolderID,
+        dailyTemplateNoteId: draft.dailyTemplateNoteID,
+        autosaveIntervalSeconds: draft.autosaveIntervalSeconds,
+        autoSyncMinutes: draft.autoSyncMinutes,
+        autoLockMinutes: draft.autoLockMinutes,
+        fileHistoryLimit,
+        sectionDefault: draft.sectionDefault,
+        cardWriteChangesToEditorDefault: draft.cardWriteChangesToEditorDefault,
+        revision: 0,
+        modifiedAt: 0,
+      });
+      if (!saved) throw new Error("The vault is not available.");
+      applyVaultSettings(saved);
+      setTheme(draft.theme);
+      setJournalLines(draft.journalLines);
+      setScratchpadOpacity(draft.scratchpadOpacity);
+      setEditorFontSize(draft.editorFontSize);
+      await applyEditorFontDraft(draft.editorFont);
+      closeAppearanceSettings();
     } catch (reason) {
-      setError(`Could not reset font: ${errorText(reason)}`);
+      setSettingsSaveError(errorText(reason));
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -3812,7 +4409,7 @@ function App() {
     console.info("GitHub link triggered");
     try {
       await persistCurrent();
-      await saveVaultSettings(true);
+      await saveVaultSettings(undefined, true);
       const linked = await VaultService.LinkGitHubVault(syncSettings);
       const saved = await VaultService.GetSyncSettings();
       setSyncSettings(saved);
@@ -3984,24 +4581,111 @@ function App() {
     }
   };
 
+  const beginShortcutCapture = (id: string) => {
+    setShortcutEditingID(id);
+    setShortcutError("");
+  };
+
+  const handleCommandPaletteShortcutCapture = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const id = shortcutEditingID;
+    if (!id) return;
+    if (event.repeat || event.nativeEvent.isComposing || event.target instanceof HTMLElement && event.target.closest("input, textarea, select")) return;
+    const shortcut = shortcutFromEvent(event);
+    if (shortcut === "") {
+      event.preventDefault();
+      setShortcutEditingID(null);
+      setShortcutError("");
+      return;
+    }
+    if (!shortcut) {
+      if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key.length === 1) {
+        setShortcutError("Use one key with at least one modifier.");
+      }
+      return;
+    }
+    event.preventDefault();
+    if (RESERVED_SHORTCUTS.has(shortcut)) {
+      setShortcutError("That shortcut is reserved for the command palette.");
+      return;
+    }
+    const conflict = Object.entries({ ...shortcutMap, scratchpad: scratchpadShortcut })
+      .find(([owner, value]) => owner !== id && value === shortcut);
+    if (conflict) {
+      setShortcutError(`That shortcut is already assigned to ${conflict[0]}.`);
+      return;
+    }
+    if (id === "scratchpad") {
+      void saveScratchpadShortcut(shortcut);
+      return;
+    }
+    if (!persistShortcutMap({ ...shortcutMap, [id]: shortcut })) return;
+    setShortcutEditingID(null);
+    setShortcutError("");
+  };
+
+  const resetShortcut = async (id: string) => {
+    const shortcut = id === "scratchpad" ? DEFAULT_SCRATCHPAD_SHORTCUT : DEFAULT_SHORTCUTS[id];
+    if (!shortcut) return;
+    const conflict = Object.entries({ ...shortcutMap, scratchpad: scratchpadShortcut })
+      .find(([owner, value]) => owner !== id && value === shortcut);
+    if (conflict) {
+      setShortcutError(`That shortcut is already assigned to ${conflict[0]}.`);
+      return;
+    }
+    if (id === "scratchpad") {
+      await saveScratchpadShortcut(shortcut);
+      return;
+    }
+    if (!persistShortcutMap({ ...shortcutMap, [id]: shortcut })) return;
+    setShortcutError("");
+  };
+
+  const resetAllShortcuts = async () => {
+    const previousMap = shortcutMap;
+    try {
+      window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(DEFAULT_SHORTCUTS));
+    } catch (reason) {
+      setShortcutError(errorText(reason));
+      return;
+    }
+    if (!(await saveScratchpadShortcut(DEFAULT_SCRATCHPAD_SHORTCUT))) {
+      try {
+        window.localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(previousMap));
+      } catch {
+        // Keep the in-memory binding unchanged if rollback storage is unavailable.
+      }
+      return;
+    }
+    setShortcutMap({ ...DEFAULT_SHORTCUTS });
+    setShortcutEditingID(null);
+    setShortcutError("");
+  };
+
   const commandPaletteCommands: CommandPaletteCommand[] = [
     {
       id: "new-note",
-      shortcut: "Ctrl + N",
+      shortcut: formatShortcut(shortcutMap["new-note"]),
       name: "New note",
       description: "Create a new encrypted note",
       run: () => void createNote(),
     },
     {
       id: "save-note",
-      shortcut: "Ctrl + S",
+      shortcut: formatShortcut(shortcutMap["save-note"]),
       name: "Save note",
       description: "Save the current note",
       run: () => persistCurrentInBackground(),
     },
     {
+      id: "scratchpad",
+      shortcut: formatShortcut(scratchpadShortcut),
+      name: "Open Scratchpad",
+      description: "Open the session scratchpad",
+      run: activateScratchpad,
+    },
+    {
       id: "quick-switcher",
-      shortcut: "Ctrl + K",
+      shortcut: formatShortcut(shortcutMap["quick-switcher"]),
       name: "Quick note switcher",
       description: "Open a note by title",
       run: () => {
@@ -4012,14 +4696,14 @@ function App() {
     },
     {
       id: "toggle-sidebar",
-      shortcut: "Ctrl + B",
+      shortcut: formatShortcut(shortcutMap["toggle-sidebar"]),
       name: "Toggle sidebar",
       description: "Expand or collapse the sidebar",
       run: () => setSidebarCollapsed((current) => !current),
     },
     {
       id: "find-notes",
-      shortcut: "Ctrl + Shift + F",
+      shortcut: formatShortcut(shortcutMap["find-notes"]),
       name: "Find in all notes",
       description: "Search text across your vault",
       run: () => {
@@ -4030,14 +4714,14 @@ function App() {
     },
     {
       id: "start-timer",
-      shortcut: "Ctrl + Shift + T",
+      shortcut: formatShortcut(shortcutMap["start-timer"]),
       name: "Start timer",
       description: "Start tracking time without leaving this note",
       run: openStartTimerDialog,
     },
     {
       id: "finish-timer",
-      shortcut: "Ctrl + Shift + E",
+      shortcut: formatShortcut(shortcutMap["finish-timer"]),
       name: "Finish timer",
       description: "Finish the active timer",
       run: () => {
@@ -4081,8 +4765,15 @@ function App() {
       },
     },
     {
+      id: "save-sync",
+      shortcut: formatShortcut(shortcutMap["save-sync"]),
+      name: "Save and sync",
+      description: "Save the current note and sync encrypted changes",
+      run: () => void saveAndSync(),
+    },
+    {
       id: "sync-vault",
-      shortcut: "Ctrl + Shift + R",
+      shortcut: formatShortcut(shortcutMap["sync-vault"]),
       name: "Sync vault",
       description: "Pull and push encrypted changes",
       run: () => void syncNow(),
@@ -4107,8 +4798,7 @@ function App() {
       name: "Settings",
       description: "Change application appearance and preferences",
       run: () => {
-        bringWindowToFront("appearanceSettings");
-        setAppearanceSettingsOpen(true);
+        openAppearanceSettings();
       },
     },
   ];
@@ -4179,7 +4869,6 @@ function App() {
                   <label>
                       Vault name{" "}
                     <input
-                      autoFocus
                       value={vaultName}
                       onChange={(event) => setVaultName(event.target.value)}
                       placeholder="Personal notes"
@@ -4220,7 +4909,6 @@ function App() {
                   <label>
                       Local vault folder name{" "}
                     <input
-                      autoFocus
                       value={vaultName}
                       onChange={(event) => setVaultName(event.target.value)}
                       placeholder="Personal notes"
@@ -4296,7 +4984,6 @@ function App() {
                 <label>
                   Vault secret{" "}
                   <input
-                    autoFocus
                     type="password"
                     value={passphrase}
                     onChange={(event) => setPassphrase(event.target.value)}
@@ -4424,29 +5111,28 @@ function App() {
   const notesHeading = new Map([["all", "Notes"], ["", "Unfiled"]]).get(selectedFolderID)
     ?? folders.find((folder) => folder.id === selectedFolderID)?.name
     ?? "Notes";
-  let syncMenuTitle = "Pull then push the vault to GitHub";
-  if (syncing) syncMenuTitle = "Syncing…";
-  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
-  const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
-    ?? (dirty ? "Unsaved" : "Saved locally");
-  let saveFileTitle = "Save this note (Ctrl + S)";
-  if (!note) saveFileTitle = "No note open";
-  if (conflictResolution) saveFileTitle = "Save the merged conflict result";
-  let saveFileLabel = "Save file";
-  if (conflictResolution) saveFileLabel = "Save merged file";
-  if (saveState === "saving") saveFileLabel = "Encrypting…";
+  const {
+    syncMenuTitle,
+    saveStatusLabel,
+    saveFileTitle,
+    saveFileLabel,
+    syncButtonTitle,
+    syncButtonLabel,
+    settingsSubmitLabel,
+  } = workspaceLabels({
+    syncing,
+    syncLinked,
+    saveState,
+    dirty,
+    hasNote: Boolean(note),
+    hasConflict: Boolean(conflictResolution),
+    settingsLinked: Boolean(syncSettings?.linked),
+    settingsBusy,
+  });
   const saveFileAction = () => {
     if (conflictResolution) void saveResolvedConflict();
     else persistCurrentInBackground();
   };
-
-  let syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
-  if (syncLinked) syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
-  if (!note) syncButtonTitle = "No note open";
-  const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
-  let settingsSubmitLabel = "Link vault";
-  if (syncSettings?.linked) settingsSubmitLabel = "Verify link";
-  if (settingsBusy) settingsSubmitLabel = "Linking…";
   const breadcrumbItems = buildBreadcrumbItems(noteTrail, session.path, currentFolder, note);
 
   const renderWorkspaceHeader = () => (
@@ -4585,10 +5271,12 @@ function App() {
               <div className="titlebar-menu-popover" role="menu">
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
-                  bringWindowToFront("appearanceSettings");
-                  setAppearanceSettingsOpen(true);
+                  openAppearanceSettings();
                 }}>
                   Settings…
+                </button>
+                <button role="menuitem" onClick={openCommandPalette}>
+                  Command palette <kbd>Ctrl/Cmd + Shift + P</kbd>
                 </button>
                 <button role="menuitem" onClick={() => {
                   setTitlebarMenu(null);
@@ -4909,9 +5597,10 @@ function App() {
             <Icon name="menu" />
           </button>
           <div className="breadcrumbs">
-            {graphOpen && <span className="breadcrumb-item"><strong>Graph view</strong></span>}
-            {timeTrackingOpen && <span className="breadcrumb-item"><strong>Time tracking</strong></span>}
-            {!graphOpen && !timeTrackingOpen && breadcrumbItems.map((crumb, index, items) => {
+            {scratchpadActive && <span className="breadcrumb-item"><strong>Scratchpad</strong></span>}
+            {!scratchpadActive && graphOpen && <span className="breadcrumb-item"><strong>Graph view</strong></span>}
+            {!scratchpadActive && timeTrackingOpen && <span className="breadcrumb-item"><strong>Time tracking</strong></span>}
+            {!scratchpadActive && !graphOpen && !timeTrackingOpen && breadcrumbItems.map((crumb, index, items) => {
               const isLast = index === items.length - 1;
               let content = <span>{crumb.title}</span>;
               if (isLast) content = <strong>{crumb.title}</strong>;
@@ -4942,50 +5631,52 @@ function App() {
               Back to previous location
             </button>
           )}
-          <div className="save-indicators">
-            {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
-            <div className={`save-status ${saveState}`}>
-              <span />
-              {saveStatusLabel}
+          {!scratchpadActive && (
+            <div className="save-indicators">
+              {activeTimeEntry && <div className="global-timer-indicator" title={activeTimeEntry.name} aria-label={`Running ${activeTimeEntry.name}`}><span>{activeTimeEntry.name}</span><strong><RunningTimerText startedAtUtc={activeTimeEntry.startedAtUtc} /></strong></div>}
+              <div className={`save-status ${saveState}`}>
+                <span />
+                {saveStatusLabel}
+              </div>
             </div>
-          </div>
-          <button
-            className="save-file-button"
-            disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
-            title={saveFileTitle}
-            onClick={saveFileAction}
-          >
-            {saveFileLabel}
-          </button>
-          <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
-            <span />
-            {syncLinked ? "Linked" : "Not linked"}
-          </div>
-          <button
-            className="save-and-sync-button"
-            disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
-            title={syncButtonTitle}
-            onClick={() => void saveAndSync()}
-          >
-            {syncButtonLabel}
-          </button>
-          {syncLinked && lastSyncedAt > 0 && <LastSyncLabel timestamp={lastSyncedAt} />}
-          {note && !graphOpen && !timeTrackingOpen && (
-            <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
-              <Icon name="trash" size={16} />
-            </button>
           )}
+          {!scratchpadActive && <button
+              className="save-file-button"
+              disabled={graphOpen || timeTrackingOpen || (!note && !conflictResolution) || (!conflictResolution && !dirty) || saveState === "saving"}
+              title={saveFileTitle}
+              onClick={saveFileAction}
+            >
+              {saveFileLabel}
+            </button>}
+          {!scratchpadActive && <div className={`sync-status ${syncLinked ? "linked" : "not-linked"}`}>
+              <span />
+              {syncLinked ? "Linked" : "Not linked"}
+            </div>}
+          {!scratchpadActive && <button
+              className="save-and-sync-button"
+              disabled={graphOpen || timeTrackingOpen || !note || !!conflictResolution || saveState === "saving" || syncing || !syncLinked}
+              title={syncButtonTitle}
+              onClick={() => void saveAndSync()}
+            >
+              {syncButtonLabel}
+            </button>}
+          {!scratchpadActive && syncLinked && lastSyncedAt > 0 && <LastSyncLabel timestamp={lastSyncedAt} />}
+          {!scratchpadActive && note && !graphOpen && !timeTrackingOpen && (
+              <button className="icon-button delete-button" onClick={() => void deleteNote()} aria-label="Delete note" title="Delete note">
+                <Icon name="trash" size={16} />
+              </button>
+            )}
         </header>
   );
 
   const renderEditorTabs = () => (
         <nav className="note-tabs" aria-label="Open notes" role="tablist">
           {tabs.map((tab, index) => (
-            <div className={`note-tab ${tab.id === activeTabID ? "active" : ""}`} key={tab.id}>
+            <div className={`note-tab ${tab.id === activeTabID && !scratchpadActive ? "active" : ""}`} key={tab.id}>
               <button
                 type="button"
                 role="tab"
-                aria-selected={tab.id === activeTabID}
+                aria-selected={tab.id === activeTabID && !scratchpadActive}
                 title={`${tab.title} (Alt+${index === 9 ? 0 : index + 1})`}
                 onClick={() => void switchTab(tab.id)}
               >
@@ -4995,6 +5686,16 @@ function App() {
             </div>
           ))}
           <button type="button" className="new-note-tab" aria-label="Open new tab" title="New tab (Ctrl+T)" onClick={() => void openEmptyTab()}>+</button>
+          <button
+            type="button"
+            role="tab"
+            className={`note-tab scratchpad-tab ${scratchpadActive ? "active" : ""}`}
+            aria-selected={scratchpadActive}
+            title={`Open Scratchpad (${scratchpadShortcut})`}
+            onClick={activateScratchpad}
+          >
+            <span>Scratchpad</span>
+          </button>
         </nav>
   );
 
@@ -5024,7 +5725,7 @@ function App() {
   };
 
   const renderEditorTimeTracking = () => {
-    if (!timeTrackingOpen) return null;
+    if (!timeTrackingOpen || scratchpadActive) return null;
     return (
           <Suspense fallback={<div className="settings-loading">Loading time tracking...</div>}>
             <TimeTrackingView key={`${session.vaultId}:${activeTimeEntry?.id ?? "idle"}`} now={timerNow} onActiveEntryChange={setActiveTimeEntry} />
@@ -5033,7 +5734,7 @@ function App() {
   };
 
   const renderEditorGraph = () => {
-    if (!graphOpen || timeTrackingOpen) return null;
+    if (!graphOpen || timeTrackingOpen || scratchpadActive) return null;
     return (
           <Suspense fallback={<div className="settings-loading">Loading graph...</div>}>
             <GraphView
@@ -5052,8 +5753,38 @@ function App() {
     );
   };
 
+  const renderScratchpadEditor = () => {
+    if (!scratchpadActive) return null;
+    return (
+      <div className="document-body scratchpad-editor-host">
+        <Scratchpad
+          onClose={leaveScratchpad}
+          onError={(reason) => setError(errorText(reason))}
+          onOpenWikilink={(title) => void openWikilinkTitle(title)}
+          onOpenCard={openCard}
+          cardTitles={cardTitles}
+          cardData={cardMetadata}
+          onCreateCard={createCard}
+          onCreateBoard={createBoard}
+          onMoveCard={moveCard}
+          onMoveCardInBoard={moveCardInBoard}
+          onAddCardToBoard={addCardToBoard}
+          onChangeBoardTitle={changeBoardTitle}
+          onChangeBoardColumns={changeBoardColumns}
+          cardTemplates={cardTemplateChoices}
+          onChangeBoardTemplate={changeBoardTemplate}
+          onOpenBoardTemplate={(boardID, templateID) => void openBoardTemplate(boardID, templateID)}
+          onCreateBoardTemplate={(boardID) => void createBoardTemplate(boardID)}
+          onDecreaseFontSize={decreaseEditorFontSize}
+          onIncreaseFontSize={increaseEditorFontSize}
+          defaultSectionsCollapsed={sectionDefault === "collapsed"}
+        />
+      </div>
+    );
+  };
+
   const renderConflictEditor = () => {
-    if (!conflictResolution || timeTrackingOpen || graphOpen) return null;
+    if (!conflictResolution || timeTrackingOpen || graphOpen || scratchpadActive) return null;
     return (
           <>
             <div className="document-heading conflict-heading">
@@ -5136,7 +5867,7 @@ function App() {
   };
 
   const renderNoteEditor = () => {
-    if (!note || timeTrackingOpen || graphOpen || conflictResolution) return null;
+    if (!note || timeTrackingOpen || graphOpen || conflictResolution || scratchpadActive) return null;
     return (
           <>
             <div className={`document-heading ${titleCollapsed ? "is-collapsed" : ""}`}>
@@ -5218,8 +5949,14 @@ function App() {
                       onCreateCard={createCard}
                       onCreateBoard={createBoard}
                       onMoveCard={moveCard}
+                      onMoveCardInBoard={moveCardInBoard}
                       onAddCardToBoard={addCardToBoard}
                       onChangeBoardTitle={changeBoardTitle}
+                      onChangeBoardColumns={changeBoardColumns}
+                      cardTemplates={cardTemplateChoices}
+                      onChangeBoardTemplate={changeBoardTemplate}
+                      onOpenBoardTemplate={(boardID, templateID) => void openBoardTemplate(boardID, templateID)}
+                      onCreateBoardTemplate={(boardID) => void createBoardTemplate(boardID)}
                       onDecreaseFontSize={decreaseEditorFontSize}
                       onIncreaseFontSize={increaseEditorFontSize}
                       searchTarget={globalSearchTarget}
@@ -5302,7 +6039,7 @@ function App() {
   };
 
   const renderEmptyEditor = () => {
-    if (timeTrackingOpen || graphOpen || conflictResolution || note) return null;
+    if (timeTrackingOpen || graphOpen || conflictResolution || note || scratchpadActive) return null;
     return (
           <div className="empty-editor">
             <div className="modal-icon"><Icon name="file" size={21} /></div>
@@ -5316,7 +6053,10 @@ function App() {
   };
 
   const renderCardPanel = () => {
-    if (!cardPanel) return null;
+    if (!cardPanel || scratchpadActive) return null;
+    let cardSaveLabel = "Save card";
+    if (cardPanel.kind) cardSaveLabel = "Save template";
+    if (cardPanelSaving) cardSaveLabel = "Saving…";
     return (
           <aside className="card-sidebar" aria-label="Card details">
             <header className="card-sidebar-header">
@@ -5341,7 +6081,7 @@ function App() {
               <div className="card-sidebar-field"><span>Status</span><CardStatusPicker value={cardPanel.metadata.status} onChange={(status) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: transitionCard(current.metadata, status) } : current); }} /></div>
               <div className="card-sidebar-field"><span>Tags</span><CardTagsEditor tags={cardPanel.metadata.tags} suggestions={cardTagSuggestions} onChange={(tags) => { setCardPanelDirty(true); setCardPanel((current) => current ? { ...current, metadata: { ...current.metadata, tags } } : current); }} /></div>
             </div>
-            {cardTemplates.length > 0 && (
+            {cardTemplates.length > 0 && !cardPanel.kind && (
               <label>Template<select value={selectedTemplateID} onChange={(event) => { setSelectedTemplateID(event.target.value); void applyCardTemplate(event.target.value); }}>
                 <option value="">Choose a template</option>
                 {cardTemplates.map((template) => <option value={template.id} key={template.id}>{String(template.properties?.["cipherleaf-card-template-name"] ?? template.title)}</option>)}
@@ -5364,8 +6104,14 @@ function App() {
                   onCreateCard={createCard}
                   onCreateBoard={createBoard}
                   onMoveCard={moveCard}
+                  onMoveCardInBoard={moveCardInBoard}
                   onAddCardToBoard={addCardToBoard}
                   onChangeBoardTitle={changeCardBoardTitle}
+                  onChangeBoardColumns={changeBoardColumns}
+                  cardTemplates={cardTemplateChoices}
+                  onChangeBoardTemplate={changeBoardTemplate}
+                  onOpenBoardTemplate={(boardID, templateID) => void openBoardTemplate(boardID, templateID)}
+                  onCreateBoardTemplate={(boardID) => void createBoardTemplate(boardID)}
                   onDecreaseFontSize={decreaseEditorFontSize}
                   onIncreaseFontSize={increaseEditorFontSize}
                   showToolbar={false}
@@ -5386,10 +6132,10 @@ function App() {
               Write changes to editor
             </label>
             <div className="card-sidebar-actions">
-              <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>
-              <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>
-              {selectedTemplateID && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
-              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : "Save card"}</button>
+              {!cardPanel.kind && <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>}
+              {!cardPanel.kind && <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>}
+              {(cardPanel.kind || selectedTemplateID) && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
+              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardSaveLabel}</button>
             </div>
           </aside>
     );
@@ -5407,6 +6153,7 @@ function App() {
         {renderEditorNotifications()}
         {renderEditorTimeTracking()}
         {renderEditorGraph()}
+        {renderScratchpadEditor()}
         {renderConflictEditor()}
         {renderNoteEditor()}
         {renderEmptyEditor()}
@@ -5484,7 +6231,6 @@ function App() {
               Password
               <div className="password-field">
                 <input
-                  autoFocus
                   type={folderPasswordVisible ? "text" : "password"}
                   value={folderPassword}
                   onChange={(event) => setFolderPassword(event.target.value)}
@@ -5562,7 +6308,8 @@ function App() {
               type="button"
               className="icon-button modal-close"
               aria-label="Close settings"
-              onClick={() => setAppearanceSettingsOpen(false)}
+              disabled={settingsSaving}
+              onClick={closeAppearanceSettings}
             >
               <Icon name="x" />
             </button>
@@ -5600,6 +6347,7 @@ function App() {
                   <div className="settings-submenu">
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-theme")}>Theme</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-guide-lines")}>Guide lines</button>
+                    <button type="button" onClick={() => openSettingsSection("appearance", "settings-scratchpad-opacity")}>Scratchpad</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-font-size")}>Text size</button>
                     <button type="button" onClick={() => openSettingsSection("appearance", "settings-editor-font")}>Editor font</button>
                   </div>
@@ -5613,18 +6361,18 @@ function App() {
                       <legend>Daily notes</legend>
                       <label>
                         Title format{" "}
-                        <input value={dailyNoteFormat} onChange={(event) => setDailyNoteFormat(event.target.value)} placeholder="YYYY-MM-DD" />
+                        <input value={settingsValues.dailyNoteFormat} onChange={(event) => updateSettingsDraft({ dailyNoteFormat: event.target.value })} placeholder="YYYY-MM-DD" />
                       </label>
                       <label>
                         Folder{" "}
-                        <select value={dailyNoteFolderID} onChange={(event) => setDailyNoteFolderID(event.target.value)}>
+                        <select value={settingsValues.dailyNoteFolderID} onChange={(event) => updateSettingsDraft({ dailyNoteFolderID: event.target.value })}>
                           <option value="">Unfiled</option>
                           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                         </select>
                       </label>
                       <label>
                         Template note{" "}
-                        <select value={dailyTemplateNoteID} onChange={(event) => setDailyTemplateNoteID(event.target.value)}>
+                        <select value={settingsValues.dailyTemplateNoteID} onChange={(event) => updateSettingsDraft({ dailyTemplateNoteID: event.target.value })}>
                           <option value="">Default heading</option>
                           {notes.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
                         </select>
@@ -5638,8 +6386,8 @@ function App() {
                           type="number"
                           min="60"
                           step="1"
-                          value={autosaveIntervalSeconds}
-                          onChange={(event) => setAutosaveIntervalSeconds(Math.max(60, Number(event.target.value) || 60))}
+                          value={settingsValues.autosaveIntervalSeconds}
+                          onChange={(event) => updateSettingsDraft({ autosaveIntervalSeconds: Math.max(60, Number(event.target.value) || 60) })}
                         />
                       </label>
                     </div>
@@ -5650,8 +6398,8 @@ function App() {
                           type="number"
                           min="1"
                           step="1"
-                          value={autoSyncMinutes}
-                          onChange={(event) => setAutoSyncMinutes(Math.max(1, Number(event.target.value) || 1))}
+                          value={settingsValues.autoSyncMinutes}
+                          onChange={(event) => updateSettingsDraft({ autoSyncMinutes: Math.max(1, Number(event.target.value) || 1) })}
                         />
                       </label>
                     </div>
@@ -5662,8 +6410,8 @@ function App() {
                           type="number"
                           min="1"
                           step="1"
-                          value={autoLockMinutes}
-                          onChange={(event) => setAutoLockMinutes(Math.max(1, Number(event.target.value) || 1))}
+                          value={settingsValues.autoLockMinutes}
+                          onChange={(event) => updateSettingsDraft({ autoLockMinutes: Math.max(1, Number(event.target.value) || 1) })}
                         />
                       </label>
                     </div>
@@ -5674,9 +6422,9 @@ function App() {
                           <button
                             key={value}
                             type="button"
-                            className={sectionDefault === value ? "active" : ""}
-                            aria-pressed={sectionDefault === value}
-                            onClick={() => setSectionDefault(value)}
+                            className={settingsValues.sectionDefault === value ? "active" : ""}
+                            aria-pressed={settingsValues.sectionDefault === value}
+                            onClick={() => updateSettingsDraft({ sectionDefault: value })}
                           >
                             {value === "expanded" ? "Expanded" : "Collapsed"}
                           </button>
@@ -5686,7 +6434,7 @@ function App() {
                     <fieldset id="settings-card-editor-default" className="appearance-fieldset settings-section settings-section-card">
                       <legend>Card editor</legend>
                       <label>
-                        <input type="checkbox" checked={cardWriteChangesToEditorDefault} onChange={(event) => setCardWriteChangesToEditorDefault(event.target.checked)} />{" "}
+                        <input type="checkbox" checked={settingsValues.cardWriteChangesToEditorDefault} onChange={(event) => updateSettingsDraft({ cardWriteChangesToEditorDefault: event.target.checked })} />{" "}
                         Write changes to editor by default
                       </label>
                     </fieldset>
@@ -5698,7 +6446,7 @@ function App() {
                       <legend>Theme</legend>
                       <div className="appearance-theme-options">
                         {THEME_OPTIONS.map((item) => (
-                          <button key={item.value} type="button" className={theme === item.value ? "active" : ""} aria-pressed={theme === item.value} onClick={() => setTheme(item.value)}>
+                          <button key={item.value} type="button" className={settingsValues.theme === item.value ? "active" : ""} aria-pressed={settingsValues.theme === item.value} onClick={() => updateSettingsDraft({ theme: item.value })}>
                             <span className={`theme-swatch ${item.swatch}`} />
                             {item.label}
                           </button>
@@ -5709,25 +6457,45 @@ function App() {
                       <legend>Writing guide lines</legend>
                       <div className="appearance-theme-options">
                         {(["none", "full", "dotted"] as JournalLines[]).map((value) => (
-                          <button key={value} type="button" className={journalLines === value ? "active" : ""} aria-pressed={journalLines === value} onClick={() => setJournalLines(value)}>
+                          <button key={value} type="button" className={settingsValues.journalLines === value ? "active" : ""} aria-pressed={settingsValues.journalLines === value} onClick={() => updateSettingsDraft({ journalLines: value })}>
                             {JOURNAL_LINE_LABELS[value]}
                           </button>
                         ))}
                       </div>
                     </fieldset>
+                    <div id="settings-scratchpad-opacity" className="settings-section settings-section-card">
+                      <label>
+                        Scratchpad background opacity
+                        <div className="appearance-size-row">
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={settingsValues.scratchpadOpacity}
+                            aria-label="Scratchpad background opacity"
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              if (Number.isFinite(value)) updateSettingsDraft({ scratchpadOpacity: Math.min(1, Math.max(0, value)) });
+                            }}
+                          />
+                          <output>{Math.round(settingsValues.scratchpadOpacity * 100)}%</output>
+                        </div>
+                      </label>
+                    </div>
                     <div id="settings-font-size" className="settings-section settings-section-card">
                       <label>
                         Editor font size
                         <div className="appearance-size-row">
-                          <input type="range" min="10" max="32" step="1" value={editorFontSize} onChange={(event) => setEditorFontSize(Number(event.target.value))} />
-                          <output>{editorFontSize}px</output>
+                          <input type="range" min="10" max="32" step="1" value={settingsValues.editorFontSize} onChange={(event) => updateSettingsDraft({ editorFontSize: Number(event.target.value) })} />
+                          <output>{settingsValues.editorFontSize}px</output>
                         </div>
                       </label>
                     </div>
                     <div id="settings-editor-font" className="appearance-font-field settings-section settings-section-card">
                       <span>Editor font</span>
                       <dl className="appearance-font-details">
-                        <div><dt>Name:</dt><dd title={editorFontName}>{editorFontName || "Default (Charter)"}</dd></div>
+                        <div><dt>Name:</dt><dd title={settingsEditorFontName}>{settingsEditorFontName || "Default (Charter)"}</dd></div>
                         <div><dt>Sample:</dt><dd className="appearance-font-sample" style={{ fontFamily: "var(--selected-editor-font, var(--editor-font))" }}>The quick brown fox jumps over the lazy dog 1234567890</dd></div>
                       </dl>
                       <div className="appearance-font-actions">
@@ -5742,13 +6510,18 @@ function App() {
                           <button type="button" className="secondary-button" disabled={installedFontsLoading} onClick={() => void loadInstalledFonts()}>{installedFontsLoading ? "Loading fonts…" : "Installed fonts…"}</button>
                         )}
                         <button type="button" className="secondary-button" onClick={() => editorFontInputRef.current?.click()}>Select .ttf…</button>
-                        <button type="button" className="secondary-button" disabled={!editorFontName} onClick={() => void resetEditorFont()}>Reset</button>
+                        <button type="button" className="secondary-button" disabled={!settingsEditorFontName} onClick={resetEditorFont}>Reset</button>
                         <input ref={editorFontInputRef} className="appearance-font-input" type="file" accept=".ttf,font/ttf" onChange={(event) => void chooseEditorFont(event)} />
                       </div>
                     </div>
                   </>
                 )}
               </div>
+            </div>
+            {settingsSaveError && <p className="error-message" role="alert">{settingsSaveError}</p>}
+            <div className="settings-actions">
+              <button type="button" className="secondary-button" disabled={settingsSaving} onClick={closeAppearanceSettings}>Exit without Saving</button>
+              <button type="button" className="primary-button" disabled={settingsSaving} onClick={() => void saveAppearanceSettings()}>{settingsSaving ? "Saving…" : "Save and Exit"}</button>
             </div>
           </dialog>
         </div>
@@ -5868,7 +6641,6 @@ function App() {
                 <label>
                   GitHub repository{" "}
                   <input
-                    autoFocus
                     value={syncSettings.repositorySsh}
                     onChange={(event) => {
                       setSyncSettings({ ...syncSettings, repositorySsh: event.target.value });
@@ -6234,17 +7006,6 @@ function App() {
     </>
   );
 
-  const renderSyncOverlay = () => (
-    <>
-      {syncing && (
-        <output className="sync-overlay" aria-live="polite" aria-busy="true">
-          <div className="sync-spinner" aria-hidden="true" />
-          <div className="sync-overlay-label">Sync in progress</div>
-        </output>
-      )}
-    </>
-  );
-
   const renderSyncConflicts = () => (
     <>
       {syncConflicts.length > 0 && (
@@ -6508,23 +7269,55 @@ function App() {
             </div>
             <div className="command-palette-results" role="listbox" aria-label="Matching commands">
               {matchingCommandPaletteCommands.map((command, index) => (
-                <button
-                  type="button"
+                <div
                   key={command.id}
                   id={`command-palette-${command.id}`}
                   className="command-palette-command"
                   role="option"
+                  tabIndex={0}
                   aria-selected={index === commandPaletteSelectedIndex}
                   onMouseEnter={() => setCommandPaletteIndex(index)}
+                  onFocus={() => setCommandPaletteIndex(index)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                    event.preventDefault();
+                    runCommandPaletteCommand(command);
+                  }}
                   onClick={() => runCommandPaletteCommand(command)}
                 >
-                  <kbd>{command.shortcut || "—"}</kbd>
+                  {((command.id in DEFAULT_SHORTCUTS) || command.id === "scratchpad") ? (
+                    <div className="command-palette-shortcut-actions">
+                      <button
+                        type="button"
+                        aria-label={`Edit shortcut for ${command.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          beginShortcutCapture(command.id);
+                        }}
+                        onKeyDown={handleCommandPaletteShortcutCapture}
+                      >
+                        <kbd>{shortcutEditingID === command.id ? "Press a shortcut…" : command.shortcut || "—"}</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Reset shortcut for ${command.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void resetShortcut(command.id);
+                        }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  ) : <kbd>{command.shortcut || "—"}</kbd>}
                   <strong>{command.name}</strong>
                   <span>{command.description}</span>
-                </button>
+                </div>
               ))}
               {!matchingCommandPaletteCommands.length && <p className="command-palette-empty">No matching commands.</p>}
             </div>
+            {shortcutError && <p className="error-message" role="alert">{shortcutError}</p>}
+            <button type="button" className="secondary-button" onClick={() => void resetAllShortcuts()}>Reset all shortcuts</button>
           </dialog>
         </div>
       )}
@@ -6691,7 +7484,6 @@ function App() {
               <label>
                 {appDialog.label}
                 <input
-                  autoFocus
                   type="text"
                   value={appDialogValue}
                   onChange={(event) => setAppDialogValue(event.target.value)}
@@ -6731,7 +7523,6 @@ function App() {
       {renderVaultSettings()}
       {renderContextMenu()}
       {renderTimerDialog()}
-      {renderSyncOverlay()}
       {renderSyncConflicts()}
       {renderTrackingConflicts()}
       {renderCalendar()}

@@ -153,8 +153,9 @@ cache.
 
 Cipherleaf includes **Light (Nord)**, **Dark (Nord)**, and **Archivist** themes.
 Settings also control journal lines, editor font size from 10–32 px, installed
-system fonts, custom TrueType editor fonts, autosave, automatic sync, and
-automatic vault locking.
+system fonts, custom TrueType editor fonts, and Scratchpad overlay opacity
+(50% by default, using the selected theme).
+Autosave, automatic sync, and automatic vault locking are also configurable.
 
 ## Important shortcuts
 
@@ -169,3 +170,4 @@ automatic vault locking.
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
 | `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
 | `Ctrl/Cmd+Shift+E` | Finish the active timer |
+| `Super+grave/backtick` | Open Scratchpad (global overlay when supported by desktop; app unfocused; editable from the Command Palette) |

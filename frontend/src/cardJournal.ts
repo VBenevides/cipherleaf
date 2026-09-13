@@ -359,7 +359,9 @@ function mergeDailyCard(
     objects: nextDocument.objects.filter((object) => included.has(object.id)).map(canonicalNode),
   });
   const cardLine = inserted.split("\n", 1)[0];
-  return body ? `${cardLine}\n${body.split("\n").map((line) => `      ${line}`).join("\n")}` : cardLine;
+  if (!body) return cardLine;
+  const indentedBody = body.split("\n").map((line) => `      ${line}`).join("\n");
+  return `${cardLine}\n${indentedBody}`;
 }
 
 function tagSectionInsertionLine(
@@ -377,12 +379,21 @@ function appendJournalTags(
   lines: string[],
   document: ReturnType<typeof parseObjectDocument>,
   section: ObjectLine,
-  journal: string,
-  cardID: string,
-  previousBody: string,
-  nextBody: string,
-  boardLine: number,
-  date: Date,
+  {
+    journal,
+    cardID,
+    previousBody,
+    nextBody,
+    boardLine,
+    date,
+  }: {
+    readonly journal: string;
+    readonly cardID: string;
+    readonly previousBody: string;
+    readonly nextBody: string;
+    readonly boardLine: number;
+    readonly date: Date;
+  },
 ): string {
   for (const block of journalTagBlocks(journal)) {
     const blockLines = block.split("\n");
@@ -406,8 +417,8 @@ function appendJournalTags(
         end: sectionInsertionLine(lines, document, card),
       }));
       insertionLine = Math.min(...ranges.map(({ start }) => start));
-      ranges.sort((left, right) => right.start - left.start)
-        .forEach(({ start, end }) => lines.splice(start, end - start));
+      ranges.sort((left, right) => right.start - left.start);
+      ranges.forEach(({ start, end }) => lines.splice(start, end - start));
     }
     lines = insertLines(lines, insertionLine, inserted).split("\n");
     document = parseObjectDocument(lines.join("\n"));
@@ -446,6 +457,13 @@ export function appendCardJournalToMainEditor(
     return insertLines(lines, insertionLine, journal);
   }
 
-  const result = appendJournalTags(lines, document, section, journal, metadata.id, previousBody, nextBody, boardLine, date);
+  const result = appendJournalTags(lines, document, section, {
+    journal,
+    cardID: metadata.id,
+    previousBody,
+    nextBody,
+    boardLine,
+    date,
+  });
   return result === normalized ? null : result;
 }

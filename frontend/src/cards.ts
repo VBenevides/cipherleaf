@@ -17,6 +17,13 @@ export const BOARD_COLUMN_LABELS: Record<CardStatus, string> = {
 
 export const BOARD_COLUMNS = ["not-started", "in-progress", "blocked", "finished"] as const;
 
+export const BOARD_COLUMN_COLORS: Record<CardStatus, string> = {
+  "not-started": "#888888",
+  "in-progress": "#2588D8",
+  blocked: "#D84C4C",
+  finished: "#2CA36B",
+};
+
 export type CardMetadata = {
   id: string;
   title: string;
@@ -41,7 +48,16 @@ export type CardTemplate = {
   name: string;
   status: CardStatus;
   tags: string[];
+  writeChangesToEditor: boolean;
   body: string;
+};
+
+export type BoardColumn = { id: string; name: string; color: string; cardIDs: string[] };
+export type BoardMarkerOptions = {
+  columns: BoardColumn[];
+  templateID?: string;
+  deletedColumns?: BoardColumn[];
+  orphanCardIDs?: string[];
 };
 
 export function boardCardsForColumns(
@@ -97,6 +113,7 @@ const TEMPLATE_KEYS = {
   name: "cipherleaf-card-template-name",
   status: "cipherleaf-card-template-status",
   tags: "cipherleaf-card-template-tags",
+  writeChangesToEditor: "cipherleaf-card-template-write-changes-to-editor",
 } as const;
 
 const frontmatterLine = /^([^:\n]+):(.*)$/;
@@ -235,7 +252,14 @@ export function parseTemplateDocument(markdown: string, id: string): { template:
   const name = frontmatter.values.get(TEMPLATE_KEYS.name)?.replace(/^"|"$/g, "").trim();
   if (!name || !validStatus(status)) return null;
   return {
-    template: { id, name, status, tags: parseTags(frontmatter.values.get(TEMPLATE_KEYS.tags)), body: frontmatter.body },
+    template: {
+      id,
+      name,
+      status,
+      tags: parseTags(frontmatter.values.get(TEMPLATE_KEYS.tags)),
+      writeChangesToEditor: frontmatter.values.get(TEMPLATE_KEYS.writeChangesToEditor) === "true",
+      body: frontmatter.body,
+    },
     body: frontmatter.body,
   };
 }
@@ -247,20 +271,101 @@ export function serializeTemplateDocument(template: CardTemplate): string {
     `${TEMPLATE_KEYS.name}: ${quote(template.name.trim())}`,
     `${TEMPLATE_KEYS.status}: ${template.status}`,
     `${TEMPLATE_KEYS.tags}: ${quote(normalizeCardTags(template.tags))}`,
+    `${TEMPLATE_KEYS.writeChangesToEditor}: ${template.writeChangesToEditor}`,
     "---",
     template.body,
   ].join("\n");
 }
 
 export const DEFAULT_BOARD_TITLE = "Kanban Board";
-export type BoardMarker = { id: string; title: string; cardIDs: string[] };
+export type BoardMarker = { id: string; title: string; cardIDs: string[]; options?: BoardMarkerOptions };
+
+function validBoardOptions(value: unknown): value is BoardMarkerOptions {
+  if (!value || typeof value !== "object") return false;
+  const options = value as Partial<BoardMarkerOptions>;
+  if (!Array.isArray(options.columns) || options.columns.length === 0) return false;
+  const ids = new Set<string>();
+  if (options.templateID !== undefined && typeof options.templateID !== "string") return false;
+  const validColumn = (column: unknown) => {
+    if (!column || typeof column !== "object") return false;
+    const candidate = column as Partial<BoardColumn>;
+    if (typeof candidate.id !== "string" || !candidate.id || ids.has(candidate.id) ||
+      typeof candidate.name !== "string" || typeof candidate.color !== "string" ||
+      !/^#[0-9A-Fa-f]{6}$/.test(candidate.color) ||
+      !Array.isArray(candidate.cardIDs) || !candidate.cardIDs.every((id) => typeof id === "string")) return false;
+    ids.add(candidate.id);
+    return true;
+  };
+  if (!options.columns.every(validColumn)) return false;
+  if (options.deletedColumns !== undefined && (!Array.isArray(options.deletedColumns) || !options.deletedColumns.every(validColumn))) return false;
+  return options.orphanCardIDs === undefined || (Array.isArray(options.orphanCardIDs) && options.orphanCardIDs.every((id) => typeof id === "string"));
+}
+
+function normalizeBoardOptions(options: BoardMarkerOptions): BoardMarkerOptions {
+  const activeCardIDs = new Set<string>();
+  const normalizeColumns = (columns: readonly BoardColumn[] = [], seenCards = new Set<string>()) => columns.map((column) => ({
+    ...column,
+    cardIDs: column.cardIDs.filter((id) => {
+      if (seenCards.has(id)) return false;
+      seenCards.add(id);
+      return true;
+    }),
+  }));
+  const columns = normalizeColumns(options.columns, activeCardIDs);
+  const deletedColumns = options.deletedColumns ? normalizeColumns(options.deletedColumns, new Set(activeCardIDs)) : undefined;
+  return {
+    ...options,
+    columns,
+    ...(deletedColumns ? { deletedColumns } : {}),
+    ...(options.orphanCardIDs ? { orphanCardIDs: [...new Set(options.orphanCardIDs)].filter((id) => !activeCardIDs.has(id)) } : {}),
+  };
+}
+
+export function boardColumnsForMarker(
+  marker: BoardMarker,
+  cards: ReadonlyMap<string, CardMetadata>,
+): BoardColumn[] {
+  if (marker.options) return normalizeBoardOptions(marker.options).columns;
+  const columns = BOARD_COLUMNS.map((status) => ({
+    id: status,
+    name: BOARD_COLUMN_LABELS[status],
+    color: BOARD_COLUMN_COLORS[status],
+    cardIDs: [] as string[],
+  }));
+  for (const id of marker.cardIDs) {
+    const status = cards.get(id)?.status;
+    columns.find((column) => column.id === status)?.cardIDs.push(id) ?? columns[0].cardIDs.push(id);
+  }
+  return columns;
+}
 
 export function boardMarker(
   boardID: string,
   cardIDs: readonly string[] = [],
   title = DEFAULT_BOARD_TITLE,
+  options?: BoardMarkerOptions,
 ): string {
-  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")} -->`;
+  if (!options) return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")} -->`;
+  if (!validBoardOptions(options)) throw new Error("Invalid board column options");
+  return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")}:${encodeURIComponent(JSON.stringify(normalizeBoardOptions(options)))} -->`;
+}
+
+function decodeBoardTitle(encodedTitle: string): string {
+  if (!encodedTitle) return DEFAULT_BOARD_TITLE;
+  try { return decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { return encodedTitle; }
+}
+
+function parseBoardOptions(fields: string[], hasTitle: boolean): BoardMarkerOptions | undefined {
+  if (!hasTitle || fields.length <= 1) return undefined;
+  try {
+    const candidate = JSON.parse(decodeURIComponent(fields[fields.length - 1] ?? "")) as unknown;
+    if (!validBoardOptions(candidate)) return undefined;
+    fields.pop();
+    return normalizeBoardOptions(candidate);
+  } catch {
+    // Legacy card IDs can contain colons.
+    return undefined;
+  }
 }
 
 export function parseBoardMarker(line: string): BoardMarker | null {
@@ -278,12 +383,12 @@ export function parseBoardMarker(line: string): BoardMarker | null {
   const fields = payload.split(":");
   const hasTitle = fields.length > 1;
   const encodedTitle = hasTitle ? fields.shift() ?? "" : "";
-  let title = DEFAULT_BOARD_TITLE;
-  if (encodedTitle) {
-    try { title = decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { title = encodedTitle; }
-  }
+  const title = decodeBoardTitle(encodedTitle);
+  const options = parseBoardOptions(fields, hasTitle);
   const ids = (hasTitle ? fields.join(":") : payload);
-  return { id, title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
+  const markerResult: BoardMarker = { id, title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
+  if (options) markerResult.options = options;
+  return markerResult;
 }
 
 export function replaceBoardMarker(
@@ -296,6 +401,6 @@ export function replaceBoardMarker(
   return markdown.replace(marker, (line) => {
     const current = parseBoardMarker(line);
     const next = current && update(current);
-    return next ? boardMarker(next.id, next.cardIDs, next.title) : line;
+    return next ? boardMarker(next.id, next.cardIDs, next.title, next.options) : line;
   });
 }

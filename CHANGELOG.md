@@ -2,6 +2,27 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [1.0.6] - 2026-09-13
+
+### Features
+
+- Added a session scratchpad with encrypted persistence, a global toggle shortcut, configurable overlay opacity, and command-palette access.
+- Added transactional settings and editable command-palette shortcuts.
+- Added dynamic board columns, editable card templates, and template inheritance for new cards.
+- Added interval-based automatic sync with visibility-resume handling and draft-preserving pull refreshes.
+
+### Bugfixes
+
+- Fixed scratchpad draft handling across vault renames, window closing, and editing or keyboard interactions.
+- Fixed editor indentation, search highlighting, caret and preview alignment, long markers, empty lines, and board deletion behavior.
+- Fixed dynamic board card placement and recovery, source-marker targeting, and card-panel state after saves.
+- Fixed command-palette and modal focus behavior and Unicode-aware editor text comparison.
+
+### Other
+
+- Expanded Go and frontend regression coverage for scratchpad, settings, shortcuts, boards, editors, synchronization, and Unicode changes.
+- Updated scratchpad and shortcut documentation and simplified frontend and cross-platform integration code.
+
 ## [1.0.5] - 2026-09-04
 
 ### Features

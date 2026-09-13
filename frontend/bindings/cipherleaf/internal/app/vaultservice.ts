@@ -174,6 +174,17 @@ export function GetNote(id: string): $CancellablePromise<vault$0.Note> {
     return $Call.ByID(1503400201, id);
 }
 
+export function GetScratchpad(): $CancellablePromise<$models.ScratchpadState> {
+    return $Call.ByID(687321542);
+}
+
+/**
+ * GetScratchpadShortcut returns the saved application-wide Scratchpad shortcut.
+ */
+export function GetScratchpadShortcut(): $CancellablePromise<string> {
+    return $Call.ByID(1175710304);
+}
+
 export function GetSession(): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(355925843);
 }
@@ -198,12 +209,27 @@ export function GetVaultStatistics(): $CancellablePromise<vault$0.VaultStatistic
     return $Call.ByID(3277829736);
 }
 
+/**
+ * HideScratchpad hides the Scratchpad window synchronously.
+ */
+export function HideScratchpad(): $CancellablePromise<void> {
+    return $Call.ByID(3062824244);
+}
+
 export function ImportFileAttachment(noteID: string, path: string): $CancellablePromise<vault$0.AttachmentInfo> {
     return $Call.ByID(2182536893, noteID, path);
 }
 
 export function ImportMarkdown(path: string): $CancellablePromise<vault$0.PortabilityResult> {
     return $Call.ByID(1577812963, path);
+}
+
+/**
+ * InitializeScratchpadShortcut registers the saved Scratchpad shortcut after
+ * the application starts. A rejected custom shortcut falls back to the default.
+ */
+export function InitializeScratchpadShortcut(): $CancellablePromise<void> {
+    return $Call.ByID(780276028);
 }
 
 export function LinkGitHubVault(settings: githubsync$0.SyncSettings): $CancellablePromise<githubsync$0.LinkResult> {
@@ -393,6 +419,10 @@ export function SaveNote(id: string, title: string, content: string): $Cancellab
     return $Call.ByID(2770680190, id, title, content);
 }
 
+export function SaveScratchpad(content: string, caretOffset: number, generation: number): $CancellablePromise<$models.ScratchpadState> {
+    return $Call.ByID(2199009165, content, caretOffset, generation);
+}
+
 export function SaveVaultSettings(settings: vault$0.VaultSettings): $CancellablePromise<vault$0.VaultSettings> {
     return $Call.ByID(3499492715, settings);
 }
@@ -427,6 +457,14 @@ export function SetFolderHidden(id: string, hidden: boolean): $CancellablePromis
 
 export function SetFolderSortMode(id: string, mode: string): $CancellablePromise<vault$0.Folder> {
     return $Call.ByID(3310669214, id, mode);
+}
+
+/**
+ * SetScratchpadShortcut changes the registered and persisted application-wide
+ * Scratchpad shortcut as one serialized transaction.
+ */
+export function SetScratchpadShortcut(shortcut: string): $CancellablePromise<string> {
+    return $Call.ByID(2182337292, shortcut);
 }
 
 export function StartTimeEntry(name: string, projectID: string, tagIDs: string[] | null): $CancellablePromise<vault$0.TimeEntry> {

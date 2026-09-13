@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { cardReference, boardMarker, type CardMetadata } from "../src/cards";
+import { cardReference, boardMarker, type BoardColumn, type CardMetadata } from "../src/cards";
 import LiveMarkdownEditor, { clipboardClaimsImage, clipboardImage, clipboardMayContainImage, imageDataURL } from "../src/LiveMarkdownEditor";
 import ObjectTreeView from "../src/ObjectTreeView";
 import SourceMarkdownEditor from "../src/SourceMarkdownEditor";
@@ -42,6 +42,7 @@ Object.defineProperties(globalThis, {
   HTMLElement: { value: dom.window.HTMLElement, configurable: true },
   Element: { value: dom.window.Element, configurable: true },
   Node: { value: dom.window.Node, configurable: true },
+  NodeFilter: { value: dom.window.NodeFilter, configurable: true },
   Window: { value: dom.window.Window, configurable: true },
   MutationObserver: { value: dom.window.MutationObserver, configurable: true },
   DOMRect: { value: dom.window.DOMRect, configurable: true },
@@ -51,9 +52,19 @@ Object.defineProperties(globalThis, {
   cancelAnimationFrame: { value: dom.window.cancelAnimationFrame.bind(dom.window), configurable: true },
   IS_REACT_ACT_ENVIRONMENT: { value: true, configurable: true },
 });
+if (dom.window.HTMLDialogElement) {
+  Object.defineProperties(dom.window.HTMLDialogElement.prototype, {
+    showModal: { configurable: true, value() { this.open = true; } },
+    close: { configurable: true, value() { this.open = false; this.dispatchEvent(new dom.window.Event("close")); } },
+  });
+}
 Object.defineProperty(dom.window.navigator, "clipboard", {
   configurable: true,
   value: { writeText: async () => {}, write: async () => {}, read: async () => [] },
+});
+Object.defineProperty(dom.window, "matchMedia", {
+  configurable: true,
+  value: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
 });
 Object.defineProperties(dom.window.HTMLElement.prototype, {
   setPointerCapture: { configurable: true, value: () => {} },
@@ -176,7 +187,9 @@ await act(async () => {
 });
 const wikilink = live.body.querySelector<HTMLElement>(".cm-live-wikilink");
 wikilink?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-live.body.querySelector<HTMLElement>(".cm-live-card-reference")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+const cardReferenceElement = live.body.querySelector<HTMLElement>(".cm-live-card-reference");
+cardReferenceElement?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+cardReferenceElement?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 live.body.querySelector<HTMLElement>(".cm-live-citation")?.click();
 live.body.querySelector<HTMLButtonElement>(".cm-live-link-menu button")?.click();
 
@@ -211,6 +224,12 @@ assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-editor"), editorNod
 assert.strictEqual(live.body.querySelector<HTMLElement>(".cm-live-board"), boardNode);
 const board = live.body.querySelector<HTMLElement>(".cm-live-board");
 assert.ok(board);
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-description")?.textContent, "Organize and track your cards across different states.");
+assert.equal(board.querySelectorAll<HTMLInputElement>(".cm-live-board-column-name").length, 4);
+assert.equal(board.querySelectorAll<HTMLInputElement>(".cm-live-board-column-color").length, 4);
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "1", "1"]);
+assert.ok(board.querySelector("button[aria-label=\"Add board column\"]"));
+assert.equal(board.querySelectorAll("button[aria-label=\"Remove column\"]").length, 4);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed card");
 assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-card-title")].some((title) => title.style.fontSize));
 assert.ok(board.querySelector(".cm-live-board-card-tags"));
@@ -225,16 +244,19 @@ assert.deepEqual([...boardTagFilter.options].map((option) => option.textContent)
 boardTagFilter.value = "work";
 boardTagFilter.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 2);
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "0", "0"]);
 const clearBoardFilters = [...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-controls button")].find((button) => button.textContent === "Clear")!;
 clearBoardFilters.click();
 assert.equal(boardTagFilter.value, "");
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 4);
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "1", "1"]);
 const boardFilter = board.querySelector<HTMLInputElement>("input[aria-label=\"Filter board cards by title\"]")!;
 boardFilter.value = "Renamed";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 assert.equal([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].filter((card) => !card.hidden).length, 1);
 boardFilter.value = "";
 boardFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+assert.deepEqual([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].map((count) => count.textContent), ["1", "1", "1", "1"]);
 const boardCard = board.querySelector<HTMLButtonElement>(".status-not-started .cm-live-board-card")!;
 const blockedColumn = board.querySelector<HTMLElement>(".status-blocked")!;
 const elementFromPoint = document.elementFromPoint;
@@ -265,18 +287,23 @@ boardCard.dispatchEvent(pointer("pointerdown", 0, 0));
 document.dispatchEvent(pointer("pointerup", 0, 0));
 boardCard.click();
 assert.equal(opened, openedBeforeBoardClick + 1);
-const minimizeBoard = board.querySelector<HTMLButtonElement>(".cm-live-board-minimize")!;
-minimizeBoard.click();
+const boardToggle = board.querySelector<HTMLButtonElement>(".cm-live-board-toggle")!;
+const liveScroller = live.body.querySelector<HTMLElement>(".cm-scroller")!;
+liveScroller.scrollTop = 240;
+boardToggle.click();
+assert.equal(liveScroller.scrollTop, 240);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, true);
-assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1");
-assert.equal(minimizeBoard.textContent, "Maximize");
-minimizeBoard.click();
+assert.equal(board.querySelector<HTMLElement>(".cm-live-board-minimized")?.textContent, "[BOARD] Roadmap · Backlog: 1 · In Progress: 1 · Blocked: 1 · Concluded: 1");
+assert.equal(boardToggle.textContent, "›");
+assert.equal(boardToggle.getAttribute("aria-expanded"), "false");
+boardToggle.click();
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, false);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, false);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, false);
-assert.equal(minimizeBoard.textContent, "Minimize");
+assert.equal(boardToggle.textContent, "⌄");
+assert.equal(boardToggle.getAttribute("aria-expanded"), "true");
 const boardTitle = board.querySelector<HTMLInputElement>(".cm-live-board-title")!;
 boardTitle.value = "Updated board";
 boardTitle.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -286,13 +313,179 @@ filter.value = "card";
 filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.click();
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-board.querySelector<HTMLButtonElement>(".cm-live-board-controls .secondary-button")?.click();
+([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-controls .secondary-button")].find((button) => button.textContent === "New card"))?.click();
 board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
   input.value = "";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 });
 board.querySelectorAll("button[aria-label]").forEach((button) => button.click());
 assert.ok(opened > 0 && moved > 0 && added > 0);
+
+const multiBoard = mount("multi-board-host");
+const addedBoardIDs: string[] = [];
+await act(async () => {
+  multiBoard.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "multi-board", value: [boardMarker("board-a", [], "First"), boardMarker("board-b", [], "Second")].join("\n"),
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
+    cardData: cards, onCreateBoard: async () => null, onAddCardToBoard: (boardID) => { addedBoardIDs.push(boardID); },
+    onMoveCard: () => {}, onChangeBoardTitle: () => {}, onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const multiBoards = multiBoard.body.querySelectorAll<HTMLElement>(".cm-live-board");
+assert.equal(multiBoards.length, 2);
+const secondBoardNewCard = [...multiBoards[1].querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "New card")!;
+secondBoardNewCard.click();
+assert.deepEqual(addedBoardIDs, ["board-b"]);
+await act(async () => { multiBoard.root.unmount(); });
+multiBoard.shell.remove();
+
+let dynamicColumns: readonly BoardColumn[] = [];
+let dynamicDeleted: readonly BoardColumn[] = [];
+let dynamicOrphans: readonly string[] = [];
+let createdBoardTemplate = "";
+const dynamic = mount("dynamic-board-host");
+await act(async () => {
+  dynamic.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "dynamic", value: boardMarker("dynamic", [], "Dynamic", {
+      columns: [
+        { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1", "card-2", "card-3"] },
+        { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
+      ],
+    }),
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
+    cardData: cards, onMoveCardInBoard: () => {}, onChangeBoardColumns: (_boardID, columns, deleted, orphans) => {
+      dynamicColumns = columns;
+      dynamicDeleted = deleted ?? [];
+      dynamicOrphans = orphans ?? [];
+    },
+    cardTemplates: [{ id: "template-1", name: "Template" }],
+    onCreateBoardTemplate: (boardID) => { createdBoardTemplate = boardID; },
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const dynamicBoard = dynamic.body.querySelector<HTMLElement>(".cm-live-board")!;
+assert.equal(dynamicBoard.querySelectorAll(".cm-live-board-column").length, 2);
+const editBoardTemplate = [...dynamicBoard.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Edit Card Template")!;
+editBoardTemplate.click();
+assert.equal(createdBoardTemplate, "dynamic");
+const dynamicName = dynamicBoard.querySelector<HTMLInputElement>(".cm-live-board-column-name")!;
+dynamicName.value = "Ready";
+dynamicName.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert.equal(dynamicColumns[0]?.name, "Ready");
+const dynamicColor = dynamicBoard.querySelector<HTMLInputElement>(".cm-live-board-column-color")!;
+dynamicColor.value = "#654321";
+dynamicColor.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert.equal(dynamicColumns[0]?.color, "#654321");
+dynamicBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-column-move")[1]?.click();
+dynamicBoard.querySelector<HTMLButtonElement>("button[aria-label=\"Add board column\"]")?.click();
+assert.equal(dynamicColumns.length, 3);
+dynamicBoard.querySelector<HTMLButtonElement>("button[aria-label=\"Remove column\"]")!.click();
+assert.deepEqual(dynamicColumns, [{ id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] }]);
+assert.deepEqual(dynamicDeleted, [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1", "card-2", "card-3"] }]);
+assert.deepEqual(dynamicOrphans, ["card-1", "card-2", "card-3"]);
+await act(async () => { dynamic.root.unmount(); });
+dynamic.shell.remove();
+
+const sameTitleCards = new Map([...cards].map(([id, card]) => [id, { ...card, title: "Same title" }]));
+let orphanColumns: readonly BoardColumn[] = [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-4"] }];
+let orphanIDs: readonly string[] = ["card-1", "card-2", "card-3"];
+const orphan = mount("orphan-board-host");
+const renderOrphanBoard = async () => {
+  await act(async () => {
+    orphan.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "orphan", value: boardMarker("orphan", ["card-1", "card-2", "card-3", "card-4"], "Orphans", {
+        columns: orphanColumns.map((column) => ({ ...column, cardIDs: [...column.cardIDs] })),
+        orphanCardIDs: [...orphanIDs],
+      }),
+      onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {}, cardData: sameTitleCards,
+      onChangeBoardColumns: (_boardID, columns, _deleted, orphans) => {
+        orphanColumns = columns;
+        orphanIDs = orphans ?? [];
+      },
+      onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+};
+await renderOrphanBoard();
+let orphanBoard = orphan.body.querySelector<HTMLElement>(".cm-live-board")!;
+orphanBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-recovery-button")[1]!.click();
+assert.equal(orphanBoard.querySelectorAll(".cm-live-board-recovery-panel:not([hidden]) .cm-live-board-recovery-row").length, 3);
+for (const expected of [["card-2", "card-3"], ["card-3"], []]) {
+  orphanBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-panel:not([hidden]) .secondary-button")!.click();
+  assert.deepEqual(orphanIDs, expected);
+  assert.equal(orphanColumns[0]?.cardIDs.length, 4 - expected.length);
+  if (expected.length > 0) {
+    await renderOrphanBoard();
+    orphanBoard = orphan.body.querySelector<HTMLElement>(".cm-live-board")!;
+    orphanBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-recovery-button")[1]!.click();
+  }
+}
+assert.deepEqual(orphanColumns[0]?.cardIDs, ["card-4", "card-1", "card-2", "card-3"]);
+await act(async () => { orphan.root.unmount(); });
+orphan.shell.remove();
+
+let recoveryColumns: readonly BoardColumn[] = [];
+let recoveryDeleted: readonly BoardColumn[] = [];
+let recoveryOrphans: readonly string[] = [];
+const recovery = mount("recovery-board-host");
+await act(async () => {
+  recovery.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "recovery", value: boardMarker("recovery", ["card-1", "card-2", "card-3"], "Recovery", {
+      columns: [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] }],
+      deletedColumns: [{ id: "archive", name: "Archived", color: "#654321", cardIDs: ["card-2"] }],
+      orphanCardIDs: [],
+    }),
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {}, cardData: cards,
+    onChangeBoardColumns: (_boardID, columns, deleted, orphans) => {
+      recoveryColumns = columns;
+      recoveryDeleted = deleted ?? [];
+      recoveryOrphans = orphans ?? [];
+    },
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const recoveryBoard = recovery.body.querySelector<HTMLElement>(".cm-live-board")!;
+assert.match(recoveryBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-button")?.textContent ?? "", /Deleted Columns 1/);
+assert.match(recoveryBoard.querySelectorAll<HTMLButtonElement>(".cm-live-board-recovery-button")[1]?.textContent ?? "", /Orphan Cards 2/);
+recoveryBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-button")!.click();
+recoveryBoard.querySelector<HTMLButtonElement>(".cm-live-board-recovery-panel:not([hidden]) .secondary-button")!.click();
+assert.equal(recoveryColumns.length, 2);
+assert.equal(recoveryDeleted.length, 0);
+assert.deepEqual(recoveryOrphans, ["card-3"]);
+assert.deepEqual(recoveryColumns[1]?.cardIDs, ["card-2"]);
+await act(async () => { recovery.root.unmount(); });
+recovery.shell.remove();
+
+let createdSnippet = "";
+const snippet = mount("snippet-host");
+await act(async () => {
+  snippet.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "snippet", value: "/today", onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, onCreateCard: async () => { createdSnippet = "card"; return "Card"; },
+    onCreateBoard: async () => "Board", showToolbar: false, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const snippetEditor = snippet.body.querySelector<HTMLElement>(".cm-content")!;
+const snippetView = EditorView.findFromDOM(snippetEditor)!;
+const expandSnippetInEditor = async (text: string) => {
+  snippetView.dispatch({ changes: { from: 0, to: snippetView.state.doc.length, insert: text }, selection: EditorSelection.cursor(text.length) });
+  key(snippetEditor, "Enter");
+  await act(async () => { await wait(); });
+};
+await expandSnippetInEditor("/today");
+assert.notEqual(snippetView.state.doc.toString(), "/today");
+await expandSnippetInEditor("/card");
+assert.equal(createdSnippet, "card");
+await expandSnippetInEditor("/board");
+assert.equal(snippetView.state.doc.toString(), "Board");
+await act(async () => { snippet.root.unmount(); });
+snippet.shell.remove();
 
 const cardsWithoutTags = new Map([...updatedCards].map(([id, card]) => [id, { ...card, tags: [] }]));
 await act(async () => {
@@ -318,6 +511,7 @@ await act(async () => {
   }));
   await wait();
 });
+assert.equal(liveScroller.scrollTop, 240);
 await act(async () => {
   const updatedEditor = live.body.querySelector<HTMLElement>(".cm-content");
   updatedEditor?.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
@@ -358,6 +552,8 @@ await act(async () => {
 key(interactionEditor!, "a", { ctrlKey: true });
 key(interactionEditor!, "s", { ctrlKey: true });
 key(interactionEditor!, "l", { ctrlKey: true, altKey: true });
+key(interactionEditor!, "z", { ctrlKey: true, shiftKey: true });
+key(interactionEditor!, "h", { ctrlKey: true });
 key(interactionEditor!, "]", { ctrlKey: true });
 key(interactionEditor!, "[", { ctrlKey: true });
 key(interactionEditor!, "]", { ctrlKey: true, shiftKey: true });
@@ -370,6 +566,10 @@ const codePosition = interactionView.state.doc.toString().indexOf("const value")
 selectText(codePosition, codePosition);
 key(interactionEditor!, "Tab");
 key(interactionEditor!, "Tab", { shiftKey: true });
+interaction.body.querySelector<HTMLInputElement>(".cm-live-task input")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+interaction.body.querySelector<HTMLElement>(".cm-live-horizontal-rule")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+interaction.body.querySelector<HTMLElement>(".cm-live-toggle-button")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+interaction.body.querySelector<HTMLButtonElement>(".cm-live-code-copy")?.click();
 interactionView.dispatch({ changes: { from: 0, to: interactionView.state.doc.length, insert: "<" }, selection: { anchor: 1 } });
 key(interactionEditor!, "Backspace");
 interactionView.dispatch({ changes: { from: 0, to: interactionView.state.doc.length, insert: "→" }, selection: { anchor: 1 } });
@@ -378,13 +578,27 @@ interactionView.dispatch({ changes: { from: 0, to: interactionView.state.doc.len
 const paste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
 Object.defineProperty(paste, "clipboardData", { value: { getData: () => "first\nsecond", items: [], files: [], types: ["text/plain"] } });
 interactionEditor!.dispatchEvent(paste);
-interaction.body.querySelector<HTMLInputElement>(".cm-live-task input")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-interaction.body.querySelector<HTMLElement>(".cm-live-horizontal-rule")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-interaction.body.querySelector<HTMLElement>(".cm-live-toggle-button")?.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-interaction.body.querySelector<HTMLButtonElement>(".cm-live-code-copy")?.click();
+const liveImagePaste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+Object.defineProperty(liveImagePaste, "clipboardData", { value: { items: [{ kind: "file", type: "image/png", getAsFile: () => clipboardImageBlob }], files: [], types: ["Files"], getData: () => "" } });
+interactionEditor!.dispatchEvent(liveImagePaste);
+const missingImagePaste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+Object.defineProperty(missingImagePaste, "clipboardData", { value: { items: [], files: [], types: ["Files"], getData: () => "" } });
+interactionEditor!.dispatchEvent(missingImagePaste);
+await act(async () => { await wait(); });
 const attachment = interaction.body.querySelector<HTMLElement>(".cm-live-attachment");
-attachment?.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true }));
-attachment?.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+await act(async () => {
+  attachment?.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true }));
+  const image = attachment?.querySelector<HTMLImageElement>("img");
+  if (image) Object.defineProperty(image, "getBoundingClientRect", { configurable: true, value: () => ({ width: 160 }) });
+  attachment?.querySelector<HTMLElement>(".cm-live-attachment-resize")?.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, clientX: 10 }));
+  document.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, clientX: 40 }));
+  document.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, clientX: 40 }));
+  await wait();
+});
+const resizedAttachment = interaction.body.querySelector<HTMLElement>(".cm-live-attachment");
+resizedAttachment?.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+interaction.body.querySelector<HTMLButtonElement>(".cm-live-attachment-menu button:first-child")?.click();
+resizedAttachment?.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
 interaction.body.querySelector<HTMLButtonElement>(".cm-live-attachment-menu button:last-child")?.click();
 const handle = interaction.body.querySelector<HTMLElement>(".cm-live-object-handle");
 handle?.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
@@ -392,6 +606,233 @@ interaction.body.querySelector<HTMLButtonElement>(".cm-live-object-menu button")
 assert.ok(interactionChanges >= 0 && interactionErrors >= 0);
 await act(async () => { interaction.root.unmount(); });
 interaction.shell.remove();
+
+const outline = mount("outline-host");
+await act(async () => {
+  outline.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "outline", value: "item\n  child", onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const outlineEditor = outline.body.querySelector<HTMLElement>(".cm-content")!;
+const outlineView = EditorView.findFromDOM(outlineEditor)!;
+outlineView.dispatch({ selection: EditorSelection.cursor(2) });
+key(outlineEditor, "Tab");
+key(outlineEditor, "Tab", { shiftKey: true });
+await act(async () => { await wait(); outline.root.unmount(); });
+outline.shell.remove();
+
+const citation = mount("citation-host");
+await act(async () => {
+  citation.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "citation", value: "[site](https://example.com)", onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const citationLink = citation.body.querySelector<HTMLButtonElement>(".cm-live-citation");
+assert.ok(citationLink);
+citationLink.click();
+citation.body.closest("body")?.querySelector<HTMLButtonElement>(".cm-live-link-menu button:last-child")?.click();
+const citationDialog = document.body.querySelector<HTMLDialogElement>(".cm-live-link-dialog");
+assert.ok(citationDialog);
+const citationInputs = citationDialog.querySelectorAll<HTMLInputElement>("input");
+citationInputs[0].value = "updated";
+citationInputs[1].value = "https://updated.example";
+citationDialog.querySelector("form")?.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+await act(async () => { await wait(); citation.root.unmount(); });
+citation.shell.remove();
+
+document.documentElement.dataset.journalLines = "full";
+const layout = mount("layout-host");
+await act(async () => {
+  layout.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "layout", value: "> Parent\n  > Child\n    ```ts\n    const deep = 1;\n    ```\n  following", onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: true,
+  }));
+  await wait();
+});
+layout.body.querySelector<HTMLElement>(".cm-scroller")?.dispatchEvent(new dom.window.Event("scroll"));
+layout.body.querySelector<HTMLButtonElement>(".cm-live-toggle-button")?.click();
+await act(async () => { await wait(); layout.root.unmount(); });
+layout.shell.remove();
+delete document.documentElement.dataset.journalLines;
+
+const boundary = mount("board-boundary-host");
+const boundaryBoards = [boardMarker("boundary-a"), "", boardMarker("boundary-b")];
+await act(async () => {
+  boundary.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "board-boundary",
+    value: boundaryBoards.join("\n"),
+    onChange: () => {},
+    onSave: () => {},
+    onError: () => {},
+    onOpenWikilink: () => {},
+    onOpenCard: () => {},
+    cardTitles: new Map(),
+    cardData: new Map(),
+    onCreateCard: async () => null,
+    onCreateBoard: async () => null,
+    onMoveCard: () => {},
+    onAddCardToBoard: () => {},
+    onChangeBoardTitle: () => {},
+    onDecreaseFontSize: () => {},
+    onIncreaseFontSize: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const boundaryEditor = boundary.body.querySelector<HTMLElement>(".cm-content")!;
+const boundaryView = EditorView.findFromDOM(boundaryEditor)!;
+const blankLine = boundaryView.state.doc.line(2);
+assert.ok([...boundary.body.querySelectorAll<HTMLElement>(".cm-line.cm-live-empty-line")].some((line) => (
+  line.lastElementChild?.tagName === "BR"
+)));
+boundaryView.dispatch({ selection: EditorSelection.cursor(blankLine.from) });
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), [boundaryBoards[0], boundaryBoards[2]].join("\n"));
+boundaryView.dispatch({
+  changes: { from: 0, to: boundaryView.state.doc.length, insert: boundaryBoards.join("\n") },
+});
+boundaryView.dispatch({ selection: EditorSelection.cursor(boundaryView.state.doc.line(2).to) });
+await act(async () => {
+  key(boundaryEditor, "Delete");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), [boundaryBoards[0], boundaryBoards[2]].join("\n"));
+boundaryView.dispatch({
+  changes: { from: 0, to: boundaryView.state.doc.length, insert: [boundaryBoards[0], "text"].join("\n") },
+});
+boundaryView.dispatch({ selection: EditorSelection.cursor(boundaryView.state.doc.line(2).from) });
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), [boundaryBoards[0], "text"].join("\n"));
+boundaryView.dispatch({
+  changes: { from: 0, to: boundaryView.state.doc.length, insert: boundaryBoards.join("\n") },
+});
+boundaryView.dispatch({ selection: EditorSelection.range(0, 1) });
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), boundaryBoards.join("\n"));
+boundaryView.dispatch({
+  selection: EditorSelection.range(
+    boundaryView.state.doc.line(2).from - 1,
+    boundaryView.state.doc.line(3).from,
+  ),
+});
+await act(async () => {
+  key(boundaryEditor, "Backspace");
+  await wait();
+});
+assert.equal(boundaryView.state.doc.toString(), boundaryBoards.join("\n"));
+await act(async () => { boundary.root.unmount(); });
+boundary.shell.remove();
+
+const indentation = mount("indentation-host");
+await act(async () => {
+  indentation.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "indentation",
+    value: "> Parent\n  \n  following",
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false,
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const indentationEditor = indentation.body.querySelector<HTMLElement>(".cm-content");
+const indentationView = EditorView.findFromDOM(indentationEditor!);
+assert.ok(indentationView);
+const blankLineFrom = indentationView!.state.doc.line(2).from;
+indentationView!.dispatch({ selection: EditorSelection.cursor(blankLineFrom) });
+const inputHandler = indentationView!.state.facet(EditorView.inputHandler).find((handler) =>
+  handler(indentationView!, blankLineFrom, blankLineFrom, "typed"),
+);
+assert.ok(inputHandler);
+assert.equal(indentationView!.state.doc.toString(), "> Parent\n  typed\n  following");
+assert.equal(indentationView!.state.selection.main.head, blankLineFrom + 2 + "typed".length);
+await act(async () => { indentation.root.unmount(); });
+indentation.shell.remove();
+
+const searchTargetHost = mount("search-target-host");
+await act(async () => {
+  searchTargetHost.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "search-target",
+    value: "phrase here\nother phrase",
+    searchTarget: {
+      noteID: "search-target",
+      offset: 0,
+      matchLength: 6,
+      utf16Offset: 0,
+      utf16MatchLength: 6,
+      query: "phrase",
+    },
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false,
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const searchTargetEditor = searchTargetHost.body.querySelector<HTMLElement>(".cm-content");
+const searchTargetView = EditorView.findFromDOM(searchTargetEditor!);
+assert.ok(searchTargetView);
+assert.equal(searchTargetView!.state.selection.main.from, 0);
+assert.equal(searchTargetView!.state.selection.main.to, 6);
+assert.equal(searchTargetHost.body.querySelectorAll(".cm-live-search-highlight").length, 1);
+searchTargetView!.dispatch({ changes: { from: 0, insert: "x" } });
+assert.equal(searchTargetHost.body.querySelectorAll(".cm-live-search-highlight").length, 0);
+await act(async () => { searchTargetHost.root.unmount(); });
+searchTargetHost.shell.remove();
+
+const scratchpadToolbarShell = document.createElement("section");
+scratchpadToolbarShell.className = "scratchpad-editor";
+const scratchpadHeading = scratchpadToolbarShell.appendChild(document.createElement("header"));
+scratchpadHeading.className = "scratchpad-heading";
+const scratchpadBody = scratchpadToolbarShell.appendChild(document.createElement("div"));
+scratchpadBody.className = "document-body scratchpad-editor-body";
+document.body.append(scratchpadToolbarShell);
+const scratchpadRoot = createRoot(scratchpadBody);
+await act(async () => {
+  scratchpadRoot.render(createElement(LiveMarkdownEditor, {
+    noteID: "scratchpad-toolbar",
+    value: "Scratchpad",
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const scratchpadToolbar = scratchpadToolbarShell.querySelector(".markdown-toolbar");
+assert.equal(scratchpadHeading.nextElementSibling, scratchpadToolbar);
+assert.equal(scratchpadToolbar?.nextElementSibling, scratchpadBody);
+await act(async () => { scratchpadRoot.unmount(); });
+scratchpadToolbarShell.remove();
+
+const noteToolbar = mount("note-toolbar-host");
+const noteHeading = document.createElement("header");
+noteToolbar.shell.insertBefore(noteHeading, noteToolbar.body);
+await act(async () => {
+  noteToolbar.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "note-toolbar",
+    value: "Note",
+    onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {},
+    defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const noteToolbarElement = noteToolbar.shell.querySelector(".markdown-toolbar");
+assert.equal(noteHeading.nextElementSibling, noteToolbarElement);
+assert.equal(noteToolbarElement?.nextElementSibling, noteToolbar.body);
+await act(async () => { noteToolbar.root.unmount(); });
+noteToolbar.shell.remove();
 
 const source = mount("source-host");
 let scrollSyncs = 0;
@@ -415,6 +856,10 @@ source.body.querySelector<HTMLElement>(".cm-scroller")?.dispatchEvent(new dom.wi
 const sourcePaste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
 Object.defineProperty(sourcePaste, "clipboardData", { value: { getData: () => "plain", items: [], files: [], types: ["text/plain"] } });
 sourceEditor?.dispatchEvent(sourcePaste);
+const sourceImagePaste = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+Object.defineProperty(sourceImagePaste, "clipboardData", { value: { items: [{ kind: "file", type: "image/png", getAsFile: () => clipboardImageBlob }], files: [], types: ["Files"], getData: () => "" } });
+sourceEditor?.dispatchEvent(sourceImagePaste);
+await act(async () => { await wait(); });
 await act(async () => {
   source.root.render(createElement(SourceMarkdownEditor, { noteID: "note", value: "# Changed", onChange: () => {}, onError: () => {}, scrollSync }));
   await wait();
@@ -499,3 +944,54 @@ object.body.querySelector<HTMLButtonElement>(".object-tree-delete")?.click();
 assert.ok(objectChanges > 0);
 await act(async () => { object.root.unmount(); });
 object.shell.remove();
+
+const liveDrag = mount("live-drag-host");
+await act(async () => {
+  liveDrag.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "live-drag", value: "> Parent\n  child\n> Sibling", onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const liveDragHandle = liveDrag.body.querySelector<HTMLElement>(".cm-live-object-handle")!;
+const liveDragLines = liveDrag.body.querySelectorAll<HTMLElement>(".cm-live-object-line[data-object-line]");
+const liveDragTarget = liveDragLines[2]!;
+Object.defineProperty(liveDragTarget, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, height: 100 }) });
+const originalElementsFromPoint = document.elementsFromPoint;
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [liveDragTarget] });
+const liveDragEvent = (type: string, clientY: number) => {
+  const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, { pointerId: { value: 1 }, clientX: { value: 10 }, clientY: { value: clientY } });
+  return event;
+};
+liveDragHandle.dispatchEvent(liveDragEvent("pointerdown", 50));
+document.dispatchEvent(liveDragEvent("pointermove", 10));
+document.dispatchEvent(liveDragEvent("pointermove", 50));
+document.dispatchEvent(liveDragEvent("pointermove", 90));
+document.dispatchEvent(liveDragEvent("pointerup", 90));
+Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: originalElementsFromPoint });
+await act(async () => { await wait(); liveDrag.root.unmount(); });
+liveDrag.shell.remove();
+
+const mainHost = document.body.appendChild(document.createElement("div"));
+mainHost.id = "root";
+const reactDOMClient = await import("react-dom/client");
+const originalCreateRoot = reactDOMClient.default.createRoot;
+const fakeRoot = { render: (_element: unknown) => {}, unmount: () => {} };
+reactDOMClient.default.createRoot = (() => fakeRoot) as typeof originalCreateRoot;
+try {
+  await import("../src/main.tsx?coverage-normal");
+  dom.window.localStorage.setItem("cipherleaf-theme", "dark");
+  dom.window.localStorage.setItem("cipherleaf-scratchpad-opacity", "0.75");
+  dom.window.localStorage.setItem("cipherleaf-editor-font-size", "18");
+  dom.reconfigure({ url: "http://localhost/?window=scratchpad" });
+  await import("../src/main.tsx?coverage-scratchpad");
+  dom.window.dispatchEvent(new dom.window.StorageEvent("storage", { key: "cipherleaf-theme", newValue: "archivist" }));
+  dom.window.dispatchEvent(new dom.window.StorageEvent("storage", { key: "cipherleaf-scratchpad-opacity", newValue: "0.25" }));
+  dom.window.dispatchEvent(new dom.window.Event("focus"));
+} finally {
+  reactDOMClient.default.createRoot = originalCreateRoot;
+  mainHost.remove();
+}
+
+dom.window.close();

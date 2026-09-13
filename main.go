@@ -22,6 +22,8 @@ var assets embed.FS
 //go:embed VERSION
 var version string
 
+const scratchpadDefaultWidth = 620
+
 func main() {
 	appTitle := fmt.Sprintf("Cipherleaf - v%s", strings.TrimSpace(version))
 	vaultService := cipherleafapp.NewVaultService()
@@ -41,6 +43,7 @@ func main() {
 	vaultService.SetApp(app)
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:      "main",
 		Title:     appTitle,
 		Width:     1280,
 		Height:    720,
@@ -57,15 +60,45 @@ func main() {
 			application.PermissionClipboardRead: application.PermissionAllow,
 		},
 	})
+	scratchpad := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "scratchpad",
+		Title:            "Cipherleaf Scratchpad",
+		Width:            scratchpadDefaultWidth,
+		Height:           600,
+		MinHeight:        240,
+		AlwaysOnTop:      true,
+		Frameless:        true,
+		BackgroundType:   application.BackgroundTypeTranslucent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		InitialPosition:  application.WindowXY,
+		X:                0,
+		Y:                0,
+		Hidden:           true,
+		URL:              "/?window=scratchpad",
+		Permissions: map[application.PermissionType]application.Permission{
+			application.PermissionClipboardRead: application.PermissionAllow,
+		},
+	})
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if err := vaultService.HideScratchpad(); err != nil {
+			scratchpad.Hide()
+		}
 		event.Cancel()
 		window.EmitEvent("cipherleaf:close-requested")
 	})
 	requestVaultLock := func(*application.ApplicationEvent) {
+		if err := vaultService.HideScratchpad(); err != nil {
+			scratchpad.Hide()
+		}
 		window.EmitEvent("cipherleaf:system-lock-requested")
 	}
 	app.Event.OnApplicationEvent(events.Common.SystemWillSleep, requestVaultLock)
 	app.Event.OnApplicationEvent(events.Common.ScreenLocked, requestVaultLock)
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		if err := vaultService.InitializeScratchpadShortcut(); err != nil {
+			log.Printf("failed to register scratchpad global shortcut: %v", err)
+		}
+	})
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)

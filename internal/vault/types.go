@@ -112,14 +112,15 @@ type Tombstone struct {
 }
 
 type manifest struct {
-	FormatVersion  int           `json:"format_version"`
-	VaultID        string        `json:"vault_id"`
-	Capabilities   []string      `json:"capabilities,omitempty"`
-	Folders        []Folder      `json:"folders"`
-	Notes          []NoteSummary `json:"notes"`
-	DeletedNotes   []Tombstone   `json:"deleted_notes,omitempty"`
-	DeletedFolders []Tombstone   `json:"deleted_folders,omitempty"`
-	Settings       VaultSettings `json:"settings,omitempty"`
+	FormatVersion  int             `json:"format_version"`
+	VaultID        string          `json:"vault_id"`
+	Capabilities   []string        `json:"capabilities,omitempty"`
+	Folders        []Folder        `json:"folders"`
+	Notes          []NoteSummary   `json:"notes"`
+	DeletedNotes   []Tombstone     `json:"deleted_notes,omitempty"`
+	DeletedFolders []Tombstone     `json:"deleted_folders,omitempty"`
+	Settings       VaultSettings   `json:"settings,omitempty"`
+	Scratchpad     ScratchpadState `json:"scratchpad"`
 }
 
 // VaultSettings contains general preferences encrypted and synced with a vault.
@@ -188,11 +189,12 @@ type remoteSyncObject struct {
 }
 
 type remoteFolderManifest struct {
-	FormatVersion int           `json:"format_version"`
-	VaultID       string        `json:"vault_id"`
-	Folders       []Folder      `json:"folders"`
-	Deleted       []Tombstone   `json:"deleted,omitempty"`
-	Settings      VaultSettings `json:"settings,omitempty"`
+	FormatVersion int             `json:"format_version"`
+	VaultID       string          `json:"vault_id"`
+	Folders       []Folder        `json:"folders"`
+	Deleted       []Tombstone     `json:"deleted,omitempty"`
+	Settings      VaultSettings   `json:"settings,omitempty"`
+	Scratchpad    ScratchpadState `json:"scratchpad"`
 }
 
 type remoteTrackingInventory struct {

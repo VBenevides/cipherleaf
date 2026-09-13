@@ -12,6 +12,7 @@ import { ClientSelect, DashboardPeriodSelect, ProjectSelect, TagMultiSelect } fr
 import TimeTrackingView from "../src/TimeTrackingView";
 import { ThemedDatePicker } from "../src/ThemedDatePicker";
 import { SNIPPETS, completeCodeFenceElement, expandSnippet, expandSnippetWithContext, rollLastDatedSection } from "../src/snippets";
+import { boardMarker } from "../src/cards";
 import { canonicalObjectDocumentFromMarkdown } from "../src/objectDocument";
 
 const storage = new Map<string, string>();
@@ -39,6 +40,7 @@ const documentStub = {
   removeEventListener: () => {},
   hasFocus: () => true,
   getElementById: () => null,
+  querySelector: () => null,
 };
 Object.assign(globalThis, { window: windowStub, document: documentStub, IS_REACT_ACT_ENVIRONMENT: true });
 const dispatchWindow = (type: string, event: any) => windowListeners.get(type)?.forEach((listener) => listener(event));
@@ -54,6 +56,8 @@ const onChange = () => {};
 const folders = [{ id: "folder", name: "Folder", parentId: "", order: 0, locked: false, hidden: false }];
 const notes = [{ id: "note", title: "Note", folderId: "folder", order: 0, updatedAt: "", createdAt: "", tags: [], outgoingLinks: [] }];
 const note = { id: "note", title: "Note", folderId: "folder", order: 0, content: "# Note\n\n- [ ] Task", updatedAt: "", createdAt: "", modifiedAt: 0, revision: 0 };
+const boardNote = { ...note, content: boardMarker("board-1", [], "Roadmap") };
+const templateNote = { ...note, id: "template", title: "Template", content: ["---", "cipherleaf-card-template: true", "cipherleaf-card-template-name: Template", "cipherleaf-card-template-status: in-progress", "cipherleaf-card-template-tags: [work]", "cipherleaf-card-template-write-changes-to-editor: true", "---", "Template body"].join("\n") };
 const cardNote = { id: "card", title: "Card", folderId: "folder", order: 0, content: [
   "---", "cipherleaf-card: true", "cipherleaf-card-status: not-started", "cipherleaf-card-tags: [work]", "cipherleaf-card-created-at: 2026-01-01T12:00:00", "cipherleaf-card-started-at: 2026-01-02T12:00:00", "cipherleaf-card-finished-at: 2026-01-04T12:00:00", "---", "Card body",
 ].join("\n") };
@@ -64,7 +68,7 @@ const archivedProject = { ...projects[0], id: "old-project", name: "Old project"
 const archivedTag = { ...tags[0], id: "old-tag", name: "Old tag", archivedAtUtc: "2026-01-01" };
 const archivedProjectResult = { ...projects[0], id: "archived-project", name: "Archived project", archivedAtUtc: "2026-01-01" };
 const archivedTagResult = { ...tags[0], id: "archived-tag", name: "Archived tag", archivedAtUtc: "2026-01-01" };
-const timeEntry = { id: "entry", name: "Task", clientId: "client", projectId: "project", tagIds: ["tag"], startedAtUtc: "2026-08-31T10:00:00Z", endedAtUtc: "2026-08-31T11:00:00Z", createdAtUtc: "2026-08-31T10:00:00Z", updatedAtUtc: "2026-08-31T11:00:00Z", modifiedAt: 1, revision: 1 };
+const timeEntry = { id: "entry", name: "Task", clientId: "client", projectId: "project", tagIds: ["tag"], startedAtUtc: "2026-09-08T10:00:00Z", endedAtUtc: "2026-09-08T11:00:00Z", createdAtUtc: "2026-09-08T10:00:00Z", updatedAtUtc: "2026-09-08T11:00:00Z", modifiedAt: 1, revision: 1 };
 const timeRange = { entry: timeEntry, startedAtUtc: timeEntry.startedAtUtc, endedAtUtc: timeEntry.endedAtUtc, totalSeconds: 3600 };
 const syncResult = { linked: true, message: "Sync complete", warning: "", branch: "main", lastCommit: "commit", pull: { linked: true, message: "Pulled", warning: "", branch: "main", lastCommit: "commit", stagingPath: "", temporary: false }, push: { linked: true, message: "Pushed", warning: "", branch: "main", lastCommit: "commit", upToDate: true, localMilliseconds: 1, transportMilliseconds: 1, transportPerformed: true }, merge: { pulledNotes: 0, updatedNotes: 0, deletedNotes: 0, pulledFolders: 0, deletedFolders: 0, updatedSettings: false, upToDate: true, conflicts: [], trackingConflicts: [] }, timings: { pullMilliseconds: 1, mergeMilliseconds: 1, pushMilliseconds: 1, totalMilliseconds: 3, transportMilliseconds: 1, localMilliseconds: 2 }, git: { sshConnectionReuse: true, sshConnectionPersistSeconds: 1, transportOperations: 1, gitBytes: 1, repositoryFilesBytes: 1, platform: "test", architecture: "test", gitVersion: "git", openSshVersion: "ssh", usedPrefetch: true, repositoryPath: "/repo" } };
 let conflictNext = false;
@@ -76,6 +80,7 @@ const richFolders = [
 const richNotes = [
   { ...notes[0], title: "Linked note", outgoingLinks: ["note", "Missing"], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-02T00:00:00Z", modifiedAt: 1, revision: 1, attachmentIds: [] },
   { ...notes[0], id: "other-note", title: "Other note", outgoingLinks: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-03T00:00:00Z", modifiedAt: 2, revision: 1, attachmentIds: [] },
+  { ...notes[0], id: "template", title: "Template", properties: { "cipherleaf-card-template": true, "cipherleaf-card-template-name": "Template" }, outgoingLinks: [], attachmentIds: [] },
 ];
 const richMarkdown = [
   "> Section",
@@ -220,32 +225,37 @@ assert.equal(expandSnippetWithContext("rollf", "", "> 2026-01-01\n  > [ ] next",
 let openCardMode = false;
 let emptyAppMode = false;
 let linkedAppMode = false;
+let boardAppMode = false;
+let throwMethod = -1;
 let lockedAction: "create" | "clone" = "create";
+let vaultSettings = { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
 setTransport({
   call: async (_objectID, _method, _windowName, request) => {
+    if (request?.methodID === throwMethod) throw new Error("coverage failure");
     if (timeTrackingMode === "error" && [308561412, 1766611694, 2155705394, 259867052].includes(request?.methodID ?? -1)) throw new Error("time tracking failed");
     switch (request?.methodID) {
       case 355925843: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
       case 3632998615: return { path: "/vault", theme: "light" };
       case 1694639620: return ["/vault", "/other-vault"];
       case 2923257755: return linkedAppMode ? { linked: true, lastSyncedAt: 1, repositorySsh: "git@github.com:owner/repo.git", privateKeyPath: "/key", branch: "main", repositoryPrivate: true } : { linked: false, lastSyncedAt: 0 };
-      case 4079532670: return { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
+      case 4079532670: return vaultSettings;
       case 308561412: return timeTrackingMode === "empty" ? { clients: [], projects: [], tags: [] } : { clients: [...clients, { id: "old-client", name: "Old client", archivedAtUtc: "2026-01-01" }], projects: [...projects, archivedProject], tags: [...tags, archivedTag] };
       case 259867052: return timeTrackingMode === "empty" ? { projectCount: 0, tagCount: 0, totalSeconds: 0, averageDaySeconds: 0, clients: [], projects: [], tags: [], tasks: [], days: [] } : { projectCount: 1, tagCount: 1, totalSeconds: 3600, averageDaySeconds: 600, clients: [{ id: "client", name: "Client", totalSeconds: 3600 }], projects: [{ id: "project", name: "Project", totalSeconds: 3600 }], tags: [{ id: "tag", name: "Tag", totalSeconds: 3600 }], tasks: [{ name: "Task", totalSeconds: 3600, entryCount: 1 }], days: [{ localDate: "2026-01-01", totalSeconds: 3600 }] };
       case 516244023: return [];
       case 2155705394: return null;
       case 220507736: return emptyAppMode ? [] : richFolders;
       case 888598820: return emptyAppMode ? [] : richNotes;
-      case 1503400201: return openCardMode ? cardNote : note;
+      case 1503400201: return request?.args?.[0] === "template" ? templateNote : boardAppMode ? boardNote : openCardMode ? cardNote : note;
       case 715955408: return note;
-      case 1766611694: return timeTrackingMode === "empty" ? { entries: [], days: [], totalSeconds: 0 } : { entries: [timeRange], days: [{ localDate: "2026-08-31", totalSeconds: 3600 }], totalSeconds: 3600 };
+      case 1766611694: return timeTrackingMode === "empty" ? { entries: [], days: [], totalSeconds: 0 } : { entries: [timeRange], days: [{ localDate: "2026-09-08", totalSeconds: 3600 }], totalSeconds: 3600 };
       case 1301789830: return { cpuPercent: 1, memoryBytes: 2, memoryUsage: [{ name: "cipherleaf", pid: 1, memoryBytes: 2 }] };
       case 3277829736: return { notesBytes: 2, attachmentsBytes: 3, timeTrackingBytes: 4, gitBytes: 5 };
       case 3351323131: return [{ id: "trash", kind: "note", title: "Deleted", deletedAt: "2026-01-01T00:00:00Z" }];
       case 2533964502: return [{ revision: 1, title: "Old", updatedAt: "2026-01-01T00:00:00Z" }];
+      case 3216968481: return note;
       case 991868496: return [{ noteId: "note", title: "Note", folderId: "folder", field: "content", snippet: "Task", offset: 0, matchLength: 4, utf16Offset: 0, utf16MatchLength: 4 }];
       case 1932071061: return { replacedNotes: 1, replacements: 1 };
-      case 2770680190: return { note, summary: richNotes[0] };
+      case 2770680190: return request?.args?.[0] === "template" ? templateNote : { note, summary: richNotes[0] };
       case 814546393: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
       case 2911480927: return note;
       case 239305947: return richFolders[0];
@@ -273,6 +283,7 @@ setTransport({
         return { ...syncResult, merge: { ...syncResult.merge, conflicts: [{ localNoteId: "note", remoteNoteId: "remote-note", title: "Merge conflict", message: "Remote edits need review.", localContent: "# Local\n", remoteContent: "# Remote\n" }], trackingConflicts: [{ id: "tracking", kind: "entry-edit", objectId: "entry", message: "Tracking entry changed remotely.", localEntry: timeEntry, remoteEntry: { ...timeEntry, name: "Remote task" } }] } };
       }
       case 974300788: return { linked: true, message: "Link complete", warning: "", branch: "main" };
+      case 233117765: return "/selected-key";
       case 3947699405: return null;
       case 3056730288: return null;
       case 3801710036: return { locked: true, path: "/vault", vaultId: "", noteCount: 0 };
@@ -280,15 +291,20 @@ setTransport({
       case 2182536893: return { id: "file", filename: "file.txt", mimeType: "text/plain", size: 12 };
       case 40245150: return "/export/file.txt";
       case 3438204788: return "/tmp/file.txt";
+      case 3669256728: return "/backup/snapshot";
       case 1268925393: return [{ noteId: "other-note", title: "Other note", folderId: "folder", field: "content", snippet: "Linked note", offset: 0, matchLength: 4, utf16Offset: 0, utf16MatchLength: 4 }];
       case 4116603909: return [];
       case 3315011432: return "secret";
       case 1416189504: return { success: true, message: "Connection verified", warning: "", branch: "main" };
-      case 3499492715: return { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
+      case 3499492715: {
+        vaultSettings = { ...vaultSettings, ...(request?.args?.[0] ?? {}), revision: vaultSettings.revision + 1, modifiedAt: vaultSettings.modifiedAt + 1 };
+        return vaultSettings;
+      }
       case 1224618098: return "/backup";
       case 1927621820: return { notes: 1, attachments: 0, path: "/export" };
       case 1577812963: return { notes: 1, folders: 0, attachments: 0 };
       case 2357438882: return { linked: false, message: "Force push complete", warning: "", branch: "main", lastCommit: "", upToDate: true, localMilliseconds: 1, transportMilliseconds: 1, transportPerformed: true };
+      case 1978051175: return { locked: true, path: "/renamed-vault", vaultId: "", noteCount: 0 };
       case 3809458984: return "/vault";
       case 3679480759: return ["Arial", "Georgia"];
       case 76659230: return [];
@@ -300,7 +316,7 @@ setTransport({
 const trackingRenderer = create(createElement(TimeTrackingView, { now: new Date("2026-09-02T12:00:00Z") }));
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { buttonNamed(trackingRenderer, "Month")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
-await act(async () => { buttonNamed(trackingRenderer, "Dashboard")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 30)); });
+await act(async () => { buttonNamed(trackingRenderer, "Dashboard")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 100)); });
 await act(async () => {
   const task = trackingRenderer.root.findAll((node) => node.type === "button" && textContent(node).includes("Task"))[0];
   task?.props.onClick();
@@ -402,6 +418,11 @@ const clickAppContaining = async (name: string) => {
   assert.ok(button, `missing app button: ${name}`);
   await act(async () => { button.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 0)); });
 };
+const clickCommandPaletteRow = async (name: string) => {
+  const row = appRenderer?.root.findAll((node) => node.type === "div" && node.props.className === "command-palette-command" && textContent(node).includes(name))[0];
+  assert.ok(row, `missing command palette row: ${name}`);
+  await act(async () => { row.props.onClick?.(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+};
 const clickLastApp = async (name: string) => {
   const buttons = appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim() === name));
   const button = buttons?.at(-1);
@@ -450,6 +471,10 @@ assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "C
 await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 const writeCardChanges = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Write changes to editor")[0];
 assert.equal(writeCardChanges?.props.checked, false);
+const cardTemplateSelect = appRenderer?.root.findAll((node) => node.type === "select" && node.props.value === "")[0];
+await act(async () => { cardTemplateSelect?.props.onChange({ target: { value: "template" } }); await new Promise((resolve) => setTimeout(resolve, 10)); });
+const cardEditor = appRenderer?.root.findAll((node) => typeof node.type === "function" && (node.type as Function).name === "LiveMarkdownEditor").at(-1);
+await act(async () => { cardEditor?.props.onChange?.("Template body updated"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { writeCardChanges?.props.onChange({ target: { checked: true } }); });
 const cardStatus = appRenderer?.root.findAll((node) => node.type === "button" && node.props.role === "option")[0];
 await act(async () => { cardStatus?.props.onClick(); });
@@ -458,7 +483,7 @@ await act(async () => { cardTagInput?.props.onChange({ target: { value: "urgent"
 const addTag = appRenderer?.root.findAll((node) => node.type === "button" && textContent(node) === "Add tag")[0];
 await act(async () => { addTag?.props.onClick(); });
 await clickApp("Save card");
-assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 1);
 await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => {
   dispatchWindow("keydown", {
@@ -471,7 +496,7 @@ await act(async () => {
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 0);
+assert.equal(appRenderer?.root.findAll((node) => node.props["aria-label"] === "Card details").length, 1);
 await act(async () => { await liveEditor.props.onOpenCard("card"); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await clickApp("Save as template");
 await clickApp("Delete template");
@@ -486,6 +511,7 @@ await act(async () => { noteRow?.props.onContextMenu?.({ preventDefault: onChang
 await clickApp("Delete note");
 await submitAppDialog();
 const folderRow = appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("folder-list-item") && typeof node.props.onContextMenu === "function")[0];
+await act(async () => { await folderRow?.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 10)); });
 await act(async () => { folderRow?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Rename folder");
 await act(async () => {
@@ -508,6 +534,8 @@ const nestedFolder = () => appRenderer?.root.findAll((node) => typeof node.props
 await act(async () => { nestedFolder()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Remove lock");
 await completeFolderPassword("Remove lock");
+await act(async () => { nestedFolder()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
+await clickApp("Top level");
 const normalFolder = () => appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("folder-list-item") && textContent(node).includes("Folder") && !textContent(node).includes("Nested"))[0];
 await act(async () => { normalFolder()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickAppContaining("Lock folder");
@@ -525,6 +553,14 @@ await submitAppDialog();
 const movableNote = () => appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("note-list-item"))[0];
 await act(async () => { movableNote()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Unfiled");
+await act(async () => {
+  appRenderer?.root.findAll((node) => node.props.className === "vault-selector-button")[0]?.props.onClick?.();
+});
+await act(async () => {
+  const removeRecent = appRenderer?.root.findAll((node) => node.props.className === "vault-selector-remove")[0];
+  removeRecent?.props.onClick?.({ stopPropagation: onChange });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 await clickApp("Settings");
 await clickApp("Settings…");
 await clickApp("General");
@@ -533,9 +569,15 @@ await clickApp("Auto-save");
 await clickApp("Auto-sync");
 await clickApp("Vault lock");
 await clickApp("Section state");
+await clickApp("Card editor");
 await act(async () => {
   appRenderer?.root.findAll((node) => node.type === "input" && node.props.type !== "file").forEach((input) => input.props.onChange?.({ target: { value: input.props.type === "number" ? "2" : "changed", checked: true } }));
   appRenderer?.root.findAll((node) => node.type === "select").forEach((select) => select.props.onChange?.({ target: { value: "folder" } }));
+});
+await act(async () => {
+  appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder === "YYYY-MM-DD")[0]?.props.onChange({ target: { value: "YYYY/MM/DD" } });
+  appRenderer?.root.findAll((node) => node.type === "input" && node.props.type === "number").forEach((input) => input.props.onChange({ target: { value: "3" } }));
+  appRenderer?.root.findAll((node) => node.type === "button" && ["Expanded", "Collapsed"].includes(textContent(node))).forEach((button) => button.props.onClick());
 });
 await clickApp("Appearance");
 await clickApp("Theme");
@@ -543,6 +585,14 @@ await clickApp("Dark (Nord)");
 await clickApp("Guide lines");
 await clickApp("Dotted");
 await clickApp("Text size");
+await act(async () => {
+  appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Scratchpad background opacity")[0]?.props.onChange({ target: { value: "0.75" } });
+  appRenderer?.root.findAll((node) => node.type === "input" && node.props.type === "range").forEach((input) => input.props.onChange({ target: { value: "18" } }));
+});
+await act(async () => {
+  const fontInput = appRenderer?.root.findAll((node) => node.props.className === "appearance-font-input")[0];
+  await fontInput?.props.onChange({ target: { files: [{ name: "font.otf" }], value: "" } });
+});
 const originalWindowTimeout = windowStub.setTimeout;
 windowStub.setTimeout = ((callback: TimerHandler, delay?: number, ...args: any[]) => delay && delay >= 600_000 ? 0 : setTimeout(callback, delay, ...args)) as typeof windowStub.setTimeout;
 await clickApp("Installed fonts…");
@@ -552,7 +602,73 @@ windowStub.setTimeout = originalWindowTimeout;
 await clickApp("Reset");
 await clickApp("Close settings");
 await clickApp("Settings");
+await clickApp("Settings…");
+await clickApp("General");
+const dailyFormatInput = () => appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder === "YYYY-MM-DD")[0];
+await act(async () => { dailyFormatInput()?.props.onChange({ target: { value: "DD/MM/YYYY" } }); });
+await clickApp("Save and Exit");
+await waitForApp();
+await clickApp("Settings");
+await clickApp("Settings…");
+await clickApp("General");
+assert.equal(dailyFormatInput()?.props.value, "DD/MM/YYYY");
+await act(async () => { dailyFormatInput()?.props.onChange({ target: { value: "MM/DD/YYYY" } }); });
+await clickApp("Exit without Saving");
+await clickApp("Settings");
+await clickApp("Settings…");
+await clickApp("General");
+assert.equal(dailyFormatInput()?.props.value, "DD/MM/YYYY");
+await clickApp("Close settings");
+
+const originalHTMLElement = (globalThis as { HTMLElement?: unknown }).HTMLElement;
+if (typeof originalHTMLElement !== "function") Object.assign(globalThis, { HTMLElement: class {} });
+try {
+  dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
+  await waitForApp();
+  const shortcutButton = (label: string) => appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === label)[0];
+  const shortcutEvent = (key: string, code: string, shiftKey = false) => ({ code, key, ctrlKey: true, altKey: false, shiftKey, metaKey: false, repeat: false, nativeEvent: { isComposing: false }, preventDefault: onChange });
+  const editShortcut = async (command: string, event: ReturnType<typeof shortcutEvent>) => {
+    const button = shortcutButton(`Edit shortcut for ${command}`);
+    assert.ok(button, `missing shortcut button: ${command}`);
+    await act(async () => { button.props.onClick?.({ stopPropagation: onChange }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const captureButton = shortcutButton(`Edit shortcut for ${command}`);
+    assert.ok(captureButton, `missing shortcut capture button: ${command}`);
+    await act(async () => { captureButton.props.onKeyDown?.(event); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  };
+  await editShortcut("Save note", shortcutEvent("l", "KeyL"));
+  assert.match(textContent(shortcutButton("Edit shortcut for Save note") ?? { children: [] }), /Ctrl \+ L/);
+  await editShortcut("New note", shortcutEvent("l", "KeyL"));
+  assert.match(textContent(appRenderer?.root.findAll((node) => node.props.role === "alert")[0] ?? { children: [] }), /already assigned to save-note/);
+  await editShortcut("New note", shortcutEvent("P", "KeyP", true));
+  assert.match(textContent(appRenderer?.root.findAll((node) => node.props.role === "alert")[0] ?? { children: [] }), /reserved for the command palette/);
+  const resetSaveShortcut = shortcutButton("Reset shortcut for Save note");
+  assert.ok(resetSaveShortcut, "missing Save note shortcut reset");
+  await act(async () => { resetSaveShortcut.props.onClick?.({ stopPropagation: onChange }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.match(textContent(shortcutButton("Edit shortcut for Save note") ?? { children: [] }), /Ctrl \+ S/);
+  await clickApp("Reset all shortcuts");
+  await clickApp("Close command palette");
+} finally {
+  if (originalHTMLElement === undefined) delete (globalThis as { HTMLElement?: unknown }).HTMLElement;
+  else Object.assign(globalThis, { HTMLElement: originalHTMLElement });
+}
+const runPaletteCommand = async (name: string) => {
+  dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
+  await waitForApp();
+  const input = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Search commands")[0];
+  await act(async () => { input?.props.onChange({ target: { value: name } }); });
+  await clickCommandPaletteRow(name);
+  await waitForApp();
+};
+await runPaletteCommand("Save note");
+await runPaletteCommand("Quick note switcher");
+await act(async () => { appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === "Close")[0]?.props.onClick(); });
+await runPaletteCommand("Find in all notes");
+await act(async () => { appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === "Close")[0]?.props.onClick(); });
+await clickApp("Settings");
 await clickApp("Application statistics…");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+assert.ok(appRenderer?.root.findAll((node) => node.props.id === "statistics-title").length, "statistics panel did not open");
+assert.match(textContent(appRenderer?.root.findAll((node) => node.props.className === "statistics-grid")[0] ?? { children: [] }), /CPU usage/);
 await clickApp("Close statistics");
 await clickApp("Settings");
 await clickApp("Log");
@@ -562,7 +678,7 @@ await clickApp("File");
 await clickAppContaining("New file");
 await clickApp("File");
 await clickApp("Attach encrypted file…");
-await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 await clickApp("Export / open");
 await clickApp("Remove");
 await clickApp("File");
@@ -573,6 +689,15 @@ await clickLastApp("Export plaintext");
 await clickApp("Vault");
 await clickApp("Vault Settings…");
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => {
+  const inputs = appRenderer?.root.findAll((node) => node.type === "input");
+  inputs?.find((input) => input.props.placeholder?.startsWith("git@"))?.props.onChange({ target: { value: "git@github.com:owner/changed.git" } });
+  inputs?.find((input) => input.props.placeholder?.startsWith("/home"))?.props.onChange({ target: { value: "/changed-key" } });
+  inputs?.find((input) => input.props.placeholder === "main")?.props.onChange({ target: { value: "develop" } });
+  inputs?.find((input) => input.props.type === "checkbox")?.props.onChange({ target: { checked: false } });
+});
+await clickApp("Browse…");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 await clickApp("Forget remembered secret");
 await clickApp("Test connection");
 await act(async () => {
@@ -581,6 +706,7 @@ await act(async () => {
 });
 await clickApp("Save");
 await clickLastApp("Save");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 await clickApp("Browse…");
 await act(async () => {
   const backup = appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder === "Disabled")[0];
@@ -592,11 +718,39 @@ await act(async () => {
   backup?.props.onChange({ target: { value: "" } });
 });
 await clickLastApp("Save");
+await act(async () => {
+  const form = appRenderer?.root.findAll((node) => node.type === "form" && String(node.props.className ?? "").includes("vault-modal"))[0];
+  form?.props.onSubmit({ preventDefault: onChange });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+});
 await clickApp("Pull remote and link");
 await clickApp("Close settings");
+
+await clickApp("Settings");
+await clickApp("Application statistics…");
+await act(async () => {
+  const input = appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder?.startsWith("Search text"))[0];
+  input?.props.onChange({ target: { value: "coverage" } });
+  input?.props.onKeyDown({ key: "Escape" });
+  const options = appRenderer?.root.findAll((node) => node.type === "input" && node.props.type === "checkbox");
+  options?.forEach((option) => option.props.onChange({ target: { checked: true } }));
+});
+await clickApp("Close statistics");
 await clickApp("Vault");
 await clickApp("Trash and version history…");
-await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+assert.ok(appRenderer?.root.findAll((node) => node.props.id === "recovery-title").length, "recovery panel did not open");
+assert.ok(appRenderer?.root.findAll((node) => node.props.className === "recovery-row").length, "recovery rows did not load");
+await act(async () => {
+  const versionRow = appRenderer?.root.findAll((node) => node.props.className === "recovery-row").find((row) => textContent(row).includes("Revision"));
+  versionRow?.findAll((node) => node.type === "button")[0]?.props.onClick?.(buttonEvent);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+});
+await act(async () => {
+  const row = appRenderer?.root.findAll((node) => node.props.className === "recovery-row")[0];
+  row?.findAll((node) => node.type === "button").forEach((button) => button.props.onClick?.(buttonEvent));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+});
 await clickApp("Restore");
 await clickLastApp("Delete");
 await clickLastApp("Delete permanently");
@@ -623,7 +777,8 @@ await act(async () => {
     editor.props.onChange?.("# Changed from source");
     editor.props.onError?.(new Error("source error"));
   });
-  appRenderer?.root.findAll((node) => node.props["aria-label"] === "Backlinks").forEach((panel) => panel.findAll((child) => child.type === "button")[0]?.props.onClick?.(buttonEvent));
+  const backlinkPanel = appRenderer?.root.findAll((node) => node.props["aria-label"] === "Backlinks")[0];
+  backlinkPanel?.findAll((child) => child.type === "button")[0]?.props.onClick?.(buttonEvent);
 });
 await clickApp("Live Preview");
 const titleInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
@@ -656,33 +811,33 @@ await clickAppStarting("Open calendar");
 await clickApp("Today");
 await act(async () => { appRenderer?.root.findAll((node) => node.type === "button" && String(node.props.className ?? "").includes("calendar-day"))[0]?.props.onClick?.(buttonEvent); });
 await clickApp("Open daily note");
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
+dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
 await waitForApp();
 const paletteInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Search commands")[0];
 await act(async () => { paletteInput?.props.onChange({ target: { value: "sidebar" } }); });
 await clickAppContaining("Toggle sidebar");
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: false, key: "k", preventDefault: onChange });
+dispatchWindow("keydown", { code: "KeyK", ctrlKey: true, metaKey: false, shiftKey: false, key: "k", preventDefault: onChange });
 await waitForApp();
 const quickInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder === "Type a note title")[0];
 await act(async () => { quickInput?.props.onChange({ target: { value: "Note" } }); quickInput?.props.onKeyDown({ key: "Enter" }); });
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
+dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
 await waitForApp();
 const timerPaletteInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Search commands")[0];
 await act(async () => { timerPaletteInput?.props.onChange({ target: { value: "Start timer" } }); });
-await clickAppContaining("Start timer");
+await clickCommandPaletteRow("Start timer");
 await act(async () => {
   const input = appRenderer?.root.findAll((node) => node.type === "input" && node.props.autoFocus)[0];
   input?.props.onChange({ target: { value: "Tracked task" } });
   appRenderer?.root.findAll((node) => node.type === "form").at(-1)?.props.onSubmit({ preventDefault: onChange });
   await new Promise((resolve) => setTimeout(resolve, 10));
 });
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
+dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
 await waitForApp();
 const finishPaletteInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Search commands")[0];
 await act(async () => { finishPaletteInput?.props.onChange({ target: { value: "Finish timer" } }); });
-await clickAppContaining("Finish timer");
+await clickCommandPaletteRow("Finish timer");
 await clickApp("Finish timer");
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: true, key: "f", preventDefault: onChange });
+dispatchWindow("keydown", { code: "KeyF", ctrlKey: true, metaKey: false, shiftKey: true, key: "f", preventDefault: onChange });
 await waitForApp();
 const searchInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder?.startsWith("Search text"))[0];
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
@@ -691,17 +846,19 @@ await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250))
 const globalResult = appRenderer?.root.findAll((node) => node.type === "button" && node.props.className === "global-search-result")[0];
 assert.ok(globalResult, "missing global search result");
 await act(async () => { globalResult.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 0)); });
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: true, key: "f", preventDefault: onChange });
+await act(async () => {
+  appRenderer?.root.findAll((node) => node.type === "button" && textContent(node) === "Back to previous location")[0]?.props.onClick?.(buttonEvent);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+dispatchWindow("keydown", { code: "KeyF", ctrlKey: true, metaKey: false, shiftKey: true, key: "f", preventDefault: onChange });
 await waitForApp();
 await clickApp("Close");
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: false, key: "k", preventDefault: onChange });
-await waitForApp();
 const createQuickInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder === "Type a note title")[0];
 await act(async () => { createQuickInput?.props.onChange({ target: { value: "Brand new" } }); await new Promise((resolve) => setTimeout(resolve, 0)); });
 const createQuickResult = appRenderer?.root.findAll((node) => node.type === "button" && textContent(node).includes("Create"))[0];
 assert.ok(createQuickResult, "missing quick create result");
 await act(async () => { createQuickResult.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 0)); });
-dispatchWindow("keydown", { ctrlKey: true, metaKey: false, shiftKey: true, key: "h", preventDefault: onChange });
+dispatchWindow("keydown", { code: "KeyH", ctrlKey: true, metaKey: false, shiftKey: true, key: "h", preventDefault: onChange });
 await waitForApp();
 const replaceInputs = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "global-search-input");
 await act(async () => { replaceInputs?.[0]?.props.onChange({ target: { value: "Task" } }); replaceInputs?.[1]?.props.onChange({ target: { value: "Done" } }); await new Promise((resolve) => setTimeout(resolve, 250)); });
@@ -709,7 +866,50 @@ await clickApp("Replace all");
 await clickLastApp("Replace");
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 await clickApp("Close");
+throwMethod = 991868496;
+dispatchWindow("keydown", { code: "KeyF", ctrlKey: true, metaKey: false, shiftKey: true, key: "f", preventDefault: onChange });
+await waitForApp();
+const failingSearchInput = appRenderer?.root.findAll((node) => node.type === "input" && node.props.placeholder?.startsWith("Search text"))[0];
+await act(async () => { failingSearchInput?.props.onChange({ target: { value: "failure" } }); await new Promise((resolve) => setTimeout(resolve, 250)); });
+assert.match(JSON.stringify(appRenderer?.toJSON()), /coverage failure/);
+throwMethod = -1;
+await clickApp("Close");
+throwMethod = 1301789830;
+await clickApp("Settings");
+await clickApp("Application statistics…");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+assert.match(JSON.stringify(appRenderer?.toJSON()), /coverage failure/);
+throwMethod = -1;
+await clickApp("Close statistics");
+const failingTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
+await act(async () => { failingTitle?.props.onChange({ target: { value: "Save failure" } }); });
+throwMethod = 2770680190;
+await clickApp("Save this note (Ctrl + S)");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+assert.match(JSON.stringify(appRenderer?.toJSON()), /coverage failure/);
+throwMethod = -1;
+await act(async () => { appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === "Collapse title")[0]?.props.onClick(); });
+assert.ok(appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === "Expand title").length, "title did not collapse");
+await act(async () => { appRenderer?.root.findAll((node) => node.type === "button" && node.props["aria-label"] === "Expand title")[0]?.props.onClick(); });
+await clickApp("Vault");
+await clickApp("Rename vault…");
+await completePrompt("Rename vault", "Renamed vault");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 await act(async () => { appRenderer?.unmount(); });
+
+boardAppMode = true;
+const boardRenderer = create(createElement(App));
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+const boardEditor = boardRenderer.root.findAll((node) => typeof node.type === "function" && (node.type as Function).name === "LiveMarkdownEditor")[0];
+assert.ok(boardEditor);
+await act(async () => {
+  boardEditor.props.onChangeBoardTitle?.("board-1", "Updated roadmap");
+  boardEditor.props.onChangeBoardColumns?.("board-1", [{ id: "todo", name: "Todo", color: "#123456", cardIDs: [] }], [], ["orphan"]);
+  boardEditor.props.onMoveCardInBoard?.("board-1", "card", "todo");
+  await boardEditor.props.onAddCardToBoard?.("board-1");
+});
+await act(async () => { boardRenderer.unmount(); });
+boardAppMode = false;
 
 linkedAppMode = true;
 let linkedRenderer: ReturnType<typeof create> | undefined;
@@ -723,6 +923,8 @@ const clickLinked = async (name: string) => {
   assert.ok(button, `missing linked app button: ${name}`);
   await act(async () => { button.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 0)); });
 };
+dispatchWindow("focus", {});
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 const submitLinkedDialog = async () => {
   await act(async () => { linkedRenderer?.root.findAll((node) => node.type === "form" && String(node.props.className ?? "").includes("app-dialog-modal")).at(-1)?.props.onSubmit({ preventDefault: onChange }); await new Promise((resolve) => setTimeout(resolve, 20)); });
 };
@@ -739,11 +941,25 @@ conflictNext = true;
 await clickLinked("Vault");
 await clickLinked("Sync vault");
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+await clickLinked("Use remote");
 assert.match(JSON.stringify(linkedRenderer?.toJSON()), /Force push local vault/);
 await clickLinked("Force push local vault");
 await submitLinkedDialog();
 await clickLinked("Vault");
 await clickLinked("Vault Settings…");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+await act(async () => {
+  const inputs = linkedRenderer?.root.findAll((node) => node.type === "input");
+  inputs?.find((input) => input.props.placeholder?.startsWith("git@"))?.props.onChange({ target: { value: "git@github.com:owner/updated.git" } });
+  inputs?.find((input) => input.props.placeholder?.startsWith("/home"))?.props.onChange({ target: { value: "/updated-key" } });
+  inputs?.find((input) => input.props.placeholder === "main")?.props.onChange({ target: { value: "develop" } });
+  inputs?.find((input) => input.props.type === "checkbox")?.props.onChange({ target: { checked: false } });
+});
+await act(async () => {
+  const browseButtons = linkedRenderer?.root.findAll((node) => node.type === "button" && textContent(node).includes("Browse…"));
+  browseButtons?.at(-1)?.props.onClick?.(buttonEvent);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 await clickLinked("Open Git terminal");
 await clickLinked("Test connection");
@@ -818,6 +1034,7 @@ await act(async () => {
   await new Promise((resolve) => setTimeout(resolve, 100));
 });
 const cloneButton = (name: string) => cloneRenderer?.root.findAll((node) => node.type === "button" && textContent(node).includes(name))[0];
+await act(async () => { cloneButton("Browse…")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 await act(async () => { cloneButton("Clone from GitHub")?.props.onClick(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 assert.match(JSON.stringify(cloneRenderer?.toJSON()), /Clone from GitHub/);
 await act(async () => {

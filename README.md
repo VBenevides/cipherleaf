@@ -72,6 +72,7 @@ Appearance settings also provide optional full or dotted journal lines, an
 editor font-size range from 10–32 px, installed system fonts, and custom TrueType (`.ttf`) editor fonts.
 Theme and installed-font preferences persist between sessions; imported font
 data remains local to the application.
+The Scratchpad overlay follows the selected theme at 50% opacity by default; its opacity can be adjusted in Appearance.
 
 ## Security model
 
@@ -185,6 +186,7 @@ npm --prefix frontend run build
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
 | `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
 | `Ctrl/Cmd+Shift+E` | Confirm finishing the active timer |
+| `Super+grave/backtick` | Open Scratchpad (global overlay when supported by desktop; app unfocused; editable from the Command Palette) |
 | `Ctrl+]` / `Ctrl+[` | Expand/collapse the current outline section |
 | `Ctrl+Shift+]` / `Ctrl+Shift+[` | Expand/collapse all outline sections |
 

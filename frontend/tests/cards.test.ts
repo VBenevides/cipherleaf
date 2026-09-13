@@ -4,6 +4,7 @@ import {
   boardMarker,
   boardCardsForColumns,
   boardCardsForColumn,
+  boardColumnsForMarker,
   cardReference,
   newCardMetadata,
   normalizeCardTags,
@@ -42,9 +43,9 @@ test("new cards default editor journaling off and accept the configured default"
 });
 
 test("template and board markers round-trip", () => {
-  const template = serializeTemplateDocument({ id: "tpl-1", name: "Bug", status: "blocked", tags: ["Ops"], body: "Steps" });
+  const template = serializeTemplateDocument({ id: "tpl-1", name: "Bug", status: "blocked", tags: ["Ops"], writeChangesToEditor: true, body: "Steps" });
   assert.deepEqual(parseTemplateDocument(template, "tpl-1")?.template, {
-    id: "tpl-1", name: "Bug", status: "blocked", tags: ["Ops"], body: "Steps",
+    id: "tpl-1", name: "Bug", status: "blocked", tags: ["Ops"], writeChangesToEditor: true, body: "Steps",
   });
   assert.deepEqual(parseBoardMarker(boardMarker("board-1", ["card-1", "card-2"])), {
     id: "board-1", title: "Kanban Board", cardIDs: ["card-1", "card-2"],
@@ -56,6 +57,33 @@ test("template and board markers round-trip", () => {
   assert.deepEqual(parseBoardMarker("<!-- cipherleaf-board:board-1: -->"), {
     id: "board-1", title: "Kanban Board", cardIDs: [],
   });
+});
+
+test("configured board markers keep ordered columns and validate colors", () => {
+  const cards = new Map([
+    ["card-1", { ...newCardMetadata("card-1"), status: "blocked" as const }],
+  ]);
+  const options = {
+    columns: [
+      { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] },
+      { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
+    ],
+    templateID: "template-1",
+    deletedColumns: [{ id: "archive", name: "Archived", color: "#654321", cardIDs: ["card-2"] }],
+    orphanCardIDs: ["card-3"],
+  };
+  const source = boardMarker("board-1", [], "Roadmap", options);
+  assert.deepEqual(parseBoardMarker(source), { id: "board-1", title: "Roadmap", cardIDs: [], options });
+  assert.deepEqual(boardColumnsForMarker(parseBoardMarker(source)!, cards), options.columns);
+  const archivedOrphans = parseBoardMarker(boardMarker("board-1", [], "Roadmap", {
+    ...options,
+    orphanCardIDs: ["card-2", "card-3"],
+  }));
+  assert.deepEqual(archivedOrphans?.options?.orphanCardIDs, ["card-2", "card-3"]);
+  assert.deepEqual(boardColumnsForMarker(parseBoardMarker(boardMarker("board-1", ["card-1", "missing"]))!, cards).map((column) => column.cardIDs), [["missing"], [], ["card-1"], []]);
+  const duplicate = boardMarker("board-1", [], "Roadmap", { columns: [{ id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1", "card-1"] }] });
+  assert.deepEqual(parseBoardMarker(duplicate)?.options?.columns[0].cardIDs, ["card-1"]);
+  assert.throws(() => boardMarker("board-1", [], "Roadmap", { columns: [{ id: "todo", name: "Todo", color: "blue", cardIDs: [] }] }), /Invalid board column options/);
 });
 
 test("tags trim and deduplicate without losing first display casing", () => {
@@ -122,6 +150,7 @@ test("parses legacy, invalid, and optional card metadata", () => {
   assert.equal(parseTemplateDocument("plain", "template"), null);
   assert.equal(parseTemplateDocument("---\ncipherleaf-card-template: true\ncipherleaf-card-template-name: \"\"\ncipherleaf-card-template-status: blocked\n---", "template"), null);
   assert.equal(parseTemplateDocument("---\ncipherleaf-card-template: true\ncipherleaf-card-template-name: Name\ncipherleaf-card-template-status: invalid\n---", "template"), null);
+  assert.equal(parseTemplateDocument("---\ncipherleaf-card-template: true\ncipherleaf-card-template-name: Legacy\ncipherleaf-card-template-status: blocked\n---", "template")?.template.writeChangesToEditor, false);
   assert.equal(parseCardDocument(`---\ncipherleaf-card: true\ncipherleaf-card-status: blocked\ncipherleaf-card-tags: not-json\ncipherleaf-card-created-at: now\n---`, "card-1", "Card")?.metadata.tags.length, 1);
 });
 

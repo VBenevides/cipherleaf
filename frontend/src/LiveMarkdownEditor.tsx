@@ -72,14 +72,17 @@ import {
 } from "./searchTarget";
 import { SNIPPETS, completeCodeFenceElement, expandSnippetWithContext } from "./snippets";
 import { expandedSelection } from "./editorSelection";
-import { boardCardsForColumns, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, normalizeCardTags, parseBoardMarker, parseCardReference, type CardMetadata, type CardStatus } from "./cards";
+import { boardCardsForColumn, boardColumnsForMarker, BOARD_COLUMNS, BOARD_COLUMN_LABELS, DEFAULT_BOARD_TITLE, normalizeCardTags, parseBoardMarker, parseCardReference, type BoardColumn, type CardMetadata, type CardStatus } from "./cards";
 import { localDateKey } from "./timeTracking";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
+
+type BoardTemplateChoice = { id: string; name: string };
 
 type LiveMarkdownEditorProps = {
   readonly noteID: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
+  readonly onChangeWithCaret?: (value: string, caretOffset: number) => void;
   readonly onSave: () => void;
   readonly onError: (reason: unknown) => void;
   readonly onOpenWikilink: (title: string) => void;
@@ -89,8 +92,14 @@ type LiveMarkdownEditorProps = {
   readonly onCreateCard?: () => Promise<string | null>;
   readonly onCreateBoard?: () => Promise<string | null>;
   readonly onMoveCard?: (id: string, status: CardStatus) => void;
+  readonly onMoveCardInBoard?: (boardID: string, cardID: string, columnID: string) => void;
   readonly onAddCardToBoard?: (boardID: string) => void;
   readonly onChangeBoardTitle?: (boardID: string, title: string) => void;
+  readonly onChangeBoardColumns?: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void;
+  readonly cardTemplates?: readonly BoardTemplateChoice[];
+  readonly onChangeBoardTemplate?: (boardID: string, templateID: string) => void;
+  readonly onOpenBoardTemplate?: (boardID: string, templateID: string) => void;
+  readonly onCreateBoardTemplate?: (boardID: string) => void;
   readonly onDecreaseFontSize: () => void;
   readonly onIncreaseFontSize: () => void;
   readonly searchTarget?: SearchTarget | null;
@@ -248,6 +257,20 @@ function preservedSelection(editor: EditorView, length: number) {
     selection.mainIndex,
   );
 }
+
+function minimalDocumentChange(state: EditorState, next: string) {
+  const current = state.doc.toString();
+  let from = 0;
+  while (from < current.length && from < next.length && current.codePointAt(from) === next.codePointAt(from)) from++;
+  let currentTo = current.length;
+  let nextTo = next.length;
+  while (currentTo > from && nextTo > from && current.codePointAt(currentTo - 1) === next.codePointAt(nextTo - 1)) {
+    currentTo--;
+    nextTo--;
+  }
+  return state.changes({ from, to: currentTo, insert: next.slice(from, nextTo) });
+}
+
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
 });
@@ -402,7 +425,7 @@ const liveMarkdownTheme = EditorView.theme(
       width: "var(--toggle-button-width)",
       justifyContent: "flex-start",
       alignItems: "center",
-      verticalAlign: "baseline",
+      verticalAlign: "middle",
       background: "transparent",
       border: "0",
       color: "inherit",
@@ -670,7 +693,7 @@ class QuoteToggleWidget extends WidgetType {
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({ effects: toggleQuote.of(this.position) });
+      view.dispatch({ effects: [toggleQuote.of(this.position), view.scrollSnapshot()] });
       view.focus();
     });
 
@@ -1146,7 +1169,7 @@ function updateBoardCardTitle(item: HTMLButtonElement, card: CardMetadata, statu
   if (!title) return false;
   title.textContent = card.title || DEFAULT_CARD_TITLE;
   item.title = `Open card “${card.title || DEFAULT_CARD_TITLE}”`;
-  item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
+  item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${item.dataset.columnName || BOARD_COLUMN_LABELS[status]}`);
   fitBoardCardTexts(item);
   return true;
 }
@@ -1157,39 +1180,199 @@ function alignmentLabel(align: "left" | "center" | "right"): string {
   return "Align right";
 }
 
+function sameBoardCardIDs(
+  cardIDs: readonly string[],
+  otherCardIDs: readonly string[],
+  cards: ReadonlyMap<string, CardMetadata>,
+  otherCards: ReadonlyMap<string, CardMetadata>,
+): boolean {
+  if (cardIDs.length !== otherCardIDs.length) return false;
+  for (let index = 0; index < cardIDs.length; index++) {
+    if (otherCardIDs[index] !== cardIDs[index]) return false;
+    const previous = cards.get(cardIDs[index]);
+    const current = otherCards.get(otherCardIDs[index]);
+    if (previous === current) continue;
+    if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+  }
+  return true;
+}
+
+function sameBoardCardViews(
+  cardIDs: Iterable<string>,
+  cards: ReadonlyMap<string, CardMetadata>,
+  otherCards: ReadonlyMap<string, CardMetadata>,
+): boolean {
+  for (const id of new Set(cardIDs)) {
+    const previous = cards.get(id);
+    const current = otherCards.get(id);
+    if (previous === current) continue;
+    if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+  }
+  return true;
+}
+
+function sameBoardColumns(left: readonly BoardColumn[], right: readonly BoardColumn[]): boolean {
+  return left.length === right.length && left.every((column, index) => {
+    const other = right[index];
+    return column.id === other.id && column.name === other.name && column.color === other.color &&
+      column.cardIDs.length === other.cardIDs.length && column.cardIDs.every((id, cardIndex) => id === other.cardIDs[cardIndex]);
+  });
+}
+
+function updateBoardMinimizedState({
+  board,
+  title,
+  description,
+  minimized,
+  controls,
+  columns,
+  boardToggle,
+  allCards,
+  boardColumns,
+  isMinimized,
+}: {
+  readonly board: HTMLElement;
+  readonly title: HTMLInputElement;
+  readonly description: HTMLElement;
+  readonly minimized: HTMLElement;
+  readonly controls: HTMLElement;
+  readonly columns: HTMLElement;
+  readonly boardToggle: HTMLButtonElement;
+  readonly allCards: ReadonlyMap<string, readonly CardMetadata[]>;
+  readonly boardColumns: readonly BoardColumn[];
+  readonly isMinimized: boolean;
+}) {
+  const boardTitle = title.value || DEFAULT_BOARD_TITLE;
+  const counts = boardColumns
+    .map((column) => `${column.name}: ${allCards.get(column.id)?.length ?? 0}`)
+    .join(" · ");
+  board.classList.toggle("is-minimized", isMinimized);
+  title.hidden = isMinimized;
+  description.hidden = isMinimized;
+  minimized.hidden = !isMinimized;
+  controls.hidden = isMinimized;
+  columns.hidden = isMinimized;
+  minimized.textContent = `[BOARD] ${boardTitle} · ${counts}`;
+  boardToggle.textContent = isMinimized ? "›" : "⌄";
+  boardToggle.setAttribute("aria-label", `${isMinimized ? "Expand" : "Collapse"} board`);
+  boardToggle.setAttribute("aria-expanded", String(!isMinimized));
+}
+
+function updateBoardFilter({
+  board,
+  filter,
+  tagFilter,
+  boardColumns,
+  configured,
+  cardIDs,
+  cards,
+}: {
+  readonly board: HTMLElement;
+  readonly filter: HTMLInputElement;
+  readonly tagFilter: HTMLSelectElement;
+  readonly boardColumns: readonly BoardColumn[];
+  readonly configured: boolean;
+  readonly cardIDs: readonly string[];
+  readonly cards: ReadonlyMap<string, CardMetadata>;
+}) {
+  const currentCards = boardCardData.get(board) ?? cards;
+  const titleQuery = filter.value.trim().toLocaleLowerCase();
+  for (const column of boardColumns) {
+    const sourceCards = configured
+      ? column.cardIDs.map((id) => currentCards.get(id)).filter((card): card is CardMetadata => Boolean(card))
+      : boardCardsForColumn(currentCards, cardIDs, column.id as CardStatus);
+    const visible = new Set((titleQuery || tagFilter.value ? sourceCards.filter((card) =>
+      (!titleQuery || card.title.toLocaleLowerCase().includes(titleQuery)) &&
+      (!tagFilter.value || card.tags.some((tag) => tag.toLocaleLowerCase() === tagFilter.value.toLocaleLowerCase()))) : sourceCards).map((card) => card.id));
+    const filtered = Boolean(titleQuery || tagFilter.value);
+    const columnElement = [...board.querySelectorAll<HTMLElement>(".cm-live-board-column")]
+      .find((item) => item.dataset.columnId === column.id);
+    const count = columnElement?.querySelector<HTMLElement>(".cm-live-board-column-count");
+    if (count) {
+      count.textContent = String(filtered ? visible.size : sourceCards.length);
+      count.setAttribute("aria-label", `${filtered ? visible.size : sourceCards.length} ${filtered ? "matching " : ""}cards`);
+    }
+    for (const item of columnElement?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
+      item.hidden = !visible.has(item.dataset.cardId ?? "");
+    }
+    const empty = columnElement?.querySelector<HTMLElement>(".cm-live-board-empty");
+    if (empty) {
+      empty.hidden = visible.size > 0;
+      empty.querySelector<HTMLElement>(".cm-live-board-empty-message")!.textContent = filtered && sourceCards.length > 0
+        ? "No matching cards"
+        : "No cards in this column";
+      empty.querySelector<HTMLElement>(".cm-live-board-empty-hint")!.textContent = filtered && sourceCards.length > 0
+        ? "Try a different filter."
+        : "Cards will appear here when added to this column.";
+    }
+  }
+}
+
 class BoardWidget extends WidgetType {
   private titleResizeObserver: ResizeObserver | null = null;
+  private draggedColumnID: string | null = null;
 
   constructor(
     readonly boardID: string,
     readonly title: string,
     readonly cardIDs: readonly string[],
+    readonly columns: readonly BoardColumn[],
+    readonly deletedColumns: readonly BoardColumn[],
+    readonly orphanCardIDs: readonly string[],
+    readonly configured: boolean,
     readonly cards: ReadonlyMap<string, CardMetadata>,
     readonly openCard: (id: string) => void,
     readonly moveCard: (id: string, status: CardStatus) => void,
+    readonly moveCardInBoard: (boardID: string, cardID: string, columnID: string) => void,
     readonly addCard: (boardID: string) => void,
     readonly changeTitle: (boardID: string, title: string) => void,
+    readonly changeColumns: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void,
+    readonly templates: readonly BoardTemplateChoice[],
+    readonly templateID: string,
+    readonly changeTemplate: (boardID: string, templateID: string) => void,
+    readonly openTemplate: (boardID: string, templateID: string) => void,
+    readonly createTemplate: (boardID: string) => void,
   ) { super(); }
 
   eq(other: BoardWidget) {
-    if (other.boardID !== this.boardID || other.title !== this.title || other.cardIDs.length !== this.cardIDs.length) return false;
-    for (let index = 0; index < this.cardIDs.length; index++) {
-      if (other.cardIDs[index] !== this.cardIDs[index]) return false;
-      const previous = this.cards.get(this.cardIDs[index]);
-      const current = other.cards.get(other.cardIDs[index]);
-      if (previous === current) continue;
-      if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
-    }
+    if (other.boardID !== this.boardID || other.title !== this.title || other.configured !== this.configured || other.templateID !== this.templateID ||
+      other.cardIDs.length !== this.cardIDs.length || other.columns.length !== this.columns.length ||
+      other.deletedColumns.length !== this.deletedColumns.length || other.orphanCardIDs.length !== this.orphanCardIDs.length) return false;
+    if (!sameBoardCardIDs(this.cardIDs, other.cardIDs, this.cards, other.cards)) return false;
+    if (!sameBoardCardViews([
+      ...this.deletedColumns.flatMap((column) => column.cardIDs),
+      ...this.orphanCardIDs,
+    ], this.cards, other.cards)) return false;
+    if (!sameBoardColumns(this.columns, other.columns) || !sameBoardColumns(this.deletedColumns, other.deletedColumns)) return false;
+    if (this.orphanCardIDs.some((id, index) => id !== other.orphanCardIDs[index])) return false;
+    if (this.templates.length !== other.templates.length || this.templates.some((template, index) =>
+      template.id !== other.templates[index].id || template.name !== other.templates[index].name)) return false;
     return true;
   }
 
   updateDOM(dom: HTMLElement, _view: EditorView, from: BoardWidget) {
+    if (this.boardID !== from.boardID || this.title !== from.title || this.configured !== from.configured || this.templateID !== from.templateID ||
+      this.cardIDs.length !== from.cardIDs.length || this.cardIDs.some((id, index) => id !== from.cardIDs[index]) ||
+      this.columns.length !== from.columns.length || this.columns.some((column, index) => {
+        const previous = from.columns[index];
+        return column.id !== previous.id || column.name !== previous.name || column.color !== previous.color ||
+          column.cardIDs.length !== previous.cardIDs.length || column.cardIDs.some((id, cardIndex) => id !== previous.cardIDs[cardIndex]);
+      }) || this.deletedColumns.length !== from.deletedColumns.length || this.deletedColumns.some((column, index) => {
+        const previous = from.deletedColumns[index];
+        return column.id !== previous.id || column.name !== previous.name || column.color !== previous.color ||
+          column.cardIDs.length !== previous.cardIDs.length || column.cardIDs.some((id, cardIndex) => id !== previous.cardIDs[cardIndex]);
+      }) || this.orphanCardIDs.length !== from.orphanCardIDs.length || this.orphanCardIDs.some((id, index) => id !== from.orphanCardIDs[index])) return false;
     boardCardData.set(dom, this.cards);
     const cardElements = new Map<string, HTMLButtonElement>();
     dom.querySelectorAll<HTMLButtonElement>(".cm-live-board-card").forEach((item) => {
       if (item.dataset.cardId) cardElements.set(item.dataset.cardId, item);
     });
-    for (const id of this.cardIDs) {
+    for (const id of new Set([
+      ...this.cardIDs,
+      ...this.columns.flatMap((column) => column.cardIDs),
+      ...this.deletedColumns.flatMap((column) => column.cardIDs),
+      ...this.orphanCardIDs,
+    ])) {
       const previous = from.cards.get(id);
       const card = this.cards.get(id);
       if (!previous || !card || previous.status !== card.status) return false;
@@ -1205,23 +1388,129 @@ class BoardWidget extends WidgetType {
 
   private renderColumn(
     columns: HTMLElement,
-    status: CardStatus,
+    columnConfig: BoardColumn,
     cards: readonly CardMetadata[],
   ) {
     const column = columns.appendChild(document.createElement("div"));
-    column.className = `cm-live-board-column status-${status}`;
-    column.dataset.status = status;
+    const status = BOARD_COLUMNS.includes(columnConfig.id as CardStatus) ? columnConfig.id : "";
+    const statusClass = status ? ` status-${status}` : "";
+    column.className = `cm-live-board-column${statusClass}`;
+    column.dataset.columnId = columnConfig.id;
+    column.style.setProperty("--board-column-color", columnConfig.color);
     column.setAttribute("role", "group");
-    column.setAttribute("aria-label", BOARD_COLUMN_LABELS[status]);
-    const heading = column.appendChild(document.createElement("h4"));
-    heading.textContent = BOARD_COLUMN_LABELS[status];
+    column.setAttribute("aria-label", columnConfig.name);
+    const heading = column.appendChild(document.createElement("div"));
+    heading.className = "cm-live-board-column-header";
+    heading.draggable = true;
+    heading.dataset.columnId = columnConfig.id;
+    const stopEditorEvent = (event: Event) => event.stopPropagation();
+    const name = heading.appendChild(document.createElement("input"));
+    name.type = "text";
+    name.value = columnConfig.name;
+    name.className = "cm-live-board-column-name";
+    name.setAttribute("aria-label", "Column name");
+    const count = heading.appendChild(document.createElement("span"));
+    count.className = "cm-live-board-column-count";
+    count.textContent = String(cards.length);
+    count.setAttribute("aria-label", `${cards.length} cards`);
+    const color = heading.appendChild(document.createElement("input"));
+    color.type = "color";
+    color.value = columnConfig.color;
+    color.className = "cm-live-board-column-color";
+    color.setAttribute("aria-label", "Column color");
+    for (const eventName of ["mousedown", "click", "input", "change", "keydown"])
+      heading.addEventListener(eventName, stopEditorEvent);
+    const updateColumn = (update: (column: BoardColumn) => BoardColumn) => {
+      this.changeColumns(this.boardID, this.columns.map((current) => current.id === columnConfig.id ? update(current) : current));
+    };
+    name.addEventListener("change", () => updateColumn((current) => ({ ...current, name: name.value.trim() || current.name })));
+    color.addEventListener("change", () => updateColumn((current) => ({ ...current, color: /^#[0-9A-Fa-f]{6}$/.test(color.value) ? color.value.toUpperCase() : current.color })));
+    const moveColumn = (offset: -1 | 1) => {
+      const index = this.columns.findIndex((current) => current.id === columnConfig.id);
+      const target = index + offset;
+      if (index < 0 || target < 0 || target >= this.columns.length) return;
+      const next = [...this.columns];
+      [next[index], next[target]] = [next[target], next[index]];
+      this.changeColumns(this.boardID, next);
+    };
+    const before = heading.appendChild(document.createElement("button"));
+    before.type = "button";
+    before.className = "icon-button cm-live-board-column-move";
+    before.textContent = "←";
+    before.title = "Move column before";
+    before.setAttribute("aria-label", "Move column before");
+    before.disabled = this.columns[0]?.id === columnConfig.id;
+    before.addEventListener("click", () => moveColumn(-1));
+    const after = heading.appendChild(document.createElement("button"));
+    after.type = "button";
+    after.className = "icon-button cm-live-board-column-move";
+    after.textContent = "→";
+    after.title = "Move column after";
+    after.setAttribute("aria-label", "Move column after");
+    after.disabled = this.columns[this.columns.length - 1]?.id === columnConfig.id;
+    after.addEventListener("click", () => moveColumn(1));
+    const remove = heading.appendChild(document.createElement("button"));
+    remove.type = "button";
+    remove.className = "icon-button cm-live-board-column-remove";
+    remove.textContent = "×";
+    remove.title = "Remove column";
+    remove.setAttribute("aria-label", "Remove column");
+    remove.disabled = this.columns.length <= 1;
+    remove.addEventListener("click", () => {
+      if (this.columns.length <= 1) return;
+      const index = this.columns.findIndex((current) => current.id === columnConfig.id);
+      if (index < 0) return;
+      this.changeColumns(this.boardID, this.columns.filter((current) => current.id !== columnConfig.id), [
+        ...this.deletedColumns,
+        { ...columnConfig, cardIDs: [...columnConfig.cardIDs] },
+      ], [...new Set([...this.orphanCardIDs, ...columnConfig.cardIDs])]);
+    });
+    heading.addEventListener("dragstart", (event) => {
+      this.draggedColumnID = columnConfig.id;
+      event.dataTransfer?.setData("text/plain", columnConfig.id);
+    });
+    heading.addEventListener("dragend", () => {
+      this.draggedColumnID = null;
+      columns.querySelectorAll<HTMLElement>(".is-column-drop-before, .is-column-drop-after").forEach((item) => item.classList.remove("is-column-drop-before", "is-column-drop-after"));
+    });
+    column.addEventListener("dragover", (event) => {
+      const sourceID = this.draggedColumnID || event.dataTransfer?.getData("text/plain");
+      if (!sourceID || sourceID === columnConfig.id) return;
+      event.preventDefault();
+      const afterTarget = event.clientX > column.getBoundingClientRect().left + column.offsetWidth / 2;
+      column.classList.toggle("is-column-drop-before", !afterTarget);
+      column.classList.toggle("is-column-drop-after", afterTarget);
+    });
+    column.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const sourceID = this.draggedColumnID || event.dataTransfer?.getData("text/plain");
+      if (!sourceID || sourceID === columnConfig.id) return;
+      const sourceIndex = this.columns.findIndex((current) => current.id === sourceID);
+      const targetIndex = this.columns.findIndex((current) => current.id === columnConfig.id);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const next = [...this.columns];
+      const [source] = next.splice(sourceIndex, 1);
+      const insertAt = next.findIndex((current) => current.id === columnConfig.id) + (event.clientX > column.getBoundingClientRect().left + column.offsetWidth / 2 ? 1 : 0);
+      next.splice(insertAt, 0, source);
+      this.changeColumns(this.boardID, next);
+    });
     const empty = column.appendChild(document.createElement("p"));
     empty.className = "cm-live-board-empty";
-    empty.textContent = "No cards";
+    const emptyIcon = empty.appendChild(document.createElement("span"));
+    emptyIcon.className = "cm-live-board-empty-icon";
+    emptyIcon.textContent = "▤";
+    emptyIcon.setAttribute("aria-hidden", "true");
+    const emptyMessage = empty.appendChild(document.createElement("span"));
+    emptyMessage.className = "cm-live-board-empty-message";
+    emptyMessage.textContent = "No cards in this column";
+    const emptyHint = empty.appendChild(document.createElement("span"));
+    emptyHint.className = "cm-live-board-empty-hint";
+    emptyHint.textContent = "Cards will appear here when added to this column.";
     for (const card of cards) {
       const item = column.appendChild(document.createElement("button"));
       item.type = "button";
       item.className = "cm-live-board-card";
+      item.style.setProperty("--board-card-color", columnConfig.color);
       const summary = item.appendChild(document.createElement("span"));
       summary.className = "cm-live-board-card-summary";
       const cardTitle = summary.appendChild(document.createElement("span"));
@@ -1277,7 +1566,7 @@ class BoardWidget extends WidgetType {
           if (nextTarget === targetColumn) return;
           clearTarget();
           targetColumn = nextTarget;
-          if (targetColumn?.dataset.status === status) return;
+          if (targetColumn?.dataset.columnId === columnConfig.id) return;
           targetColumn?.classList.add("is-drop-target");
           if (targetColumn) {
             preview = item.cloneNode(true) as HTMLButtonElement;
@@ -1299,8 +1588,11 @@ class BoardWidget extends WidgetType {
           if (!dragging) return;
           upEvent.preventDefault();
           const target = columnAt(upEvent.clientX, upEvent.clientY);
-          const nextStatus = target?.dataset.status as CardStatus | undefined;
-          if (nextStatus && nextStatus !== status) this.moveCard(card.id, nextStatus);
+          const nextColumnID = target?.dataset.columnId;
+          if (nextColumnID && nextColumnID !== columnConfig.id) {
+            if (this.configured) this.moveCardInBoard(this.boardID, card.id, nextColumnID);
+            else if (BOARD_COLUMNS.includes(nextColumnID as CardStatus)) this.moveCard(card.id, nextColumnID as CardStatus);
+          }
         };
         const cancel = (cancelEvent: PointerEvent) => {
           if (cancelEvent.pointerId === event.pointerId) cleanup();
@@ -1317,16 +1609,19 @@ class BoardWidget extends WidgetType {
         }
         this.openCard(card.id);
       });
-      item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${BOARD_COLUMN_LABELS[status]}`);
+      item.dataset.columnName = columnConfig.name;
+      item.setAttribute("aria-label", `${card.title || DEFAULT_CARD_TITLE}, ${columnConfig.name}`);
       item.addEventListener("keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        const index = BOARD_COLUMNS.indexOf(status);
+        const index = this.columns.findIndex((current) => current.id === columnConfig.id);
         const nextIndex = index + (event.key === "ArrowRight" ? 1 : -1);
-        if (nextIndex < 0 || nextIndex >= BOARD_COLUMNS.length) return;
+        if (nextIndex < 0 || nextIndex >= this.columns.length) return;
         event.preventDefault();
-        this.moveCard(card.id, BOARD_COLUMNS[nextIndex]);
+        const nextColumn = this.columns[nextIndex];
+        if (this.configured) this.moveCardInBoard(this.boardID, card.id, nextColumn.id);
+        else if (BOARD_COLUMNS.includes(nextColumn.id as CardStatus)) this.moveCard(card.id, nextColumn.id as CardStatus);
       });
-      const date = boardCardDate(card, status);
+      const date = boardCardDate(card, card.status);
       const cardDate = item.appendChild(document.createElement("time"));
       cardDate.className = "cm-live-board-card-date";
       cardDate.dateTime = date ?? "";
@@ -1334,24 +1629,43 @@ class BoardWidget extends WidgetType {
     }
   }
 
-  toDOM() {
+  toDOM(view: EditorView) {
     const board = document.createElement("section");
     board.className = "cm-live-board";
     const header = board.appendChild(document.createElement("div"));
     header.className = "cm-live-board-header";
+    const boardToggle = header.appendChild(document.createElement("button"));
+    boardToggle.type = "button";
+    boardToggle.className = "icon-button cm-live-board-toggle";
+    boardToggle.textContent = "⌄";
+    boardToggle.setAttribute("aria-label", "Collapse board");
+    boardToggle.setAttribute("aria-expanded", "true");
+    const boardIcon = header.appendChild(document.createElement("span"));
+    boardIcon.className = "cm-live-board-icon";
+    boardIcon.textContent = "▦";
+    boardIcon.setAttribute("aria-hidden", "true");
     const title = header.appendChild(document.createElement("input"));
     title.className = "cm-live-board-title";
     title.type = "text";
     title.value = this.title || DEFAULT_BOARD_TITLE;
     title.setAttribute("aria-label", "Board title");
+    const headerActions = header.appendChild(document.createElement("div"));
+    headerActions.className = "cm-live-board-header-actions";
+    const deletedColumnsButton = headerActions.appendChild(document.createElement("button"));
+    deletedColumnsButton.type = "button";
+    deletedColumnsButton.className = "secondary-button cm-live-board-recovery-button";
+    deletedColumnsButton.textContent = `Deleted Columns ${this.deletedColumns.length}`;
+    deletedColumnsButton.setAttribute("aria-label", `Deleted Columns, ${this.deletedColumns.length}`);
+    deletedColumnsButton.setAttribute("aria-expanded", "false");
+    const orphanCardsButton = headerActions.appendChild(document.createElement("button"));
+    orphanCardsButton.type = "button";
+    orphanCardsButton.className = "secondary-button cm-live-board-recovery-button";
+    orphanCardsButton.textContent = `Orphan Cards ${this.orphanCardIDs.length}`;
+    orphanCardsButton.setAttribute("aria-label", `Orphan Cards, ${this.orphanCardIDs.length}`);
+    orphanCardsButton.setAttribute("aria-expanded", "false");
     const minimized = header.appendChild(document.createElement("span"));
     minimized.className = "cm-live-board-minimized";
     minimized.hidden = true;
-    const minimize = header.appendChild(document.createElement("button"));
-    minimize.type = "button";
-    minimize.className = "secondary-button cm-live-board-minimize";
-    minimize.textContent = "Minimize";
-    minimize.setAttribute("aria-label", "Minimize board");
     const stopEditorEvent = (event: Event) => event.stopPropagation();
     for (const eventName of ["mousedown", "click", "input", "change"])
       title.addEventListener(eventName, stopEditorEvent);
@@ -1368,21 +1682,28 @@ class BoardWidget extends WidgetType {
       }
     });
     board.setAttribute("aria-label", title.value);
+    const description = board.appendChild(document.createElement("p"));
+    description.className = "cm-live-board-description";
+    description.textContent = "Organize and track your cards across different states.";
     const controls = board.appendChild(document.createElement("div"));
     controls.className = "cm-live-board-controls";
-    const filter = controls.appendChild(document.createElement("input"));
+    const filterRow = controls.appendChild(document.createElement("div"));
+    filterRow.className = "cm-live-board-filter-row";
+    const filter = filterRow.appendChild(document.createElement("input"));
     filter.type = "search";
     filter.placeholder = "Filter cards by title";
     filter.setAttribute("aria-label", "Filter board cards by title");
-    const tagFilter = controls.appendChild(document.createElement("select"));
+    const tagFilter = filterRow.appendChild(document.createElement("select"));
     tagFilter.setAttribute("aria-label", "Filter board cards by tags");
     tagFilter.appendChild(document.createElement("option")).value = "";
-    for (const tag of normalizeCardTags(this.cardIDs.flatMap((id) => this.cards.get(id)?.tags ?? []))) {
+    for (const tag of normalizeCardTags(this.columns.flatMap((column) => column.cardIDs.flatMap((id) => this.cards.get(id)?.tags ?? [])))) {
       const option = tagFilter.appendChild(document.createElement("option"));
       option.value = tag;
       option.textContent = tag;
     }
-    const add = controls.appendChild(document.createElement("button"));
+    const actions = controls.appendChild(document.createElement("div"));
+    actions.className = "cm-live-board-actions";
+    const add = actions.appendChild(document.createElement("button"));
     add.type = "button";
     add.className = "secondary-button";
     add.textContent = "New card";
@@ -1390,7 +1711,24 @@ class BoardWidget extends WidgetType {
       event.stopPropagation();
       this.addCard(this.boardID);
     });
-    const clear = controls.appendChild(document.createElement("button"));
+    const addColumn = actions.appendChild(document.createElement("button"));
+    addColumn.type = "button";
+    addColumn.className = "secondary-button";
+    addColumn.textContent = "Add column";
+    addColumn.setAttribute("aria-label", "Add board column");
+    addColumn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `column-${Date.now().toString(36)}`;
+      this.changeColumns(this.boardID, [...this.columns, { id, name: "New column", color: "#888888", cardIDs: [] }]);
+    });
+    const editTemplate = actions.appendChild(document.createElement("button"));
+    editTemplate.type = "button";
+    editTemplate.className = "secondary-button";
+    editTemplate.textContent = "Edit Card Template";
+    editTemplate.addEventListener("click", () => this.templateID
+      ? this.openTemplate(this.boardID, this.templateID)
+      : this.createTemplate(this.boardID));
+    const clear = filterRow.appendChild(document.createElement("button"));
     clear.type = "button";
     clear.className = "secondary-button";
     clear.textContent = "Clear";
@@ -1400,49 +1738,126 @@ class BoardWidget extends WidgetType {
       tagFilter.value = "";
       updateFilter();
     });
+    const makeRecoveryPanel = (titleText: string) => {
+      const panel = board.appendChild(document.createElement("section"));
+      panel.className = "cm-live-board-recovery-panel";
+      panel.hidden = true;
+      const panelHeader = panel.appendChild(document.createElement("header"));
+      const panelTitle = panelHeader.appendChild(document.createElement("strong"));
+      panelTitle.textContent = titleText;
+      const close = panelHeader.appendChild(document.createElement("button"));
+      close.type = "button";
+      close.className = "icon-button";
+      close.textContent = "×";
+      close.setAttribute("aria-label", `Close ${titleText}`);
+      const list = panel.appendChild(document.createElement("div"));
+      list.className = "cm-live-board-recovery-list";
+      close.addEventListener("click", () => {
+        panel.hidden = true;
+        deletedColumnsButton.setAttribute("aria-expanded", "false");
+        orphanCardsButton.setAttribute("aria-expanded", "false");
+      });
+      return { panel, list };
+    };
+    const deletedView = makeRecoveryPanel("Deleted Columns");
+    const orphanView = makeRecoveryPanel("Orphan Cards");
+    const refreshRecoveryPanels = () => {
+      deletedView.list.replaceChildren();
+      for (const deleted of this.deletedColumns) {
+        const row = deletedView.list.appendChild(document.createElement("div"));
+        row.className = "cm-live-board-recovery-row";
+        const label = row.appendChild(document.createElement("span"));
+        label.textContent = `${deleted.name} (${deleted.cardIDs.length})`;
+        const restore = row.appendChild(document.createElement("button"));
+        restore.type = "button";
+        restore.className = "secondary-button";
+        restore.textContent = "Restore";
+        restore.addEventListener("click", () => {
+          const activeCardIDs = new Set(this.columns.flatMap((column) => column.cardIDs));
+          const restored = { ...deleted, cardIDs: deleted.cardIDs.filter((id) => !activeCardIDs.has(id)) };
+          this.changeColumns(this.boardID, [...this.columns, restored], this.deletedColumns.filter((column) => column.id !== deleted.id), this.orphanCardIDs.filter((id) => !restored.cardIDs.includes(id)));
+        });
+      }
+      if (this.deletedColumns.length === 0) deletedView.list.textContent = "No deleted columns";
+      orphanView.list.replaceChildren();
+      for (const cardID of this.orphanCardIDs) {
+        const row = orphanView.list.appendChild(document.createElement("div"));
+        row.className = "cm-live-board-recovery-row";
+        const label = row.appendChild(document.createElement("span"));
+        label.textContent = this.cards.get(cardID)?.title || cardID;
+        const target = row.appendChild(document.createElement("select"));
+        target.setAttribute("aria-label", `Column for ${label.textContent}`);
+        for (const column of this.columns) {
+          const option = target.appendChild(document.createElement("option"));
+          option.value = column.id;
+          option.textContent = column.name;
+        }
+        const assign = row.appendChild(document.createElement("button"));
+        assign.type = "button";
+        assign.className = "secondary-button";
+        assign.textContent = "Add to column";
+        assign.disabled = this.columns.length === 0;
+        assign.addEventListener("click", () => {
+          const nextColumns = this.columns.map((column) => column.id === target.value
+            ? { ...column, cardIDs: [...new Set([...column.cardIDs, cardID])] }
+            : column);
+          this.changeColumns(this.boardID, nextColumns, this.deletedColumns, this.orphanCardIDs.filter((id) => id !== cardID));
+        });
+      }
+      if (this.orphanCardIDs.length === 0) orphanView.list.textContent = "No orphan cards";
+    };
+    const toggleRecoveryPanel = (panel: HTMLElement, button: HTMLButtonElement, other: HTMLElement, otherButton: HTMLButtonElement) => {
+      const open = panel.hidden;
+      panel.hidden = !open;
+      other.hidden = true;
+      button.setAttribute("aria-expanded", String(open));
+      otherButton.setAttribute("aria-expanded", "false");
+      if (open) refreshRecoveryPanels();
+    };
+    deletedColumnsButton.addEventListener("click", () => toggleRecoveryPanel(deletedView.panel, deletedColumnsButton, orphanView.panel, orphanCardsButton));
+    orphanCardsButton.addEventListener("click", () => toggleRecoveryPanel(orphanView.panel, orphanCardsButton, deletedView.panel, deletedColumnsButton));
+    refreshRecoveryPanels();
     const columns = board.appendChild(document.createElement("div"));
     columns.className = "cm-live-board-columns";
     const fitTitles = () => fitBoardCardTexts(board);
-    const allCards = boardCardsForColumns(this.cards, this.cardIDs);
-    for (const status of BOARD_COLUMNS) {
-      this.renderColumn(columns, status, allCards.get(status) ?? []);
+    const allCards = new Map<string, CardMetadata[]>();
+    for (const column of this.columns) {
+      const columnCards = this.configured
+        ? column.cardIDs.map((id) => this.cards.get(id)).filter((card): card is CardMetadata => Boolean(card))
+        : boardCardsForColumn(this.cards, this.cardIDs, column.id as CardStatus);
+      allCards.set(column.id, columnCards);
+      this.renderColumn(columns, column, columnCards);
     }
     boardCardData.set(board, this.cards);
     let isMinimized = false;
-    const updateMinimizedState = () => {
-      const boardTitle = title.value || DEFAULT_BOARD_TITLE;
-      const counts = BOARD_COLUMNS.slice(0, 3)
-        .map((status) => `${BOARD_COLUMN_LABELS[status]}: ${allCards.get(status)?.length ?? 0}`)
-        .join(" · ");
-      board.classList.toggle("is-minimized", isMinimized);
-      title.hidden = isMinimized;
-      minimized.hidden = !isMinimized;
-      controls.hidden = isMinimized;
-      columns.hidden = isMinimized;
-      minimized.textContent = `[BOARD] ${boardTitle} · ${counts}`;
-      minimize.textContent = isMinimized ? "Maximize" : "Minimize";
-      minimize.setAttribute("aria-label", `${isMinimized ? "Maximize" : "Minimize"} board`);
-      minimize.setAttribute("aria-expanded", String(!isMinimized));
-    };
-    minimize.addEventListener("click", (event) => {
+    const updateMinimizedState = () => updateBoardMinimizedState({
+      board,
+      title,
+      description,
+      minimized,
+      controls,
+      columns,
+      boardToggle,
+      allCards,
+      boardColumns: this.columns,
+      isMinimized,
+    });
+    boardToggle.addEventListener("click", (event) => {
       event.stopPropagation();
+      const snapshot = view.scrollSnapshot();
       isMinimized = !isMinimized;
       updateMinimizedState();
+      view.dispatch({ effects: snapshot });
     });
-    const updateFilter = () => {
-      const currentCards = boardCardData.get(board) ?? this.cards;
-      const titleQuery = filter.value.trim().toLocaleLowerCase();
-      const filteredCards = titleQuery || tagFilter.value
-        ? boardCardsForColumns(currentCards, this.cardIDs, titleQuery, [tagFilter.value])
-        : allCards;
-      for (const status of BOARD_COLUMNS) {
-        const visible = new Set((filteredCards.get(status) ?? []).map((card) => card.id));
-        for (const item of board.querySelectorAll<HTMLButtonElement>(`.status-${status} .cm-live-board-card`)) {
-          item.hidden = !visible.has(item.dataset.cardId ?? "");
-        }
-        board.querySelector<HTMLElement>(`.status-${status} .cm-live-board-empty`)!.hidden = visible.size > 0;
-      }
-    };
+    const updateFilter = () => updateBoardFilter({
+      board,
+      filter,
+      tagFilter,
+      boardColumns: this.columns,
+      configured: this.configured,
+      cardIDs: this.cardIDs,
+      cards: this.cards,
+    });
     filter.addEventListener("input", updateFilter);
     tagFilter.addEventListener("change", updateFilter);
     updateFilter();
@@ -1874,8 +2289,14 @@ type LivePreviewOptions = {
   cardTitle: (id: string) => string | null;
   cards: () => ReadonlyMap<string, CardMetadata>;
   moveCard: (id: string, status: CardStatus) => void;
+  moveCardInBoard: (boardID: string, cardID: string, columnID: string) => void;
   addCard: (boardID: string) => void;
   changeBoardTitle: (boardID: string, title: string) => void;
+  changeBoardColumns: (boardID: string, columns: readonly BoardColumn[], deletedColumns?: readonly BoardColumn[], orphanCardIDs?: readonly string[]) => void;
+  cardTemplates: readonly BoardTemplateChoice[];
+  changeBoardTemplate: (boardID: string, templateID: string) => void;
+  openBoardTemplate: (boardID: string, templateID: string) => void;
+  createBoardTemplate: (boardID: string) => void;
   noteID: string;
   onError: (reason: unknown) => void;
   highlightLineNumbers: ReadonlySet<number>;
@@ -2064,6 +2485,11 @@ function decoratePreviewText(
   });
 }
 
+function hasUnbrokenObjectContent(line: string, offset: number): boolean {
+  const content = line.slice(offset).trim();
+  return content.length > 0 && !/\s/.test(content);
+}
+
 function renderBoardLine(
   context: LivePreviewRenderContext,
   lineNumber: number,
@@ -2072,6 +2498,14 @@ function renderBoardLine(
   const board = parseBoardMarker(line.text);
   if (board) {
     const { decorations, atomicRanges, options } = context;
+    const columns = boardColumnsForMarker(board, options.cards());
+    const deletedColumns = board.options?.deletedColumns ?? [];
+    const assignedCardIDs = new Set(columns.flatMap((column) => column.cardIDs));
+    const orphanCardIDs = [...new Set([
+      ...(board.options?.orphanCardIDs ?? []),
+      ...deletedColumns.flatMap((column) => column.cardIDs),
+      ...(board.options ? board.cardIDs.filter((id) => !assignedCardIDs.has(id)) : []),
+    ])].filter((id) => !assignedCardIDs.has(id));
     decorations.push(
       Decoration.line({ attributes: { class: "cm-live-board-line" } }).range(line.from),
       Decoration.widget({
@@ -2088,11 +2522,22 @@ function renderBoardLine(
         board.id,
         board.title,
         board.cardIDs,
+        columns,
+        deletedColumns,
+        orphanCardIDs,
+        Boolean(board.options),
         options.cards(),
         options.openCard,
         options.moveCard,
+        options.moveCardInBoard,
         options.addCard,
         options.changeBoardTitle,
+        options.changeBoardColumns,
+        options.cardTemplates,
+        board.options?.templateID ?? "",
+        options.changeBoardTemplate,
+        options.openBoardTemplate,
+        options.createBoardTemplate,
       ),
     );
     return lineNumber + 1;
@@ -2223,6 +2668,7 @@ function renderToggleLine(
   const line = state.doc.line(lineNumber);
   const toggle = toggleLine(objectDocument, lineNumber, line.text);
   if (!toggle) return null;
+  const unbrokenContent = hasUnbrokenObjectContent(line.text, toggle.object.sourcePrefix.length);
   const toggleAttachment = parseAttachmentMarkdown(toggle.content);
   const sectionEndLineNumber = toggleSectionEnd(objectDocument, lineNumber);
   const hasChildren = sectionEndLineNumber > lineNumber;
@@ -2247,6 +2693,7 @@ function renderToggleLine(
     toggleAttachment ? "cm-live-attachment-line" : "",
     isTask ? "cm-live-task-line" : "",
     isTask || listKind ? "cm-live-list-line" : "",
+    unbrokenContent ? "cm-live-unbroken-line" : "",
   ].filter(Boolean).join(" ");
 
   let lineStyle = toggleLineStyle();
@@ -2423,16 +2870,15 @@ function renderContinuationLine(
   return lineNumber + 1;
 }
 
-function renderPlainLine(
+function decoratePlainLine(
   context: LivePreviewRenderContext,
   lineNumber: number,
-): number {
-  const { state, objectDocument, decorations, atomicRanges, depthByLine } = context;
-  const line = state.doc.line(lineNumber);
-  const object = objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber
-    ? objectDocument.byLine.get(lineNumber) ?? null
-    : null;
-  const barePrefixSize = object?.barePrefixSize ?? 0;
+  line: { from: number; text: string },
+  object: ObjectLine | null,
+  barePrefixSize: number,
+  unbrokenContent: boolean,
+) {
+  const { decorations, atomicRanges, depthByLine } = context;
   if (barePrefixSize > 0 && object?.checked === undefined && !object?.listMarker) {
     addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
   }
@@ -2448,7 +2894,7 @@ function renderPlainLine(
     decorations.push(Decoration.line({
       attributes: objectLineAttributes(
         lineNumber,
-        "cm-live-task-line cm-live-list-line",
+        `cm-live-task-line cm-live-list-line${unbrokenContent ? " cm-live-unbroken-line" : ""}`,
         listLineStyle(),
         depthByLine.get(lineNumber) ?? 0,
       ),
@@ -2458,7 +2904,7 @@ function renderPlainLine(
     decorations.push(Decoration.line({
       attributes: objectLineAttributes(
         lineNumber,
-        "cm-live-list-line",
+        `cm-live-list-line${unbrokenContent ? " cm-live-unbroken-line" : ""}`,
         listLineStyle(),
         depthByLine.get(lineNumber) ?? 0,
       ),
@@ -2467,11 +2913,26 @@ function renderPlainLine(
   if (!task && !listKind) {
     decorations.push(
       Decoration.line({
-        attributes: context.lineAttributes(lineNumber),
+        attributes: context.lineAttributes(lineNumber, line.text.length === 0 ? "cm-live-empty-line" : ""),
       }).range(line.from),
     );
   }
+}
 
+function renderPlainLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number {
+  const { state, objectDocument } = context;
+  const line = state.doc.line(lineNumber);
+  const object = objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber
+    ? objectDocument.byLine.get(lineNumber) ?? null
+    : null;
+  const barePrefixSize = object?.barePrefixSize ?? 0;
+  const unbrokenContent = object
+    ? hasUnbrokenObjectContent(line.text, object.sourcePrefix.length)
+    : false;
+  decoratePlainLine(context, lineNumber, line, object, barePrefixSize, unbrokenContent);
   decoratePreviewText(context, line.text.slice(barePrefixSize), line.from + barePrefixSize);
   return lineNumber + 1;
 }
@@ -2813,21 +3274,46 @@ function restoreArrowSubstitution(view: EditorView): boolean {
   return true;
 }
 
-function boardMarkerAtDeletionBoundary(view: EditorView): boolean {
-  const range = view.state.selection.main;
-  if (!range.empty) return rangeTouchesBoard(view.state, range.from, range.to);
-  const positions = [range.head, range.head - 1, range.head + 1];
-  return positions.some((position) =>
-    position >= 0 && position <= view.state.doc.length && parseBoardMarker(view.state.doc.lineAt(position).text) !== null,
-  );
+function deletionChangesBoardMarkers(
+  state: EditorState,
+  changes: readonly { from: number; to: number }[],
+): boolean {
+  if (changes.length === 0) return false;
+  const boardMarkers = (text: string) => text.split("\n").filter((line) => parseBoardMarker(line));
+  const source = state.doc.toString();
+  const before = boardMarkers(source);
+  const afterSource = [...changes]
+    .sort((a, b) => b.from - a.from)
+    .reduce((text, change) => text.slice(0, change.from) + text.slice(change.to), source);
+  const after = boardMarkers(afterSource);
+  return before.length !== after.length || before.some((marker, index) => marker !== after[index]);
+}
+
+function boardMarkerAtDeletionBoundary(view: EditorView, direction: "backspace" | "delete"): boolean {
+  const length = view.state.doc.length;
+  const changes = view.state.selection.ranges.flatMap((range) => {
+    let from = range.from;
+    let to = range.to;
+    if (range.empty) {
+      if (direction === "backspace") {
+        from = range.head - 1;
+        to = range.head;
+      } else {
+        from = range.head;
+        to = range.head + 1;
+      }
+    }
+    return from >= 0 && to <= length && to > from ? [{ from, to }] : [];
+  });
+  return deletionChangesBoardMarkers(view.state, changes);
 }
 
 function handleBackspace(view: EditorView): boolean {
-  return boardMarkerAtDeletionBoundary(view) || restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
+  return boardMarkerAtDeletionBoundary(view, "backspace") || restoreArrowSubstitution(view) || removeBareTaskPrefix(view);
 }
 
 function handleBoardDelete(view: EditorView): boolean {
-  return boardMarkerAtDeletionBoundary(view);
+  return boardMarkerAtDeletionBoundary(view, "delete");
 }
 
 function snippetCompletion(
@@ -3099,7 +3585,7 @@ function multilineObjectPaste(view: EditorView, text: string) {
 let logicalObjectClipboard = "";
 
 function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
-  view.dispatch({ effects: setAllQuotesCollapsed.of(collapsed) });
+  view.dispatch({ effects: [setAllQuotesCollapsed.of(collapsed), view.scrollSnapshot()] });
   view.focus();
   return true;
 }
@@ -3159,7 +3645,7 @@ function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
   if (position === null) return false;
 
   view.dispatch({
-    effects: setQuoteCollapsed.of({ position, collapsed }),
+    effects: [setQuoteCollapsed.of({ position, collapsed }), view.scrollSnapshot()],
   });
 
   view.focus();
@@ -3207,8 +3693,10 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
     const line = state.doc.line(lineNumber);
     const next = deleteObjectInMarkdown(doc, lineNumber);
     if (next === doc) return;
+    const changes = minimalDocumentChange(view.state, next);
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: next },
+      changes,
+      effects: view.scrollSnapshot().map(changes)!,
       selection: EditorSelection.cursor(Math.min(line.from, next.length)),
     });
     view.focus();
@@ -3229,8 +3717,10 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
       const next = insertLogicalObjectAfterCaret(doc, logicalObjectClipboard, state.doc.line(lineNumber).to);
       if (next === doc) return;
       const duplicateStart = state.doc.line(objectBlockEnd(lines, lineNumber)).to + 1;
+      const changes = minimalDocumentChange(state, next);
       view.dispatch({
-        changes: { from: 0, to: state.doc.length, insert: next },
+        changes,
+        effects: view.scrollSnapshot().map(changes)!,
         selection: EditorSelection.cursor(Math.min(duplicateStart, next.length)),
       });
       view.focus();
@@ -3300,10 +3790,8 @@ function moveObjectBlock(
   const next = moveObjectInMarkdown(doc, sourceLineNumber, targetLineNumber, mode);
   if (next === doc) return false;
 
-  view.dispatch({
-    changes: { from: 0, to: state.doc.length, insert: next },
-    scrollIntoView: false,
-  });
+  const changes = minimalDocumentChange(state, next);
+  view.dispatch({ changes, effects: view.scrollSnapshot().map(changes)! });
   view.focus();
   return true;
 }
@@ -3326,6 +3814,14 @@ function completeTypedEditorInput(
     view.dispatch({
       changes: { from: line.from, to: line.to, insert: fence },
       selection: EditorSelection.cursor(line.from + fence.indexOf("\n") + 1),
+    });
+    return true;
+  }
+  if (line.text.trim() === "") {
+    const inserted = line.text + text;
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: inserted },
+      selection: EditorSelection.cursor(line.from + inserted.length),
     });
     return true;
   }
@@ -3354,6 +3850,19 @@ function normalizeEditorInput(
   let changeFrom = from;
   let changeTo = to;
   let inserted = text;
+  const line = view.state.doc.lineAt(from);
+  const owner = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (
+    owner &&
+    owner.lineNumber !== line.number &&
+    line.text.trim() === "" &&
+    from <= line.to &&
+    !text.includes("\n")
+  ) {
+    changeFrom = line.from;
+    changeTo = line.to;
+    inserted = (line.text || " ".repeat(owner?.contentIndent ?? 0)) + inserted;
+  }
   if (
     changeFrom > 0 &&
     view.state.sliceDoc(changeFrom - 1, changeFrom) === "-" &&
@@ -3387,13 +3896,16 @@ function normalizeEditorInput(
     inserted += "-";
   }
   const normalized = normalizeArrowText(inserted);
-  return normalized === inserted ? null : { from: changeFrom, to: changeTo, text: normalized };
+  return changeFrom === from && changeTo === to && normalized === text
+    ? null
+    : { from: changeFrom, to: changeTo, text: normalized };
 }
 
 export default function LiveMarkdownEditor({
   noteID,
   value,
   onChange,
+  onChangeWithCaret,
   onSave,
   onError,
   onOpenWikilink,
@@ -3403,8 +3915,14 @@ export default function LiveMarkdownEditor({
   onCreateCard,
   onCreateBoard,
   onMoveCard,
+  onMoveCardInBoard,
   onAddCardToBoard,
   onChangeBoardTitle,
+  onChangeBoardColumns,
+  cardTemplates = [],
+  onChangeBoardTemplate,
+  onOpenBoardTemplate,
+  onCreateBoardTemplate,
   onDecreaseFontSize,
   onIncreaseFontSize,
   searchTarget = null,
@@ -3420,6 +3938,7 @@ export default function LiveMarkdownEditor({
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const onChangeWithCaretRef = useRef(onChangeWithCaret);
   const onSaveRef = useRef(onSave);
   const onErrorRef = useRef(onError);
   const onOpenWikilinkRef = useRef(onOpenWikilink);
@@ -3429,8 +3948,14 @@ export default function LiveMarkdownEditor({
   const onCreateCardRef = useRef(onCreateCard);
   const onCreateBoardRef = useRef(onCreateBoard);
   const onMoveCardRef = useRef(onMoveCard);
+  const onMoveCardInBoardRef = useRef(onMoveCardInBoard);
   const onAddCardToBoardRef = useRef(onAddCardToBoard);
   const onChangeBoardTitleRef = useRef(onChangeBoardTitle);
+  const onChangeBoardColumnsRef = useRef(onChangeBoardColumns);
+  const cardTemplatesRef = useRef(cardTemplates);
+  const onChangeBoardTemplateRef = useRef(onChangeBoardTemplate);
+  const onOpenBoardTemplateRef = useRef(onOpenBoardTemplate);
+  const onCreateBoardTemplateRef = useRef(onCreateBoardTemplate);
   const onDecreaseFontSizeRef = useRef(onDecreaseFontSize);
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
@@ -3445,10 +3970,8 @@ export default function LiveMarkdownEditor({
     const editorHost = host.current;
     if (!editorHost) return;
 
-    const editorShell = editorHost.closest<HTMLElement>(".editor-shell");
-    const documentBody = editorShell?.querySelector<HTMLElement>(".document-body");
-
-    if (!editorShell || !documentBody) return;
+    const documentBody = editorHost.closest<HTMLElement>(".document-body");
+    if (!documentBody) return;
 
     const toolbar = document.createElement("div");
     toolbar.className = "markdown-toolbar";
@@ -3466,7 +3989,9 @@ export default function LiveMarkdownEditor({
 
   useEffect(() => {
     const previousCardData = cardDataRef.current;
+    const previousCardTemplates = cardTemplatesRef.current;
     onChangeRef.current = onChange;
+    onChangeWithCaretRef.current = onChangeWithCaret;
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
     onOpenWikilinkRef.current = onOpenWikilink;
@@ -3476,16 +4001,23 @@ export default function LiveMarkdownEditor({
     onCreateCardRef.current = onCreateCard;
     onCreateBoardRef.current = onCreateBoard;
     onMoveCardRef.current = onMoveCard;
+    onMoveCardInBoardRef.current = onMoveCardInBoard;
     onAddCardToBoardRef.current = onAddCardToBoard;
     onChangeBoardTitleRef.current = onChangeBoardTitle;
+    onChangeBoardColumnsRef.current = onChangeBoardColumns;
+    cardTemplatesRef.current = cardTemplates;
+    onChangeBoardTemplateRef.current = onChangeBoardTemplate;
+    onOpenBoardTemplateRef.current = onOpenBoardTemplate;
+    onCreateBoardTemplateRef.current = onCreateBoardTemplate;
     onDecreaseFontSizeRef.current = onDecreaseFontSize;
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
-    if (previousCardData !== cardData) {
-      view.current?.dispatch({ effects: refreshLivePreview.of(null) });
+    if (previousCardData !== cardData || previousCardTemplates !== cardTemplates) {
+      const editor = view.current;
+      if (editor) editor.dispatch({ effects: [refreshLivePreview.of(null), editor.scrollSnapshot()] });
     }
-  }, [onChange, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onAddCardToBoard, onChangeBoardTitle, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -3774,7 +4306,11 @@ export default function LiveMarkdownEditor({
                   );
                   if (next !== pastedView.state.doc.toString()) {
                     event.preventDefault();
-                    pastedView.dispatch({ changes: { from: 0, to: pastedView.state.doc.length, insert: next } });
+                    const changes = minimalDocumentChange(pastedView.state, next);
+                    pastedView.dispatch({
+                      changes,
+                      effects: pastedView.scrollSnapshot().map(changes)!,
+                    });
                     pastedView.focus();
                     return true;
                   }
@@ -3825,8 +4361,14 @@ export default function LiveMarkdownEditor({
             cardTitle: (id) => cardTitlesRef.current.get(id) ?? null,
             cards: () => cardDataRef.current,
             moveCard: (id, status) => onMoveCardRef.current?.(id, status),
+            moveCardInBoard: (boardID, cardID, columnID) => onMoveCardInBoardRef.current?.(boardID, cardID, columnID),
             addCard: (boardID) => onAddCardToBoardRef.current?.(boardID),
             changeBoardTitle: (boardID, title) => onChangeBoardTitleRef.current?.(boardID, title),
+            changeBoardColumns: (boardID, columns, deletedColumns, orphanCardIDs) => onChangeBoardColumnsRef.current?.(boardID, columns, deletedColumns, orphanCardIDs),
+            cardTemplates: cardTemplatesRef.current,
+            changeBoardTemplate: (boardID, templateID) => onChangeBoardTemplateRef.current?.(boardID, templateID),
+            openBoardTemplate: (boardID, templateID) => onOpenBoardTemplateRef.current?.(boardID, templateID),
+            createBoardTemplate: (boardID) => onCreateBoardTemplateRef.current?.(boardID),
             noteID,
             onError: (reason) => onErrorRef.current(reason),
             highlightLineNumbers,
@@ -3834,15 +4376,20 @@ export default function LiveMarkdownEditor({
           }),
           searchHighlightField,
           EditorView.updateListener.of((update) => {
-            if (
-              update.docChanged &&
-              !update.transactions.some((transaction) =>
-                transaction.annotation(externalDocumentUpdate),
-              )
-            ) {
-              onChangeRef.current(update.state.doc.toString());
-            }
-            if (update.selectionSet || update.docChanged) {
+            const externalUpdate = update.transactions.some((transaction) =>
+              transaction.annotation(externalDocumentUpdate),
+            );
+            const suppressExternalCaret = externalUpdate && Boolean(onChangeWithCaretRef.current);
+            if (!externalUpdate && update.docChanged) {
+              const content = update.state.doc.toString();
+              const caretOffset = update.state.selection.main.head;
+              if (onChangeWithCaretRef.current) {
+                onChangeWithCaretRef.current(content, caretOffset);
+              } else {
+                onChangeRef.current(content);
+                onCaretChangeRef.current?.(caretOffset);
+              }
+            } else if ((update.selectionSet || update.docChanged) && !suppressExternalCaret) {
               onCaretChangeRef.current?.(update.state.selection.main.head);
             }
             if (update.docChanged || update.viewportChanged || update.geometryChanged) {
@@ -3889,9 +4436,11 @@ export default function LiveMarkdownEditor({
     const normalizedValue = normalizeArrowText(value);
     if (editor.state.doc.toString() === normalizedValue) return;
 
+    const changes = minimalDocumentChange(editor.state, normalizedValue);
     editor.dispatch({
-      changes: { from: 0, to: editor.state.doc.length, insert: normalizedValue },
+      changes,
       selection: preservedSelection(editor, normalizedValue.length),
+      effects: editor.scrollSnapshot().map(changes)!,
       annotations: [
         externalDocumentUpdate.of(true),
         Transaction.addToHistory.of(false),

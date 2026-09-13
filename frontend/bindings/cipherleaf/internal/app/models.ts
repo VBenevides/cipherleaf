@@ -47,6 +47,13 @@ export interface ProcessMemoryUsage {
     "memoryBytes": number;
 }
 
+export interface ScratchpadState {
+    "content": string;
+    "caretOffset": number;
+    "generation": number;
+    "revision": number;
+}
+
 /**
  * SyncResult summarizes a manual sync (pull then push) for the frontend.
  */

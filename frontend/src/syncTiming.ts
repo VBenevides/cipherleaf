@@ -4,10 +4,6 @@ function formatDuration(milliseconds: number): string {
   return `${milliseconds.toFixed(2)} ms (${(milliseconds / 1000).toFixed(3)} s)`;
 }
 
-export function syncFinishedMessage(elapsedMilliseconds: number): string {
-  return `Cloud sync finished after: ${(elapsedMilliseconds / 1000).toFixed(2)} seconds`;
-}
-
 export function syncTimingMessages(
   timings: SyncTimings,
   wallMilliseconds: number,

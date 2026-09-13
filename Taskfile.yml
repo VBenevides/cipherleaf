@@ -3,7 +3,7 @@ version: '3'
 vars:
   APP_NAME: "cipherleaf"
   APP_VERSION:
-    sh: cat VERSION
+    sh: '{{if eq OS "windows"}}powershell -NoProfile -Command "(Get-Content VERSION -Raw).Trim()"{{else}}cat VERSION{{end}}'
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
