@@ -6042,6 +6042,9 @@ function App() {
 
   const renderCardPanel = () => {
     if (!cardPanel || scratchpadActive) return null;
+    let cardSaveLabel = "Save card";
+    if (cardPanel.kind) cardSaveLabel = "Save template";
+    if (cardPanelSaving) cardSaveLabel = "Saving…";
     return (
           <aside className="card-sidebar" aria-label="Card details">
             <header className="card-sidebar-header">
@@ -6120,7 +6123,7 @@ function App() {
               {!cardPanel.kind && <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>}
               {!cardPanel.kind && <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>}
               {(cardPanel.kind || selectedTemplateID) && <button type="button" className="secondary-button danger" onClick={() => void deleteCardTemplate()}>Delete template</button>}
-              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardPanelSaving ? "Saving…" : cardPanel.kind ? "Save template" : "Save card"}</button>
+              <button type="button" className={`${cardPanelDirty ? "primary-button is-dirty" : "secondary-button"} card-save-button`} disabled={cardPanelSaving} onClick={() => void saveCardPanel()}>{cardSaveLabel}</button>
             </div>
           </aside>
     );
