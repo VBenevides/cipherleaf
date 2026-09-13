@@ -10,6 +10,7 @@ test("command palette supports matching, keyboard selection, and themed presenta
   assert.match(app, /<dialog open className="global-search-panel command-palette" aria-modal="true" aria-labelledby="command-palette-title"/);
   assert.match(app, /event\.key === "ArrowDown"/);
   assert.match(app, /event\.key === "Enter"/);
+  assert.match(app, /event\.target !== event\.currentTarget \|\| \(event\.key !== "Enter" && event\.key !== " "\)/);
   assert.match(app, /event\.key === "Escape"/);
   assert.match(app, /formatShortcut\(shortcutMap\["new-note"\]\)/);
   assert.match(app, /shortcutEditingID === command\.id/);
