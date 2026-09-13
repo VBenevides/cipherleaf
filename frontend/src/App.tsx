@@ -7270,6 +7270,7 @@ function App() {
                   id={`command-palette-${command.id}`}
                   className="command-palette-command"
                   role="option"
+                  tabIndex={0}
                   aria-selected={index === commandPaletteSelectedIndex}
                   onMouseEnter={() => setCommandPaletteIndex(index)}
                   onClick={() => runCommandPaletteCommand(command)}
