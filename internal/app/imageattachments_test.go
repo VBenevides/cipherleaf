@@ -72,6 +72,7 @@ func TestConvertImageDataURLRejectsMalformedInput(t *testing.T) {
 		"plain text",
 		"data:image/png,not-base64",
 		"data:image/png;base64,",
+		"data:image/png;base64,!!!",
 		"data:image/png;base64,AAAA",
 	} {
 		if _, err := convertImageDataURLToWebP(value); err == nil {

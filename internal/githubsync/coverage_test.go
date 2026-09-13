@@ -383,6 +383,108 @@ func TestCoverageGitProviderErrorBranches(t *testing.T) {
 	}
 }
 
+func TestCoverageAcceptExistingRepository(t *testing.T) {
+	settings := DefaultSettings(strings.Repeat("a", 32))
+	settings.RepositorySSH = "git@github.com:owner/repository.git"
+	runner := &sequenceGitRunner{outputs: [][]byte{
+		[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil,
+		nil, nil, nil, nil, []byte(""), []byte(strings.Repeat("a", 40)),
+	}}
+	provider := &GitHubSSHProvider{runner: runner, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}
+	commit, err := provider.acceptExistingRepository(
+		context.Background(), settings, coverageRemoteSnapshot{}, t.TempDir(),
+		"refs/remotes/origin/main", t.TempDir(), nil,
+	)
+	if err != nil || commit != strings.Repeat("a", 40) {
+		t.Fatalf("accepted repository commit = %q, %v", commit, err)
+	}
+}
+
+type coverageSnapshotError struct {
+	validateErr error
+	exportErr   error
+	match       bool
+}
+
+func (s coverageSnapshotError) ExportRemoteSnapshot(root string) error {
+	if s.exportErr != nil {
+		return s.exportErr
+	}
+	return (coverageRemoteSnapshot{}).ExportRemoteSnapshot(root)
+}
+
+func (s coverageSnapshotError) ValidateRemoteSnapshot(string) (bool, error) {
+	return s.match, s.validateErr
+}
+
+type coverageUnsafeSnapshot struct{}
+
+func (coverageUnsafeSnapshot) ExportRemoteSnapshot(root string) error {
+	if err := (coverageRemoteSnapshot{}).ExportRemoteSnapshot(root); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, "unsafe.txt"), []byte("unsafe"), 0o600)
+}
+
+func (coverageUnsafeSnapshot) ValidateRemoteSnapshot(string) (bool, error) { return true, nil }
+
+func TestCoverageGitRemainingProviderBranches(t *testing.T) {
+	settings := DefaultSettings(strings.Repeat("a", 32))
+	settings.RepositorySSH = "git@github.com:owner/repository.git"
+	if got := NewGitHubSSHProvider(t.TempDir(), t.TempDir()); got == nil {
+		t.Fatal("provider constructor returned nil")
+	}
+	if git, ssh := ToolVersions(); git == "" || ssh == "" {
+		t.Fatalf("tool versions = %q, %q", git, ssh)
+	}
+	if knownHosts, wrapper, err := prepareSSHFiles(t.TempDir()); err != nil || knownHosts == "" || wrapper == "" {
+		t.Fatalf("SSH files = %q, %q, %v", knownHosts, wrapper, err)
+	}
+
+	accept := func(t *testing.T, runner GitRunner, snapshot RemoteSnapshotStore, wantErr bool) {
+		t.Helper()
+		provider := &GitHubSSHProvider{runner: runner, runtimeDir: t.TempDir(), cacheRoot: t.TempDir(), timeout: time.Second}
+		_, err := provider.acceptExistingRepository(context.Background(), settings, snapshot, t.TempDir(), "refs/remotes/origin/main", t.TempDir(), nil)
+		if (err != nil) != wantErr {
+			t.Fatalf("accept existing error = %v, want error=%v", err, wantErr)
+		}
+	}
+	accept(t, &sequenceGitRunner{}, coverageSnapshotError{}, true)
+	accept(t, &sequenceGitRunner{errors: []error{errors.New("inspect")}}, coverageSnapshotError{}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil}}, coverageSnapshotError{validateErr: errors.New("validate")}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil}}, coverageSnapshotError{}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil}, errors: []error{nil, nil, errors.New("prepare")}}, coverageSnapshotError{match: true}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil}, errors: []error{nil, nil, nil, nil, nil}}, coverageSnapshotError{match: true, exportErr: errors.New("export")}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil}, errors: []error{nil, nil, nil, nil, nil}}, coverageUnsafeSnapshot{}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil}, errors: []error{nil, nil, nil, nil, nil, errors.New("stage")}}, coverageSnapshotError{match: true}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil, nil}, errors: []error{nil, nil, nil, nil, nil, nil, errors.New("diff")}}, coverageSnapshotError{match: true}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil, nil, []byte("vault.json")}, errors: []error{nil, nil, nil, nil, nil, nil, nil, errors.New("commit")}}, coverageSnapshotError{match: true}, true)
+	accept(t, &sequenceGitRunner{outputs: [][]byte{[]byte("vault.json\x00sync/manifest.enc\x00sync/folders.enc\x00"), nil, nil, nil, nil, nil, []byte("vault.json"), nil}, errors: []error{nil, nil, nil, nil, nil, nil, nil, nil, errors.New("push")}}, coverageSnapshotError{match: true}, true)
+
+	workingTree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workingTree, "vault.json"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider := &GitHubSSHProvider{runner: &sequenceGitRunner{}, runtimeDir: t.TempDir(), cacheRoot: t.TempDir()}
+	if err := provider.materializeChangedRepository(context.Background(), workingTree, "origin/main", []changedRemotePath{
+		{path: "missing.enc", deleted: true}, {path: "vault.json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	statuses := make([]byte, 0, 257*4)
+	for index := 0; index < 257; index++ {
+		statuses = append(statuses, []byte(" M file")...)
+		statuses = append(statuses, 0)
+	}
+	provider.runner = &sequenceGitRunner{outputs: [][]byte{statuses, nil, nil}}
+	if err := provider.stageChangedSnapshot(context.Background(), workingTree); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.resolveReference(context.Background(), workingTree, "HEAD"); err == nil {
+		t.Fatal("missing commit output accepted")
+	}
+}
+
 type coverageSyncProvider struct{}
 
 func (coverageSyncProvider) Link(context.Context, SyncSettings, RemoteSnapshotStore) (LinkResult, error) {
@@ -422,6 +524,266 @@ func TestCoverageManagerLinkVault(t *testing.T) {
 	if err != nil || !saved.Linked || saved.LastSnapshotRev != "revision" {
 		t.Fatalf("saved settings = %#v, %v", saved, err)
 	}
+}
+
+type coverageManagerSettingsStore struct {
+	settings  SyncSettings
+	loadErr   error
+	saveErr   error
+	removeErr error
+}
+
+func (s *coverageManagerSettingsStore) Load(string) (SyncSettings, error) {
+	if s.loadErr != nil {
+		return SyncSettings{}, s.loadErr
+	}
+	if s.settings.VaultID == "" {
+		return SyncSettings{}, ErrSettingsNotFound
+	}
+	return s.settings, nil
+}
+
+func (s *coverageManagerSettingsStore) Save(settings SyncSettings) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.settings = settings
+	return nil
+}
+
+func (s *coverageManagerSettingsStore) Remove(string) error { return s.removeErr }
+
+type coverageManagerProvider struct {
+	link             LinkResult
+	linkErr          error
+	download         DownloadedVault
+	downloadErr      error
+	push             PushResult
+	pushErr          error
+	pull             PullResult
+	pullErr          error
+	force            PushResult
+	forceErr         error
+	prefetchErr      error
+	workingDirectory string
+}
+
+func (p *coverageManagerProvider) Link(context.Context, SyncSettings, RemoteSnapshotStore) (LinkResult, error) {
+	return p.link, p.linkErr
+}
+
+func (p *coverageManagerProvider) Download(context.Context, SyncSettings) (DownloadedVault, error) {
+	return p.download, p.downloadErr
+}
+
+func (p *coverageManagerProvider) Push(context.Context, SyncSettings, RemoteSnapshotStore) (PushResult, error) {
+	return p.push, p.pushErr
+}
+
+func (p *coverageManagerProvider) Pull(context.Context, SyncSettings) (PullResult, error) {
+	return p.pull, p.pullErr
+}
+
+func (p *coverageManagerProvider) ForcePush(context.Context, SyncSettings, RemoteSnapshotStore) (PushResult, error) {
+	return p.force, p.forceErr
+}
+
+func (p *coverageManagerProvider) Prefetch(context.Context, SyncSettings) error { return p.prefetchErr }
+
+func (p *coverageManagerProvider) GitWorkingDirectory(SyncSettings) string {
+	return p.workingDirectory
+}
+
+type coverageManagerRevisionSnapshot struct {
+	revision string
+	err      error
+}
+
+func (s coverageManagerRevisionSnapshot) SnapshotRevision() (string, error)         { return s.revision, s.err }
+func (coverageManagerRevisionSnapshot) ExportRemoteSnapshot(string) error           { return nil }
+func (coverageManagerRevisionSnapshot) ValidateRemoteSnapshot(string) (bool, error) { return true, nil }
+
+func coverageManagerLinkedSettings(vaultID string) SyncSettings {
+	settings := DefaultSettings(vaultID)
+	settings.RepositorySSH = "git@github.com:owner/repository.git"
+	settings.PrivateKeyPath = "/key"
+	settings.RepositoryPrivate = true
+	settings.Linked = true
+	return settings
+}
+
+func TestCoverageManagerBranches(t *testing.T) {
+	vaultID := "manager-vault"
+	valid := coverageManagerLinkedSettings(vaultID)
+	valid.PrivateKeyPath = filepath.Join(t.TempDir(), "id_cipherleaf")
+	if err := os.WriteFile(valid.PrivateKeyPath, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := coverageManagerRevisionSnapshot{revision: "revision"}
+
+	if _, err := (&Manager{settings: &coverageManagerSettingsStore{loadErr: errors.New("load")}}).GetSettings(vaultID); err == nil {
+		t.Fatal("settings load error was ignored")
+	}
+	if got, err := NewManager(&coverageManagerSettingsStore{}, nil).GetSettings(vaultID); err != nil || got.VaultID != vaultID {
+		t.Fatalf("default settings = %#v, %v", got, err)
+	}
+
+	provider := &coverageManagerProvider{}
+	store := &coverageManagerSettingsStore{settings: valid}
+	manager := NewManager(store, &successfulConnectionTester{})
+	manager.provider = provider
+	if err := manager.PrefetchVault(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	provider.prefetchErr = errors.New("prefetch")
+	if err := manager.PrefetchVault(context.Background(), vaultID); !errors.Is(err, provider.prefetchErr) {
+		t.Fatalf("prefetch error = %v", err)
+	}
+	if path, err := manager.GitWorkingDirectory(vaultID); err != nil || path != "" {
+		t.Fatalf("working directory = %q, %v", path, err)
+	}
+	provider.workingDirectory = "/checkout"
+	if path, err := manager.GitWorkingDirectory(vaultID); err != nil || path != "/checkout" {
+		t.Fatalf("working directory = %q, %v", path, err)
+	}
+
+	provider.link = LinkResult{Linked: true, Branch: "main", LastCommit: "commit"}
+	if result, err := manager.LinkVault(context.Background(), vaultID, valid, &snapshot); err != nil || result.LastCommit != "commit" {
+		t.Fatalf("link result = %#v, %v", result, err)
+	}
+	provider.linkErr = errors.New("link")
+	if _, err := manager.LinkVault(context.Background(), vaultID, valid, &snapshot); !errors.Is(err, provider.linkErr) {
+		t.Fatalf("link error = %v", err)
+	}
+	provider.linkErr = nil
+	if _, err := manager.LinkVault(context.Background(), vaultID, SyncSettings{}, &snapshot); err == nil {
+		t.Fatal("invalid link settings accepted")
+	}
+	manager.provider = nil
+	if _, err := manager.LinkVault(context.Background(), vaultID, valid, &snapshot); err == nil {
+		t.Fatal("missing link provider accepted")
+	}
+	manager.provider = provider
+	if _, err := manager.LinkVault(context.Background(), vaultID, valid, &coverageManagerRevisionSnapshot{err: errors.New("revision")}); err == nil {
+		t.Fatal("revision error was ignored")
+	}
+	store.saveErr = errors.New("save")
+	if _, err := manager.LinkVault(context.Background(), vaultID, valid, &snapshot); err == nil {
+		t.Fatal("link save error was ignored")
+	}
+	store.saveErr = nil
+
+	provider.download = DownloadedVault{VaultID: vaultID, CachePath: "/cache", Branch: "main"}
+	if downloaded, linked, err := manager.DownloadVault(context.Background(), valid); err != nil || linked.VaultID != vaultID || downloaded.CachePath != "/cache" {
+		t.Fatalf("download = %#v, %#v, %v", downloaded, linked, err)
+	}
+	provider.downloadErr = errors.New("download")
+	if _, _, err := manager.DownloadVault(context.Background(), valid); !errors.Is(err, provider.downloadErr) {
+		t.Fatalf("download error = %v", err)
+	}
+	provider.downloadErr = nil
+	manager.provider = nil
+	if _, _, err := manager.DownloadVault(context.Background(), valid); err == nil {
+		t.Fatal("missing download provider accepted")
+	}
+	manager.provider = provider
+	if _, _, err := manager.DownloadVault(context.Background(), SyncSettings{}); err == nil {
+		t.Fatal("invalid download settings accepted")
+	}
+	if err := manager.ActivateDownloadedVault(SyncSettings{}); err == nil {
+		t.Fatal("invalid downloaded settings accepted")
+	}
+	store.saveErr = errors.New("save")
+	if err := manager.ActivateDownloadedVault(valid); err == nil {
+		t.Fatal("download settings save error was ignored")
+	}
+	store.saveErr = nil
+
+	connection := &successfulConnectionTester{}
+	manager.connection = connection
+	if result, err := manager.TestConnection(context.Background(), vaultID, valid); err != nil || !result.Success {
+		t.Fatalf("connection result = %#v, %v", result, err)
+	}
+	manager.connection = failingConnectionTester{}
+	if _, err := manager.TestConnection(context.Background(), vaultID, valid); err == nil {
+		t.Fatal("connection error was ignored")
+	}
+	manager.connection = connection
+	if _, err := manager.TestConnection(context.Background(), vaultID, SyncSettings{}); err == nil {
+		t.Fatal("invalid connection settings accepted")
+	}
+
+	store.settings = valid
+	provider.push = PushResult{Linked: true, Branch: "main", LastCommit: "pushed"}
+	if result, err := manager.PushVault(context.Background(), vaultID, &snapshot); err != nil || result.LastCommit != "pushed" {
+		t.Fatalf("push result = %#v, %v", result, err)
+	}
+	provider.pushErr = errors.New("push")
+	if _, err := manager.PushVault(context.Background(), vaultID, &coverageManagerRevisionSnapshot{revision: "changed"}); !errors.Is(err, provider.pushErr) {
+		t.Fatalf("push error = %v", err)
+	}
+	provider.pushErr = nil
+	manager.provider = nil
+	if _, err := manager.PushVault(context.Background(), vaultID, &snapshot); err == nil {
+		t.Fatal("missing push provider accepted")
+	}
+	manager.provider = provider
+	if _, err := manager.PushVault(context.Background(), vaultID, &coverageManagerRevisionSnapshot{err: errors.New("revision")}); err == nil {
+		t.Fatal("push revision error was ignored")
+	}
+	store.saveErr = errors.New("save")
+	if _, err := manager.PushVault(context.Background(), vaultID, &coverageManagerRevisionSnapshot{revision: "changed"}); err == nil {
+		t.Fatal("push save error was ignored")
+	}
+	store.saveErr = nil
+
+	provider.force = PushResult{Linked: true, Branch: "main", LastCommit: "forced"}
+	if result, err := manager.ForcePushVault(context.Background(), vaultID, &snapshot); err != nil || result.LastCommit != "forced" {
+		t.Fatalf("force push result = %#v, %v", result, err)
+	}
+	provider.forceErr = errors.New("force")
+	if _, err := manager.ForcePushVault(context.Background(), vaultID, &snapshot); !errors.Is(err, provider.forceErr) {
+		t.Fatalf("force push error = %v", err)
+	}
+	provider.forceErr = nil
+	store.saveErr = errors.New("save")
+	if _, err := manager.ForcePushVault(context.Background(), vaultID, &snapshot); err == nil {
+		t.Fatal("force push save error was ignored")
+	}
+	store.saveErr = nil
+
+	provider.pull = PullResult{Linked: true, Branch: "main"}
+	if result, err := manager.PullVault(context.Background(), vaultID); err != nil || !result.Linked {
+		t.Fatalf("pull result = %#v, %v", result, err)
+	}
+	provider.pullErr = errors.New("pull")
+	if _, err := manager.PullVault(context.Background(), vaultID); !errors.Is(err, provider.pullErr) {
+		t.Fatalf("pull error = %v", err)
+	}
+	provider.pullErr = nil
+	manager.provider = nil
+	if _, err := manager.PullVault(context.Background(), vaultID); err == nil {
+		t.Fatal("missing pull provider accepted")
+	}
+	manager.provider = provider
+
+	store.loadErr = errors.New("load")
+	if _, err := manager.PushVault(context.Background(), vaultID, &snapshot); err == nil {
+		t.Fatal("push load error was ignored")
+	}
+	if _, err := manager.ForcePushVault(context.Background(), vaultID, &snapshot); err == nil {
+		t.Fatal("force push load error was ignored")
+	}
+	if _, err := manager.PullVault(context.Background(), vaultID); err == nil {
+		t.Fatal("pull load error was ignored")
+	}
+	manager.MarkSynced(vaultID)
+}
+
+type failingConnectionTester struct{}
+
+func (failingConnectionTester) TestConnection(context.Context, SyncSettings) (ConnectionResult, error) {
+	return ConnectionResult{}, errors.New("connection")
 }
 
 func TestCoverageGitLayoutIdentityAndCacheHelpers(t *testing.T) {

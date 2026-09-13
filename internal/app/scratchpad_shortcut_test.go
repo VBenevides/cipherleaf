@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
 	appsession "cipherleaf/internal/session"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
@@ -86,4 +88,63 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 			t.Fatalf("invalid attachment ID accepted: %q", id)
 		}
 	}
+}
+
+type coverageNoopTransport struct{}
+
+func (coverageNoopTransport) Start(context.Context, *application.MessageProcessor) error { return nil }
+func (coverageNoopTransport) JSClient() []byte                                           { return nil }
+func (coverageNoopTransport) Stop() error                                                { return nil }
+
+func TestScratchpadShortcutApplicationBranches(t *testing.T) {
+	wailsApp := application.New(application.Options{
+		DisableDefaultSignalHandler: true,
+		Transport:                   coverageNoopTransport{},
+	})
+	wailsApp.Window.Add(application.NewWindow(application.WebviewWindowOptions{Name: mainWindowName}))
+	wailsApp.Window.Add(application.NewWindow(application.WebviewWindowOptions{Name: scratchpadWindowName}))
+	if err := wailsApp.Screen.LayoutScreens([]*application.Screen{{
+		ID: "primary", IsPrimary: true, Bounds: application.Rect{Width: 1200, Height: 800},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewVaultService()
+	service.SetApp(wailsApp)
+	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	if err := service.recent.SetScratchpadShortcut("Ctrl+Shift+S"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.InitializeScratchpadShortcut(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.SetScratchpadShortcut("Alt+S"); err != nil || got != "Alt+S" {
+		t.Fatalf("changed Scratchpad shortcut = %q, %v", got, err)
+	}
+	if _, err := service.store.Create(t.TempDir(), "shortcut coverage secret"); err != nil {
+		t.Fatal(err)
+	}
+	service.toggleScratchpad()
+
+	fallback := NewVaultService()
+	fallback.SetApp(wailsApp)
+	fallback.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	if err := fallback.recent.SetScratchpadShortcut("Alt+S"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fallback.InitializeScratchpadShortcut(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fallback.GetScratchpadShortcut(); got != appsession.DefaultScratchpadShortcut {
+		t.Fatalf("fallback shortcut = %q", got)
+	}
+
+	defaultConflict := NewVaultService()
+	defaultConflict.SetApp(wailsApp)
+	defaultConflict.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	if err := defaultConflict.InitializeScratchpadShortcut(); err == nil {
+		t.Fatal("duplicate default shortcut unexpectedly initialized")
+	}
+
+	service.toggleScratchpad()
 }

@@ -73,6 +73,14 @@ func TestValidateSettings(t *testing.T) {
 	if warning != "" {
 		t.Fatalf("unexpected key permission warning: %s", warning)
 	}
+	if _, _, err := ValidateSettings(value, ""); err == nil {
+		t.Fatal("empty vault ID unexpectedly validated")
+	}
+	value.VaultID = "another-vault"
+	if _, _, err := ValidateSettings(value, "vault-id-123"); err == nil {
+		t.Fatal("settings for another vault unexpectedly validated")
+	}
+	value.VaultID = ""
 	downloadSettings := value
 	downloadSettings.VaultID = ""
 	downloadSettings.Linked = false
