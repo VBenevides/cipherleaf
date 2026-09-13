@@ -4857,7 +4857,6 @@ function App() {
                   <label>
                       Vault name{" "}
                     <input
-                      autoFocus
                       value={vaultName}
                       onChange={(event) => setVaultName(event.target.value)}
                       placeholder="Personal notes"
@@ -4898,7 +4897,6 @@ function App() {
                   <label>
                       Local vault folder name{" "}
                     <input
-                      autoFocus
                       value={vaultName}
                       onChange={(event) => setVaultName(event.target.value)}
                       placeholder="Personal notes"
@@ -4974,7 +4972,6 @@ function App() {
                 <label>
                   Vault secret{" "}
                   <input
-                    autoFocus
                     type="password"
                     value={passphrase}
                     onChange={(event) => setPassphrase(event.target.value)}
@@ -6219,7 +6216,6 @@ function App() {
               Password
               <div className="password-field">
                 <input
-                  autoFocus
                   type={folderPasswordVisible ? "text" : "password"}
                   value={folderPassword}
                   onChange={(event) => setFolderPassword(event.target.value)}
@@ -6630,7 +6626,6 @@ function App() {
                 <label>
                   GitHub repository{" "}
                   <input
-                    autoFocus
                     value={syncSettings.repositorySsh}
                     onChange={(event) => {
                       setSyncSettings({ ...syncSettings, repositorySsh: event.target.value });
@@ -7478,7 +7473,6 @@ function App() {
               <label>
                 {appDialog.label}
                 <input
-                  autoFocus
                   type="text"
                   value={appDialogValue}
                   onChange={(event) => setAppDialogValue(event.target.value)}
