@@ -938,6 +938,7 @@ function App() {
   const vaultSettingsLoadedForRef = useRef("");
   const vaultSettingsSnapshotRef = useRef("");
   const autoSyncVaultRef = useRef<() => Promise<void>>(async () => {});
+  const syncInFlightRef = useRef(false);
 
   const createSettingsDraft = (): SettingsDraft => ({
     dailyNoteFormat,
@@ -1861,6 +1862,19 @@ function App() {
   }, [autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
 
   useEffect(() => {
+    if (!session || session.locked || !syncLinked) return;
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") void autoSyncVaultRef.current();
+    };
+    window.addEventListener("focus", syncWhenVisible);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    return () => {
+      window.removeEventListener("focus", syncWhenVisible);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
+  }, [session?.vaultId, session?.locked, syncLinked]);
+
+  useEffect(() => {
     if (!session || session.locked) return;
     const delay = autoLockMinutes * 60 * 1000;
     const retryDelay = Math.min(delay, 60_000);
@@ -2328,7 +2342,8 @@ function App() {
   };
 
   const syncNow = async () => {
-    if (syncing) return;
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
     setSyncing(true);
     setSyncNotification("");
     try {
@@ -2374,12 +2389,13 @@ function App() {
     } catch (reason) {
       setError(errorText(reason));
     } finally {
+      syncInFlightRef.current = false;
       setSyncing(false);
     }
   };
 
   autoSyncVaultRef.current = async () => {
-    if (!syncLinked || syncing) return;
+    if (!syncLinked || syncInFlightRef.current) return;
     await syncNow();
   };
 

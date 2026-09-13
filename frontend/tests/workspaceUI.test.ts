@@ -376,6 +376,19 @@ test("automatic sync runs on a fixed interval instead of activity reset", () => 
   assert.doesNotMatch(effect[0], /pointerdown|keydown|mousemove|touchstart/);
 });
 
+test("sync resumes on focus and visibility changes without overlapping", () => {
+  const effect = app.match(/  useEffect\(\(\) => \{\n    if \(!session \|\| session\.locked \|\| !syncLinked\) return;\n    const syncWhenVisible = \(\) => \{[\s\S]*?\n  \}, \[session\?\.vaultId, session\?\.locked, syncLinked\]\);/);
+  assert.ok(effect);
+  assert.match(effect[0], /window\.addEventListener\("focus", syncWhenVisible\)/);
+  assert.match(effect[0], /document\.addEventListener\("visibilitychange", syncWhenVisible\)/);
+  assert.match(effect[0], /window\.removeEventListener\("focus", syncWhenVisible\)/);
+  assert.match(effect[0], /document\.removeEventListener\("visibilitychange", syncWhenVisible\)/);
+  const sync = app.match(/  const syncNow = async \(\) => \{[\s\S]*?\n  \};/);
+  assert.ok(sync);
+  assert.match(sync[0], /if \(syncInFlightRef\.current\) return;/);
+  assert.match(sync[0], /syncInFlightRef\.current = false;/);
+});
+
 test("vault settings configure scheduled encrypted backups", () => {
   assert.match(app, /VaultService\.CreateScheduledBackup\(backupDirectory, backupRetention\)/);
   assert.match(app, /cipherleaf-backup-\$\{field\}:\$\{vaultID\}/);
