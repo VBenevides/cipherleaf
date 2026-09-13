@@ -36,7 +36,7 @@ import type {
   SyncSettings,
 } from "../bindings/cipherleaf/internal/githubsync/models";
 import type { ApplicationStatistics, SyncResult } from "../bindings/cipherleaf/internal/app/models";
-import { syncFinishedMessage, syncTimingMessages } from "./syncTiming";
+import { syncTimingMessages } from "./syncTiming";
 import { errorText } from "./errors";
 import { createSerialTaskRunner } from "./serialTask";
 import { canReplaceSearch, isAdvancedSearchQuery, searchResultsKey } from "./globalSearch";
@@ -1787,8 +1787,6 @@ function App() {
       syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
       if (result.warning) {
         setError(result.warning);
-      } else {
-        setSyncNotification(syncFinishedMessage(syncElapsed));
       }
       const settings = await VaultService.GetSyncSettings();
       setLastSyncedAt(settings.lastSyncedAt);
@@ -2434,7 +2432,6 @@ function App() {
         setSyncNotification("Remote changes synced; your active draft was preserved.");
       } else if (result.message) {
         setSaveState("saved");
-        setSyncNotification(syncFinishedMessage(syncElapsed));
       }
       if (result.merge.conflicts?.length) {
         bringWindowToFront("syncConflicts");
@@ -7009,17 +7006,6 @@ function App() {
     </>
   );
 
-  const renderSyncOverlay = () => (
-    <>
-      {syncing && (
-        <output className="sync-overlay" aria-live="polite" aria-busy="true">
-          <div className="sync-spinner" aria-hidden="true" />
-          <div className="sync-overlay-label">Sync in progress</div>
-        </output>
-      )}
-    </>
-  );
-
   const renderSyncConflicts = () => (
     <>
       {syncConflicts.length > 0 && (
@@ -7537,7 +7523,6 @@ function App() {
       {renderVaultSettings()}
       {renderContextMenu()}
       {renderTimerDialog()}
-      {renderSyncOverlay()}
       {renderSyncConflicts()}
       {renderTrackingConflicts()}
       {renderCalendar()}

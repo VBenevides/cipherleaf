@@ -406,6 +406,12 @@ test("sync status exposes local, remote, failure, and conflict states", () => {
   assert.match(app, /Force push local vault/);
 });
 
+test("sync progress and duration stay out of workspace notifications", () => {
+  assert.doesNotMatch(app, /syncFinishedMessage|Sync in progress|renderSyncOverlay/);
+  assert.match(app, /syncTimingMessages\(result\.timings, syncElapsed, result\.git\)\.forEach\(\(message\) => console\.info\(message\)\)/);
+  assert.doesNotMatch(style, /\.sync-overlay\s*\{/);
+});
+
 test("sync refreshes lists without replacing a draft changed during pull", () => {
   assert.match(app, /const refreshNotes = async \(preferredID\?: string, preferredNote\?: Note, preserveCurrent = false\)/);
   const sync = app.match(/  const syncNow = async \(\) => \{[\s\S]*?\n  \};/);

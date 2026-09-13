@@ -5199,42 +5199,6 @@ dialog.modal-backdrop {
   background: var(--danger-surface);
 }
 
-.sync-overlay {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 14px 18px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--green-dark) 82%, transparent);
-  backdrop-filter: blur(2px);
-  pointer-events: none;
-}
-
-.sync-spinner {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 3px solid color-mix(in srgb, var(--modal-control-surface) 25%, transparent);
-  border-top-color: var(--green-dark);
-  animation: sync-spin 0.9s linear infinite;
-}
-
-.sync-overlay-label {
-  color: var(--on-accent);
-  font-size: 13px;
-  letter-spacing: 0.4px;
-}
-
-@keyframes sync-spin {
-  to { transform: rotate(360deg); }
-}
-
 .global-search-scrim {
   position: fixed;
   inset: 0;
