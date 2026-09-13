@@ -126,6 +126,13 @@ test("Scratchpad shortcut capture persists from the command palette", () => {
   assert.doesNotMatch(app, /openSettingsSection\("appearance", "settings-shortcuts"\)/);
 });
 
+test("reported dialog inputs receive focus without autofocus attributes", () => {
+  assert.match(app, /document\.querySelector<HTMLInputElement>\(selector\)\?\.focus\(\)/);
+  assert.match(app, /appDialog\?\.kind === "prompt"/);
+  assert.match(app, /folderPasswordPrompt/);
+  assert.match(app, /vaultSettingsOpen && syncSettings/);
+});
+
 test("scratchpad size follows the active screen and keeps its height", () => {
   assert.match(nativeService, /width := screen\.Bounds\.Width \* 4 \/ 5/);
   assert.match(nativeService, /_, height := scratchpad\.Size\(\)[\s\S]*if height <= 0 \{[\s\S]*height = 600/);

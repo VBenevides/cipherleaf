@@ -2826,6 +2826,20 @@ function App() {
   };
 
   useEffect(() => {
+    let selector = "";
+    if (appDialog?.kind === "prompt") selector = ".app-dialog-modal input";
+    else if (folderPasswordPrompt) selector = ".folder-password-modal input";
+    else if (vaultAction) {
+      selector = vaultAction === "create" || vaultAction === "clone"
+        ? ".vault-action-backdrop input:not([type='checkbox'])"
+        : ".vault-action-backdrop input[type='password']";
+    } else if (vaultSettingsOpen && syncSettings) {
+      selector = ".vault-settings-backdrop input[placeholder^='git@github.com']";
+    }
+    if (selector) document.querySelector<HTMLInputElement>(selector)?.focus();
+  }, [appDialog?.kind, folderPasswordPrompt, syncSettings !== null, vaultAction, vaultSettingsOpen]);
+
+  useEffect(() => {
     const dialogs: { open: boolean; layer: WindowLayer; close: () => void }[] = [
       {
         open: Boolean(appDialog),
