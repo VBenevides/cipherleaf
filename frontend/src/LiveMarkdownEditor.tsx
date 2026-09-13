@@ -3292,8 +3292,17 @@ function deletionChangesBoardMarkers(
 function boardMarkerAtDeletionBoundary(view: EditorView, direction: "backspace" | "delete"): boolean {
   const length = view.state.doc.length;
   const changes = view.state.selection.ranges.flatMap((range) => {
-    const from = range.empty ? (direction === "backspace" ? range.head - 1 : range.head) : range.from;
-    const to = range.empty ? (direction === "backspace" ? range.head : range.head + 1) : range.to;
+    let from = range.from;
+    let to = range.to;
+    if (range.empty) {
+      if (direction === "backspace") {
+        from = range.head - 1;
+        to = range.head;
+      } else {
+        from = range.head;
+        to = range.head + 1;
+      }
+    }
     return from >= 0 && to <= length && to > from ? [{ from, to }] : [];
   });
   return deletionChangesBoardMarkers(view.state, changes);
