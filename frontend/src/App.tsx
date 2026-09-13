@@ -7290,6 +7290,7 @@ function App() {
                   tabIndex={0}
                   aria-selected={index === commandPaletteSelectedIndex}
                   onMouseEnter={() => setCommandPaletteIndex(index)}
+                  onFocus={() => setCommandPaletteIndex(index)}
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
                     event.preventDefault();

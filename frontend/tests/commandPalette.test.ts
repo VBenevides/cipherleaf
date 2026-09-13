@@ -11,6 +11,7 @@ test("command palette supports matching, keyboard selection, and themed presenta
   assert.match(app, /event\.key === "ArrowDown"/);
   assert.match(app, /event\.key === "Enter"/);
   assert.match(app, /event\.target !== event\.currentTarget \|\| \(event\.key !== "Enter" && event\.key !== " "\)/);
+  assert.match(app, /onFocus=\{\(\) => setCommandPaletteIndex\(index\)\}/);
   assert.match(app, /event\.key === "Escape"/);
   assert.match(app, /formatShortcut\(shortcutMap\["new-note"\]\)/);
   assert.match(app, /shortcutEditingID === command\.id/);
