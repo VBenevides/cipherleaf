@@ -736,6 +736,57 @@ export function VaultStatisticsGrid({ statistics }: { readonly statistics: Vault
   </div>;
 }
 
+function workspaceLabels({
+  syncing,
+  syncLinked,
+  saveState,
+  dirty,
+  hasNote,
+  hasConflict,
+  settingsLinked,
+  settingsBusy,
+}: {
+  readonly syncing: boolean;
+  readonly syncLinked: boolean;
+  readonly saveState: SaveState;
+  readonly dirty: boolean;
+  readonly hasNote: boolean;
+  readonly hasConflict: boolean;
+  readonly settingsLinked: boolean;
+  readonly settingsBusy: boolean;
+}) {
+  let syncMenuTitle = "Pull then push the vault to GitHub";
+  if (syncing) syncMenuTitle = "Syncing…";
+  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
+
+  const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
+    ?? (dirty ? "Unsaved" : "Saved locally");
+  let saveFileTitle = "Save this note (Ctrl + S)";
+  if (!hasNote) saveFileTitle = "No note open";
+  if (hasConflict) saveFileTitle = "Save the merged conflict result";
+  let saveFileLabel = "Save file";
+  if (hasConflict) saveFileLabel = "Save merged file";
+  if (saveState === "saving") saveFileLabel = "Encrypting…";
+
+  let syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
+  if (syncLinked) syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
+  if (!hasNote) syncButtonTitle = "No note open";
+  const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
+  let settingsSubmitLabel = "Link vault";
+  if (settingsLinked) settingsSubmitLabel = "Verify link";
+  if (settingsBusy) settingsSubmitLabel = "Linking…";
+
+  return {
+    syncMenuTitle,
+    saveStatusLabel,
+    saveFileTitle,
+    saveFileLabel,
+    syncButtonTitle,
+    syncButtonLabel,
+    settingsSubmitLabel,
+  };
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -5051,29 +5102,28 @@ function App() {
   const notesHeading = new Map([["all", "Notes"], ["", "Unfiled"]]).get(selectedFolderID)
     ?? folders.find((folder) => folder.id === selectedFolderID)?.name
     ?? "Notes";
-  let syncMenuTitle = "Pull then push the vault to GitHub";
-  if (syncing) syncMenuTitle = "Syncing…";
-  if (!syncLinked) syncMenuTitle = "Link this vault in Vault Settings first";
-  const saveStatusLabel = new Map([["error", "Save failed"], ["saving", "Encrypting…"]]).get(saveState)
-    ?? (dirty ? "Unsaved" : "Saved locally");
-  let saveFileTitle = "Save this note (Ctrl + S)";
-  if (!note) saveFileTitle = "No note open";
-  if (conflictResolution) saveFileTitle = "Save the merged conflict result";
-  let saveFileLabel = "Save file";
-  if (conflictResolution) saveFileLabel = "Save merged file";
-  if (saveState === "saving") saveFileLabel = "Encrypting…";
+  const {
+    syncMenuTitle,
+    saveStatusLabel,
+    saveFileTitle,
+    saveFileLabel,
+    syncButtonTitle,
+    syncButtonLabel,
+    settingsSubmitLabel,
+  } = workspaceLabels({
+    syncing,
+    syncLinked,
+    saveState,
+    dirty,
+    hasNote: Boolean(note),
+    hasConflict: Boolean(conflictResolution),
+    settingsLinked: Boolean(syncSettings?.linked),
+    settingsBusy,
+  });
   const saveFileAction = () => {
     if (conflictResolution) void saveResolvedConflict();
     else persistCurrentInBackground();
   };
-
-  let syncButtonTitle = "Link this vault to GitHub in Vault Settings first";
-  if (syncLinked) syncButtonTitle = "Save and sync to GitHub (Ctrl + Shift + S)";
-  if (!note) syncButtonTitle = "No note open";
-  const syncButtonLabel = syncing ? "Syncing…" : "Save file and sync";
-  let settingsSubmitLabel = "Link vault";
-  if (syncSettings?.linked) settingsSubmitLabel = "Verify link";
-  if (settingsBusy) settingsSubmitLabel = "Linking…";
   const breadcrumbItems = buildBreadcrumbItems(noteTrail, session.path, currentFolder, note);
 
   const renderWorkspaceHeader = () => (
