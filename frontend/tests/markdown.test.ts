@@ -25,6 +25,7 @@ test("keeps the caret at the active text metric", () => {
 
 test("preserves the live editor viewport across structural updates", () => {
   assert.match(editor, /function minimalDocumentChange\(state: EditorState, next: string\)/);
+  assert.equal((editor.match(/\.codePointAt\(/g) ?? []).length, 4);
   assert.match(editor, /const changes = minimalDocumentChange\(editor\.state, normalizedValue\);[\s\S]*effects: editor\.scrollSnapshot\(\)\.map\(changes\)!/);
   assert.match(editor, /toggleQuote\.of\(this\.position\), view\.scrollSnapshot\(\)/);
   assert.match(editor, /setAllQuotesCollapsed\.of\(collapsed\), view\.scrollSnapshot\(\)/);

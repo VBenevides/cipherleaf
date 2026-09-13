@@ -261,10 +261,10 @@ function preservedSelection(editor: EditorView, length: number) {
 function minimalDocumentChange(state: EditorState, next: string) {
   const current = state.doc.toString();
   let from = 0;
-  while (from < current.length && from < next.length && current.charCodeAt(from) === next.charCodeAt(from)) from++;
+  while (from < current.length && from < next.length && current.codePointAt(from) === next.codePointAt(from)) from++;
   let currentTo = current.length;
   let nextTo = next.length;
-  while (currentTo > from && nextTo > from && current.charCodeAt(currentTo - 1) === next.charCodeAt(nextTo - 1)) {
+  while (currentTo > from && nextTo > from && current.codePointAt(currentTo - 1) === next.codePointAt(nextTo - 1)) {
     currentTo--;
     nextTo--;
   }
