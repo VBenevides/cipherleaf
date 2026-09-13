@@ -193,7 +193,7 @@ function isValidStoredShortcut(shortcut: string): boolean {
   if (parts.length < 2 || key === "Escape") return false;
   const modifiers = parts.slice(0, -1);
   if (modifiers.some((part) => !["Ctrl", "Alt", "Shift", "Super"].includes(part)) || new Set(modifiers).size !== modifiers.length) return false;
-  return key === "plus" || Object.values(SHORTCUT_KEY_CODES).includes(key) || /^Key[A-Z]$/.test(`Key${key}`) || /^Digit[0-9]$/.test(`Digit${key}`) || /^F(?:[1-9]|1[0-9]|2[0-4])$/.test(key);
+  return key === "plus" || Object.values(SHORTCUT_KEY_CODES).includes(key) || /^Key[A-Z]$/.test(`Key${key}`) || /^Digit\d$/.test(`Digit${key}`) || /^F(?:[1-9]|1[0-9]|2[0-4])$/.test(key);
 }
 
 function readShortcutMap(): Record<string, string> {
