@@ -350,6 +350,24 @@ export function boardMarker(
   return `<!-- cipherleaf-board:${boardID}:${encodeURIComponent(title.trim() || DEFAULT_BOARD_TITLE)}:${cardIDs.join(",")}:${encodeURIComponent(JSON.stringify(normalizeBoardOptions(options)))} -->`;
 }
 
+function decodeBoardTitle(encodedTitle: string): string {
+  if (!encodedTitle) return DEFAULT_BOARD_TITLE;
+  try { return decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { return encodedTitle; }
+}
+
+function parseBoardOptions(fields: string[], hasTitle: boolean): BoardMarkerOptions | undefined {
+  if (!hasTitle || fields.length <= 1) return undefined;
+  try {
+    const candidate = JSON.parse(decodeURIComponent(fields[fields.length - 1] ?? "")) as unknown;
+    if (!validBoardOptions(candidate)) return undefined;
+    fields.pop();
+    return normalizeBoardOptions(candidate);
+  } catch {
+    // Legacy card IDs can contain colons.
+    return undefined;
+  }
+}
+
 export function parseBoardMarker(line: string): BoardMarker | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("<!--") || !trimmed.endsWith("-->")) return null;
@@ -365,22 +383,8 @@ export function parseBoardMarker(line: string): BoardMarker | null {
   const fields = payload.split(":");
   const hasTitle = fields.length > 1;
   const encodedTitle = hasTitle ? fields.shift() ?? "" : "";
-  let title = DEFAULT_BOARD_TITLE;
-  if (encodedTitle) {
-    try { title = decodeURIComponent(encodedTitle) || DEFAULT_BOARD_TITLE; } catch { title = encodedTitle; }
-  }
-  let options: BoardMarkerOptions | undefined;
-  if (hasTitle && fields.length > 1) {
-    try {
-      const candidate = JSON.parse(decodeURIComponent(fields[fields.length - 1] ?? "")) as unknown;
-      if (validBoardOptions(candidate)) {
-        options = normalizeBoardOptions(candidate);
-        fields.pop();
-      }
-    } catch {
-      // Legacy card IDs can contain colons.
-    }
-  }
+  const title = decodeBoardTitle(encodedTitle);
+  const options = parseBoardOptions(fields, hasTitle);
   const ids = (hasTitle ? fields.join(":") : payload);
   const markerResult: BoardMarker = { id, title, cardIDs: ids ? ids.split(",").map((id) => id.trim()).filter(Boolean) : [] };
   if (options) markerResult.options = options;
