@@ -1007,9 +1007,9 @@ function App() {
     editorFont: { kind: "unchanged" },
   });
   const settingsValues = settingsDraft ?? createSettingsDraft();
-  const settingsEditorFontName = settingsValues.editorFont.kind === "unchanged"
-    ? editorFontName
-    : settingsValues.editorFont.kind === "default" ? "" : settingsValues.editorFont.name;
+  let settingsEditorFontName = editorFontName;
+  if (settingsValues.editorFont.kind === "default") settingsEditorFontName = "";
+  else if (settingsValues.editorFont.kind !== "unchanged") settingsEditorFontName = settingsValues.editorFont.name;
   const updateSettingsDraft = (change: Partial<SettingsDraft>) => {
     setSettingsDraft((current) => current ? { ...current, ...change } : current);
   };
