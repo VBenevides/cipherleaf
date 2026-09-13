@@ -1690,9 +1690,10 @@ function App() {
     return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [vaultMenuOpen]);
 
-  const refreshNotes = async (preferredID?: string, preferredNote?: Note) => {
+  const refreshNotes = async (preferredID?: string, preferredNote?: Note, preserveCurrent = false) => {
     const result = (await VaultService.ListNotes()) ?? [];
     setNotes(result);
+    if (preserveCurrent) return;
     const firstVisible = result.find((item) => !isStructuredSummary(item));
     const targetID = preferredID ?? noteRef.current?.id ?? firstVisible?.id;
     if (targetID && result.some((item) => item.id === targetID)) {
@@ -2346,6 +2347,7 @@ function App() {
     syncInFlightRef.current = true;
     setSyncing(true);
     setSyncNotification("");
+    const syncEditVersion = editVersion.current;
     try {
       await persistCurrent();
       await saveVaultSettings();
@@ -2357,10 +2359,11 @@ function App() {
       }
       const syncElapsed = performance.now() - syncStartedAt;
       syncTimingMessages(result.timings, syncElapsed, result.git).forEach((message) => console.info(message));
-      await refreshNotes();
+      const preserveLocalDraft = editVersion.current !== syncEditVersion || dirtyRef.current;
+      await refreshNotes(undefined, undefined, preserveLocalDraft);
       await refreshFolders();
       const note = noteRef.current;
-      if (note) {
+      if (note && !preserveLocalDraft) {
         try {
           const fresh = await VaultService.GetNote(note.id);
           applyLoadedNote(fresh);
@@ -2376,6 +2379,8 @@ function App() {
       }
       if (result.warning) {
         setError(result.warning);
+      } else if (preserveLocalDraft) {
+        setSyncNotification("Remote changes synced; your active draft was preserved.");
       } else if (result.message) {
         setSaveState("saved");
         setSyncNotification(syncFinishedMessage(syncElapsed));

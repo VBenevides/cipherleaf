@@ -398,6 +398,18 @@ test("sync status exposes local, remote, failure, and conflict states", () => {
   assert.match(app, /Force push local vault/);
 });
 
+test("sync refreshes lists without replacing a draft changed during pull", () => {
+  assert.match(app, /const refreshNotes = async \(preferredID\?: string, preferredNote\?: Note, preserveCurrent = false\)/);
+  const sync = app.match(/  const syncNow = async \(\) => \{[\s\S]*?\n  \};/);
+  assert.ok(sync);
+  assert.match(sync[0], /const syncEditVersion = editVersion\.current;/);
+  assert.match(sync[0], /const preserveLocalDraft = editVersion\.current !== syncEditVersion \|\| dirtyRef\.current;/);
+  assert.match(sync[0], /await refreshNotes\(undefined, undefined, preserveLocalDraft\)/);
+  assert.match(sync[0], /await refreshFolders\(\)/);
+  assert.match(sync[0], /if \(note && !preserveLocalDraft\)/);
+  assert.match(sync[0], /Remote changes synced; your active draft was preserved\./);
+});
+
 test("vault settings configure scheduled encrypted backups", () => {
   assert.match(app, /VaultService\.CreateScheduledBackup\(backupDirectory, backupRetention\)/);
   assert.match(app, /cipherleaf-backup-\$\{field\}:\$\{vaultID\}/);
