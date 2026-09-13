@@ -205,3 +205,107 @@ func TestCoverageReferenceAndRangeErrors(t *testing.T) {
 		t.Fatal("non-UTC time range accepted")
 	}
 }
+
+func TestCoverageTrackingCatalogValidationBranches(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	otherID := strings.Repeat("b", 32)
+	client := TimeClient{ID: id, Name: "Client", Revision: 1}
+	project := TimeProject{ID: id, Name: "Project", ClientID: id, Revision: 1}
+	tag := TimeTag{ID: id, Name: "Tag", Revision: 1}
+	if _, err := validateTrackingClients([]TimeClient{client}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range [][]TimeClient{
+		{{ID: "bad", Name: "Client", Revision: 1}},
+		{{ID: id, Name: "", Revision: 1}},
+		{client, client},
+	} {
+		if _, err := validateTrackingClients(value); err == nil {
+			t.Fatalf("invalid clients accepted: %#v", value)
+		}
+	}
+	if _, err := validateTrackingProjects([]TimeProject{{ID: id, Name: "Project", ClientID: otherID, Revision: 1}}, map[string]struct{}{otherID: {}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateTrackingProjects([]TimeProject{{ID: id, Name: "Project", ClientID: otherID, Revision: 1}}, nil, []Tombstone{{ID: otherID, Revision: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range [][]TimeProject{
+		{{ID: "bad", Name: "Project", Revision: 1}},
+		{{ID: id, Name: "", Revision: 1}},
+		{project, project},
+		{{ID: id, Name: "Project", ClientID: otherID, Revision: 1}},
+	} {
+		if _, err := validateTrackingProjects(value, map[string]struct{}{}, nil); err == nil {
+			t.Fatalf("invalid projects accepted: %#v", value)
+		}
+	}
+	for _, test := range []struct {
+		value   []TimeTag
+		wantErr bool
+	}{
+		{[]TimeTag{tag}, false},
+		{[]TimeTag{{ID: "bad", Name: "Tag", Revision: 1}}, true},
+		{[]TimeTag{{ID: id, Name: "", Revision: 1}}, true},
+		{[]TimeTag{tag, tag}, true},
+	} {
+		if _, err := validateTrackingTags(test.value); (err != nil) != test.wantErr {
+			t.Fatalf("tag validation = %v for %#v", err, test.value)
+		}
+	}
+	validBucket := timeTrackingBucketSummary{ID: id, MonthUTC: "2026-01"}
+	if err := validateTrackingBuckets([]timeTrackingBucketSummary{validBucket}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range [][]timeTrackingBucketSummary{
+		{{ID: "bad", MonthUTC: "2026-01"}},
+		{{ID: id, MonthUTC: "bad"}},
+		{validBucket, validBucket},
+		{validBucket, {ID: otherID, MonthUTC: "2026-01"}},
+	} {
+		if err := validateTrackingBuckets(value); err == nil {
+			t.Fatalf("invalid buckets accepted: %#v", value)
+		}
+	}
+	if err := validateTrackingTombstones([]Tombstone{{ID: id, Revision: 1}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range [][]Tombstone{
+		{{ID: "bad", Revision: 1}},
+		{{ID: id, Revision: 0}},
+		{{ID: id, Revision: 1}, {ID: id, Revision: 1}},
+	} {
+		if err := validateTrackingTombstones(value, nil); err == nil {
+			t.Fatalf("invalid tombstones accepted: %#v", value)
+		}
+	}
+	if err := validateTrackingTombstones([]Tombstone{{ID: id, Revision: 1}}, map[string]struct{}{id: {}}); err == nil {
+		t.Fatal("live tombstone accepted")
+	}
+	base := timeTrackingCatalog{
+		FormatVersion: TimeTrackingCatalogFormatVersion,
+		VaultID:       id,
+		Clients:       []TimeClient{client},
+		Projects:      []TimeProject{project},
+		Tags:          []TimeTag{tag},
+	}
+	for _, mutate := range []func(*timeTrackingCatalog){
+		func(catalog *timeTrackingCatalog) {
+			catalog.Projects = []TimeProject{{ID: id, Name: "Project", ClientID: otherID, Revision: 1}}
+		},
+		func(catalog *timeTrackingCatalog) { catalog.Tags = []TimeTag{{ID: "bad", Name: "Tag", Revision: 1}} },
+		func(catalog *timeTrackingCatalog) {
+			catalog.Buckets = []timeTrackingBucketSummary{{ID: "bad", MonthUTC: "2026-01"}}
+		},
+		func(catalog *timeTrackingCatalog) { catalog.DeletedEntries = []Tombstone{{ID: "bad", Revision: 1}} },
+		func(catalog *timeTrackingCatalog) { catalog.DeletedClients = []Tombstone{{ID: id, Revision: 1}} },
+		func(catalog *timeTrackingCatalog) { catalog.DeletedProjects = []Tombstone{{ID: id, Revision: 1}} },
+		func(catalog *timeTrackingCatalog) { catalog.DeletedTags = []Tombstone{{ID: id, Revision: 1}} },
+	} {
+		invalid := base
+		mutate(&invalid)
+		if err := validateTrackingCatalogObjects(invalid); err == nil {
+			t.Fatal("invalid tracking catalog accepted")
+		}
+	}
+}

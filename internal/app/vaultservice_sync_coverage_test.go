@@ -84,6 +84,9 @@ func newAppSyncCoverageService(t *testing.T) (*VaultService, *appCoverageSyncPro
 
 func TestVaultServiceSyncCoverage(t *testing.T) {
 	service, provider, settings := newAppSyncCoverageService(t)
+	if got, err := service.GetSyncSettings(); err != nil || got.VaultID != settings.VaultID {
+		t.Fatalf("sync settings = %#v, %v", got, err)
+	}
 	if err := os.MkdirAll(filepath.Join(provider.workingDir, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +181,11 @@ func TestVaultServiceSyncCoverage(t *testing.T) {
 	result, err = service.PullAndLinkGitHubVault(settings)
 	if err != nil || !result.Linked || result.LastCommit != provider.push.LastCommit || result.Push.LastCommit != provider.push.LastCommit {
 		t.Fatalf("pull-and-link result = %#v, %v", result, err)
+	}
+	provider.pull = githubsync.PullResult{Linked: true, Branch: settings.Branch, UpToDate: true}
+	provider.push = githubsync.PushResult{Linked: true, Branch: settings.Branch, UpToDate: true, Message: "already current"}
+	if result, err := service.SyncNow(); err != nil || result.Message != "The vault is already in sync with GitHub." {
+		t.Fatalf("queued sync = %#v, %v", result, err)
 	}
 }
 

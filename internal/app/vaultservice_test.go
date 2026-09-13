@@ -172,6 +172,46 @@ func TestReadClipboardImageUsesSupportedClipboardFallbacks(t *testing.T) {
 	}
 }
 
+func TestVaultServiceSessionAndTerminalBranches(t *testing.T) {
+	service := NewVaultService()
+	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	if err := service.RememberTheme("dark"); err != nil {
+		t.Fatal(err)
+	}
+	vaultPath := filepath.Join(t.TempDir(), "vault")
+	if err := os.MkdirAll(vaultPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.recent.RememberWithTheme(vaultPath, "light"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RememberTheme("dark"); err != nil {
+		t.Fatal(err)
+	}
+	if session, err := service.GetLastSession(); err != nil || session.Theme != "dark" {
+		t.Fatalf("last session = %#v, %v", session, err)
+	}
+
+	service, provider, _ := newAppSyncCoverageService(t)
+	if err := os.MkdirAll(filepath.Join(provider.workingDir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	terminal := t.TempDir()
+	if err := os.WriteFile(filepath.Join(terminal, "x-terminal-emulator"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", terminal)
+	if err := service.OpenGitTerminal(); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.UnlinkGitHubSync(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.GetSyncSettings(); err != nil || got.Linked {
+		t.Fatalf("removed sync settings = %#v, %v", got, err)
+	}
+}
+
 func TestVaultServiceLifecycleAndDiagnostics(t *testing.T) {
 	service := NewVaultService()
 	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
