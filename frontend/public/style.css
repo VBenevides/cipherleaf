@@ -4129,6 +4129,10 @@ dialog.modal-backdrop {
   border-left-color: var(--green-dark);
 }
 
+.live-markdown-editor:not(.source-markdown-editor) .cm-cursor {
+  margin-top: 0.375em;
+}
+
 .live-markdown-editor .cm-placeholder {
   color: var(--muted);
   font-style: italic;

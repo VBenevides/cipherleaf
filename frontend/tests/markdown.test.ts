@@ -20,6 +20,15 @@ const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf
 
 test("keeps the caret at the active text metric", () => {
   assert.match(style, /\.live-markdown-editor \.cm-cursor \{[\s\S]*height: 1em !important;/);
+  assert.match(style, /\.live-markdown-editor:not\(\.source-markdown-editor\) \.cm-cursor \{[\s\S]*margin-top: 0\.375em;/);
+});
+
+test("preserves the live editor viewport across structural updates", () => {
+  assert.match(editor, /function minimalDocumentChange\(state: EditorState, next: string\)/);
+  assert.match(editor, /const changes = minimalDocumentChange\(editor\.state, normalizedValue\);[\s\S]*effects: editor\.scrollSnapshot\(\)\.map\(changes\)!/);
+  assert.match(editor, /toggleQuote\.of\(this\.position\), view\.scrollSnapshot\(\)/);
+  assert.match(editor, /setAllQuotesCollapsed\.of\(collapsed\), view\.scrollSnapshot\(\)/);
+  assert.match(editor, /const snapshot = view\.scrollSnapshot\(\);[\s\S]*updateMinimizedState\(\);[\s\S]*view\.dispatch\(\{ effects: snapshot \}\)/);
 });
 
 test("keeps the dark scratchpad overlay readable and translucent", () => {

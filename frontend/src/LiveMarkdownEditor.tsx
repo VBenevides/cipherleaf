@@ -257,6 +257,20 @@ function preservedSelection(editor: EditorView, length: number) {
     selection.mainIndex,
   );
 }
+
+function minimalDocumentChange(state: EditorState, next: string) {
+  const current = state.doc.toString();
+  let from = 0;
+  while (from < current.length && from < next.length && current.charCodeAt(from) === next.charCodeAt(from)) from++;
+  let currentTo = current.length;
+  let nextTo = next.length;
+  while (currentTo > from && nextTo > from && current.charCodeAt(currentTo - 1) === next.charCodeAt(nextTo - 1)) {
+    currentTo--;
+    nextTo--;
+  }
+  return state.changes({ from, to: currentTo, insert: next.slice(from, nextTo) });
+}
+
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
 });
@@ -679,7 +693,7 @@ class QuoteToggleWidget extends WidgetType {
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({ effects: toggleQuote.of(this.position) });
+      view.dispatch({ effects: [toggleQuote.of(this.position), view.scrollSnapshot()] });
       view.focus();
     });
 
@@ -1505,7 +1519,7 @@ class BoardWidget extends WidgetType {
     }
   }
 
-  toDOM() {
+  toDOM(view: EditorView) {
     const board = document.createElement("section");
     board.className = "cm-live-board";
     const header = board.appendChild(document.createElement("div"));
@@ -1724,8 +1738,10 @@ class BoardWidget extends WidgetType {
     };
     boardToggle.addEventListener("click", (event) => {
       event.stopPropagation();
+      const snapshot = view.scrollSnapshot();
       isMinimized = !isMinimized;
       updateMinimizedState();
+      view.dispatch({ effects: snapshot });
     });
     const updateFilter = () => {
       const currentCards = boardCardData.get(board) ?? this.cards;
@@ -3467,7 +3483,7 @@ function multilineObjectPaste(view: EditorView, text: string) {
 let logicalObjectClipboard = "";
 
 function setAllSectionsCollapsed(view: EditorView, collapsed: boolean) {
-  view.dispatch({ effects: setAllQuotesCollapsed.of(collapsed) });
+  view.dispatch({ effects: [setAllQuotesCollapsed.of(collapsed), view.scrollSnapshot()] });
   view.focus();
   return true;
 }
@@ -3527,7 +3543,7 @@ function setCurrentSectionCollapsed(view: EditorView, collapsed: boolean) {
   if (position === null) return false;
 
   view.dispatch({
-    effects: setQuoteCollapsed.of({ position, collapsed }),
+    effects: [setQuoteCollapsed.of({ position, collapsed }), view.scrollSnapshot()],
   });
 
   view.focus();
@@ -3575,8 +3591,10 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
     const line = state.doc.line(lineNumber);
     const next = deleteObjectInMarkdown(doc, lineNumber);
     if (next === doc) return;
+    const changes = minimalDocumentChange(view.state, next);
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: next },
+      changes,
+      effects: view.scrollSnapshot().map(changes)!,
       selection: EditorSelection.cursor(Math.min(line.from, next.length)),
     });
     view.focus();
@@ -3597,8 +3615,10 @@ function showObjectHandleMenu(event: MouseEvent, view: EditorView, lineNumber: n
       const next = insertLogicalObjectAfterCaret(doc, logicalObjectClipboard, state.doc.line(lineNumber).to);
       if (next === doc) return;
       const duplicateStart = state.doc.line(objectBlockEnd(lines, lineNumber)).to + 1;
+      const changes = minimalDocumentChange(state, next);
       view.dispatch({
-        changes: { from: 0, to: state.doc.length, insert: next },
+        changes,
+        effects: view.scrollSnapshot().map(changes)!,
         selection: EditorSelection.cursor(Math.min(duplicateStart, next.length)),
       });
       view.focus();
@@ -3668,10 +3688,8 @@ function moveObjectBlock(
   const next = moveObjectInMarkdown(doc, sourceLineNumber, targetLineNumber, mode);
   if (next === doc) return false;
 
-  view.dispatch({
-    changes: { from: 0, to: state.doc.length, insert: next },
-    scrollIntoView: false,
-  });
+  const changes = minimalDocumentChange(state, next);
+  view.dispatch({ changes, effects: view.scrollSnapshot().map(changes)! });
   view.focus();
   return true;
 }
@@ -3894,7 +3912,8 @@ export default function LiveMarkdownEditor({
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
     if (previousCardData !== cardData || previousCardTemplates !== cardTemplates) {
-      view.current?.dispatch({ effects: refreshLivePreview.of(null) });
+      const editor = view.current;
+      if (editor) editor.dispatch({ effects: [refreshLivePreview.of(null), editor.scrollSnapshot()] });
     }
   }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
 
@@ -4185,7 +4204,11 @@ export default function LiveMarkdownEditor({
                   );
                   if (next !== pastedView.state.doc.toString()) {
                     event.preventDefault();
-                    pastedView.dispatch({ changes: { from: 0, to: pastedView.state.doc.length, insert: next } });
+                    const changes = minimalDocumentChange(pastedView.state, next);
+                    pastedView.dispatch({
+                      changes,
+                      effects: pastedView.scrollSnapshot().map(changes)!,
+                    });
                     pastedView.focus();
                     return true;
                   }
@@ -4311,9 +4334,11 @@ export default function LiveMarkdownEditor({
     const normalizedValue = normalizeArrowText(value);
     if (editor.state.doc.toString() === normalizedValue) return;
 
+    const changes = minimalDocumentChange(editor.state, normalizedValue);
     editor.dispatch({
-      changes: { from: 0, to: editor.state.doc.length, insert: normalizedValue },
+      changes,
       selection: preservedSelection(editor, normalizedValue.length),
+      effects: editor.scrollSnapshot().map(changes)!,
       annotations: [
         externalDocumentUpdate.of(true),
         Transaction.addToHistory.of(false),

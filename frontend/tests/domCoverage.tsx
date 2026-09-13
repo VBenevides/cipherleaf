@@ -275,7 +275,10 @@ document.dispatchEvent(pointer("pointerup", 0, 0));
 boardCard.click();
 assert.equal(opened, openedBeforeBoardClick + 1);
 const boardToggle = board.querySelector<HTMLButtonElement>(".cm-live-board-toggle")!;
+const liveScroller = live.body.querySelector<HTMLElement>(".cm-scroller")!;
+liveScroller.scrollTop = 240;
 boardToggle.click();
+assert.equal(liveScroller.scrollTop, 240);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-title")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-controls")?.hidden, true);
 assert.equal(board.querySelector<HTMLElement>(".cm-live-board-columns")?.hidden, true);
@@ -466,6 +469,7 @@ await act(async () => {
   }));
   await wait();
 });
+assert.equal(liveScroller.scrollTop, 240);
 await act(async () => {
   const updatedEditor = live.body.querySelector<HTMLElement>(".cm-content");
   updatedEditor?.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
