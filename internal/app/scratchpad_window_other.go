@@ -8,4 +8,6 @@ func disableScratchpadWindowTransitions(window application.Window) error {
 	return nil
 }
 
-func hideScratchpadWindowImmediately(window application.Window) {}
+func hideScratchpadWindowImmediately(window application.Window) {
+	// Other platforms have no native transition override; window.Hide below performs the hide.
+}
