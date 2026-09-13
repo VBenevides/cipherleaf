@@ -1393,7 +1393,8 @@ class BoardWidget extends WidgetType {
   ) {
     const column = columns.appendChild(document.createElement("div"));
     const status = BOARD_COLUMNS.includes(columnConfig.id as CardStatus) ? columnConfig.id : "";
-    column.className = `cm-live-board-column${status ? ` status-${status}` : ""}`;
+    const statusClass = status ? ` status-${status}` : "";
+    column.className = `cm-live-board-column${statusClass}`;
     column.dataset.columnId = columnConfig.id;
     column.style.setProperty("--board-column-color", columnConfig.color);
     column.setAttribute("role", "group");
