@@ -497,7 +497,10 @@ test("card saving is opt-in for editor journaling and keeps the panel open", () 
   assert.match(app, /runSerializedSave\(\(\) => VaultService\.SaveNote\(cardPanel\.note\.id/);
   assert.match(app, /serializeTemplateDocument\(template\)/);
   assert.match(app, /options: \{ \.\.\.marker\.options!?[,}] templateID: undefined \}/);
-  assert.match(app, /newCardMetadata\(created\.id, new Date\(created\.createdAt\), false\)/);
+  assert.match(app, /newCardMetadata\(created\.id, new Date\(created\.createdAt\), template\?\.writeChangesToEditor \?\? false\)/);
+  assert.match(app, /setSelectedTemplateID\(template\?\.id \?\? \"\"\)/);
+  assert.match(app, /writeChangesToEditor: parsed\.template\.writeChangesToEditor/);
+  assert.match(app, /writeChangesToEditor: metadata\.writeChangesToEditor/);
   assert.match(app, /VaultService\.SaveNote\(template\.id, template\.title, serializeTemplateDocument\(draft\)\)/);
   assert.doesNotMatch(app, /const saveCardPanel = async \(\) => \{[\s\S]*?\n  \} catch[\s\S]*await closeCardPanel\(true\);/);
   assert.match(app, /onClick=\{\(\) => void closeCardPanel\(\)\}/);

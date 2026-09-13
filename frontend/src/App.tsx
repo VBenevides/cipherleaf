@@ -3714,6 +3714,7 @@ function App() {
       title: template.name.trim() || "Untitled",
       status: template.status,
       tags: normalizeCardTags(template.tags),
+      writeChangesToEditor: template.writeChangesToEditor,
     };
     setSelectedTemplateID(note.id);
     setCardPanel({ note, metadata, body: template.body, kind: "template" });
@@ -3756,7 +3757,7 @@ function App() {
         await VaultService.DeleteNote(template.id).catch(() => {});
         return;
       }
-      const draft: CardTemplate = { id: template.id, name: `${board.title} card`, status: "not-started", tags: [], body: "" };
+      const draft: CardTemplate = { id: template.id, name: `${board.title} card`, status: "not-started", tags: [], writeChangesToEditor: false, body: "" };
       const saved = await runSerializedSave(() => VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft)));
       if (request !== templateRequestRef.current || cardPanelRef.current) {
         await VaultService.DeleteNote(template.id).catch(() => {});
@@ -3801,7 +3802,7 @@ function App() {
       const targetFolder = current.folderId;
       const created = await VaultService.CreateNoteInFolder(template?.name.trim() || "Untitled", targetFolder);
       createdID = created.id;
-      const base = newCardMetadata(created.id, new Date(created.createdAt), false);
+      const base = newCardMetadata(created.id, new Date(created.createdAt), template?.writeChangesToEditor ?? false);
       const metadata = template
         ? { ...transitionCard(base, template.status), title: template.name.trim() || "Untitled", tags: normalizeCardTags(template.tags) }
         : base;
@@ -3814,7 +3815,7 @@ function App() {
       }
       updateSummary(saved.summary);
       if (request === templateRequestRef.current) {
-        setSelectedTemplateID("");
+        setSelectedTemplateID(template?.id ?? "");
         setCardPanel({ note: saved.note, metadata, body: template?.body ?? "" });
         setCardPanelDirty(false);
       }
@@ -3902,6 +3903,7 @@ function App() {
           name: title,
           status: metadata.status,
           tags: metadata.tags,
+          writeChangesToEditor: metadata.writeChangesToEditor,
           body: cardPanel.body,
         };
         const saved = await runSerializedSave(() => VaultService.SaveNote(cardPanel.note.id, `Template: ${title}`, serializeTemplateDocument(template)));
@@ -3968,6 +3970,7 @@ function App() {
         name: cardPanel.metadata.title || "Untitled",
         status: cardPanel.metadata.status,
         tags: cardPanel.metadata.tags,
+        writeChangesToEditor: cardPanel.metadata.writeChangesToEditor,
         body: cardPanel.body,
       }));
       updateSummary(saved.summary);
@@ -3989,8 +3992,8 @@ function App() {
       setCardPanelDirty(true);
       setCardPanel((current) => current ? {
         ...current,
-        metadata: { ...current.metadata, status: parsed.template.status, tags: parsed.template.tags },
         body: parsed.template.body,
+        metadata: { ...current.metadata, status: parsed.template.status, tags: parsed.template.tags, writeChangesToEditor: parsed.template.writeChangesToEditor },
       } : current);
     } catch (reason) {
       setError(errorText(reason));
@@ -6045,7 +6048,7 @@ function App() {
                 />
               </Suspense>
             </section>
-            {!cardPanel.kind && <label className="card-editor-journal-toggle">
+            <label className="card-editor-journal-toggle">
               <input
                 type="checkbox"
                 aria-label="Write changes to editor"
@@ -6056,7 +6059,7 @@ function App() {
                 }}
               />{" "}
               Write changes to editor
-            </label>}
+            </label>
             <div className="card-sidebar-actions">
               {!cardPanel.kind && <button type="button" className="danger-button" onClick={() => void deleteCard()}>Delete card</button>}
               {!cardPanel.kind && <button type="button" className="secondary-button" onClick={() => void saveCardAsTemplate()}>Save as template</button>}

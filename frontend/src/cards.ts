@@ -48,6 +48,7 @@ export type CardTemplate = {
   name: string;
   status: CardStatus;
   tags: string[];
+  writeChangesToEditor: boolean;
   body: string;
 };
 
@@ -112,6 +113,7 @@ const TEMPLATE_KEYS = {
   name: "cipherleaf-card-template-name",
   status: "cipherleaf-card-template-status",
   tags: "cipherleaf-card-template-tags",
+  writeChangesToEditor: "cipherleaf-card-template-write-changes-to-editor",
 } as const;
 
 const frontmatterLine = /^([^:\n]+):(.*)$/;
@@ -250,7 +252,14 @@ export function parseTemplateDocument(markdown: string, id: string): { template:
   const name = frontmatter.values.get(TEMPLATE_KEYS.name)?.replace(/^"|"$/g, "").trim();
   if (!name || !validStatus(status)) return null;
   return {
-    template: { id, name, status, tags: parseTags(frontmatter.values.get(TEMPLATE_KEYS.tags)), body: frontmatter.body },
+    template: {
+      id,
+      name,
+      status,
+      tags: parseTags(frontmatter.values.get(TEMPLATE_KEYS.tags)),
+      writeChangesToEditor: frontmatter.values.get(TEMPLATE_KEYS.writeChangesToEditor) === "true",
+      body: frontmatter.body,
+    },
     body: frontmatter.body,
   };
 }
@@ -262,6 +271,7 @@ export function serializeTemplateDocument(template: CardTemplate): string {
     `${TEMPLATE_KEYS.name}: ${quote(template.name.trim())}`,
     `${TEMPLATE_KEYS.status}: ${template.status}`,
     `${TEMPLATE_KEYS.tags}: ${quote(normalizeCardTags(template.tags))}`,
+    `${TEMPLATE_KEYS.writeChangesToEditor}: ${template.writeChangesToEditor}`,
     "---",
     template.body,
   ].join("\n");
