@@ -47,7 +47,7 @@ const (
 	maxTitleRunes                 = 200
 	maxFolderRunes                = 120
 	folderPasswordSaltBytes       = 16
-	folderPasswordVerifierPrefix  = "argon2id-v1:"
+	folderVerifierPrefix           = "argon2id-v1:"
 )
 
 var (
@@ -5182,14 +5182,14 @@ func deriveFolderPasswordVerifier(password string) (string, error) {
 		return "", err
 	}
 	defer secure.Zero(hash)
-	return fmt.Sprintf("%s%s:%d:%d:%d:%s", folderPasswordVerifierPrefix,
+	return fmt.Sprintf("%s%s:%d:%d:%d:%s", folderVerifierPrefix,
 		base64.RawURLEncoding.EncodeToString(salt), defaultKDF.Time, defaultKDF.Memory,
 		defaultKDF.Threads, hex.EncodeToString(hash)), nil
 }
 
 func verifyFolderPassword(verifier, password string) bool {
-	if strings.HasPrefix(verifier, folderPasswordVerifierPrefix) {
-		payload := strings.TrimPrefix(verifier, folderPasswordVerifierPrefix)
+	if strings.HasPrefix(verifier, folderVerifierPrefix) {
+		payload := strings.TrimPrefix(verifier, folderVerifierPrefix)
 		parts := strings.Split(payload, ":")
 		if len(parts) != 5 {
 			return false
