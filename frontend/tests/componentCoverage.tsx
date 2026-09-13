@@ -39,6 +39,7 @@ const documentStub = {
   removeEventListener: () => {},
   hasFocus: () => true,
   getElementById: () => null,
+  querySelector: () => null,
 };
 Object.assign(globalThis, { window: windowStub, document: documentStub, IS_REACT_ACT_ENVIRONMENT: true });
 const dispatchWindow = (type: string, event: any) => windowListeners.get(type)?.forEach((listener) => listener(event));
