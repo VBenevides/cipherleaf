@@ -417,8 +417,8 @@ function appendJournalTags(
         end: sectionInsertionLine(lines, document, card),
       }));
       insertionLine = Math.min(...ranges.map(({ start }) => start));
-      ranges.sort((left, right) => right.start - left.start)
-        .forEach(({ start, end }) => lines.splice(start, end - start));
+      ranges.sort((left, right) => right.start - left.start);
+      ranges.forEach(({ start, end }) => lines.splice(start, end - start));
     }
     lines = insertLines(lines, insertionLine, inserted).split("\n");
     document = parseObjectDocument(lines.join("\n"));
