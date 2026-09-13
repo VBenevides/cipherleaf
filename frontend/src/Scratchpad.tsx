@@ -112,7 +112,7 @@ export default function Scratchpad({
       if (generation !== generationRef.current) return;
       try {
         const saved = scratchpadState(await VaultService.SaveScratchpad(content, caretOffset, generation));
-        if (!saved || saved.generation !== generationRef.current) return;
+        if (saved?.generation !== generationRef.current) return;
         const latestLocalChange = localChange === localChangeRef.current;
         if (latestLocalChange) lastSavedLocalChangeRef.current = localChange;
         applyState(saved, !latestLocalChange);
