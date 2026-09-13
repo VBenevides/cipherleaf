@@ -359,7 +359,9 @@ function mergeDailyCard(
     objects: nextDocument.objects.filter((object) => included.has(object.id)).map(canonicalNode),
   });
   const cardLine = inserted.split("\n", 1)[0];
-  return body ? `${cardLine}\n${body.split("\n").map((line) => `      ${line}`).join("\n")}` : cardLine;
+  if (!body) return cardLine;
+  const indentedBody = body.split("\n").map((line) => `      ${line}`).join("\n");
+  return `${cardLine}\n${indentedBody}`;
 }
 
 function tagSectionInsertionLine(
