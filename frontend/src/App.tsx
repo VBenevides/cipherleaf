@@ -230,7 +230,7 @@ function shortcutKeyFromEvent(event: Pick<ShortcutEvent, "code" | "key">): strin
   if (event.code in SHORTCUT_KEY_CODES) return SHORTCUT_KEY_CODES[event.code];
   if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
   if (/^Digit\d$/.test(event.code)) return event.code.slice(5);
-  if (/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(event.code)) return event.code;
+  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(event.code)) return event.code;
   return null;
 }
 
