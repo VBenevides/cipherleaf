@@ -1852,25 +1852,13 @@ function App() {
   }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
 
   useEffect(() => {
-    if (!session || session.locked || !syncLinked || autoSyncMinutes === autoLockMinutes) return;
+    if (!session || session.locked || !syncLinked) return;
     const delay = autoSyncMinutes * 60 * 1000;
-    let timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
-    const reset = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => void autoSyncVaultRef.current(), delay);
-    };
-    const events: (keyof WindowEventMap)[] = [
-      "pointerdown",
-      "keydown",
-      "mousemove",
-      "touchstart",
-    ];
-    events.forEach((event) => window.addEventListener(event, reset, { passive: true }));
+    const interval = window.setInterval(() => void autoSyncVaultRef.current(), delay);
     return () => {
-      window.clearTimeout(timer);
-      events.forEach((event) => window.removeEventListener(event, reset));
+      window.clearInterval(interval);
     };
-  }, [autoLockMinutes, autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
+  }, [autoSyncMinutes, session?.vaultId, session?.locked, syncLinked]);
 
   useEffect(() => {
     if (!session || session.locked) return;

@@ -368,6 +368,14 @@ test("failed inactivity and system locks retry without discarding the draft", ()
   assert.match(app, /if \(!await autoLockRef\.current\(\)\) retry = window\.setTimeout/);
 });
 
+test("automatic sync runs on a fixed interval instead of activity reset", () => {
+  const effect = app.match(/  useEffect\(\(\) => \{\n    if \(!session \|\| session\.locked \|\| !syncLinked\) return;[\s\S]*?\n  \}, \[autoSyncMinutes, session\?\.vaultId, session\?\.locked, syncLinked\]\);/);
+  assert.ok(effect);
+  assert.match(effect[0], /window\.setInterval\(\(\) => void autoSyncVaultRef\.current\(\), delay\)/);
+  assert.match(effect[0], /window\.clearInterval\(interval\)/);
+  assert.doesNotMatch(effect[0], /pointerdown|keydown|mousemove|touchstart/);
+});
+
 test("vault settings configure scheduled encrypted backups", () => {
   assert.match(app, /VaultService\.CreateScheduledBackup\(backupDirectory, backupRetention\)/);
   assert.match(app, /cipherleaf-backup-\$\{field\}:\$\{vaultID\}/);
