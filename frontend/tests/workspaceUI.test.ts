@@ -389,6 +389,15 @@ test("sync resumes on focus and visibility changes without overlapping", () => {
   assert.match(sync[0], /syncInFlightRef\.current = false;/);
 });
 
+test("sync status exposes local, remote, failure, and conflict states", () => {
+  assert.match(app, /const saveStatusLabel = new Map\(\[\["error", "Save failed"\], \["saving", "Encrypting…"\]\]\)\.get\(saveState\)\n    \?\? \(dirty \? "Unsaved" : "Saved locally"\);/);
+  assert.match(app, /className=\{`sync-status \$\{syncLinked \? "linked" : "not-linked"\}`\}/);
+  assert.match(app, /<LastSyncLabel timestamp=\{lastSyncedAt\} \/>/);
+  assert.match(app, /className="error-banner" role="alert"/);
+  assert.match(app, /<h2 id="conflict-title">Remote edits were preserved<\/h2>/);
+  assert.match(app, /Force push local vault/);
+});
+
 test("vault settings configure scheduled encrypted backups", () => {
   assert.match(app, /VaultService\.CreateScheduledBackup\(backupDirectory, backupRetention\)/);
   assert.match(app, /cipherleaf-backup-\$\{field\}:\$\{vaultID\}/);
