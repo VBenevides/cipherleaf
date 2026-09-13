@@ -2827,8 +2827,9 @@ function App() {
 
   useEffect(() => {
     let selector = "";
-    if (appDialog?.kind === "prompt") selector = ".app-dialog-modal input";
-    else if (folderPasswordPrompt) selector = ".folder-password-modal input";
+    if (appDialog) {
+      if (appDialog.kind === "prompt") selector = ".app-dialog-modal input";
+    } else if (folderPasswordPrompt) selector = ".folder-password-modal input";
     else if (vaultAction) {
       selector = vaultAction === "create" || vaultAction === "clone"
         ? ".vault-action-backdrop input:not([type='checkbox'])"
