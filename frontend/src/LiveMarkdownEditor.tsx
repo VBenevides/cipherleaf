@@ -2869,19 +2869,15 @@ function renderContinuationLine(
   return lineNumber + 1;
 }
 
-function renderPlainLine(
+function decoratePlainLine(
   context: LivePreviewRenderContext,
   lineNumber: number,
-): number {
-  const { state, objectDocument, decorations, atomicRanges, depthByLine } = context;
-  const line = state.doc.line(lineNumber);
-  const object = objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber
-    ? objectDocument.byLine.get(lineNumber) ?? null
-    : null;
-  const barePrefixSize = object?.barePrefixSize ?? 0;
-  const unbrokenContent = object
-    ? hasUnbrokenObjectContent(line.text, object.sourcePrefix.length)
-    : false;
+  line: { from: number; text: string },
+  object: ObjectLine | null,
+  barePrefixSize: number,
+  unbrokenContent: boolean,
+) {
+  const { decorations, atomicRanges, depthByLine } = context;
   if (barePrefixSize > 0 && object?.checked === undefined && !object?.listMarker) {
     addHiddenRange(line.from, line.from + barePrefixSize, decorations, atomicRanges);
   }
@@ -2920,7 +2916,22 @@ function renderPlainLine(
       }).range(line.from),
     );
   }
+}
 
+function renderPlainLine(
+  context: LivePreviewRenderContext,
+  lineNumber: number,
+): number {
+  const { state, objectDocument } = context;
+  const line = state.doc.line(lineNumber);
+  const object = objectDocument.byLine.get(lineNumber)?.lineNumber === lineNumber
+    ? objectDocument.byLine.get(lineNumber) ?? null
+    : null;
+  const barePrefixSize = object?.barePrefixSize ?? 0;
+  const unbrokenContent = object
+    ? hasUnbrokenObjectContent(line.text, object.sourcePrefix.length)
+    : false;
+  decoratePlainLine(context, lineNumber, line, object, barePrefixSize, unbrokenContent);
   decoratePreviewText(context, line.text.slice(barePrefixSize), line.from + barePrefixSize);
   return lineNumber + 1;
 }
