@@ -391,7 +391,7 @@ test("sync resumes on focus and visibility changes without overlapping", () => {
 });
 
 test("sync status exposes local, remote, failure, and conflict states", () => {
-  assert.match(app, /const saveStatusLabel = new Map\(\[\["error", "Save failed"\], \["saving", "Encrypting…"\]\]\)\.get\(saveState\)\n    \?\? \(dirty \? "Unsaved" : "Saved locally"\);/);
+  assert.match(app, /function workspaceLabels\([\s\S]*const saveStatusLabel = new Map\(\[\["error", "Save failed"\], \["saving", "Encrypting…"\]\]\)\.get\(saveState\)\n    \?\? \(dirty \? "Unsaved" : "Saved locally"\);/);
   assert.match(app, /className=\{`sync-status \$\{syncLinked \? "linked" : "not-linked"\}`\}/);
   assert.match(app, /<LastSyncLabel timestamp=\{lastSyncedAt\} \/>/);
   assert.match(app, /className="error-banner" role="alert"/);
@@ -592,7 +592,7 @@ test("live preview updates only safe local edits", () => {
 
 test("board widget equality compares card IDs without serialization", () => {
   assert.match(liveEditor, /other\.cardIDs\.length !== this\.cardIDs\.length/);
-  assert.match(liveEditor, /other\.cardIDs\[index\] !== this\.cardIDs\[index\]/);
+  assert.match(liveEditor, /otherCardIDs\[index\] !== cardIDs\[index\]/);
   assert.match(liveEditor, /updateDOM\(dom: HTMLElement, _view: EditorView, from: BoardWidget\)/);
   assert.match(liveEditor, /boardCardPresentationChanged\(previous, card\)/);
   assert.doesNotMatch(liveEditor, /JSON\.stringify\(other\.cardIDs\)/);

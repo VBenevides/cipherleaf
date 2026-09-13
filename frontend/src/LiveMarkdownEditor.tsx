@@ -1180,6 +1180,45 @@ function alignmentLabel(align: "left" | "center" | "right"): string {
   return "Align right";
 }
 
+function sameBoardCardIDs(
+  cardIDs: readonly string[],
+  otherCardIDs: readonly string[],
+  cards: ReadonlyMap<string, CardMetadata>,
+  otherCards: ReadonlyMap<string, CardMetadata>,
+): boolean {
+  if (cardIDs.length !== otherCardIDs.length) return false;
+  for (let index = 0; index < cardIDs.length; index++) {
+    if (otherCardIDs[index] !== cardIDs[index]) return false;
+    const previous = cards.get(cardIDs[index]);
+    const current = otherCards.get(otherCardIDs[index]);
+    if (previous === current) continue;
+    if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+  }
+  return true;
+}
+
+function sameBoardCardViews(
+  cardIDs: Iterable<string>,
+  cards: ReadonlyMap<string, CardMetadata>,
+  otherCards: ReadonlyMap<string, CardMetadata>,
+): boolean {
+  for (const id of new Set(cardIDs)) {
+    const previous = cards.get(id);
+    const current = otherCards.get(id);
+    if (previous === current) continue;
+    if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
+  }
+  return true;
+}
+
+function sameBoardColumns(left: readonly BoardColumn[], right: readonly BoardColumn[]): boolean {
+  return left.length === right.length && left.every((column, index) => {
+    const other = right[index];
+    return column.id === other.id && column.name === other.name && column.color === other.color &&
+      column.cardIDs.length === other.cardIDs.length && column.cardIDs.every((id, cardIndex) => id === other.cardIDs[cardIndex]);
+  });
+}
+
 class BoardWidget extends WidgetType {
   private titleResizeObserver: ResizeObserver | null = null;
   private draggedColumnID: string | null = null;
@@ -1210,31 +1249,12 @@ class BoardWidget extends WidgetType {
     if (other.boardID !== this.boardID || other.title !== this.title || other.configured !== this.configured || other.templateID !== this.templateID ||
       other.cardIDs.length !== this.cardIDs.length || other.columns.length !== this.columns.length ||
       other.deletedColumns.length !== this.deletedColumns.length || other.orphanCardIDs.length !== this.orphanCardIDs.length) return false;
-    for (let index = 0; index < this.cardIDs.length; index++) {
-      if (other.cardIDs[index] !== this.cardIDs[index]) return false;
-      const previous = this.cards.get(this.cardIDs[index]);
-      const current = other.cards.get(other.cardIDs[index]);
-      if (previous === current) continue;
-      if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
-    }
-    for (const id of new Set([...this.deletedColumns.flatMap((column) => column.cardIDs), ...this.orphanCardIDs])) {
-      const previous = this.cards.get(id);
-      const current = other.cards.get(id);
-      if (previous === current) continue;
-      if (!previous || !current || previous.status !== current.status || boardCardPresentationChanged(previous, current)) return false;
-    }
-    for (let index = 0; index < this.columns.length; index++) {
-      const current = this.columns[index];
-      const otherColumn = other.columns[index];
-      if (current.id !== otherColumn.id || current.name !== otherColumn.name || current.color !== otherColumn.color ||
-        current.cardIDs.length !== otherColumn.cardIDs.length || current.cardIDs.some((id, cardIndex) => id !== otherColumn.cardIDs[cardIndex])) return false;
-    }
-    for (let index = 0; index < this.deletedColumns.length; index++) {
-      const current = this.deletedColumns[index];
-      const otherColumn = other.deletedColumns[index];
-      if (current.id !== otherColumn.id || current.name !== otherColumn.name || current.color !== otherColumn.color ||
-        current.cardIDs.length !== otherColumn.cardIDs.length || current.cardIDs.some((id, cardIndex) => id !== otherColumn.cardIDs[cardIndex])) return false;
-    }
+    if (!sameBoardCardIDs(this.cardIDs, other.cardIDs, this.cards, other.cards)) return false;
+    if (!sameBoardCardViews([
+      ...this.deletedColumns.flatMap((column) => column.cardIDs),
+      ...this.orphanCardIDs,
+    ], this.cards, other.cards)) return false;
+    if (!sameBoardColumns(this.columns, other.columns) || !sameBoardColumns(this.deletedColumns, other.deletedColumns)) return false;
     if (this.orphanCardIDs.some((id, index) => id !== other.orphanCardIDs[index])) return false;
     if (this.templates.length !== other.templates.length || this.templates.some((template, index) =>
       template.id !== other.templates[index].id || template.name !== other.templates[index].name)) return false;
