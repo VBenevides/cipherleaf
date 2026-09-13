@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import {
   attachmentMarkdown,
   isHorizontalRule,
@@ -17,6 +18,23 @@ import {
 
 const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+const minimalDocumentChangeSource = editor.slice(
+  editor.indexOf("function minimalDocumentChange"),
+  editor.indexOf("\n\nconst toggleQuote"),
+).trim();
+const minimalDocumentChange = new Function(
+  `${transpileModule(minimalDocumentChangeSource, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 } }).outputText}; return minimalDocumentChange;`,
+)() as (state: { doc: { toString: () => string }; changes: (change: { from: number; to: number; insert: string }) => unknown }, next: string) => unknown;
+
+function applyMinimalDocumentChange(current: string, next: string): string {
+  let change: { from: number; to: number; insert: string } | undefined;
+  minimalDocumentChange({
+    doc: { toString: () => current },
+    changes: (value) => { change = value; return value; },
+  }, next);
+  assert.ok(change);
+  return current.slice(0, change.from) + change.insert + current.slice(change.to);
+}
 
 test("keeps the caret at the active text metric", () => {
   assert.match(style, /\.live-markdown-editor \.cm-cursor \{[\s\S]*height: 1em !important;/);
@@ -30,6 +48,11 @@ test("preserves the live editor viewport across structural updates", () => {
   assert.match(editor, /toggleQuote\.of\(this\.position\), view\.scrollSnapshot\(\)/);
   assert.match(editor, /setAllQuotesCollapsed\.of\(collapsed\), view\.scrollSnapshot\(\)/);
   assert.match(editor, /const snapshot = view\.scrollSnapshot\(\);[\s\S]*updateMinimizedState\(\);[\s\S]*view\.dispatch\(\{ effects: snapshot \}\)/);
+});
+
+test("preserves Unicode changes in minimal editor updates", () => {
+  assert.equal(applyMinimalDocumentChange("before 😀 after", "before 😃 after"), "before 😃 after");
+  assert.equal(applyMinimalDocumentChange("prefix", "prefix 🧪"), "prefix 🧪");
 });
 
 test("keeps the dark scratchpad overlay readable and translucent", () => {
