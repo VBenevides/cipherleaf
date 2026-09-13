@@ -379,12 +379,21 @@ function appendJournalTags(
   lines: string[],
   document: ReturnType<typeof parseObjectDocument>,
   section: ObjectLine,
-  journal: string,
-  cardID: string,
-  previousBody: string,
-  nextBody: string,
-  boardLine: number,
-  date: Date,
+  {
+    journal,
+    cardID,
+    previousBody,
+    nextBody,
+    boardLine,
+    date,
+  }: {
+    readonly journal: string;
+    readonly cardID: string;
+    readonly previousBody: string;
+    readonly nextBody: string;
+    readonly boardLine: number;
+    readonly date: Date;
+  },
 ): string {
   for (const block of journalTagBlocks(journal)) {
     const blockLines = block.split("\n");
@@ -448,6 +457,13 @@ export function appendCardJournalToMainEditor(
     return insertLines(lines, insertionLine, journal);
   }
 
-  const result = appendJournalTags(lines, document, section, journal, metadata.id, previousBody, nextBody, boardLine, date);
+  const result = appendJournalTags(lines, document, section, {
+    journal,
+    cardID: metadata.id,
+    previousBody,
+    nextBody,
+    boardLine,
+    date,
+  });
   return result === normalized ? null : result;
 }
