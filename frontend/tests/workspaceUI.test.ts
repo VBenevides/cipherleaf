@@ -338,6 +338,13 @@ test("window switching does not trigger a caret-moving save", () => {
   assert.match(app, /if \(!event\.relatedTarget && !document\.hasFocus\(\)\) return;/);
 });
 
+test("typing resets autosave without rendering the whole app", () => {
+  assert.doesNotMatch(app, /autosaveVersion/);
+  assert.match(app, /const autosaveTimerRef = useRef<number \| null>\(null\)/);
+  assert.match(app, /const scheduleAutosave = \(\) => \{[\s\S]*clearTimeout\(autosaveTimerRef\.current\)[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*persistCurrentInBackground\(\)/);
+  assert.match(app, /dirtyRef\.current = true;\n    scheduleAutosave\(\);/);
+});
+
 test("global search offers one-shot return navigation", () => {
   assert.match(app, /type GlobalSearchOrigin = \{/);
   assert.match(app, /const \[globalSearchOrigin, setGlobalSearchOrigin\]/);

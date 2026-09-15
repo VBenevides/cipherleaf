@@ -893,7 +893,6 @@ function App() {
   const templateRequestRef = useRef(0);
   const cardOriginRef = useRef<{ noteID: string; offset: number } | null>(null);
   cardPanelRef.current = cardPanel;
-  const [autosaveVersion, setAutosaveVersion] = useState(0);
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState(0);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -968,6 +967,7 @@ function App() {
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
   const editVersion = useRef(0);
+  const autosaveTimerRef = useRef<number | null>(null);
   const runSerializedSave = useRef(createSerialTaskRunner()).current;
   const noteRef = useRef<Note | null>(null);
   const tabsRef = useRef(tabs);
@@ -1865,6 +1865,15 @@ function App() {
     });
   };
 
+  const scheduleAutosave = () => {
+    if (autosaveTimerRef.current !== null) window.clearTimeout(autosaveTimerRef.current);
+    if (!dirtyRef.current || !noteRef.current) return;
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      persistCurrentInBackground();
+    }, autosaveIntervalSeconds * 1000);
+  };
+
   const saveCurrentDraft = () => {
     const snapshot = noteRef.current;
     if (!snapshot || !dirtyRef.current) return;
@@ -1895,12 +1904,14 @@ function App() {
   }), []);
 
   useEffect(() => {
-    if (!dirty || !note) return;
-    const timer = window.setTimeout(() => {
-      persistCurrentInBackground();
-    }, autosaveIntervalSeconds * 1000);
-    return () => window.clearTimeout(timer);
-  }, [autosaveIntervalSeconds, autosaveVersion, dirty, note?.id]);
+    scheduleAutosave();
+    return () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [autosaveIntervalSeconds, dirty, note?.id]);
 
   useEffect(() => {
     if (!session || session.locked || !syncLinked) return;
@@ -3354,8 +3365,8 @@ function App() {
 
   const markDirty = () => {
     editVersion.current++;
-    setAutosaveVersion(editVersion.current);
     dirtyRef.current = true;
+    scheduleAutosave();
     setDirty(true);
     setSaveState((current) => current === "idle" ? current : "idle");
   };
