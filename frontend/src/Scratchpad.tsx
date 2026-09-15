@@ -216,7 +216,12 @@ export default function Scratchpad({
           </button>
         )}
       </header>
-      {error && <div className="scratchpad-alert" role="alert">{error}</div>}
+      {error && (
+        <div className="scratchpad-alert" role="alert">
+          <span>{error}</span>
+          <button type="button" className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">×</button>
+        </div>
+      )}
       <div className="document-body scratchpad-editor-body">
         {loaded ? <Suspense fallback={<div className="settings-loading">Loading editor...</div>}>
             <LiveMarkdownEditor

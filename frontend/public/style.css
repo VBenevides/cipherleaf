@@ -2904,12 +2904,21 @@ dialog.modal-backdrop {
 }
 
 .scratchpad-alert {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
   margin: 10px var(--editor-content-right) 0 var(--editor-content-left);
   padding: 8px 10px;
   color: var(--red);
   border: 1px solid var(--red);
   border-radius: 6px;
   font-size: 11px;
+}
+
+.scratchpad-alert span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 :root[data-window="scratchpad"],

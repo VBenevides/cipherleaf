@@ -42,6 +42,7 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /key=\{editorGeneration\}/);
   assert.match(scratchpad, /noteID=\{`scratchpad:\$\{editorGeneration\}`\}/);
   assert.match(scratchpad, /aria-label="Hide scratchpad"/);
+  assert.match(scratchpad, /className="scratchpad-alert" role="alert">[\s\S]*setError\(""\)[\s\S]*aria-label="Dismiss error"/);
   assert.match(scratchpad, /Window\.Hide\(\)/);
 });
 

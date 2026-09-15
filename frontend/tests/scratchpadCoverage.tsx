@@ -169,6 +169,10 @@ try {
   await act(async () => { await flush(); });
   assert.equal(error, saveError);
   assert.match(alertText(renderer), /save failed/);
+  await act(async () => {
+    renderer.root.findByProps({ "aria-label": "Dismiss error" }).props.onClick();
+  });
+  assert.throws(() => renderer.root.findByProps({ role: "alert" }));
 
   await act(async () => {
     emit(changed, state("event local", 1, 8, 4));
