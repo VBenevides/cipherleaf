@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/deepteams/webp v1.2.4
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/shirou/gopsutil/v4 v4.24.10
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	github.com/zalando/go-keyring v0.2.8
@@ -67,7 +68,6 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-task/template v0.2.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/rpmpack v0.7.1 // indirect

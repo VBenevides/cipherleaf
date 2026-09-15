@@ -97,6 +97,7 @@ func (coverageNoopTransport) JSClient() []byte                                  
 func (coverageNoopTransport) Stop() error                                                { return nil }
 
 func TestScratchpadShortcutApplicationBranches(t *testing.T) {
+	t.Setenv("XDG_SESSION_TYPE", "x11")
 	wailsApp := application.New(application.Options{
 		DisableDefaultSignalHandler: true,
 		Transport:                   coverageNoopTransport{},

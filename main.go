@@ -86,6 +86,12 @@ func main() {
 		event.Cancel()
 		window.EmitEvent("cipherleaf:close-requested")
 	})
+	scratchpad.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if err := vaultService.HideScratchpad(); err != nil {
+			scratchpad.Hide()
+		}
+		event.Cancel()
+	})
 	requestVaultLock := func(*application.ApplicationEvent) {
 		if err := vaultService.HideScratchpad(); err != nil {
 			scratchpad.Hide()

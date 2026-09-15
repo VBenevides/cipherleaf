@@ -78,6 +78,7 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeMain, /BackgroundType:\s+application\.BackgroundTypeTranslucent/);
   assert.match(nativeMain, /Name:\s+"main"/);
   assert.match(nativeMain, /app\.Event\.OnApplicationEvent\(events\.Common\.ApplicationStarted, func\(\*application\.ApplicationEvent\) \{[\s\S]*vaultService\.InitializeScratchpadShortcut\(\)/);
+  assert.match(nativeMain, /scratchpad\.RegisterHook\(events\.Common\.WindowClosing, func\(event \*application\.WindowEvent\) \{[\s\S]*event\.Cancel\(\)/);
   assert.doesNotMatch(nativeMain, /app\.GlobalShortcut\.Register/);
   assert.match(nativeMain, /if err := vaultService\.InitializeScratchpadShortcut\(\); err != nil \{[\s\S]*log\.Printf\("failed to register scratchpad global shortcut: %v", err\)/);
   const registrationIndex = nativeMain.indexOf("app.Event.OnApplicationEvent(events.Common.ApplicationStarted");

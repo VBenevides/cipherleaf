@@ -15,6 +15,13 @@ const (
 	scratchpadWindowName = "scratchpad"
 )
 
+func registerWailsScratchpadShortcut(app *application.App, shortcut string, callback func()) (func() error, error) {
+	if err := app.GlobalShortcut.Register(shortcut, callback); err != nil {
+		return nil, err
+	}
+	return func() error { return app.GlobalShortcut.Unregister(shortcut) }, nil
+}
+
 // GetScratchpadShortcut returns the saved application-wide Scratchpad shortcut.
 func (s *VaultService) GetScratchpadShortcut() string {
 	s.scratchpadShortcutMu.Lock()
@@ -46,20 +53,23 @@ func (s *VaultService) InitializeScratchpadShortcut() error {
 	if strings.TrimSpace(candidate) == "" {
 		candidate = appsession.DefaultScratchpadShortcut
 	}
-	register := func(shortcut string) error {
-		return app.GlobalShortcut.Register(shortcut, s.toggleScratchpad)
+	register := func(shortcut string) (func() error, error) {
+		return registerScratchpadShortcut(app, shortcut, s.toggleScratchpad)
 	}
-	if err := register(candidate); err != nil {
+	registration, err := register(candidate)
+	if err != nil {
 		if candidate == appsession.DefaultScratchpadShortcut {
 			return fmt.Errorf("register Scratchpad shortcut %q: %w", candidate, err)
 		}
-		fallbackErr := register(appsession.DefaultScratchpadShortcut)
+		var fallbackErr error
+		registration, fallbackErr = register(appsession.DefaultScratchpadShortcut)
 		if fallbackErr != nil {
 			return fmt.Errorf("register Scratchpad shortcut %q: %v; register default %q: %w", candidate, err, appsession.DefaultScratchpadShortcut, fallbackErr)
 		}
 		log.Printf("failed to register saved Scratchpad shortcut %q; using default %q: %v", candidate, appsession.DefaultScratchpadShortcut, err)
 		candidate = appsession.DefaultScratchpadShortcut
 	}
+	s.scratchpadShortcutRegistration = registration
 	if err := s.recent.SetScratchpadShortcut(candidate); err != nil {
 		s.scratchpadShortcut = candidate
 		s.scratchpadShortcutInitialized = true
@@ -103,30 +113,36 @@ func (s *VaultService) SetScratchpadShortcut(shortcut string) (string, error) {
 	if app == nil || app.GlobalShortcut == nil {
 		return current, errors.New("application global shortcuts are unavailable")
 	}
-	if err := app.GlobalShortcut.Register(shortcut, s.toggleScratchpad); err != nil {
+	registration, err := registerScratchpadShortcut(app, shortcut, s.toggleScratchpad)
+	if err != nil {
 		return current, fmt.Errorf("register Scratchpad shortcut %q: %w", shortcut, err)
 	}
 	if err := s.recent.SetScratchpadShortcut(shortcut); err != nil {
-		cleanupErr := app.GlobalShortcut.Unregister(shortcut)
+		cleanupErr := registration()
 		if cleanupErr != nil {
 			return current, fmt.Errorf("persist Scratchpad shortcut: %v; cleanup candidate: %w", err, cleanupErr)
 		}
 		return current, fmt.Errorf("persist Scratchpad shortcut: %w", err)
 	}
-	if err := app.GlobalShortcut.Unregister(current); err != nil {
-		restoreErr := app.GlobalShortcut.Register(current, s.toggleScratchpad)
-		if restoreErr == nil {
-			restorePersistenceErr := s.recent.SetScratchpadShortcut(current)
-			cleanupErr := app.GlobalShortcut.Unregister(shortcut)
-			if restorePersistenceErr != nil || cleanupErr != nil {
-				return current, fmt.Errorf("retire previous Scratchpad shortcut: %v; restore persistence: %v; cleanup candidate: %v", err, restorePersistenceErr, cleanupErr)
+	if s.scratchpadShortcutRegistration != nil {
+		if err := s.scratchpadShortcutRegistration(); err != nil {
+			restoreRegistration, restoreErr := registerScratchpadShortcut(app, current, s.toggleScratchpad)
+			if restoreErr == nil {
+				s.scratchpadShortcutRegistration = restoreRegistration
+				restorePersistenceErr := s.recent.SetScratchpadShortcut(current)
+				cleanupErr := registration()
+				if restorePersistenceErr != nil || cleanupErr != nil {
+					return current, fmt.Errorf("retire previous Scratchpad shortcut: %v; restore persistence: %v; cleanup candidate: %v", err, restorePersistenceErr, cleanupErr)
+				}
+				return current, fmt.Errorf("retire previous Scratchpad shortcut: %w", err)
 			}
-			return current, fmt.Errorf("retire previous Scratchpad shortcut: %w", err)
+			s.scratchpadShortcut = shortcut
+			s.scratchpadShortcutRegistration = registration
+			return shortcut, fmt.Errorf("retire previous Scratchpad shortcut: %v; restore old binding: %v; keeping candidate %q", err, restoreErr, shortcut)
 		}
-		s.scratchpadShortcut = shortcut
-		return shortcut, fmt.Errorf("retire previous Scratchpad shortcut: %v; restore old binding: %v; keeping candidate %q", err, restoreErr, shortcut)
 	}
 	s.scratchpadShortcut = shortcut
+	s.scratchpadShortcutRegistration = registration
 	return shortcut, nil
 }
 

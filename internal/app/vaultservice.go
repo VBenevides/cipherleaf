@@ -25,21 +25,22 @@ import (
 )
 
 type VaultService struct {
-	mu                            sync.RWMutex
-	app                           *application.App
-	store                         *vault.Store
-	recent                        *appsession.RecentVaultStore
-	secrets                       *secretstore.Store
-	sync                          *githubsync.Manager
-	syncWorkerOnce                sync.Once
-	syncJobs                      chan syncJob
-	statisticsMu                  sync.Mutex
-	backupMu                      sync.Mutex
-	scratchpadShortcutMu          sync.Mutex
-	scratchpadShortcut            string
-	scratchpadShortcutInitialized bool
-	process                       *process.Process
-	scratchpad                    scratchpadStore
+	mu                             sync.RWMutex
+	app                            *application.App
+	store                          *vault.Store
+	recent                         *appsession.RecentVaultStore
+	secrets                        *secretstore.Store
+	sync                           *githubsync.Manager
+	syncWorkerOnce                 sync.Once
+	syncJobs                       chan syncJob
+	statisticsMu                   sync.Mutex
+	backupMu                       sync.Mutex
+	scratchpadShortcutMu           sync.Mutex
+	scratchpadShortcut             string
+	scratchpadShortcutInitialized  bool
+	scratchpadShortcutRegistration func() error
+	process                        *process.Process
+	scratchpad                     scratchpadStore
 }
 
 type syncJob struct{ done chan syncJobResult }
