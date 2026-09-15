@@ -2687,6 +2687,20 @@ dialog.modal-backdrop {
   padding: 0 0 7px 8px;
 }
 
+.scratchpad-target-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.scratchpad-target-toggle input {
+  accent-color: var(--accent);
+}
+
 .document-heading-actions .secondary-button {
   min-height: 30px;
   padding: 5px 10px;

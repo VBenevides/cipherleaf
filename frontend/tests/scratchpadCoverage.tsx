@@ -29,9 +29,16 @@ const flush = async () => {
 
 const changed = "cipherleaf:scratchpad-changed";
 const cleared = "cipherleaf:scratchpad-cleared";
+const noteChanged = "cipherleaf:scratchpad-note-changed";
+const draftChanged = "cipherleaf:scratchpad-note-draft-changed";
 const getScratchpadMethod = 687321542;
 const saveScratchpadMethod = 2199009165;
 const hideScratchpadMethod = 3062824244;
+const listNotesMethod = 888598820;
+const getNoteMethod = 1503400201;
+const getScratchpadTargetMethod = 3332482185;
+const getSessionMethod = 355925843;
+const saveNoteMethod = 2770680190;
 
 const previousTransport = getTransport();
 const runtimeWindow = globalThis.window as unknown as {
@@ -67,6 +74,8 @@ const state = (content: string, generation: number, revision: number, caretOffse
 let getCalls = 0;
 const initialGet = deferred<ScratchpadState>();
 const saveRequests: Array<{ request: any; result: Deferred<ScratchpadState> }> = [];
+const noteSaveRequests: Array<{ request: any; result: Deferred<any> }> = [];
+let shortcutTarget = "scratchpad";
 let currentState = state("initial", 1, 1, 2);
 let windowHideCalls = 0;
 const transport: RuntimeTransport = {
@@ -84,8 +93,47 @@ const transport: RuntimeTransport = {
         saveRequests.push({ request, result });
         return result.promise;
       }
+      case getScratchpadTargetMethod:
+        return shortcutTarget;
+      case getSessionMethod:
+        return { locked: false, path: "/vault", vaultId: "vault-1", noteCount: 1 };
+      case getNoteMethod:
+        return {
+          id: "target-note",
+          title: "Target",
+          folderId: "folder",
+          order: 0,
+          content: "first",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          modifiedAt: 1,
+          revision: 1,
+        };
+      case saveNoteMethod: {
+        const result = deferred<any>();
+        noteSaveRequests.push({ request, result });
+        return result.promise;
+      }
       case hideScratchpadMethod:
         throw new Error("hide failed");
+      case listNotesMethod:
+        return [{
+          id: "card",
+          title: "Board card",
+          folderId: "folder",
+          order: 0,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          modifiedAt: 1,
+          revision: 1,
+          attachmentIds: [],
+          outgoingLinks: [],
+          properties: {
+            "cipherleaf-card": true,
+            "cipherleaf-card-status": "in-progress",
+            "cipherleaf-card-created-at": "2026-01-01T00:00:00Z",
+          },
+        }];
       default:
         return null;
     }
@@ -232,8 +280,121 @@ try {
   assert.equal(keydownListeners.size, 0);
 
   let overlay!: ReturnType<typeof create>;
+  shortcutTarget = "note:target-note";
   overlay = create(createElement(Scratchpad, { overlay: true }));
   await act(async () => { await flush(); });
+  assert.equal(editorOf(overlay).props.cardData.get("card").title, "Board card");
+  assert.equal(editorOf(overlay).props.cardTitles.get("card"), "Board card");
+  await act(async () => {
+    emit(draftChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "from ui ", revision: 1 },
+      draftSequence: 1,
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "from ui ");
+  await act(async () => {
+    emit(draftChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "stale draft", revision: 1 },
+      draftSequence: 1,
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "from ui ");
+  await act(async () => {
+    emit(noteChanged, {
+      vaultId: "other-vault",
+      note: { id: "target-note", title: "Target", content: "wrong vault", revision: 2 },
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "from ui ");
+  await act(async () => {
+    emit(noteChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "old saved", revision: 2 },
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "from ui ");
+  await act(async () => {
+    emit(noteChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "saved", revision: 2 },
+      draftSequence: 1,
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "saved");
+  await act(async () => {
+    emit(noteChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "stale", revision: 1 },
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "saved");
+  await act(async () => {
+    emit(draftChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "newer draft ", revision: 2 },
+      draftSequence: 2,
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "newer draft ");
+  await act(async () => {
+    emit(noteChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "older persisted", revision: 3 },
+      draftSequence: 1,
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "newer draft ");
+  await act(async () => {
+    emit("cipherleaf:scratchpad-overlay-refresh", null);
+    await flush();
+    await flush();
+  });
+  assert.equal(editorOf(overlay).props.value, "newer draft ");
+  const targetEditor = editorOf(overlay);
+  await act(async () => {
+    targetEditor.props.onChangeWithCaret("first ", 6);
+    await flush();
+  });
+  await act(async () => {
+    emit(noteChanged, {
+      vaultId: "vault-1",
+      note: { id: "target-note", title: "Target", content: "remote while dirty", revision: 3 },
+    });
+  });
+  assert.equal(editorOf(overlay).props.value, "first ");
+  const noteSave = noteSaveRequests.at(-1);
+  assert.ok(noteSave);
+  assert.equal(noteSave.request.args[2], "first ");
+  noteSave.result.resolve({
+    note: {
+      id: "target-note",
+      title: "Target",
+      folderId: "folder",
+      order: 0,
+      content: "first",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      modifiedAt: 2,
+      revision: 4,
+    },
+    summary: {
+      id: "target-note",
+      title: "Target",
+      folderId: "folder",
+      order: 0,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      modifiedAt: 2,
+      revision: 4,
+      attachmentIds: [],
+      outgoingLinks: [],
+      properties: {},
+    },
+  });
+  await act(async () => { await flush(); });
+  assert.equal(editorOf(overlay).props.value, "first ");
   await act(async () => {
     overlay.root.findByProps({ "aria-label": "Hide scratchpad" }).props.onClick();
     await flush();
@@ -248,6 +409,8 @@ try {
   assert.equal(keydownListeners.size, 0);
 } finally {
   Events.Off(changed, cleared);
+  Events.Off(noteChanged);
+  Events.Off(draftChanged);
   setTransport(previousTransport);
   runtimeWindow.addEventListener = previousAddEventListener;
   runtimeWindow.removeEventListener = previousRemoveEventListener;

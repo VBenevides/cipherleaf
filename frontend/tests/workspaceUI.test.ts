@@ -10,6 +10,7 @@ const nativeMain = readFileSync(new URL("../../main.go", import.meta.url), "utf8
 const nativeService = readFileSync(new URL("../../internal/app/scratchpad_shortcut.go", import.meta.url), "utf8");
 const nativeVaultService = readFileSync(new URL("../../internal/app/vaultservice.go", import.meta.url), "utf8");
 const scratchpad = readFileSync(new URL("../src/Scratchpad.tsx", import.meta.url), "utf8");
+const cards = readFileSync(new URL("../src/cards.ts", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
 
@@ -34,16 +35,40 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(main, /<Scratchpad overlay \/>/);
   assert.match(main, /dataset\.window = 'scratchpad'/);
   assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-changed"/);
-  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-cleared"/);
-  assert.match(scratchpad, /VaultService\.GetScratchpad\(\)/);
+ assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-cleared"/);
+  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-overlay-refresh"/);
+ assert.match(scratchpad, /VaultService\.GetScratchpad\(\)/);
+  assert.match(scratchpad, /VaultService\.GetScratchpadShortcutTarget\(\)/);
+ assert.match(scratchpad, /VaultService\.GetNote\(noteID\)/);
+  assert.match(scratchpad, /VaultService\.ListNotes\(\)/);
+  assert.match(scratchpad, /VaultService\.ListNotes\(\)\.catch\(\(\) => null\)/);
+  assert.match(scratchpad, /cardMetadataFromSummary\(summary\)/);
+  assert.match(scratchpad, /const editorCardData = cardData \?\? overlayCardData/);
+  assert.match(scratchpad, /VaultService\.SaveNote\(note\.id, note\.title/);
+  assert.match(scratchpad, /Events\.Emit\("cipherleaf:scratchpad-note-changed"/);
+  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-note-changed"/);
+  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-note-draft-changed"/);
+  assert.match(scratchpad, /targetDirtyRef\.current\) return/);
+  assert.match(scratchpad, /payload\.vaultId !== targetVaultIDRef\.current/);
+  assert.match(scratchpad, /changedNote\.revision <= current\.revision/);
+  assert.match(scratchpad, /targetVaultIDRef\.current = "";[\s\S]*loadedRef\.current = false;/);
   assert.match(scratchpad, /VaultService\.SaveScratchpad\(content, caretOffset, generation\)/);
   assert.match(scratchpad, /next\.generation < current\.generation/);
   assert.match(scratchpad, /next\.revision < current\.revision/);
   assert.match(scratchpad, /key=\{editorGeneration\}/);
-  assert.match(scratchpad, /noteID=\{`scratchpad:\$\{editorGeneration\}`\}/);
+  assert.match(scratchpad, /const editorGeneration = targetNote\?\.id \?\? state\.generation/);
+  assert.match(scratchpad, /currentNote\.id !== generation/);
+  assert.match(scratchpad, /const clearTarget = useCallback/);
+  assert.match(scratchpad, /noteID=\{targetNote\?\.id \?\? "scratchpad:" \+ editorGeneration\}/);
+  assert.match(scratchpad, /Open as scratchpad/);
   assert.match(scratchpad, /aria-label="Hide scratchpad"/);
   assert.match(scratchpad, /className="scratchpad-alert" role="alert">[\s\S]*setError\(""\)[\s\S]*aria-label="Dismiss error"/);
   assert.match(scratchpad, /Window\.Hide\(\)/);
+  assert.match(app, /Events\.On\("cipherleaf:scratchpad-note-changed"/);
+  assert.match(app, /Events\.Emit\("cipherleaf:scratchpad-note-changed"/);
+  assert.match(app, /Events\.Emit\("cipherleaf:scratchpad-note-draft-changed"/);
+  assert.match(app, /if \(id !== noteRef\.current\?\.id \|\| dirtyRef\.current\) return/);
+  assert.match(app, /changedNote\.revision <= noteRef\.current\.revision/);
 });
 
 test("scratchpad Escape closes its host without stealing dialog Escape", () => {
@@ -94,7 +119,8 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeService, /screen\.Bounds\.X/);
   assert.match(nativeService, /screen\.Bounds\.Y/);
   assert.match(nativeService, /scratchpad\.SetPosition/);
-  assert.match(nativeService, /mainWindow\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+ assert.match(nativeService, /mainWindow\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+  assert.match(nativeService, /scratchpad\.EmitEvent\("cipherleaf:scratchpad-overlay-refresh"\)/);
   assert.doesNotMatch(nativeMain, /window\.RegisterKeyBinding/);
   assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
 });
@@ -128,6 +154,39 @@ test("Scratchpad shortcut capture persists from the command palette", () => {
   assert.doesNotMatch(app, /openSettingsSection\("appearance", "settings-shortcuts"\)/);
 });
 
+test("Scratchpad shortcut can target an open note tab", () => {
+  assert.match(app, /GetScratchpadShortcutTarget\(\)/);
+  assert.match(app, /SetScratchpadShortcutTarget\(next\)/);
+  assert.match(app, /const DEFAULT_SCRATCHPAD_SHORTCUT_TARGET = "scratchpad"/);
+  assert.match(app, /targetTabForShortcut\(scratchpadShortcutTarget, tabsRef\.current\)/);
+  assert.match(app, /function targetTabForShortcut\(target: string, tabs: readonly EditorTab\[\]\)/);
+  assert.match(app, /scratchpadNoteId: noteIDForShortcutTarget\(scratchpadShortcutTarget\) \?\? ""/);
+  assert.match(app, /checked=\{noteIDForShortcutTarget\(scratchpadShortcutTarget\) === note\.id\}/);
+  assert.match(app, /Open as scratchpad/);
+  assert.match(nativeService, /GetScratchpadShortcutTarget\(\)/);
+  assert.match(nativeService, /scratchpad\.Show\(\)/);
+  assert.match(nativeService, /mainWindow\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+});
+
+test("shortcut target resolution handles default, missing, and duplicate note tabs", () => {
+  const noteIDSource = app.match(/function noteIDForShortcutTarget\(target: string\): string \| null \{[\s\S]*?\n\}/);
+  const functionSource = app.match(/function targetTabForShortcut\(target: string, tabs: readonly EditorTab\[\]\): EditorTab \| null \{[\s\S]*?\n\}/);
+  assert.ok(noteIDSource);
+  assert.ok(functionSource);
+  const functionBody = transpileModule(`${noteIDSource[0]}\n${functionSource[0]}`, {
+    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
+  }).outputText;
+  const resolve = new Function(`${functionBody}\nreturn targetTabForShortcut;`)() as (target: string, tabs: Array<{ id: number; noteID: string }>) => { id: number; noteID: string } | null;
+  const tabs = [{ id: 1, noteID: "note-a" }, { id: 2, noteID: "note-a" }];
+  assert.equal(resolve("scratchpad", tabs), null);
+  assert.equal(resolve("note:missing", tabs), null);
+  assert.equal(resolve("note:note-a", tabs), tabs[0]);
+  const activationSource = app.match(/  const activateShortcutTarget = \(\) => \{[\s\S]*?\n  \};/);
+  assert.ok(activationSource);
+  assert.match(activationSource[0], /target\.id === activeTabIDRef\.current/);
+  assert.match(activationSource[0], /setGraphOpen\(false\)/);
+});
+
 test("reported dialog inputs receive focus without autofocus attributes", () => {
   assert.match(app, /document\.querySelector<HTMLInputElement>\(selector\)\?\.focus\(\)/);
   assert.match(app, /appDialog\?\.kind === "prompt"/);
@@ -153,7 +212,7 @@ test("scratchpad focus effect handles native focus and cleanup", () => {
   let eventsOff = 0;
   let cleanup: (() => void) | undefined;
   const unlockedRef = { current: true };
-  const activateScratchpadRef = { current: () => { actionCalls += 1; } };
+  const activateShortcutTargetRef = { current: () => { actionCalls += 1; } };
   const useEffect = (callback: () => () => void) => { cleanup = callback(); };
   const Events = {
     On: (name: string, callback: () => void) => {
@@ -165,11 +224,11 @@ test("scratchpad focus effect handles native focus and cleanup", () => {
       };
     },
   };
-  new Function("useEffect", "Events", "unlockedRef", "activateScratchpadRef", effect)(
+  new Function("useEffect", "Events", "unlockedRef", "activateShortcutTargetRef", effect)(
     useEffect,
     Events,
     unlockedRef,
-    activateScratchpadRef,
+    activateShortcutTargetRef,
   );
   nativeFocus?.();
   assert.equal(actionCalls, 1);
@@ -241,7 +300,7 @@ test("scratchpad editor saves content and caret from the same local update", () 
   assert.match(listener, /else \{[\s\S]*onChangeRef\.current\(content\);[\s\S]*onCaretChangeRef\.current\?\.\(caretOffset\);/);
   assert.match(listener, /else if \(\(update\.selectionSet \|\| update\.docChanged\) && !suppressExternalCaret\) \{[\s\S]*onCaretChangeRef\.current\?\.\(update\.state\.selection\.main\.head\);/);
 
-  const contentUpdateSource = scratchpad.match(/  const updateContent = \(content: string, generation: number, caretOffset = stateRef\.current\.caretOffset\) => \{[\s\S]*?\n  \};\n/);
+  const contentUpdateSource = scratchpad.match(/  const updateContent = \(content: string, generation: number \| string, caretOffset = stateRef\.current\.caretOffset\) => \{[\s\S]*?\n  \};\n/);
   assert.ok(contentUpdateSource);
   assert.match(contentUpdateSource[0], /const normalizedCaretOffset = Math\.max\(0, Math\.min\(Math\.floor\(caretOffset\), content\.length\)\)/);
   assert.match(contentUpdateSource[0], /const next = \{ \.\.\.current, content, caretOffset: normalizedCaretOffset \}/);
@@ -556,7 +615,7 @@ test("card saving is opt-in for editor journaling and keeps the panel open", () 
   assert.match(app, /aria-label="Write changes to editor"/);
   assert.match(app, /checked=\{cardPanel\.metadata\.writeChangesToEditor\}/);
   assert.match(app, /const journaledMain = cardPanel\.metadata\.writeChangesToEditor && mainContent/);
-  assert.match(app, /cipherleaf-card-write-changes-to-editor/);
+  assert.match(cards, /cipherleaf-card-write-changes-to-editor/);
   assert.match(app, /Write changes to editor by default/);
   assert.match(app, /cardWriteChangesToEditorDefault/);
   assert.match(app, /const closeCardPanel = async \(force = false, preserveTemplateRequest = false\) => \{[\s\S]*!force && cardPanelDirty && !\(await requestAppConfirm/);

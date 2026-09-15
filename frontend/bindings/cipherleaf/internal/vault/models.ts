@@ -264,6 +264,7 @@ export interface TrashItem {
  * VaultSettings contains general preferences encrypted and synced with a vault.
  */
 export interface VaultSettings {
+    "scratchpadNoteId"?: string;
     "dailyNoteFormat": string;
     "dailyNoteFolderId": string;
     "dailyTemplateNoteId": string;

@@ -30,6 +30,25 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 	if got := service.GetScratchpadShortcut(); got != "Alt+S" {
 		t.Fatalf("initialized Scratchpad shortcut = %q", got)
 	}
+	if got := service.GetScratchpadShortcutTarget(); got != defaultScratchpadShortcutTarget {
+		t.Fatalf("default Scratchpad shortcut target = %q", got)
+	}
+	if _, err := service.store.Create(t.TempDir(), "shortcut target secret"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.SetScratchpadShortcutTarget("note:abc"); err != nil || got != "note:abc" {
+		t.Fatalf("setting Scratchpad shortcut target = %q, %v", got, err)
+	}
+	if got := service.GetScratchpadShortcutTarget(); got != "note:abc" {
+		t.Fatalf("saved Scratchpad shortcut target = %q", got)
+	}
+	settings, err := service.store.GetVaultSettings()
+	if err != nil || settings.ScratchpadNoteID != "abc" {
+		t.Fatalf("vault Scratchpad target = %q, %v", settings.ScratchpadNoteID, err)
+	}
+	if _, err := service.SetScratchpadShortcutTarget("tab:1"); err == nil {
+		t.Fatal("invalid Scratchpad shortcut target unexpectedly accepted")
+	}
 	if err := service.InitializeScratchpadShortcut(); err != nil {
 		t.Fatalf("already initialized shortcut: %v", err)
 	}

@@ -186,9 +186,12 @@ npm --prefix frontend run build
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
 | `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
 | `Ctrl/Cmd+Shift+E` | Confirm finishing the active timer |
-| `Super+grave/backtick` | Open Scratchpad (global overlay when supported by desktop; app unfocused; editable from the Command Palette) |
+| `Super+grave/backtick` | Open the note marked “Open as scratchpad” (the Scratchpad by default) |
 | `Ctrl+]` / `Ctrl+[` | Expand/collapse the current outline section |
 | `Ctrl+Shift+]` / `Ctrl+Shift+[` | Expand/collapse all outline sections |
+
+Open a note and select **Open as scratchpad** to change the shortcut target. Select the
+Scratchpad checkbox to restore the default. This choice is stored in the encrypted vault.
 
 Inside outline sections, `Tab` and `Shift+Tab` indent or outdent rows.
 Consecutive `>` lines form one collapsible section; additional `>` characters

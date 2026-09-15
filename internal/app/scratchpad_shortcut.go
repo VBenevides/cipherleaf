@@ -11,9 +11,14 @@ import (
 )
 
 const (
-	mainWindowName       = "main"
-	scratchpadWindowName = "scratchpad"
+	mainWindowName                  = "main"
+	scratchpadWindowName            = "scratchpad"
+	defaultScratchpadShortcutTarget = "scratchpad"
 )
+
+func validScratchpadShortcutTarget(target string) bool {
+	return target == defaultScratchpadShortcutTarget || (strings.HasPrefix(target, "note:") && len(target) > len("note:"))
+}
 
 func registerWailsScratchpadShortcut(app *application.App, shortcut string, callback func()) (func() error, error) {
 	if err := app.GlobalShortcut.Register(shortcut, callback); err != nil {
@@ -79,6 +84,46 @@ func (s *VaultService) InitializeScratchpadShortcut() error {
 	s.scratchpadShortcut = candidate
 	s.scratchpadShortcutInitialized = true
 	return nil
+}
+
+// GetScratchpadShortcutTarget returns the tab opened by the Scratchpad shortcut.
+func (s *VaultService) GetScratchpadShortcutTarget() string {
+	settings, err := s.store.GetVaultSettings()
+	if err != nil || strings.TrimSpace(settings.ScratchpadNoteID) == "" {
+		return defaultScratchpadShortcutTarget
+	}
+	return "note:" + strings.TrimSpace(settings.ScratchpadNoteID)
+}
+
+// SetScratchpadShortcutTarget changes the tab opened by the Scratchpad shortcut.
+func (s *VaultService) SetScratchpadShortcutTarget(target string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		target = defaultScratchpadShortcutTarget
+	}
+	if !validScratchpadShortcutTarget(target) {
+		return "", fmt.Errorf("invalid Scratchpad shortcut target %q", target)
+	}
+	s.scratchpadShortcutMu.Lock()
+	defer s.scratchpadShortcutMu.Unlock()
+	settings, err := s.store.GetVaultSettings()
+	if err != nil {
+		return "", err
+	}
+	if target == defaultScratchpadShortcutTarget {
+		settings.ScratchpadNoteID = ""
+	} else {
+		settings.ScratchpadNoteID = strings.TrimPrefix(target, "note:")
+	}
+	if _, err := s.store.SaveVaultSettings(settings); err != nil {
+		return "", err
+	}
+	if app := s.application(); app != nil {
+		if scratchpad, ok := app.Window.GetByName(scratchpadWindowName); ok && scratchpad != nil {
+			scratchpad.EmitEvent("cipherleaf:scratchpad-overlay-refresh")
+		}
+	}
+	return target, nil
 }
 
 // HideScratchpad hides the Scratchpad window synchronously.
@@ -160,6 +205,27 @@ func (s *VaultService) toggleScratchpad() {
 	mainWindow, mainOK := app.Window.GetByName(mainWindowName)
 	scratchpad, scratchpadOK := app.Window.GetByName(scratchpadWindowName)
 	if !mainOK || !scratchpadOK {
+		return
+	}
+	if s.GetScratchpadShortcutTarget() != defaultScratchpadShortcutTarget {
+		if scratchpad.IsVisible() {
+			hideScratchpadWindow(scratchpad)
+			return
+		}
+		if s.GetSession().Locked {
+			mainWindow.Show()
+			mainWindow.Focus()
+			return
+		}
+		mainWindowActive := mainWindow.IsFocused() && mainWindow.IsVisible()
+		if mainWindowActive {
+			mainWindow.EmitEvent("cipherleaf:scratchpad-focus")
+			return
+		}
+		positionScratchpad(app, mainWindow, scratchpad)
+		scratchpad.Show()
+		scratchpad.Focus()
+		scratchpad.EmitEvent("cipherleaf:scratchpad-overlay-refresh")
 		return
 	}
 

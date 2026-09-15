@@ -1,3 +1,5 @@
+import type { NoteSummary } from "../bindings/cipherleaf/internal/vault/models";
+
 export const CARD_STATUSES = ["not-started", "in-progress", "blocked", "finished"] as const;
 export type CardStatus = (typeof CARD_STATUSES)[number];
 
@@ -51,6 +53,35 @@ export type CardTemplate = {
   writeChangesToEditor: boolean;
   body: string;
 };
+
+export function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
+  const properties = summary.properties ?? {};
+  if (properties["cipherleaf-card"] !== true && properties["cipherleaf-card"] !== "true") return null;
+  const status = String(properties["cipherleaf-card-status"] ?? "not-started") as CardStatus;
+  if (!BOARD_COLUMNS.includes(status as typeof BOARD_COLUMNS[number])) return null;
+  const tags = Array.isArray(properties["cipherleaf-card-tags"])
+    ? properties["cipherleaf-card-tags"].filter((tag): tag is string => typeof tag === "string")
+    : [];
+  const metadata: CardMetadata = {
+    id: summary.id,
+    title: summary.title || "Untitled",
+    status,
+    tags,
+    writeChangesToEditor: properties["cipherleaf-card-write-changes-to-editor"] === true || properties["cipherleaf-card-write-changes-to-editor"] === "true",
+    createdAt: String(properties["cipherleaf-card-created-at"] ?? summary.createdAt),
+  };
+  for (const [key, field] of [
+    ["cipherleaf-card-started-at", "startedAt"],
+    ["cipherleaf-card-blocked-on", "blockedOn"],
+    ["cipherleaf-card-finished-at", "finishedAt"],
+    ["cipherleaf-card-board-id", "boardID"],
+    ["cipherleaf-card-column-entered-at", "columnEnteredAt"],
+  ] as const) {
+    const value = properties[key];
+    if (typeof value === "string" && value) metadata[field] = value;
+  }
+  return metadata;
+}
 
 export type BoardColumn = { id: string; name: string; color: string; cardIDs: string[] };
 export type BoardMarkerOptions = {

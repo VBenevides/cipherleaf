@@ -170,4 +170,7 @@ Autosave, automatic sync, and automatic vault locking are also configurable.
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
 | `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
 | `Ctrl/Cmd+Shift+E` | Finish the active timer |
-| `Super+grave/backtick` | Open Scratchpad (global overlay when supported by desktop; app unfocused; editable from the Command Palette) |
+| `Super+grave/backtick` | Open the note marked “Open as scratchpad” (the Scratchpad by default) |
+
+Open a note and select **Open as scratchpad** to change the shortcut target. Select the
+Scratchpad checkbox to restore the default. This choice is stored in the encrypted vault.

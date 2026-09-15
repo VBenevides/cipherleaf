@@ -185,6 +185,13 @@ export function GetScratchpadShortcut(): $CancellablePromise<string> {
     return $Call.ByID(1175710304);
 }
 
+/**
+ * GetScratchpadShortcutTarget returns the tab opened by the Scratchpad shortcut.
+ */
+export function GetScratchpadShortcutTarget(): $CancellablePromise<string> {
+    return $Call.ByID(3332482185);
+}
+
 export function GetSession(): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(355925843);
 }
@@ -465,6 +472,13 @@ export function SetFolderSortMode(id: string, mode: string): $CancellablePromise
  */
 export function SetScratchpadShortcut(shortcut: string): $CancellablePromise<string> {
     return $Call.ByID(2182337292, shortcut);
+}
+
+/**
+ * SetScratchpadShortcutTarget changes the tab opened by the Scratchpad shortcut.
+ */
+export function SetScratchpadShortcutTarget(target: string): $CancellablePromise<string> {
+    return $Call.ByID(2987846773, target);
 }
 
 export function StartTimeEntry(name: string, projectID: string, tagIDs: string[] | null): $CancellablePromise<vault$0.TimeEntry> {

@@ -60,6 +60,7 @@ import {
   boardMarker,
   boardColumnsForMarker,
   newCardMetadata,
+  cardMetadataFromSummary,
   cardReference,
   normalizeCardTags,
   parseCardDocument,
@@ -74,6 +75,8 @@ import {
   type CardStatus,
   type BoardColumn,
 } from "./cards";
+
+export { cardMetadataFromSummary } from "./cards";
 
 type VaultAction = "create" | "open" | "clone";
 type EditorView = "live" | "object" | "markdown";
@@ -130,6 +133,7 @@ const JOURNAL_LINE_LABELS: Record<JournalLines, string> = {
 const SCRATCHPAD_OPACITY_KEY = "cipherleaf-scratchpad-opacity";
 const SCRATCHPAD_DEFAULT_OPACITY = 0.5;
 const DEFAULT_SCRATCHPAD_SHORTCUT = "Super+`";
+const DEFAULT_SCRATCHPAD_SHORTCUT_TARGET = "scratchpad";
 const SHORTCUTS_STORAGE_KEY = "cipherleaf-shortcuts";
 const DEFAULT_SHORTCUTS: Record<string, string> = {
   "new-note": "Ctrl+N",
@@ -175,6 +179,15 @@ const EDITOR_VIEW_LABELS: Record<EditorView, string> = {
   object: "Object Tree",
   markdown: "Markdown",
 };
+
+function noteIDForShortcutTarget(target: string): string | null {
+  return target.startsWith("note:") && target.length > "note:".length ? target.slice("note:".length) : null;
+}
+
+function targetTabForShortcut(target: string, tabs: readonly EditorTab[]): EditorTab | null {
+  const noteID = noteIDForShortcutTarget(target);
+  return noteID ? tabs.find((tab) => tab.noteID === noteID) ?? null : null;
+}
 
 function readScratchpadOpacity(): number {
   const saved = window.localStorage.getItem(SCRATCHPAD_OPACITY_KEY);
@@ -427,35 +440,6 @@ export function noteForEditing(note: Note): { note: Note; migrated: boolean } {
 export function markdownForEditing(content: string): string {
   const canonical = parseCanonicalObjectDocumentText(content);
   return canonical ? markdownFromCanonicalObjectDocument(canonical) : content;
-}
-
-export function cardMetadataFromSummary(summary: NoteSummary): CardMetadata | null {
-  const properties = summary.properties ?? {};
-  if (properties["cipherleaf-card"] !== true && properties["cipherleaf-card"] !== "true") return null;
-  const status = String(properties["cipherleaf-card-status"] ?? "not-started") as CardStatus;
-  if (!BOARD_COLUMNS.includes(status as typeof BOARD_COLUMNS[number])) return null;
-  const tags = Array.isArray(properties["cipherleaf-card-tags"])
-    ? properties["cipherleaf-card-tags"].filter((tag): tag is string => typeof tag === "string")
-    : [];
-  const metadata: CardMetadata = {
-    id: summary.id,
-    title: summary.title || "Untitled",
-    status,
-    tags,
-    writeChangesToEditor: properties["cipherleaf-card-write-changes-to-editor"] === true || properties["cipherleaf-card-write-changes-to-editor"] === "true",
-    createdAt: String(properties["cipherleaf-card-created-at"] ?? summary.createdAt),
-  };
-  for (const [key, field] of [
-    ["cipherleaf-card-started-at", "startedAt"],
-    ["cipherleaf-card-blocked-on", "blockedOn"],
-    ["cipherleaf-card-finished-at", "finishedAt"],
-    ["cipherleaf-card-board-id", "boardID"],
-    ["cipherleaf-card-column-entered-at", "columnEnteredAt"],
-  ] as const) {
-    const value = properties[key];
-    if (typeof value === "string" && value) metadata[field] = value;
-  }
-  return metadata;
 }
 
 function CardStatusPicker({ value, onChange }: { readonly value: CardStatus; readonly onChange: (value: CardStatus) => void }) {
@@ -796,6 +780,7 @@ function App() {
   const [activeTabID, setActiveTabID] = useState(1);
   const [scratchpadActive, setScratchpadActive] = useState(false);
   const [scratchpadShortcut, setScratchpadShortcut] = useState(DEFAULT_SCRATCHPAD_SHORTCUT);
+  const [scratchpadShortcutTarget, setScratchpadShortcutTarget] = useState(DEFAULT_SCRATCHPAD_SHORTCUT_TARGET);
   const [scratchpadOpacity, setScratchpadOpacity] = useState(() => readScratchpadOpacity());
   const [noteTrail, setNoteTrail] = useState<NoteCrumb[]>([]);
   const [backlinks, setBacklinks] = useState<FindMatch[]>([]);
@@ -967,9 +952,12 @@ function App() {
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
   const editVersion = useRef(0);
+  const draftSequenceRef = useRef(0);
   const autosaveTimerRef = useRef<number | null>(null);
   const runSerializedSave = useRef(createSerialTaskRunner()).current;
   const noteRef = useRef<Note | null>(null);
+  const sessionRef = useRef<Session | null>(session);
+  sessionRef.current = session;
   const tabsRef = useRef(tabs);
   const activeTabIDRef = useRef(activeTabID);
   const scratchpadActiveRef = useRef(scratchpadActive);
@@ -981,6 +969,7 @@ function App() {
   const dirtyRef = useRef(false);
   const unlockedRef = useRef(false);
   const activateScratchpadRef = useRef<() => void>(() => {});
+  const activateShortcutTargetRef = useRef<() => void>(() => {});
   const dragCandidateRef = useRef<{ kind: "note" | "folder"; id: string; active: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const folderPasswordResolverRef = useRef<((value: string | null) => void) | null>(null);
@@ -1015,6 +1004,7 @@ function App() {
   };
 
   const portableVaultSettings = useMemo<VaultSettings>(() => ({
+    scratchpadNoteId: noteIDForShortcutTarget(scratchpadShortcutTarget) ?? "",
     dailyNoteFormat,
     dailyNoteFolderId: dailyNoteFolderID,
     dailyTemplateNoteId: dailyTemplateNoteID,
@@ -1036,12 +1026,14 @@ function App() {
     fileHistoryLimit,
     sectionDefault,
     cardWriteChangesToEditorDefault,
+    scratchpadShortcutTarget,
   ]);
 
   const settingsSnapshot = (settings: VaultSettings) => JSON.stringify({ ...settings, revision: 0, modifiedAt: 0 });
 
   const applyVaultSettings = (settings: VaultSettings) => {
     vaultSettingsSnapshotRef.current = settingsSnapshot(settings);
+    setScratchpadShortcutTarget(settings.scratchpadNoteId ? `note:${settings.scratchpadNoteId}` : DEFAULT_SCRATCHPAD_SHORTCUT_TARGET);
     setDailyNoteFormat(settings.dailyNoteFormat);
     setDailyNoteFolderID(settings.dailyNoteFolderId);
     setDailyTemplateNoteID(settings.dailyTemplateNoteId);
@@ -1120,6 +1112,19 @@ function App() {
       return false;
     }
   };
+
+ const saveScratchpadShortcutTarget = async (target: string) => {
+   const next = target === DEFAULT_SCRATCHPAD_SHORTCUT_TARGET || noteIDForShortcutTarget(target)
+     ? target
+     : DEFAULT_SCRATCHPAD_SHORTCUT_TARGET;
+   try {
+     const effective = await VaultService.SetScratchpadShortcutTarget(next);
+     setScratchpadShortcutTarget(effective || next);
+     setShortcutError("");
+   } catch (reason) {
+      setError(errorText(reason));
+   }
+ };
 
   const persistShortcutMap = (next: Record<string, string>): boolean => {
     try {
@@ -1363,6 +1368,26 @@ function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!session || session.locked) {
+      setScratchpadShortcutTarget(DEFAULT_SCRATCHPAD_SHORTCUT_TARGET);
+      return () => {
+        active = false;
+      };
+    }
+    VaultService.GetScratchpadShortcutTarget()
+      .then((target) => {
+        if (active) setScratchpadShortcutTarget(target === DEFAULT_SCRATCHPAD_SHORTCUT_TARGET || noteIDForShortcutTarget(target) ? target : DEFAULT_SCRATCHPAD_SHORTCUT_TARGET);
+      })
+      .catch(() => {
+        if (active) setScratchpadShortcutTarget(DEFAULT_SCRATCHPAD_SHORTCUT_TARGET);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.locked, session?.vaultId]);
 
   const increaseEditorFontSize = useCallback(() => {
     setEditorFontSize((current) => Math.min(32, current + 1));
@@ -1799,9 +1824,12 @@ function App() {
   };
 
   const updateSummary = (saved: NoteSummary) => {
-    setNotes((current) => current.some(({ id }) => id === saved.id)
-      ? current.map((item) => item.id === saved.id ? saved : item)
-      : [...current, saved]);
+    setNotes((current) => {
+      const existing = current.find(({ id }) => id === saved.id);
+      if (!existing) return [...current, saved];
+      if (existing.revision > saved.revision) return current;
+      return current.map((item) => item.id === saved.id ? saved : item);
+    });
   };
 
   const applyLoadedNote = (loaded: Note | null, state: SaveState = "idle") => {
@@ -1829,18 +1857,49 @@ function App() {
     setSaveState(state);
   };
 
+  useEffect(() => {
+    const off = Events.On("cipherleaf:scratchpad-note-changed", (event) => {
+      const raw = event && typeof event === "object" && "data" in event ? event.data : event;
+      if (!raw || typeof raw !== "object") return;
+      const payload = raw as { vaultId?: unknown; note?: unknown; summary?: unknown };
+      const changedNote = payload.note && typeof payload.note === "object" ? payload.note as Note : null;
+      const changedSummary = payload.summary && typeof payload.summary === "object" ? payload.summary as NoteSummary : null;
+      const id = changedNote?.id ?? changedSummary?.id;
+      const currentSession = sessionRef.current;
+      if (!id || !currentSession || currentSession.locked || typeof payload.vaultId !== "string" || payload.vaultId !== currentSession.vaultId) return;
+      for (const [tabID, cached] of tabNoteCacheRef.current) {
+        if (cached.id === id) tabNoteCacheRef.current.delete(tabID);
+      }
+      if (changedSummary?.id === id) updateSummary(changedSummary);
+      if (id !== noteRef.current?.id || dirtyRef.current) return;
+      if (changedNote && changedNote.revision <= noteRef.current.revision) return;
+      if (changedNote?.id === id) applyLoadedNote(changedNote, "saved");
+    });
+    return off;
+  }, []);
+
   const persistCurrent = (snapshot = noteRef.current) => {
     if (!snapshot || !dirtyRef.current) return Promise.resolve(snapshot);
     const version = editVersion.current;
+    const draftSequence = draftSequenceRef.current;
     setSaveState("saving");
     return runSerializedSave(async () => {
       setSaveState("saving");
       try {
+        const vaultId = sessionRef.current?.vaultId ?? "";
         const saved = await VaultService.SaveNote(
           snapshot.id,
           snapshot.title,
           markdownForEditing(snapshot.content),
         );
+        if (vaultId) {
+          void Events.Emit("cipherleaf:scratchpad-note-changed", {
+            vaultId,
+            note: saved.note,
+            summary: saved.summary,
+            draftSequence,
+          }).catch(() => {});
+        }
         updateSummary(saved.summary);
         const prepared = noteForEditing(saved.note);
         if (version === editVersion.current) {
@@ -1863,6 +1922,14 @@ function App() {
     void persistCurrent(snapshot).catch(() => {
       // persistCurrent already presents the actionable error.
     });
+  };
+
+  const saveNoteScratchpadTarget = (target: string) => {
+    void persistCurrent()
+      .then(() => saveScratchpadShortcutTarget(target))
+      .catch(() => {
+        // persistCurrent already presents the actionable error.
+      });
   };
 
   const scheduleAutosave = () => {
@@ -2153,7 +2220,9 @@ function App() {
     setTabs([emptyTab]);
     setActiveTabID(emptyTab.id);
     setScratchpadActive(false);
+    setScratchpadShortcutTarget(DEFAULT_SCRATCHPAD_SHORTCUT_TARGET);
     setUnlockedFolderIDs(new Set());
+    sessionRef.current = locked;
     setSession(locked);
     setFolders([]);
     setNotes([]);
@@ -3126,6 +3195,33 @@ function App() {
     }
   };
 
+  const activateShortcutTarget = () => {
+    if (scratchpadShortcutTarget === DEFAULT_SCRATCHPAD_SHORTCUT_TARGET) {
+      activateScratchpad();
+      return;
+    }
+    const target = targetTabForShortcut(scratchpadShortcutTarget, tabsRef.current);
+    if (!target) {
+      const noteID = noteIDForShortcutTarget(scratchpadShortcutTarget);
+      if (noteID && notes.some((item) => item.id === noteID)) {
+        void openNoteInNewTab(noteID);
+        return;
+      }
+      activateScratchpad();
+      return;
+    }
+    if (target.id === activeTabIDRef.current) {
+      leaveScratchpad();
+      setGraphOpen(false);
+      setTimeTrackingOpen(false);
+      setConflictResolution(null);
+      setSidebarOpen(false);
+      return;
+    }
+    void switchTab(target.id);
+  };
+  activateShortcutTargetRef.current = activateShortcutTarget;
+
   const closeTab = async (tabID: number) => {
     const keepScratchpad = scratchpadActiveRef.current;
     const current = tabsRef.current;
@@ -3175,7 +3271,7 @@ function App() {
 
   useEffect(() => {
     const off = Events.On("cipherleaf:scratchpad-focus", () => {
-      if (unlockedRef.current) activateScratchpadRef.current();
+      if (unlockedRef.current) activateShortcutTargetRef.current();
     });
     return () => {
       off();
@@ -3380,6 +3476,15 @@ function App() {
     const next = { ...current, ...patch };
     if ("content" in patch) setGlobalSearchTarget(null);
     noteRef.current = next;
+    const vaultId = sessionRef.current?.vaultId;
+    if (vaultId && ("content" in patch || "title" in patch)) {
+      const draftSequence = ++draftSequenceRef.current;
+      void Events.Emit("cipherleaf:scratchpad-note-draft-changed", {
+        vaultId,
+        note: next,
+        draftSequence,
+      }).catch(() => {});
+    }
     markDirty();
     if ("title" in patch) {
       setTabs((currentTabs) => currentTabs.map((tab) => tab.id === activeTabIDRef.current
@@ -4350,6 +4455,7 @@ function App() {
     setSettingsSaveError("");
     try {
       const saved = await saveVaultSettings({
+        scratchpadNoteId: noteIDForShortcutTarget(scratchpadShortcutTarget) ?? "",
         dailyNoteFormat: draft.dailyNoteFormat,
         dailyNoteFolderId: draft.dailyNoteFolderID,
         dailyTemplateNoteId: draft.dailyTemplateNoteID,
@@ -4690,9 +4796,9 @@ function App() {
     {
       id: "scratchpad",
       shortcut: formatShortcut(scratchpadShortcut),
-      name: "Open Scratchpad",
-      description: "Open the session scratchpad",
-      run: activateScratchpad,
+      name: "Open scratchpad",
+      description: "Open the selected scratchpad note",
+      run: activateShortcutTarget,
     },
     {
       id: "quick-switcher",
@@ -5769,6 +5875,8 @@ function App() {
     return (
       <div className="document-body scratchpad-editor-host">
         <Scratchpad
+          isShortcutTarget={scratchpadShortcutTarget === DEFAULT_SCRATCHPAD_SHORTCUT_TARGET}
+          onSetShortcutTarget={(target) => void saveScratchpadShortcutTarget(target)}
           onClose={leaveScratchpad}
           onError={(reason) => setError(errorText(reason))}
           onOpenWikilink={(title) => void openWikilinkTitle(title)}
@@ -5930,6 +6038,14 @@ function App() {
                     ))}
                   </div>
                   <div className="document-heading-actions">
+                    <label className="scratchpad-target-toggle">
+                      <input
+                        type="checkbox"
+                        checked={noteIDForShortcutTarget(scratchpadShortcutTarget) === note.id}
+                        onChange={(event) => saveNoteScratchpadTarget(event.target.checked ? "note:" + note.id : DEFAULT_SCRATCHPAD_SHORTCUT_TARGET)}
+                      />{" "}
+                      Open as scratchpad
+                    </label>
                     <button
                       type="button"
                       className="secondary-button"
