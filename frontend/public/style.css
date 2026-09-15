@@ -1553,6 +1553,22 @@ dialog.modal-backdrop {
   --wails-draggable: drag;
 }
 
+/* The macOS titlebar is hidden into the window content. Keep the native
+   traffic lights in their reserved area instead of underneath app controls. */
+:root[data-os="darwin"] .workspace {
+  grid-template-rows: 50px minmax(0, 1fr);
+}
+
+:root[data-os="darwin"] .workspace.log-open {
+  grid-template-rows: 50px minmax(0, 1fr) minmax(180px, 28vh);
+}
+
+:root[data-os="darwin"] .app-menubar {
+  min-height: 50px;
+  /* Leave a compact safety gap after the native traffic-light cluster. */
+  padding-left: 100px;
+}
+
 .sidebar-collapse-toggle {
   min-width: 38px;
   height: 28px;
@@ -4956,6 +4972,10 @@ dialog.modal-backdrop {
     display: block;
     border: 0;
     background: color-mix(in srgb, var(--ink) 38%, transparent);
+  }
+
+  :root[data-os="darwin"] .sidebar {
+    inset: 50px auto 0 0;
   }
 
   .document-heading,
