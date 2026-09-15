@@ -4150,12 +4150,7 @@ dialog.modal-backdrop {
 }
 
 .live-markdown-editor .cm-cursor {
-  height: 1em !important;
   border-left-color: var(--green-dark);
-}
-
-.live-markdown-editor:not(.source-markdown-editor) .cm-cursor {
-  margin-top: 0.375em;
 }
 
 .live-markdown-editor .cm-placeholder {

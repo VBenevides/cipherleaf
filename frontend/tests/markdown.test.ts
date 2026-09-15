@@ -36,9 +36,10 @@ function applyMinimalDocumentChange(current: string, next: string): string {
   return current.slice(0, change.from) + change.insert + current.slice(change.to);
 }
 
-test("keeps the caret at the active text metric", () => {
-  assert.match(style, /\.live-markdown-editor \.cm-cursor \{[\s\S]*height: 1em !important;/);
-  assert.match(style, /\.live-markdown-editor:not\(\.source-markdown-editor\) \.cm-cursor \{[\s\S]*margin-top: 0\.375em;/);
+test("uses CodeMirror's measured caret geometry", () => {
+  assert.match(style, /\.live-markdown-editor \.cm-cursor \{\s*border-left-color: var\(--green-dark\);/);
+  assert.doesNotMatch(style, /\.live-markdown-editor \.cm-cursor \{[^}]*height:/);
+  assert.doesNotMatch(style, /\.live-markdown-editor:not\(\.source-markdown-editor\) \.cm-cursor/);
 });
 
 test("preserves the live editor viewport across structural updates", () => {
