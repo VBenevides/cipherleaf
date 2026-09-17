@@ -45,7 +45,7 @@ test("uses CodeMirror's measured caret geometry", () => {
 test("preserves the live editor viewport across structural updates", () => {
   assert.match(editor, /function minimalDocumentChange\(state: EditorState, next: string\)/);
   assert.equal((editor.match(/\.codePointAt\(/g) ?? []).length, 4);
-  assert.match(editor, /const changes = minimalDocumentChange\(editor\.state, normalizedValue\);[\s\S]*effects: editor\.scrollSnapshot\(\)\.map\(changes\)!/);
+  assert.match(editor, /const changes = minimalDocumentChange\(editor\.state, normalizedValue\);[\s\S]*const snapshot = lastScrollSnapshotRef\.current\?\.map\(changes\) \?\? editor\.scrollSnapshot\(\)\.map\(changes\)!/);
   assert.match(editor, /toggleQuote\.of\(this\.position\), view\.scrollSnapshot\(\)/);
   assert.match(editor, /setAllQuotesCollapsed\.of\(collapsed\), view\.scrollSnapshot\(\)/);
   assert.match(editor, /const snapshot = view\.scrollSnapshot\(\);[\s\S]*updateMinimizedState\(\);[\s\S]*view\.dispatch\(\{ effects: snapshot \}\)/);

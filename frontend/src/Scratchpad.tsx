@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Events, Window } from "@wailsio/runtime";
+import type { StateEffect } from "@codemirror/state";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { ScratchpadState } from "../bindings/cipherleaf/internal/app/models";
 import type { Note } from "../bindings/cipherleaf/internal/vault/models";
@@ -43,6 +44,11 @@ type ScratchpadProps = {
 type PendingTargetDraft = {
   readonly note: Note;
   readonly draftSequence: number;
+};
+
+type SavedScrollSnapshot = {
+  readonly snapshot: StateEffect<unknown>;
+  readonly document: string;
 };
 
 function targetNoteKey(vaultId: string, noteID: string): string {
@@ -130,6 +136,7 @@ export default function Scratchpad({
   const targetVaultIDRef = useRef("");
   const targetDraftsRef = useRef(new Map<string, PendingTargetDraft>());
   const persistedDraftSequencesRef = useRef(new Map<string, number>());
+  const scrollSnapshotsRef = useRef(new Map<string, SavedScrollSnapshot>());
   const overlayCardTitles = useMemo(
     () => new Map([...overlayCardData].map(([id, card]) => [id, card.title])),
     [overlayCardData],
@@ -441,6 +448,9 @@ export default function Scratchpad({
   }, [hideOverlay, onClose, overlay]);
 
   const editorGeneration = targetNote?.id ?? state.generation;
+  const editorScrollKey = targetNote
+    ? `note:${targetVaultIDRef.current}:${targetNote.id}`
+    : `scratchpad:${state.generation}`;
   const editorCardData = cardData ?? overlayCardData;
   const editorCardTitles = cardTitles ?? overlayCardTitles;
   return (
@@ -504,6 +514,9 @@ export default function Scratchpad({
               onIncreaseFontSize={onIncreaseFontSize}
               caretOffset={targetNote ? undefined : state.caretOffset}
               onCaretChange={targetNote ? undefined : (offset) => updateCaret(offset, state.generation)}
+              scrollSnapshot={overlay ? scrollSnapshotsRef.current.get(editorScrollKey)?.snapshot : undefined}
+              scrollSnapshotDocument={overlay ? scrollSnapshotsRef.current.get(editorScrollKey)?.document : undefined}
+              onScrollSnapshotChange={overlay ? (snapshot, document) => scrollSnapshotsRef.current.set(editorScrollKey, { snapshot, document }) : undefined}
               showToolbar
               defaultSectionsCollapsed={defaultSectionsCollapsed}
             />

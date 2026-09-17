@@ -314,6 +314,23 @@ test("scratchpad editor saves content and caret from the same local update", () 
   assert.match(caretUpdateSource[0], /const normalizedCaretOffset = Math\.max\(0, Math\.floor\(caretOffset\)\);[\s\S]*if \(normalizedCaretOffset === current\.caretOffset\) return;[\s\S]*const localChange/);
 });
 
+test("separate scratchpad keeps its viewport across hide and reopen", () => {
+  assert.match(scratchpad, /type SavedScrollSnapshot = \{[\s\S]*snapshot: StateEffect<unknown>;[\s\S]*document: string;/);
+  assert.match(scratchpad, /const scrollSnapshotsRef = useRef\(new Map<string, SavedScrollSnapshot>\(\)\)/);
+  assert.match(scratchpad, /const editorScrollKey = targetNote[\s\S]*targetVaultIDRef\.current[\s\S]*targetNote\.id/);
+  assert.match(scratchpad, /scrollSnapshot=\{overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\)\?\.snapshot : undefined\}/);
+  assert.match(scratchpad, /scrollSnapshotDocument=\{overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\)\?\.document : undefined\}/);
+  assert.match(scratchpad, /onScrollSnapshotChange=\{overlay \? \(snapshot, document\) => scrollSnapshotsRef\.current\.set\(editorScrollKey, \{ snapshot, document \}\) : undefined\}/);
+  assert.match(liveEditor, /readonly scrollSnapshot\?: StateEffect<unknown> \| null;/);
+  assert.match(liveEditor, /readonly scrollSnapshotDocument\?: string \| null;/);
+  assert.match(liveEditor, /lastScrollSnapshotRef = useRef<StateEffect<unknown> \| null>\(scrollSnapshot\)/);
+  assert.match(liveEditor, /scrollSnapshot\.map\(minimalDocumentChange\(savedState, normalizedValue\)\)/);
+  assert.match(liveEditor, /window\.addEventListener\("focus", restoreScroll\)/);
+  assert.match(liveEditor, /window\.removeEventListener\("focus", restoreScroll\)/);
+  assert.match(liveEditor, /scrollRestorePendingRef\.current = false/);
+  assert.match(liveEditor, /lastScrollSnapshotRef\.current\.map\(update\.changes\)/);
+});
+
 test("scratchpad styling stays accessible, responsive, translucent, and reduced-motion safe", () => {
   assert.match(style, /\.scratchpad-tab \{/);
   assert.match(style, /\.scratchpad-tab span \{[\s\S]*font-size: 1em/);

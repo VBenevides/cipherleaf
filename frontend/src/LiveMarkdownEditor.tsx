@@ -107,6 +107,9 @@ type LiveMarkdownEditorProps = {
   readonly caretOffset?: number | null;
   readonly caretRestoreVersion?: number;
   readonly onCaretChange?: (offset: number) => void;
+  readonly scrollSnapshot?: StateEffect<unknown> | null;
+  readonly scrollSnapshotDocument?: string | null;
+  readonly onScrollSnapshotChange?: (snapshot: StateEffect<unknown>, document: string) => void;
   readonly readOnly?: boolean;
   readonly showToolbar?: boolean;
   readonly highlightLineNumbers?: ReadonlySet<number>;
@@ -3931,6 +3934,9 @@ export default function LiveMarkdownEditor({
   caretOffset = null,
   caretRestoreVersion = 0,
   onCaretChange,
+  scrollSnapshot = null,
+  scrollSnapshotDocument = null,
+  onScrollSnapshotChange,
   readOnly = false,
   showToolbar = true,
   highlightLineNumbers = new Set<number>(),
@@ -3961,6 +3967,11 @@ export default function LiveMarkdownEditor({
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
   const onCaretChangeRef = useRef(onCaretChange);
+  const onScrollSnapshotChangeRef = useRef(onScrollSnapshotChange);
+  const lastScrollSnapshotRef = useRef<StateEffect<unknown> | null>(scrollSnapshot);
+  const scrollRestoreFrameRef = useRef<number | null>(null);
+  const scrollRestoreReleaseFrameRef = useRef<number | null>(null);
+  const scrollRestorePendingRef = useRef(false);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [hiddenAncestors, setHiddenAncestors] = useState<string[]>([]);
 
@@ -4014,11 +4025,13 @@ export default function LiveMarkdownEditor({
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
+    onScrollSnapshotChangeRef.current = onScrollSnapshotChange;
+    if (scrollSnapshot) lastScrollSnapshotRef.current = scrollSnapshot;
     if (previousCardData !== cardData || previousCardTemplates !== cardTemplates) {
       const editor = view.current;
       if (editor) editor.dispatch({ effects: [refreshLivePreview.of(null), editor.scrollSnapshot()] });
     }
-  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange, onScrollSnapshotChange, scrollSnapshot]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -4377,6 +4390,13 @@ export default function LiveMarkdownEditor({
           }),
           searchHighlightField,
           EditorView.updateListener.of((update) => {
+            if (update.docChanged && lastScrollSnapshotRef.current) {
+              const snapshot = lastScrollSnapshotRef.current.map(update.changes);
+              if (snapshot) {
+                lastScrollSnapshotRef.current = snapshot;
+                onScrollSnapshotChangeRef.current?.(snapshot, update.state.doc.toString());
+              }
+            }
             const externalUpdate = update.transactions.some((transaction) =>
               transaction.annotation(externalDocumentUpdate),
             );
@@ -4405,11 +4425,43 @@ export default function LiveMarkdownEditor({
     });
     const journalRules = installJournalRules(editor);
     scheduleJournalRules = journalRules.schedule;
-    const handleScroll = () => syncHiddenAncestors(editor);
+    const handleScroll = () => {
+      if (onScrollSnapshotChangeRef.current && !scrollRestorePendingRef.current && document.hasFocus()) {
+        const snapshot = editor.scrollSnapshot();
+        lastScrollSnapshotRef.current = snapshot;
+        onScrollSnapshotChangeRef.current(snapshot, editor.state.doc.toString());
+      }
+      syncHiddenAncestors(editor);
+    };
+    const restoreScroll = () => {
+      if (!lastScrollSnapshotRef.current) return;
+      if (scrollRestoreFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreFrameRef.current);
+      if (scrollRestoreReleaseFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreReleaseFrameRef.current);
+      scrollRestorePendingRef.current = true;
+      scrollRestoreFrameRef.current = window.requestAnimationFrame(() => {
+        scrollRestoreFrameRef.current = null;
+        if (view.current === editor && lastScrollSnapshotRef.current) {
+          editor.dispatch({ effects: lastScrollSnapshotRef.current });
+        }
+        scrollRestoreReleaseFrameRef.current = window.requestAnimationFrame(() => {
+          scrollRestoreReleaseFrameRef.current = null;
+          scrollRestorePendingRef.current = false;
+        });
+      });
+    };
     editor.scrollDOM.addEventListener("scroll", handleScroll, { passive: true });
+    if (onScrollSnapshotChange) window.addEventListener("focus", restoreScroll);
     syncHiddenAncestors(editor);
 
     view.current = editor;
+    if (scrollSnapshot && scrollSnapshotDocument !== null && scrollSnapshotDocument !== normalizedValue) {
+      const savedState = EditorState.create({ doc: scrollSnapshotDocument });
+      lastScrollSnapshotRef.current = scrollSnapshot.map(minimalDocumentChange(savedState, normalizedValue)) ?? null;
+      if (lastScrollSnapshotRef.current) {
+        onScrollSnapshotChangeRef.current?.(lastScrollSnapshotRef.current, normalizedValue);
+      }
+    }
+    restoreScroll();
     if (typeof caretOffset === "number" && Number.isFinite(caretOffset)) {
       const position = Math.max(0, Math.min(Math.floor(caretOffset), editor.state.doc.length));
       editor.dispatch({
@@ -4424,7 +4476,13 @@ export default function LiveMarkdownEditor({
 
     return () => {
       onCaretChangeRef.current?.(editor.state.selection.main.head);
+      if (scrollRestoreFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreFrameRef.current);
+      if (scrollRestoreReleaseFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreReleaseFrameRef.current);
+      scrollRestoreFrameRef.current = null;
+      scrollRestoreReleaseFrameRef.current = null;
+      scrollRestorePendingRef.current = false;
       editor.scrollDOM.removeEventListener("scroll", handleScroll);
+      if (onScrollSnapshotChange) window.removeEventListener("focus", restoreScroll);
       journalRules.destroy();
       editor.destroy();
       view.current = null;
@@ -4438,10 +4496,11 @@ export default function LiveMarkdownEditor({
     if (editor.state.doc.toString() === normalizedValue) return;
 
     const changes = minimalDocumentChange(editor.state, normalizedValue);
+    const snapshot = lastScrollSnapshotRef.current?.map(changes) ?? editor.scrollSnapshot().map(changes)!;
     editor.dispatch({
       changes,
       selection: preservedSelection(editor, normalizedValue.length),
-      effects: editor.scrollSnapshot().map(changes)!,
+      effects: snapshot,
       annotations: [
         externalDocumentUpdate.of(true),
         Transaction.addToHistory.of(false),
