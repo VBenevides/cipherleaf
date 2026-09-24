@@ -1340,6 +1340,7 @@ class BoardWidget extends WidgetType {
       other.deletedColumns.length !== this.deletedColumns.length || other.orphanCardIDs.length !== this.orphanCardIDs.length) return false;
     if (!sameBoardCardIDs(this.cardIDs, other.cardIDs, this.cards, other.cards)) return false;
     if (!sameBoardCardViews([
+      ...this.columns.flatMap((column) => column.cardIDs),
       ...this.deletedColumns.flatMap((column) => column.cardIDs),
       ...this.orphanCardIDs,
     ], this.cards, other.cards)) return false;

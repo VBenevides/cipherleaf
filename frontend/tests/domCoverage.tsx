@@ -321,6 +321,41 @@ board.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
 board.querySelectorAll("button[aria-label]").forEach((button) => button.click());
 assert.ok(opened > 0 && moved > 0 && added > 0);
 
+const configured = mount("configured-board-host");
+const configuredValue = boardMarker("configured-board", [], "Configured", {
+  columns: [
+    { id: "todo", name: "Todo", color: "#123456", cardIDs: ["card-1"] },
+    { id: "done", name: "Done", color: "#ABCDEF", cardIDs: [] },
+  ],
+});
+await act(async () => {
+  configured.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "configured", value: configuredValue,
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
+    cardData: cards, onMoveCardInBoard: () => {}, onChangeBoardColumns: () => {},
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const configuredBoard = configured.body.querySelector<HTMLElement>(".cm-live-board")!;
+assert.equal(configuredBoard.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Backlog card");
+const renamedConfiguredCards = new Map(cards);
+renamedConfiguredCards.set("card-1", { ...cards.get("card-1")!, title: "Renamed configured card" });
+await act(async () => {
+  configured.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "configured", value: configuredValue,
+    onChange: () => {}, onSave: () => {}, onError: () => {}, onOpenWikilink: () => {}, onOpenCard: () => {},
+    cardData: renamedConfiguredCards, onMoveCardInBoard: () => {}, onChangeBoardColumns: () => {},
+    onDecreaseFontSize: () => {}, onIncreaseFontSize: () => {}, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const updatedConfiguredBoard = configured.body.querySelector<HTMLElement>(".cm-live-board")!;
+assert.equal(updatedConfiguredBoard.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Renamed configured card");
+await act(async () => { configured.root.unmount(); });
+configured.shell.remove();
+
+
 const multiBoard = mount("multi-board-host");
 const addedBoardIDs: string[] = [];
 await act(async () => {

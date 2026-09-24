@@ -604,6 +604,7 @@ test("card panel keeps metadata compact and notes in the themed editor", () => {
   assert.match(style, /\.cm-live-board-card-date \{[\s\S]*text-align: right/);
   assert.match(style, /\.cm-live-board-header \.cm-live-board-title \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board-controls select \{ min-width: 0; flex: 1; \}/);
+  assert.match(style, /\.cm-live-board-column \{ min-height: 0; max-height: 360px; overflow-y: auto; overflow-x: hidden/);
   assert.match(style, /\.cm-live-board-minimized \{[\s\S]*flex: 1 1 auto/);
   assert.match(style, /\.cm-live-board \[hidden\] \{[\s\S]*display: none !important/);
   assert.match(style, /\.card-save-button\.is-dirty \{[\s\S]*background: #1e73b5/);
