@@ -2,6 +2,26 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [1.0.7] - 2026-09-24
+
+### Features
+
+- Added macOS support, with titlebar spacing for the native traffic lights, updated app icons, and scratchpad windows hidden on window close.
+- The scratchpad shortcut can now open a specific note: select **Open as scratchpad** on a note to set it as the shortcut target; the choice is stored in the encrypted vault, and the Scratchpad checkbox restores the default target.
+- Added global scratchpad shortcut registration on Linux Wayland sessions through the xdg-desktop-portal GlobalShortcuts API, falling back to the Wails global shortcut on X11.
+
+### Bugfixes
+
+- Fixed the scratchpad preserving its viewport when reopened and keeping draft edits synchronized between the main window and the scratchpad overlay.
+- Fixed the scratchpad error banner to be dismissible.
+- Fixed the live-preview caret centering and removed per-keystroke whole-app renders.
+- Fixed board columns not refreshing when card metadata changes, and constrained board columns to a 360px height with internal scrolling instead of fixed 310–520px rows.
+
+### Other
+
+- Documented the scratchpad shortcut target behavior in the README and user guide.
+- Expanded frontend and Go regression coverage for scratchpad targeting, draft synchronization, viewport restoration, board refresh, and Wayland shortcut registration.
+
 ## [1.0.6] - 2026-09-13
 
 ### Features
