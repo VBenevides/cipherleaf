@@ -127,7 +127,12 @@ assert.match(render(createElement(ObjectTreeView, { value: "[report.pdf](attachm
 assert.match(render(createElement(ThemedDatePicker, { ariaLabel: "Invalid date", value: "invalid", onChange })), /Select date/);
 
 const graphRenderer = create(createElement(GraphView, { folders: richFolders, notes: richNotes, onSelectFolder: onChange, onSelectNote: onChange }));
-await act(async () => { for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom out").props.onClick(); for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom in").props.onClick(); buttonNamed(graphRenderer, "Reset zoom").props.onClick(); buttonNamed(graphRenderer, "Folders").props.onClick(); });
+await act(async () => {
+  for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom out").props.onClick();
+  for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom in").props.onClick();
+  buttonNamed(graphRenderer, "Reset zoom").props.onClick();
+  buttonNamed(graphRenderer, "Folders").props.onClick();
+});
 const graphNodes = graphRenderer.root.findAll((node) => typeof node.props.onClick === "function" && String(node.props.className ?? "").includes("graph-node"));
 await act(async () => { graphNodes.forEach((node) => { node.props.onClick(); node.props.onKeyDown({ key: "Enter", preventDefault: onChange }); }); });
 await act(async () => { graphNodes.forEach((node) => { node.props.onKeyDown({ key: " ", preventDefault: onChange }); node.props.onKeyDown({ key: "Escape", preventDefault: onChange }); }); });
@@ -245,7 +250,11 @@ setTransport({
       case 2155705394: return null;
       case 220507736: return emptyAppMode ? [] : richFolders;
       case 888598820: return emptyAppMode ? [] : richNotes;
-      case 1503400201: return request?.args?.[0] === "template" ? templateNote : boardAppMode ? boardNote : openCardMode ? cardNote : note;
+      case 1503400201:
+        if (request?.args?.[0] === "template") return templateNote;
+        if (boardAppMode) return boardNote;
+        if (openCardMode) return cardNote;
+        return note;
       case 715955408: return note;
       case 1766611694: return timeTrackingMode === "empty" ? { entries: [], days: [], totalSeconds: 0 } : { entries: [timeRange], days: [{ localDate: "2026-09-08", totalSeconds: 3600 }], totalSeconds: 3600 };
       case 1301789830: return { cpuPercent: 1, memoryBytes: 2, memoryUsage: [{ name: "cipherleaf", pid: 1, memoryBytes: 2 }] };
@@ -261,6 +270,8 @@ setTransport({
       case 239305947: return richFolders[0];
       case 4062770880: return clients[0];
       case 2039739724: return projects[0];
+    }
+    switch (request?.methodID) {
       case 1966438356:
       case 3548001575:
       case 1556478150: return projects[0];
@@ -290,14 +301,16 @@ setTransport({
       case 4139522503: return { locked: true, path: "/vault", vaultId: "", noteCount: 0 };
       case 2182536893: return { id: "file", filename: "file.txt", mimeType: "text/plain", size: 12 };
       case 40245150: return "/export/file.txt";
-      case 3438204788: return "/tmp/file.txt";
+      case 3438204788: return "/selected-file.txt";
       case 3669256728: return "/backup/snapshot";
       case 1268925393: return [{ noteId: "other-note", title: "Other note", folderId: "folder", field: "content", snippet: "Linked note", offset: 0, matchLength: 4, utf16Offset: 0, utf16MatchLength: 4 }];
       case 4116603909: return [];
       case 3315011432: return "secret";
+    }
+    switch (request?.methodID) {
       case 1416189504: return { success: true, message: "Connection verified", warning: "", branch: "main" };
       case 3499492715: {
-        vaultSettings = { ...vaultSettings, ...(request?.args?.[0] ?? {}), revision: vaultSettings.revision + 1, modifiedAt: vaultSettings.modifiedAt + 1 };
+        vaultSettings = { ...vaultSettings, ...(request?.args?.[0]), revision: vaultSettings.revision + 1, modifiedAt: vaultSettings.modifiedAt + 1 };
         return vaultSettings;
       }
       case 1224618098: return "/backup";
@@ -621,7 +634,7 @@ assert.equal(dailyFormatInput()?.props.value, "DD/MM/YYYY");
 await clickApp("Close settings");
 
 const originalHTMLElement = (globalThis as { HTMLElement?: unknown }).HTMLElement;
-if (typeof originalHTMLElement !== "function") Object.assign(globalThis, { HTMLElement: class {} });
+if (typeof originalHTMLElement !== "function") Object.assign(globalThis, { HTMLElement: class HTMLElementStub { readonly nodeType = 1; } });
 try {
   dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
   await waitForApp();

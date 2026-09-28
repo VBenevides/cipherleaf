@@ -92,7 +92,7 @@ func TestVaultServiceLockedPaths(t *testing.T) {
 	_, _ = service.MoveNote("note", "folder")
 	_ = service.ReorderNotes("folder", nil)
 	_, _ = service.GetNote("note")
-	_, _ = service.SaveNote("note", "title", "content")
+	_, _ = service.SaveNote("note", "title", "content", 0)
 	_, _ = service.SaveImageAttachment("note", "invalid")
 	_, _ = service.GetAttachment("note", "attachment")
 	_, _ = service.ImportFileAttachment("note", "/missing")
@@ -223,8 +223,9 @@ func TestVaultServiceUnlockedDelegates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.SaveNote(note.ID, "Saved note", "[[Other note]] #tag")
+	saved, err := service.SaveNote(note.ID, "Saved note", "[[Other note]] #tag", note.Revision)
 	must(err)
+	note = saved.Note
 	other, err := service.CreateNote("Other note")
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +243,8 @@ func TestVaultServiceUnlockedDelegates(t *testing.T) {
 	must(err)
 	_, err = service.ReplaceAcrossNotes("tag", "done", []string{note.ID}, false, false)
 	must(err)
+	note, err = service.GetNote(note.ID)
+	must(err)
 	_, err = service.ListNotes()
 	must(err)
 	_, err = service.ListFolders()
@@ -253,8 +256,9 @@ func TestVaultServiceUnlockedDelegates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.SaveNote(note.ID, "Saved note", "![file](attachment:"+attachment.ID+")")
+	saved, err = service.SaveNote(note.ID, "Saved note", "![file](attachment:"+attachment.ID+")", note.Revision)
 	must(err)
+	note = saved.Note
 	_, err = service.ListFileAttachments(note.ID)
 	must(err)
 	_, err = service.ExportFileAttachment(note.ID, attachment.ID, t.TempDir())
@@ -263,8 +267,9 @@ func TestVaultServiceUnlockedDelegates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.SaveNote(note.ID, "Saved note", "![file](attachment:"+attachment.ID+")\n![inline](attachment:"+inlineID+")")
+	saved, err = service.SaveNote(note.ID, "Saved note", "![file](attachment:"+attachment.ID+")\n![inline](attachment:"+inlineID+")", note.Revision)
 	must(err)
+	note = saved.Note
 	_, err = service.GetAttachment(note.ID, inlineID)
 	must(err)
 	_, err = service.ExportMarkdown(t.TempDir())

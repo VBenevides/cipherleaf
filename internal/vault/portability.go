@@ -13,10 +13,12 @@ import (
 	"time"
 )
 
-var unsafeExportCharacter = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
-var portableAttachmentLink = regexp.MustCompile(`attachments/([a-f0-9]{32})\.webp`)
-var portableFileLink = regexp.MustCompile(`attachments/([^\s)]+)`)
-var portableImageFilename = regexp.MustCompile(`(?i)^[a-f0-9]{32}\.webp$`)
+var (
+	unsafeExportCharacter  = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
+	portableAttachmentLink = regexp.MustCompile(`attachments/([a-f0-9]{32})\.webp`)
+	portableFileLink       = regexp.MustCompile(`attachments/([^\s)]+)`)
+	portableImageFilename  = regexp.MustCompile(`(?i)^[a-f0-9]{32}\.webp$`)
+)
 
 const attachmentLinkPrefix = "attachment:"
 
@@ -254,7 +256,7 @@ func collectMarkdownImportFiles(source string) ([]markdownImportFile, map[string
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return errors.New("Markdown import cannot contain symbolic links")
+			return errors.New("markdown import cannot contain symbolic links")
 		}
 		relative, err := filepath.Rel(source, path)
 		if err != nil {

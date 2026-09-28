@@ -148,7 +148,7 @@ func validateCommonSettings(settings SyncSettings) (SyncSettings, string, error)
 		branch = DefaultBranch
 	}
 	if !validBranch(branch) {
-		return SyncSettings{}, "", errors.New("Git branch name is invalid")
+		return SyncSettings{}, "", errors.New("git branch name is invalid")
 	}
 	if !settings.RepositoryPrivate {
 		return SyncSettings{}, "", errors.New("confirm that the GitHub repository is private")
@@ -241,11 +241,10 @@ func validatePrivateKeyPath(value string) (string, string, error) {
 	if !info.Mode().IsRegular() {
 		return "", "", errors.New("the selected SSH private key is not a regular file")
 	}
-	warning := ""
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		warning = "SSH key permissions are broader than owner-only; use chmod 600 on the key."
+		return "", "", errors.New("the selected SSH private key must be readable only by its owner")
 	}
-	return absolute, warning, nil
+	return absolute, "", nil
 }
 
 func validBranch(value string) bool {

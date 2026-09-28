@@ -84,6 +84,13 @@ func newAppSyncCoverageService(t *testing.T) (*VaultService, *appCoverageSyncPro
 
 func TestVaultServiceSyncCoverage(t *testing.T) {
 	service, provider, settings := newAppSyncCoverageService(t)
+	testVaultServiceSyncState(t, service, provider, settings)
+	testVaultServiceSyncWarnings(t, service, provider, settings)
+	testVaultServiceCloneAndLink(t, service, provider, settings)
+	testVaultServiceQueuedSync(t, service, provider, settings)
+}
+
+func testVaultServiceSyncState(t *testing.T, service *VaultService, provider *appCoverageSyncProvider, settings githubsync.SyncSettings) {
 	if got, err := service.GetSyncSettings(); err != nil || got.VaultID != settings.VaultID {
 		t.Fatalf("sync settings = %#v, %v", got, err)
 	}
@@ -93,18 +100,12 @@ func TestVaultServiceSyncCoverage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(provider.workingDir, "vault.enc"), []byte("data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	remote := filepath.Join(t.TempDir(), "remote")
 	if err := service.store.ExportRemoteSnapshot(remote); err != nil {
 		t.Fatal(err)
 	}
-	provider.pull = githubsync.PullResult{
-		Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("a", 40),
-		StagingPath: remote, Temporary: true,
-	}
-	provider.push = githubsync.PushResult{
-		Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("b", 40), Message: "pushed",
-	}
+	provider.pull = githubsync.PullResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("a", 40), StagingPath: remote, Temporary: true}
+	provider.push = githubsync.PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("b", 40), Message: "pushed"}
 	result, err := service.syncNow()
 	if err != nil {
 		t.Fatal(err)
@@ -113,14 +114,15 @@ func TestVaultServiceSyncCoverage(t *testing.T) {
 		result.Git.RepositoryPath != provider.workingDir || provider.pullCalls != 1 || provider.pushCalls != 1 {
 		t.Fatalf("sync result = %#v, provider calls = (%d, %d)", result, provider.pullCalls, provider.pushCalls)
 	}
-
 	provider.pull = githubsync.PullResult{Linked: true, Branch: settings.Branch, UpToDate: true}
 	provider.push = githubsync.PushResult{Linked: true, Branch: settings.Branch, UpToDate: true, Message: "already current"}
 	result, err = service.syncNow()
 	if err != nil || result.Message != "The vault is already in sync with GitHub." {
 		t.Fatalf("up-to-date sync = %#v, %v", result, err)
 	}
+}
 
+func testVaultServiceSyncWarnings(t *testing.T, service *VaultService, provider *appCoverageSyncProvider, settings githubsync.SyncSettings) {
 	if _, err := service.CreateNote("Changed before warning"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +141,9 @@ func TestVaultServiceSyncCoverage(t *testing.T) {
 		t.Fatalf("push warning = %#v, %v", result, err)
 	}
 	provider.pushErr = nil
+}
 
+func testVaultServiceCloneAndLink(t *testing.T, service *VaultService, provider *appCoverageSyncProvider, settings githubsync.SyncSettings) {
 	service.LockVault()
 	source := vault.NewStore()
 	sourceSession, err := source.Create(t.TempDir(), "clone source secret")
@@ -153,16 +157,12 @@ func TestVaultServiceSyncCoverage(t *testing.T) {
 	if err := source.ExportRemoteSnapshot(cloneRemote); err != nil {
 		t.Fatal(err)
 	}
-	provider.download = githubsync.DownloadedVault{
-		VaultID: sourceSession.VaultID, CachePath: cloneRemote, Branch: settings.Branch,
-		LastCommit: strings.Repeat("c", 40), Message: "downloaded",
-	}
+	provider.download = githubsync.DownloadedVault{VaultID: sourceSession.VaultID, CachePath: cloneRemote, Branch: settings.Branch, LastCommit: strings.Repeat("c", 40), Message: "downloaded"}
 	provider.downloadErr = nil
 	clone, err := service.CloneGitHubVault(t.TempDir(), "cloned", settings.RepositorySSH, settings.PrivateKeyPath, settings.Branch, "clone source secret", true)
 	if err != nil || clone.Session.Locked || !clone.Linked || clone.LastCommit != provider.download.LastCommit {
 		t.Fatalf("clone result = %#v, %v", clone, err)
 	}
-
 	service.LockVault()
 	if _, err := service.store.Open(clone.Session.Path, "clone source secret"); err != nil {
 		t.Fatal(err)
@@ -171,17 +171,15 @@ func TestVaultServiceSyncCoverage(t *testing.T) {
 	if _, err := service.PullAndLinkGitHubVault(settings); err == nil {
 		t.Fatal("mismatched pull-and-link vault was accepted")
 	}
-	provider.download = githubsync.DownloadedVault{
-		VaultID: clone.Session.VaultID, CachePath: cloneRemote, Branch: settings.Branch,
-		LastCommit: strings.Repeat("e", 40), Message: "pulled",
-	}
-	provider.push = githubsync.PushResult{
-		Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("f", 40), Message: "pushed",
-	}
-	result, err = service.PullAndLinkGitHubVault(settings)
+	provider.download = githubsync.DownloadedVault{VaultID: clone.Session.VaultID, CachePath: cloneRemote, Branch: settings.Branch, LastCommit: strings.Repeat("e", 40), Message: "pulled"}
+	provider.push = githubsync.PushResult{Linked: true, Branch: settings.Branch, LastCommit: strings.Repeat("f", 40), Message: "pushed"}
+	result, err := service.PullAndLinkGitHubVault(settings)
 	if err != nil || !result.Linked || result.LastCommit != provider.push.LastCommit || result.Push.LastCommit != provider.push.LastCommit {
 		t.Fatalf("pull-and-link result = %#v, %v", result, err)
 	}
+}
+
+func testVaultServiceQueuedSync(t *testing.T, service *VaultService, provider *appCoverageSyncProvider, settings githubsync.SyncSettings) {
 	provider.pull = githubsync.PullResult{Linked: true, Branch: settings.Branch, UpToDate: true}
 	provider.push = githubsync.PushResult{Linked: true, Branch: settings.Branch, UpToDate: true, Message: "already current"}
 	if result, err := service.SyncNow(); err != nil || result.Message != "The vault is already in sync with GitHub." {

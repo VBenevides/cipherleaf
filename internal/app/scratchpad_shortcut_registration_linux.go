@@ -60,62 +60,104 @@ type portalResponse struct {
 	results map[string]dbus.Variant
 }
 
+type portalShortcutSetup struct {
+	conn        *dbus.Conn
+	signals     chan *dbus.Signal
+	sessionPath dbus.ObjectPath
+}
+
 func registerPortalScratchpadShortcut(shortcut string, callback func()) (func() error, error) {
-	trigger, err := portalShortcutTrigger(shortcut)
+	setup, err := preparePortalScratchpadShortcut(shortcut)
 	if err != nil {
 		return nil, err
 	}
+	registration := &portalScratchpadShortcut{
+		conn:        setup.conn,
+		signals:     setup.signals,
+		sessionPath: setup.sessionPath,
+		done:        make(chan struct{}),
+		callback:    callback,
+	}
+	go registration.consumeSignals()
+	return registration.Unregister, nil
+}
+
+func preparePortalScratchpadShortcut(shortcut string) (setup portalShortcutSetup, err error) {
+	trigger, err := portalShortcutTrigger(shortcut)
+	if err != nil {
+		return portalShortcutSetup{}, err
+	}
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
-		return nil, fmt.Errorf("connect to session bus: %w", err)
+		return portalShortcutSetup{}, fmt.Errorf("connect to session bus: %w", err)
 	}
-	var signals chan *dbus.Signal
-	var sessionPath dbus.ObjectPath
-	keepAlive := false
+	setup.conn = conn
 	defer func() {
-		if !keepAlive {
-			if signals != nil {
-				conn.RemoveSignal(signals)
-			}
-			if sessionPath != "" {
-				_ = conn.Object(portalServiceName, sessionPath).Call(portalSessionIf+".Close", 0).Err
-			}
-			_ = conn.Close()
+		if err != nil {
+			cleanupPortalShortcutSetup(setup)
 		}
 	}()
+
 	portal := conn.Object(portalServiceName, portalObjectPath)
-	// Host applications must identify this D-Bus peer before using the portal.
-	if err := portal.Call(portalRegistryIf+".Register", 0, portalAppID, map[string]dbus.Variant{}).Err; err != nil {
-		return nil, fmt.Errorf("register portal application %q: %w", portalAppID, err)
+	if err := registerPortalApplication(portal); err != nil {
+		return setup, err
 	}
-	signals = make(chan *dbus.Signal, portalSignalQueueSize)
+	setup.signals = make(chan *dbus.Signal, portalSignalQueueSize)
+	if err := configurePortalSignals(conn, setup.signals); err != nil {
+		return setup, err
+	}
+	setup.sessionPath, err = createPortalShortcutSession(portal, setup.signals)
+	if err != nil {
+		return setup, err
+	}
+	if err := bindPortalShortcut(portal, setup.signals, setup.sessionPath, trigger); err != nil {
+		return setup, err
+	}
+	return setup, nil
+}
+
+func registerPortalApplication(portal dbus.BusObject) error {
+	if err := portal.Call(portalRegistryIf+".Register", 0, portalAppID, map[string]dbus.Variant{}).Err; err != nil {
+		return fmt.Errorf("register portal application %q: %w", portalAppID, err)
+	}
+	return nil
+}
+
+func configurePortalSignals(conn *dbus.Conn, signals chan *dbus.Signal) error {
 	conn.Signal(signals)
 	if err := conn.AddMatchSignal(dbus.WithMatchSender(portalServiceName), dbus.WithMatchInterface(portalRequestIf), dbus.WithMatchMember("Response")); err != nil {
-		return nil, fmt.Errorf("listen for portal responses: %w", err)
+		return fmt.Errorf("listen for portal responses: %w", err)
 	}
 	if err := conn.AddMatchSignal(dbus.WithMatchSender(portalServiceName), dbus.WithMatchInterface(portalShortcutIf), dbus.WithMatchMember("Activated")); err != nil {
-		return nil, fmt.Errorf("listen for portal activations: %w", err)
+		return fmt.Errorf("listen for portal activations: %w", err)
 	}
+	return nil
+}
 
-	var createRequest dbus.ObjectPath
+func createPortalShortcutSession(portal dbus.BusObject, signals <-chan *dbus.Signal) (dbus.ObjectPath, error) {
+	var requestPath dbus.ObjectPath
 	if err := portal.Call(portalShortcutIf+".CreateSession", 0, map[string]dbus.Variant{
 		"handle_token":         dbus.MakeVariant(nextPortalToken("request")),
 		"session_handle_token": dbus.MakeVariant(nextPortalToken("session")),
-	}).Store(&createRequest); err != nil {
-		return nil, fmt.Errorf("create portal shortcut session: %w", err)
+	}).Store(&requestPath); err != nil {
+		return "", fmt.Errorf("create portal shortcut session: %w", err)
 	}
-	created, err := waitPortalResponseWithTimeout(signals, createRequest, portalResponseTimeout)
+	response, err := waitPortalResponseWithTimeout(signals, requestPath, portalResponseTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("create portal shortcut session: %w", err)
+		return "", fmt.Errorf("create portal shortcut session: %w", err)
 	}
-	if created.code != 0 {
-		return nil, fmt.Errorf("portal refused shortcut session (response %d)", created.code)
+	if response.code != 0 {
+		return "", fmt.Errorf("portal refused shortcut session (response %d)", response.code)
 	}
-	session, ok := created.results["session_handle"]
+	session, ok := response.results["session_handle"]
+	var sessionPath dbus.ObjectPath
 	if !ok || session.Store(&sessionPath) != nil || !sessionPath.IsValid() {
-		return nil, fmt.Errorf("portal returned an invalid shortcut session handle")
+		return "", fmt.Errorf("portal returned an invalid shortcut session handle")
 	}
+	return sessionPath, nil
+}
 
+func bindPortalShortcut(portal dbus.BusObject, signals <-chan *dbus.Signal, sessionPath dbus.ObjectPath, trigger string) error {
 	entry := portalShortcutEntry{
 		ID: portalShortcutID,
 		Props: map[string]dbus.Variant{
@@ -123,31 +165,30 @@ func registerPortalScratchpadShortcut(shortcut string, callback func()) (func() 
 			"preferred_trigger": dbus.MakeVariant(trigger),
 		},
 	}
-	var bindRequest dbus.ObjectPath
+	var requestPath dbus.ObjectPath
 	if err := portal.Call(portalShortcutIf+".BindShortcuts", 0, sessionPath, []portalShortcutEntry{entry}, "", map[string]dbus.Variant{
 		"handle_token": dbus.MakeVariant(nextPortalToken("bind")),
-	}).Store(&bindRequest); err != nil {
-		return nil, fmt.Errorf("bind portal Scratchpad shortcut: %w", err)
+	}).Store(&requestPath); err != nil {
+		return fmt.Errorf("bind portal Scratchpad shortcut: %w", err)
 	}
-	bound, err := waitPortalResponseWithTimeout(signals, bindRequest, portalBindTimeout)
+	response, err := waitPortalResponseWithTimeout(signals, requestPath, portalBindTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("bind portal Scratchpad shortcut: %w", err)
+		return fmt.Errorf("bind portal Scratchpad shortcut: %w", err)
 	}
-	if bound.code != 0 {
-		return nil, fmt.Errorf("portal rejected Scratchpad shortcut (response %d)", bound.code)
+	if response.code != 0 {
+		return fmt.Errorf("portal rejected Scratchpad shortcut (response %d)", response.code)
 	}
+	return nil
+}
 
-	registration := &portalScratchpadShortcut{
-		conn:        conn,
-		signals:     signals,
-		sessionPath: sessionPath,
-		done:        make(chan struct{}),
-		callback:    callback,
+func cleanupPortalShortcutSetup(setup portalShortcutSetup) {
+	if setup.signals != nil {
+		setup.conn.RemoveSignal(setup.signals)
 	}
-	// Keep the connection and session alive for Activated signals.
-	keepAlive = true
-	go registration.consumeSignals()
-	return registration.Unregister, nil
+	if setup.sessionPath != "" {
+		_ = setup.conn.Object(portalServiceName, setup.sessionPath).Call(portalSessionIf+".Close", 0).Err
+	}
+	_ = setup.conn.Close()
 }
 
 func nextPortalToken(prefix string) string {

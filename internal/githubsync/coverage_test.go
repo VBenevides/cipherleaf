@@ -101,7 +101,8 @@ func cancelledContext() context.Context {
 }
 
 func TestCoverageFileSettingsStore(t *testing.T) {
-	store := NewFileSettingsStore(t.TempDir())
+	root := t.TempDir()
+	store := NewFileSettingsStore(root)
 	if _, err := store.Load("bad"); err == nil {
 		t.Fatal("invalid vault ID accepted")
 	}
@@ -110,7 +111,10 @@ func TestCoverageFileSettingsStore(t *testing.T) {
 	}
 	settings := DefaultSettings("vault123")
 	settings.RepositorySSH = "git@github.com:owner/repository.git"
-	settings.PrivateKeyPath = "/tmp/key"
+	settings.PrivateKeyPath = filepath.Join(root, "key")
+	if err := os.WriteFile(settings.PrivateKeyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	settings.RepositoryPrivate = true
 	if err := store.Save(settings); err != nil {
 		t.Fatal(err)
@@ -170,7 +174,8 @@ func TestCoverageFileSettingsStore(t *testing.T) {
 }
 
 func TestCoverageManagerUnlinkedPaths(t *testing.T) {
-	store := NewFileSettingsStore(t.TempDir())
+	storeRoot := t.TempDir()
+	store := NewFileSettingsStore(storeRoot)
 	manager := NewManager(store, &successfulConnectionTester{})
 	vaultID := "vault123"
 	if settings, err := manager.GetSettings(vaultID); err != nil || settings.VaultID != vaultID {
@@ -197,7 +202,10 @@ func TestCoverageManagerUnlinkedPaths(t *testing.T) {
 
 	settings := DefaultSettings(vaultID)
 	settings.RepositorySSH = "git@github.com:owner/repository.git"
-	settings.PrivateKeyPath = "/tmp/key"
+	settings.PrivateKeyPath = filepath.Join(storeRoot, "key")
+	if err := os.WriteFile(settings.PrivateKeyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	settings.RepositoryPrivate = true
 	if err := store.Save(settings); err != nil {
 		t.Fatal(err)
@@ -467,7 +475,7 @@ func TestCoverageGitRemainingProviderBranches(t *testing.T) {
 	}
 	provider := &GitHubSSHProvider{runner: &sequenceGitRunner{}, runtimeDir: t.TempDir(), cacheRoot: t.TempDir()}
 	if err := provider.materializeChangedRepository(context.Background(), workingTree, "origin/main", []changedRemotePath{
-		{path: "missing.enc", deleted: true}, {path: "vault.json"},
+		{path: "sync/folders.enc", deleted: true}, {path: "vault.json"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -482,6 +490,51 @@ func TestCoverageGitRemainingProviderBranches(t *testing.T) {
 	}
 	if _, err := provider.resolveReference(context.Background(), workingTree, "HEAD"); err == nil {
 		t.Fatal("missing commit output accepted")
+	}
+}
+
+func TestProtectChangedSnapshotRejectsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "vault.json")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := protectChangedSnapshot(root, []changedRemotePath{{path: "vault.json"}}); err == nil {
+		t.Fatal("symlinked changed snapshot path was accepted")
+	}
+	info, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("outside file permissions changed to %o", got)
+	}
+}
+
+func TestMaterializeChangedRepositoryRejectsSymlinkedDeleteParent(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	outsidePath := filepath.Join(outside, "deleted.enc")
+	if err := os.WriteFile(outsidePath, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "sync")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	provider := &GitHubSSHProvider{runner: &sequenceGitRunner{}}
+	if err := provider.materializeChangedRepository(
+		context.Background(),
+		root,
+		"origin/main",
+		[]changedRemotePath{{path: "sync/deleted.enc", deleted: true}},
+	); err == nil {
+		t.Fatal("symlinked delete parent was accepted")
+	}
+	if _, err := os.Stat(outsidePath); err != nil {
+		t.Fatalf("outside file was removed: %v", err)
 	}
 }
 

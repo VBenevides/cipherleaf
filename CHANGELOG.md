@@ -16,6 +16,8 @@ All notable changes to Cipherleaf are documented here.
 - Fixed the scratchpad error banner to be dismissible.
 - Fixed the live-preview caret centering and removed per-keystroke whole-app renders.
 - Fixed board columns not refreshing when card metadata changes, and constrained board columns to a 360px height with internal scrolling instead of fixed 310–520px rows.
+- Added revision-checked note saves with conflict detection and latest-note reload/merge handling instead of allowing stale writers to overwrite newer content.
+- Fixed live Scratchpad card metadata updates for validated note-save events, including vault filtering and stale-event rejection.
 
 ### Other
 

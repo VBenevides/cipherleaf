@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { minimalDocumentChange } from "../src/minimalDocumentChange.ts";
 import {
   attachmentMarkdown,
-  isHorizontalRule,
-  isTableDivider,
   embeddedClipboardImage,
+  isHorizontalRule,
+  isOpenableCitationURL,
+  isTableDivider,
   insertAttachmentMarkdown,
   markdownCitation,
   markdownCitations,
@@ -17,14 +18,8 @@ import {
 } from "../src/markdown.ts";
 
 const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
+const minimalChange = readFileSync(new URL("../src/minimalDocumentChange.ts", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
-const minimalDocumentChangeSource = editor.slice(
-  editor.indexOf("function minimalDocumentChange"),
-  editor.indexOf("\n\nconst toggleQuote"),
-).trim();
-const minimalDocumentChange = new Function(
-  `${transpileModule(minimalDocumentChangeSource, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 } }).outputText}; return minimalDocumentChange;`,
-)() as (state: { doc: { toString: () => string }; changes: (change: { from: number; to: number; insert: string }) => unknown }, next: string) => unknown;
 
 function applyMinimalDocumentChange(current: string, next: string): string {
   let change: { from: number; to: number; insert: string } | undefined;
@@ -43,8 +38,8 @@ test("uses CodeMirror's measured caret geometry", () => {
 });
 
 test("preserves the live editor viewport across structural updates", () => {
-  assert.match(editor, /function minimalDocumentChange\(state: EditorState, next: string\)/);
-  assert.equal((editor.match(/\.codePointAt\(/g) ?? []).length, 4);
+  assert.match(minimalChange, /export function minimalDocumentChange/);
+  assert.equal((minimalChange.match(/\.codePointAt\(/g) ?? []).length, 4);
   assert.match(editor, /const changes = minimalDocumentChange\(editor\.state, normalizedValue\);[\s\S]*const snapshot = lastScrollSnapshotRef\.current\?\.map\(changes\) \?\? editor\.scrollSnapshot\(\)\.map\(changes\)!/);
   assert.match(editor, /toggleQuote\.of\(this\.position\), view\.scrollSnapshot\(\)/);
   assert.match(editor, /setAllQuotesCollapsed\.of\(collapsed\), view\.scrollSnapshot\(\)/);
@@ -77,16 +72,18 @@ test("renders safe Markdown citations without treating images as links", () => {
   assert.deepEqual(markdownCitations("[card](note:card-1)"), []);
   assert.equal(markdownCitation(" Updated name ", " https://example.com/new "), "[Updated name](https://example.com/new)");
   assert.deepEqual(
-    markdownCitations("[HTTP](http://example.com) [relative](./docs/readme.md) [absolute](/tmp/readme.md)"),
+    markdownCitations("[HTTP](http://example.com) [relative](./docs/readme.md) [absolute](/vault/readme.md)"),
     [
       { label: "HTTP", url: "http://example.com", index: 0, length: 26 },
       { label: "relative", url: "./docs/readme.md", index: 27, length: 28 },
-      { label: "absolute", url: "/tmp/readme.md", index: 56, length: 26 },
+      { label: "absolute", url: "/vault/readme.md", index: 56, length: 28 },
     ],
   );
-  assert.equal(markdownCitation("Local", "docs\\readme.md"), "[Local](docs\\readme.md)");
+  assert.equal(markdownCitation("Local", String.raw`docs\readme.md`), String.raw`[Local](docs\readme.md)`);
   assert.equal(markdownCitation("Bad]name", "javascript:alert(1)"), null);
-  assert.equal(markdownCitation("Bad", "data:text/plain,hello"), null);
+  assert.equal(isOpenableCitationURL("https://example.com"), true);
+  assert.equal(isOpenableCitationURL("file:///vault/readme.md"), false);
+  assert.equal(isOpenableCitationURL("javascript:alert(1)"), false);
 });
 
 test("edits a citation in one themed dialog", () => {
@@ -125,7 +122,7 @@ test("normalizes link labels without changing destinations", () => {
 });
 
 test("limits underscore emphasis to standalone words", () => {
-  assert.match(editor, /const italic = \/\(\?<\!\[\\p\{L\}\\p\{N\}_\]\)_\(\?=\\S\)\(\[\^\\s_\]\+\)_\(\?!\[\\p\{L\}\\p\{N\}_\]\)\/gu/);
+  assert.match(editor, /const italic = \/\(\?<!\[\\p\{L\}\\p\{N\}_\]\)_\(\?=\\S\)\(\[\^\\s_\]\+\)_\(\?!\[\\p\{L\}\\p\{N\}_\]\)\/gu/);
 });
 
 test("uses asterisk emphasis for multi-word toolbar italics", () => {
@@ -223,7 +220,7 @@ test("handles malformed markdown and insertion boundaries", () => {
   ]);
   assert.equal(markdownCitation("", "https://example.com"), null);
   assert.equal(markdownCitation("line\nname", "https://example.com"), null);
-  assert.equal(markdownCitation("Windows", "C:\\notes\\readme.md"), "[Windows](C:\\notes\\readme.md)");
+  assert.equal(markdownCitation("Windows", String.raw`C:\notes\readme.md`), String.raw`[Windows](C:\notes\readme.md)`);
   assert.equal(isTableDivider(""), false);
   const id = "c".repeat(32);
   assert.deepEqual(parseAttachmentMarkdown(`![Default](attachment:${id})`), { alt: "Default", id, width: 640, align: "left" });

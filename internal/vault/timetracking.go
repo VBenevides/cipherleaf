@@ -450,8 +450,7 @@ func compressTimeTrackingPayload(plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("create tracking compressor: %w", err)
 	}
 	if _, err := writer.Write(plaintext); err != nil {
-		writer.Close()
-		return nil, fmt.Errorf("compress tracking bucket: %w", err)
+		return nil, fmt.Errorf("compress tracking bucket: %w", errors.Join(err, writer.Close()))
 	}
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("finish tracking compression: %w", err)
@@ -464,10 +463,13 @@ func decompressPayload(compressed []byte, limit int64, name string) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("compressed encrypted %s is damaged", name)
 	}
-	defer reader.Close()
-	plaintext, err := io.ReadAll(io.LimitReader(reader, limit+1))
-	if err != nil {
-		return nil, fmt.Errorf("decompress encrypted %s", name)
+	plaintext, readErr := io.ReadAll(io.LimitReader(reader, limit+1))
+	closeErr := reader.Close()
+	if readErr != nil {
+		return nil, errors.Join(fmt.Errorf("decompress encrypted %s", name), readErr, closeErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close encrypted %s: %w", name, closeErr)
 	}
 	if int64(len(plaintext)) > limit {
 		return nil, fmt.Errorf("compressed encrypted %s exceeds the supported size", name)

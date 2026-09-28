@@ -18,7 +18,7 @@ func TestScratchpadLockedAccess(t *testing.T) {
 	if got := service.GetScratchpad(); got.Content != "" || got.Generation != 0 || got.Revision != 0 {
 		t.Fatalf("locked scratchpad = %#v", got)
 	}
-	if _, err := service.SaveScratchpad("content", 0, 0); !errors.Is(err, vault.ErrLocked) {
+	if _, err := service.SaveScratchpad("content", 0, 0, 0); !errors.Is(err, vault.ErrLocked) {
 		t.Fatalf("SaveScratchpad() error = %v, want vault.ErrLocked", err)
 	}
 	if _, err := service.GetAttachment(scratchpadNamespace, "0123456789abcdef0123456789abcdef"); !errors.Is(err, vault.ErrLocked) {
@@ -28,19 +28,22 @@ func TestScratchpadLockedAccess(t *testing.T) {
 
 func TestScratchpadContentCaretAndRevision(t *testing.T) {
 	service := newScratchpadTestService(t)
-	first, err := service.SaveScratchpad("draft", -4, 0)
+	first, err := service.SaveScratchpad("draft", -4, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Content != "draft" || first.CaretOffset != 0 || first.Generation != 0 || first.Revision != 1 {
 		t.Fatalf("first scratchpad state = %#v", first)
 	}
-	second, err := service.SaveScratchpad("updated", 7, first.Generation)
+	second, err := service.SaveScratchpad("updated", 7, first.Generation, first.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if second.Content != "updated" || second.CaretOffset != 7 || second.Revision != 2 {
 		t.Fatalf("second scratchpad state = %#v", second)
+	}
+	if _, err := service.SaveScratchpad("stale", 0, second.Generation, first.Revision); !errors.Is(err, vault.ErrScratchpadRevisionConflict) {
+		t.Fatalf("stale revision SaveScratchpad() error = %v", err)
 	}
 	if got := service.GetScratchpad(); got != second {
 		t.Fatalf("GetScratchpad() = %#v, want %#v", got, second)
@@ -49,7 +52,7 @@ func TestScratchpadContentCaretAndRevision(t *testing.T) {
 
 func TestScratchpadStaleGenerationAfterLock(t *testing.T) {
 	service := newScratchpadTestService(t)
-	state, err := service.SaveScratchpad("before lock", 1, 0)
+	state, err := service.SaveScratchpad("before lock", 1, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +64,7 @@ func TestScratchpadStaleGenerationAfterLock(t *testing.T) {
 	if _, err := service.store.Open(path, "scratchpad test secret"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SaveScratchpad("stale", 0, state.Generation); !errors.Is(err, ErrScratchpadStaleGeneration) {
+	if _, err := service.SaveScratchpad("stale", 0, state.Generation, 0); !errors.Is(err, ErrScratchpadStaleGeneration) {
 		t.Fatalf("stale SaveScratchpad() error = %v", err)
 	}
 }
@@ -74,7 +77,7 @@ func TestScratchpadHydratesAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved, err := service.SaveScratchpad("persisted", 4, service.GetScratchpad().Generation)
+	saved, err := service.SaveScratchpad("persisted", 4, service.GetScratchpad().Generation, service.GetScratchpad().Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +93,7 @@ func TestScratchpadHydratesAfterReopen(t *testing.T) {
 	if got.Generation <= saved.Generation || opened.Path != session.Path {
 		t.Fatalf("reopened scratchpad generation/session = %#v, %q", got, opened.Path)
 	}
-	if _, err := service.SaveScratchpad("stale", 0, saved.Generation); !errors.Is(err, ErrScratchpadStaleGeneration) {
+	if _, err := service.SaveScratchpad("stale", 0, saved.Generation, saved.Revision); !errors.Is(err, ErrScratchpadStaleGeneration) {
 		t.Fatalf("old-generation SaveScratchpad() error = %v", err)
 	}
 }
@@ -111,7 +114,7 @@ func TestScratchpadAppRevisionStaysMonotonicAcrossHydrationAndSave(t *testing.T)
 	if hydrated.Content != "remote" || hydrated.Revision != 8 {
 		t.Fatalf("hydrated scratchpad = %#v, want remote revision 8", hydrated)
 	}
-	saved, err := service.SaveScratchpad("saved", 3, hydrated.Generation)
+	saved, err := service.SaveScratchpad("saved", 3, hydrated.Generation, hydrated.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,16 +170,16 @@ func TestScratchpadPendingAttachmentRetentionAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SaveScratchpad("draft", 0, 0); err != nil {
+	if _, err := service.SaveScratchpad("draft", 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.GetAttachment(scratchpadNamespace, id); err != nil {
 		t.Fatalf("pending attachment was cleaned up: %v", err)
 	}
-	if _, err := service.SaveScratchpad("attachment:"+id, 0, 0); err != nil {
+	if _, err := service.SaveScratchpad("attachment:"+id, 0, 0, service.GetScratchpad().Revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SaveScratchpad("", 0, 0); err != nil {
+	if _, err := service.SaveScratchpad("", 0, 0, service.GetScratchpad().Revision); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.GetAttachment(scratchpadNamespace, id); err == nil {

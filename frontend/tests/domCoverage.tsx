@@ -994,11 +994,7 @@ const liveDragTarget = liveDragLines[2]!;
 Object.defineProperty(liveDragTarget, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, height: 100 }) });
 const originalElementsFromPoint = document.elementsFromPoint;
 Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [liveDragTarget] });
-const liveDragEvent = (type: string, clientY: number) => {
-  const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
-  Object.defineProperties(event, { pointerId: { value: 1 }, clientX: { value: 10 }, clientY: { value: clientY } });
-  return event;
-};
+const liveDragEvent = dragEvent;
 liveDragHandle.dispatchEvent(liveDragEvent("pointerdown", 50));
 document.dispatchEvent(liveDragEvent("pointermove", 10));
 document.dispatchEvent(liveDragEvent("pointermove", 50));

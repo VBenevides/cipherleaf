@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,33 +48,35 @@ const (
 	maxTitleRunes                 = 200
 	maxFolderRunes                = 120
 	folderPasswordSaltBytes       = 16
-	folderVerifierPrefix           = "argon2id-v1:"
+	folderVerifierPrefix          = "argon2id-v1:"
 )
 
 var (
-	defaultKDF             = secure.KDFParams{Time: 3, Memory: 64 * 1024, Threads: 2}
-	ErrLocked              = errors.New("vault is locked")
-	ErrFolderLocked        = errors.New("folder is locked")
-	ErrVaultAlreadyExists  = errors.New("a vault already exists in this folder")
-	ErrVaultFolderExists   = errors.New("a folder with that vault name already exists")
-	ErrVaultNotFound       = errors.New("no encrypted vault exists in this folder")
-	ErrEncryptedFileAbsent = errors.New("an encrypted note file is missing")
-	attachmentReference    = regexp.MustCompile(`attachment:([a-f0-9]{32})`)
-	inlineCodePattern      = regexp.MustCompile("`+[^`\n]*`+")
-	wikilinkPattern        = regexp.MustCompile(`\[\[([^\]\n]+)\]\]`)
-	tagPattern             = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9][A-Za-z0-9_-]{0,63})`)
-	canonicalCodeFence     = regexp.MustCompile("^([ \\t]*)```([^\\s`]*)[ \\t]*$")
-	canonicalCodeFenceEnd  = regexp.MustCompile("^[ \\t]*```[ \\t]*$")
-	canonicalOutline       = regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`)
-	canonicalBare          = regexp.MustCompile(`^([ \t]*)<([ \t]?)(.*)$`)
-	canonicalImage         = regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`)
-	canonicalAttachment    = regexp.MustCompile(`^(!?)\[[^\]]*]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$`)
-	canonicalBullet        = regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`)
-	canonicalOrdered       = regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`)
-	canonicalCheckbox      = regexp.MustCompile(`^\[([ xX]?)\]\s*(.*)$`)
-	canonicalTask          = regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX]?)\]\s*(.*)$`)
-	canonicalHeading       = regexp.MustCompile(`^#{1,6}\s+`)
-	canonicalCheckboxEnd   = regexp.MustCompile(`\[[ xX]?\](\s*)$`)
+	defaultKDF                    = secure.KDFParams{Time: 3, Memory: 64 * 1024, Threads: 2}
+	ErrLocked                     = errors.New("vault is locked")
+	ErrFolderLocked               = errors.New("folder is locked")
+	ErrVaultAlreadyExists         = errors.New("a vault already exists in this folder")
+	ErrVaultFolderExists          = errors.New("a folder with that vault name already exists")
+	ErrVaultNotFound              = errors.New("no encrypted vault exists in this folder")
+	ErrEncryptedFileAbsent        = errors.New("an encrypted note file is missing")
+	ErrNoteRevisionConflict       = errors.New("note was changed by another writer")
+	ErrScratchpadRevisionConflict = errors.New("scratchpad was changed by another writer")
+	attachmentReference           = regexp.MustCompile(`attachment:([a-f0-9]{32})`)
+	inlineCodePattern             = regexp.MustCompile("`+[^`\n]*`+")
+	wikilinkPattern               = regexp.MustCompile(`\[\[([^\]\n]+)\]\]`)
+	tagPattern                    = regexp.MustCompile(`(^|[\s(])#([A-Za-z0-9][A-Za-z0-9_-]{0,63})`)
+	canonicalCodeFence            = regexp.MustCompile("^([ \\t]*)```([^\\s`]*)[ \\t]*$")
+	canonicalCodeFenceEnd         = regexp.MustCompile("^[ \\t]*```[ \\t]*$")
+	canonicalOutline              = regexp.MustCompile(`^([ \t]*)(>+)([ \t]?)(.*)$`)
+	canonicalBare                 = regexp.MustCompile(`^([ \t]*)<([ \t]?)(.*)$`)
+	canonicalImage                = regexp.MustCompile(`^!\[[^\]]*]\([^)]+\)\s*$`)
+	canonicalAttachment           = regexp.MustCompile(`^(!?)\[[^\]]*]\(attachment:([a-f0-9]{32})(?:#[^)]*)?\)\s*$`)
+	canonicalBullet               = regexp.MustCompile(`^([-*])(?:\s+(.*)|\s*)$`)
+	canonicalOrdered              = regexp.MustCompile(`^(\d+[.)])(?:\s+(.*)|\s*)$`)
+	canonicalCheckbox             = regexp.MustCompile(`^\[([ xX]?)\]\s*(.*)$`)
+	canonicalTask                 = regexp.MustCompile(`^(?:[-+*]\s+)?\[([ xX]?)\]\s*(.*)$`)
+	canonicalHeading              = regexp.MustCompile(`^#{1,6}\s+`)
+	canonicalCheckboxEnd          = regexp.MustCompile(`\[[ xX]?\](\s*)$`)
 )
 
 const (
@@ -904,8 +907,34 @@ func (s *Store) GetNoteSummary(id string) (NoteSummary, error) {
 }
 
 func (s *Store) SaveNote(id, title, content string) (Note, error) {
+	return s.saveNote(id, title, content, nil)
+}
+
+func (s *Store) SaveNoteAtRevision(id, title, content string, expectedRevision uint64) (Note, error) {
+	return s.saveNote(id, title, content, &expectedRevision)
+}
+
+func (s *Store) SaveNoteAtRevisionWithSummary(id, title, content string, expectedRevision uint64) (Note, NoteSummary, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	note, err := s.saveNoteLocked(id, title, content, &expectedRevision)
+	if err != nil {
+		return Note{}, NoteSummary{}, "", err
+	}
+	index, found := s.findNoteLocked(id)
+	if !found {
+		return Note{}, NoteSummary{}, "", errors.New("note not found")
+	}
+	return note, *cloneNoteSummary(s.manifest.Notes[index]), s.vaultID, nil
+}
+
+func (s *Store) saveNote(id, title, content string, expectedRevision *uint64) (Note, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveNoteLocked(id, title, content, expectedRevision)
+}
+
+func (s *Store) saveNoteLocked(id, title, content string, expectedRevision *uint64) (Note, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return Note{}, err
 	}
@@ -920,6 +949,9 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
+	if len(content) > maxNoteBytes {
+		return Note{}, errors.New("note exceeds the 10 MiB limit")
+	}
 	storedContent := canonicalizeNoteContent(content)
 	if len(storedContent) > maxNoteBytes {
 		return Note{}, errors.New("note exceeds the 10 MiB limit")
@@ -929,14 +961,17 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
+	if expectedRevision != nil && current.Revision != *expectedRevision {
+		return Note{}, fmt.Errorf("%w: expected revision %d, found %d", ErrNoteRevisionConflict, *expectedRevision, current.Revision)
+	}
 	originalSummary := s.manifest.Notes[index]
 	contentMatches := current.Content == storedContent || derivedMarkdownContent(current.Content) == content
 	if current.Title == title && contentMatches {
 		if err := s.pruneNoteAttachmentsByIDLocked(id, extractAttachmentIDs(derivedContent)); err != nil {
-			return Note{}, err
+			log.Printf("note attachment cleanup failed for %s: %v", id, err)
 		}
 		if err := s.prunePendingSharedAttachmentsLocked(id); err != nil {
-			return Note{}, err
+			log.Printf("pending attachment cleanup failed for %s: %v", id, err)
 		}
 		return noteForClientContent(current, derivedContent), nil
 	}
@@ -969,10 +1004,10 @@ func (s *Store) SaveNote(id, title, content string) (Note, error) {
 	s.updateSharedAttachmentRefsLocked(originalSummary.AttachmentIDs, s.manifest.Notes[index].AttachmentIDs)
 	s.updateSearchIndexLocked(id, derivedContent)
 	if err := s.pruneNoteAttachmentsByIDLocked(id, s.manifest.Notes[index].AttachmentIDs); err != nil {
-		return Note{}, err
+		log.Printf("note attachment cleanup failed for %s: %v", id, err)
 	}
 	if err := s.prunePendingSharedAttachmentsLocked(id); err != nil {
-		return Note{}, err
+		log.Printf("pending attachment cleanup failed for %s: %v", id, err)
 	}
 	return noteForClientContent(current, derivedContent), nil
 }
@@ -3274,7 +3309,7 @@ func (s *Store) readRemoteSnapshotLocked(
 // before any final vault folder becomes visible.
 func (s *Store) RestoreRemoteSnapshot(
 	source, parent, name, passphrase string,
-) (Session, error) {
+) (sessionResult Session, returnErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.key) != 0 {
@@ -3324,7 +3359,11 @@ func (s *Store) RestoreRemoteSnapshot(
 	if err != nil {
 		return Session{}, fmt.Errorf("create restored vault staging folder: %w", err)
 	}
-	defer os.RemoveAll(stagingRoot)
+	defer func() {
+		if removeErr := os.RemoveAll(stagingRoot); removeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove restored vault staging folder: %w", removeErr))
+		}
+	}()
 	if err := os.Chmod(stagingRoot, 0o700); err != nil {
 		return Session{}, fmt.Errorf("protect restored vault staging folder: %w", err)
 	}
@@ -4250,11 +4289,14 @@ func readJSONFile(path string, maxBytes int64, target any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 	limited := io.LimitReader(file, maxBytes+1)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return err
+	data, readErr := io.ReadAll(limited)
+	closeErr := file.Close()
+	if readErr != nil {
+		return errors.Join(readErr, closeErr)
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if int64(len(data)) > maxBytes {
 		return errors.New("file exceeds the supported size")
@@ -4290,8 +4332,7 @@ func compressNotePayload(plaintext []byte) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("create note compressor: %w", err)
 	}
 	if _, err := writer.Write(plaintext); err != nil {
-		writer.Close()
-		return nil, "", fmt.Errorf("compress note: %w", err)
+		return nil, "", fmt.Errorf("compress note: %w", errors.Join(err, writer.Close()))
 	}
 	if err := writer.Close(); err != nil {
 		return nil, "", fmt.Errorf("finish note compression: %w", err)
@@ -4307,11 +4348,14 @@ func decompressNotePayload(compressed []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("compressed encrypted note is damaged")
 	}
-	defer reader.Close()
 	const maxDecompressedNote = maxNoteBytes + 1024*1024
-	plaintext, err := io.ReadAll(io.LimitReader(reader, maxDecompressedNote+1))
-	if err != nil {
-		return nil, errors.New("decompress encrypted note")
+	plaintext, readErr := io.ReadAll(io.LimitReader(reader, maxDecompressedNote+1))
+	closeErr := reader.Close()
+	if readErr != nil {
+		return nil, errors.Join(errors.New("decompress encrypted note"), readErr, closeErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close encrypted note: %w", closeErr)
 	}
 	if len(plaintext) > maxDecompressedNote {
 		return nil, errors.New("compressed encrypted note exceeds the supported size")

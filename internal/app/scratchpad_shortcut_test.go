@@ -10,8 +10,21 @@ import (
 )
 
 func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
+	service := newScratchpadShortcutTestService(t)
+	testScratchpadShortcutState(t, service)
+	testScratchpadShortcutTarget(t, service)
+	testScratchpadShortcutRegistration(t)
+	testScratchpadValidationHelpers(t)
+}
+
+func newScratchpadShortcutTestService(t *testing.T) *VaultService {
+	t.Helper()
 	service := NewVaultService()
 	service.recent = appsession.NewRecentVaultStore(filepath.Join(t.TempDir(), "recent.json"))
+	return service
+}
+
+func testScratchpadShortcutState(t *testing.T, service *VaultService) {
 	if got := service.GetScratchpadShortcut(); got != appsession.DefaultScratchpadShortcut {
 		t.Fatalf("default Scratchpad shortcut = %q, want %q", got, appsession.DefaultScratchpadShortcut)
 	}
@@ -21,7 +34,6 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 	if got := service.GetScratchpadShortcut(); got != "Ctrl+Shift+S" {
 		t.Fatalf("saved Scratchpad shortcut = %q", got)
 	}
-
 	if err := service.InitializeScratchpadShortcut(); err == nil {
 		t.Fatal("initialization without an application unexpectedly succeeded")
 	}
@@ -30,6 +42,14 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 	if got := service.GetScratchpadShortcut(); got != "Alt+S" {
 		t.Fatalf("initialized Scratchpad shortcut = %q", got)
 	}
+	service.toggleScratchpad()
+	if err := service.HideScratchpad(); err == nil {
+		t.Fatal("hiding Scratchpad without an application unexpectedly succeeded")
+	}
+	hideScratchpadWindow(nil)
+}
+
+func testScratchpadShortcutTarget(t *testing.T, service *VaultService) {
 	if got := service.GetScratchpadShortcutTarget(); got != defaultScratchpadShortcutTarget {
 		t.Fatalf("default Scratchpad shortcut target = %q", got)
 	}
@@ -52,13 +72,9 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 	if err := service.InitializeScratchpadShortcut(); err != nil {
 		t.Fatalf("already initialized shortcut: %v", err)
 	}
+}
 
-	if err := service.HideScratchpad(); err == nil {
-		t.Fatal("hiding Scratchpad without an application unexpectedly succeeded")
-	}
-	service.toggleScratchpad()
-	hideScratchpadWindow(nil)
-
+func testScratchpadShortcutRegistration(t *testing.T) {
 	fresh := NewVaultService()
 	if _, err := fresh.SetScratchpadShortcut("Ctrl+S"); err == nil {
 		t.Fatal("setting an uninitialized Scratchpad shortcut unexpectedly succeeded")
@@ -71,7 +87,9 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 	if got, err := fresh.SetScratchpadShortcut("Alt+S"); err == nil || got != "Ctrl+S" {
 		t.Fatalf("unavailable shortcut application = %q, %v", got, err)
 	}
+}
 
+func testScratchpadValidationHelpers(t *testing.T) {
 	for _, test := range []struct {
 		namespace  string
 		generation uint64
@@ -88,13 +106,7 @@ func TestScratchpadShortcutGuardsAndHelpers(t *testing.T) {
 			t.Fatalf("scratchpadGeneration(%q) = %d, %v, %v", test.namespace, generation, explicit, err)
 		}
 	}
-
-	for _, data := range [][]byte{
-		nil,
-		make([]byte, scratchpadMaxAttachmentBytes+1),
-		[]byte("not WebP"),
-		[]byte("RIFF1234NOPE"),
-	} {
+	for _, data := range [][]byte{nil, make([]byte, scratchpadMaxAttachmentBytes+1), []byte("not WebP"), []byte("RIFF1234NOPE")} {
 		if err := validateScratchpadAttachment(data); err == nil {
 			t.Fatalf("invalid attachment accepted: %d bytes", len(data))
 		}

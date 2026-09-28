@@ -54,6 +54,8 @@ import { appendCardJournalToMainEditor, stripCardJournalEntries } from "./cardJo
 import { formatLocalDateTime, formatLocalTime, formatRunningDuration, localDateKey, millisecondsUntilNextDurationMinute } from "./timeTracking";
 import { ClientSelect, ProjectSelect, TagMultiSelect } from "./TagMultiSelect";
 import Scratchpad from "./Scratchpad";
+import { noteIDForShortcutTarget, targetTabForShortcut } from "./shortcutTargets";
+import { parseNoteSavedEvent } from "./noteSavedEvent";
 import {
   BOARD_COLUMNS,
   CARD_STATUS_LABELS,
@@ -180,14 +182,6 @@ const EDITOR_VIEW_LABELS: Record<EditorView, string> = {
   markdown: "Markdown",
 };
 
-function noteIDForShortcutTarget(target: string): string | null {
-  return target.startsWith("note:") && target.length > "note:".length ? target.slice("note:".length) : null;
-}
-
-function targetTabForShortcut(target: string, tabs: readonly EditorTab[]): EditorTab | null {
-  const noteID = noteIDForShortcutTarget(target);
-  return noteID ? tabs.find((tab) => tab.noteID === noteID) ?? null : null;
-}
 
 function readScratchpadOpacity(): number {
   const saved = window.localStorage.getItem(SCRATCHPAD_OPACITY_KEY);
@@ -333,9 +327,12 @@ type EditorTab = {
 type ConflictResolution = {
   conflict: MergeConflict;
   localNote: Note;
+  title: string;
+  expectedRevision: number;
   mergedContent: string;
   cloudHighlightLines: ReadonlySet<number>;
 };
+
 
 type CardPanelState = {
   note: Note;
@@ -351,6 +348,7 @@ type CloneVaultSubmission = {
   passphrase: string;
   repositoryPrivate: boolean;
 };
+
 
 export function vaultSubmissionError(
   action: VaultAction,
@@ -952,10 +950,10 @@ function App() {
   const editorFontInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorFontRef = useRef<FontFace | null>(null);
   const editVersion = useRef(0);
-  const draftSequenceRef = useRef(0);
   const autosaveTimerRef = useRef<number | null>(null);
   const runSerializedSave = useRef(createSerialTaskRunner()).current;
   const noteRef = useRef<Note | null>(null);
+  const noteEventGenerationRef = useRef(0);
   const sessionRef = useRef<Session | null>(session);
   sessionRef.current = session;
   const tabsRef = useRef(tabs);
@@ -1787,7 +1785,7 @@ function App() {
   };
 
   const syncVaultOnOpen = async () => {
-    let linked = false;
+    let linked: boolean;
     try {
       const settings = await VaultService.GetSyncSettings();
       linked = settings.linked;
@@ -1858,48 +1856,124 @@ function App() {
   };
 
   useEffect(() => {
-    const off = Events.On("cipherleaf:scratchpad-note-changed", (event) => {
-      const raw = event && typeof event === "object" && "data" in event ? event.data : event;
-      if (!raw || typeof raw !== "object") return;
-      const payload = raw as { vaultId?: unknown; note?: unknown; summary?: unknown };
-      const changedNote = payload.note && typeof payload.note === "object" ? payload.note as Note : null;
-      const changedSummary = payload.summary && typeof payload.summary === "object" ? payload.summary as NoteSummary : null;
-      const id = changedNote?.id ?? changedSummary?.id;
+    let active = true;
+    const applyNoteChanged = async (event: unknown) => {
+      const payload = parseNoteSavedEvent(event);
       const currentSession = sessionRef.current;
-      if (!id || !currentSession || currentSession.locked || typeof payload.vaultId !== "string" || payload.vaultId !== currentSession.vaultId) return;
+      if (!currentSession || currentSession.locked || !payload || payload.vaultId !== currentSession.vaultId) return;
+      const eventGeneration = noteEventGenerationRef.current;
+      const eventVaultID = currentSession.vaultId;
+      const noteID = payload.noteID;
+      const revision = payload.revision;
+      let authoritativeNote: Note;
+      let summaries: readonly NoteSummary[];
+      try {
+        const [loadedNote, loadedSummaries] = await Promise.all([
+          VaultService.GetNote(noteID),
+          VaultService.ListNotes(),
+        ]);
+        if (!loadedNote || !loadedSummaries) throw new Error("authoritative note refresh returned incomplete data");
+        authoritativeNote = loadedNote;
+        summaries = loadedSummaries;
+      } catch (reason) {
+        if (active) console.error(`Note event refresh failed: ${errorText(reason)}`);
+        return;
+      }
+      if (
+        !active ||
+        eventGeneration !== noteEventGenerationRef.current ||
+        sessionRef.current?.locked ||
+        sessionRef.current?.vaultId !== eventVaultID
+      ) return;
+      const authoritativeSummary = summaries.find((summary) => summary.id === noteID);
+      if (
+        !authoritativeSummary ||
+        authoritativeNote.id !== noteID ||
+        authoritativeNote.revision !== revision ||
+        authoritativeSummary.revision !== revision
+      ) return;
+      const id = authoritativeNote.id;
       for (const [tabID, cached] of tabNoteCacheRef.current) {
         if (cached.id === id) tabNoteCacheRef.current.delete(tabID);
       }
-      if (changedSummary?.id === id) updateSummary(changedSummary);
+      updateSummary(authoritativeSummary);
       if (id !== noteRef.current?.id || dirtyRef.current) return;
-      if (changedNote && changedNote.revision <= noteRef.current.revision) return;
-      if (changedNote?.id === id) applyLoadedNote(changedNote, "saved");
-    });
-    return off;
+      if (authoritativeNote.revision <= noteRef.current.revision) return;
+      applyLoadedNote(authoritativeNote, "saved");
+    };
+    const offNoteSaved = Events.On("cipherleaf:note-saved", applyNoteChanged);
+    return () => {
+      active = false;
+      offNoteSaved();
+    };
   }, []);
+
+  const openNoteRevisionConflict = async (snapshot: Note, failedVersion: number) => {
+    try {
+      const latest = await VaultService.GetNote(snapshot.id);
+      if (editVersion.current !== failedVersion || noteRef.current?.id !== snapshot.id) {
+        setError("The note changed elsewhere while its latest version was loading. Retry the save.");
+        return;
+      }
+      if (latest.revision <= snapshot.revision) {
+        setError("The note changed elsewhere. Reload it before retrying the save.");
+        return;
+      }
+      const localContent = markdownForEditing(snapshot.content);
+      const remoteContent = markdownForEditing(latest.content);
+      setConflictResolution({
+        conflict: {
+          localNoteId: snapshot.id,
+          remoteNoteId: snapshot.id,
+          title: latest.title || snapshot.title,
+          message: "The note was changed by another writer while this draft was being saved.",
+          localContent,
+          remoteContent,
+        },
+        localNote: { ...snapshot, title: snapshot.title || latest.title, revision: latest.revision },
+        title: snapshot.title || latest.title,
+        expectedRevision: latest.revision,
+        mergedContent: localContent,
+        cloudHighlightLines: changedLineNumbers(localContent, remoteContent),
+      });
+      applyLoadedNote(null);
+      setNoteTrail([]);
+      setSidebarOpen(false);
+      setError("");
+    } catch (reason) {
+      setError(`Could not load the latest note: ${errorText(reason)}`);
+    }
+  };
+
+  const refreshConflictBase = async (resolution: ConflictResolution) => {
+    const latest = await VaultService.GetNote(resolution.localNote.id);
+    const remoteContent = markdownForEditing(latest.content);
+    setConflictResolution((current) => current?.localNote.id === resolution.localNote.id
+      ? {
+        ...current,
+        localNote: { ...current.localNote, revision: latest.revision },
+        conflict: { ...current.conflict, remoteContent },
+        expectedRevision: latest.revision,
+        cloudHighlightLines: changedLineNumbers(current.mergedContent, remoteContent),
+      }
+      : current);
+    return latest;
+  };
 
   const persistCurrent = (snapshot = noteRef.current) => {
     if (!snapshot || !dirtyRef.current) return Promise.resolve(snapshot);
-    const version = editVersion.current;
-    const draftSequence = draftSequenceRef.current;
     setSaveState("saving");
     return runSerializedSave(async () => {
+      const queuedSnapshot = noteRef.current?.id === snapshot.id ? noteRef.current : snapshot;
+      const version = editVersion.current;
       setSaveState("saving");
       try {
-        const vaultId = sessionRef.current?.vaultId ?? "";
         const saved = await VaultService.SaveNote(
-          snapshot.id,
-          snapshot.title,
-          markdownForEditing(snapshot.content),
+          queuedSnapshot.id,
+          queuedSnapshot.title,
+          markdownForEditing(queuedSnapshot.content),
+          queuedSnapshot.revision,
         );
-        if (vaultId) {
-          void Events.Emit("cipherleaf:scratchpad-note-changed", {
-            vaultId,
-            note: saved.note,
-            summary: saved.summary,
-            draftSequence,
-          }).catch(() => {});
-        }
         updateSummary(saved.summary);
         const prepared = noteForEditing(saved.note);
         if (version === editVersion.current) {
@@ -1908,11 +1982,21 @@ function App() {
           setNote(prepared.note);
           setDirty(false);
           setSaveState("saved");
+        } else if (noteRef.current?.id === queuedSnapshot.id) {
+          noteRef.current = { ...noteRef.current, revision: prepared.note.revision };
         }
         return prepared.note;
       } catch (reason) {
         setSaveState("error");
-        setError(errorText(reason));
+        if (
+          errorText(reason).startsWith("note was changed by another writer") &&
+          version === editVersion.current &&
+          noteRef.current?.id === queuedSnapshot.id
+        ) {
+          void openNoteRevisionConflict(queuedSnapshot, version);
+        } else {
+          setError(errorText(reason));
+        }
         throw reason;
       }
     });
@@ -2209,7 +2293,35 @@ function App() {
     };
   }, []);
 
+  const clearLockedPlaintextUI = (folderID?: string) => {
+    templateRequestRef.current += 1;
+    setConflictResolution(null);
+    setSyncConflicts([]);
+    setGlobalSearchOpen(false);
+    setGlobalSearchQuery("");
+    setGlobalSearchReplacement("");
+    setGlobalSearchMatches([]);
+    setGlobalSearchError("");
+    setGlobalSearchTarget(null);
+    setGlobalSearchOrigin(null);
+    const panelSummary = cardPanelRef.current && notes.find((item) => item.id === cardPanelRef.current?.note.id);
+    const clearCardPanel = !folderID ||
+      !panelSummary ||
+      folderLineage(panelSummary.folderId, folderByID).some((item) => item.id === folderID);
+    if (clearCardPanel) {
+      setCardPanel(null);
+      cardPanelRef.current = null;
+      setCardPanelDirty(false);
+      setCardPanelSaving(false);
+      setSelectedTemplateID("");
+    }
+  };
+
   const resetToLocked = (locked: Session) => {
+    noteEventGenerationRef.current += 1;
+    noteRef.current = null;
+    dirtyRef.current = false;
+    clearLockedPlaintextUI();
     unlockedRef.current = false;
     scratchpadActiveRef.current = false;
     noteCaretOffsetsRef.current.clear();
@@ -2224,6 +2336,7 @@ function App() {
     setUnlockedFolderIDs(new Set());
     sessionRef.current = locked;
     setSession(locked);
+    void Events.Emit("cipherleaf:scratchpad-cleared", { all: true }).catch((reason) => console.error(`Scratchpad lock cleanup failed: ${errorText(reason)}`));
     setFolders([]);
     setNotes([]);
     setNote(null);
@@ -2269,7 +2382,7 @@ function App() {
 
   const chooseVault = async (action: VaultAction) => {
     setError("");
-    let path = "";
+    let path: string;
     try {
       path =
         action === "open"
@@ -2455,6 +2568,7 @@ function App() {
           first.id,
           first.title,
           welcomeContent,
+          first.revision,
         );
         setNotes([saved.summary]);
         applyLoadedNote(saved.note);
@@ -2543,6 +2657,8 @@ function App() {
       setConflictResolution({
         conflict,
         localNote,
+        title: conflict.title || localNote.title,
+        expectedRevision: localNote.revision,
         mergedContent: localContent,
         cloudHighlightLines: changedLineNumbers(localContent, remoteContent),
       });
@@ -2555,8 +2671,22 @@ function App() {
     }
   }
 
+  const reloadConflictNote = async () => {
+    const resolution = conflictResolution;
+    if (!resolution) return;
+    try {
+      const latest = await VaultService.GetNote(resolution.localNote.id);
+      setConflictResolution(null);
+      applyLoadedNote(latest);
+      setError("");
+    } catch (reason) {
+      setError(`Could not reload the latest note: ${errorText(reason)}`);
+    }
+  };
+
   const saveResolvedConflict = async () => {
-    if (!conflictResolution) return;
+    const resolution = conflictResolution;
+    if (!resolution) return;
     const confirmed = await requestAppConfirm({
       kind: "confirm",
       eyebrow: "Merge conflict",
@@ -2570,13 +2700,14 @@ function App() {
     console.info("Sync conflict resolution save triggered");
     try {
       const saved = await VaultService.SaveNote(
-        conflictResolution.localNote.id,
-        conflictResolution.localNote.title,
-        conflictResolution.mergedContent,
+        resolution.localNote.id,
+        resolution.title,
+        resolution.mergedContent,
+        resolution.expectedRevision,
       );
       setConflictResolution(null);
       setSyncConflicts((current) =>
-        current.filter((item) => item.localNoteId !== conflictResolution.conflict.localNoteId),
+        current.filter((item) => item.localNoteId !== resolution.conflict.localNoteId),
       );
       updateSummary(saved.summary);
       applyLoadedNote(saved.note, "saved");
@@ -2586,8 +2717,17 @@ function App() {
       console.info("Sync conflict resolution saved");
     } catch (reason) {
       setSaveState("error");
-      setError(errorText(reason));
-      console.error(`Sync conflict resolution save failed: ${errorText(reason)}`);
+      if (errorText(reason).startsWith("note was changed by another writer")) {
+        try {
+          await refreshConflictBase(resolution);
+          setError("The remote note changed again. Your merged draft was kept; review and retry.");
+        } catch (error_) {
+          setError(`Could not refresh the latest conflict base: ${errorText(error_)}`);
+        }
+      } else {
+        setError(errorText(reason));
+        console.error(`Sync conflict resolution save failed: ${errorText(reason)}`);
+      }
     }
   };
 
@@ -2692,7 +2832,7 @@ function App() {
   const switchVault = async (action: VaultAction) => {
     setTitlebarMenu(null);
     setError("");
-    let path = "";
+    let path: string;
     try {
       path = await VaultService.SelectVaultFolder();
     } catch {
@@ -2792,7 +2932,7 @@ function App() {
         const template = await VaultService.GetNote(dailyTemplateNoteID);
         content = renderNoteTemplate(markdownForEditing(template.content), title, date);
       }
-      const saved = await VaultService.SaveNote(created.id, created.title, content);
+      const saved = await VaultService.SaveNote(created.id, created.title, content, created.revision);
       updateSummary(saved.summary);
       applyLoadedNote(saved.note);
     } catch (reason) {
@@ -2975,13 +3115,66 @@ function App() {
     vaultSettingsOpen,
     windowLayers,
   ]);
+  const folderIDsInLockedSubtree = (folderID: string) => {
+    const folderIDs = folders
+      .filter((candidate) => folderLineage(candidate.id, folderByID).some((item) => item.id === folderID))
+      .map((candidate) => candidate.id);
+    return folderIDs.includes(folderID) ? folderIDs : [folderID, ...folderIDs];
+  };
+
+  const evictLockedFolderTabs = (folderID: string) => {
+    const evictedTabIDs = new Set<number>();
+    for (const tab of tabsRef.current) {
+      const currentSummary = notes.find((item) => item.id === tab.noteID);
+      const cached = tabNoteCacheRef.current.get(tab.id);
+      const tabFolderID = currentSummary?.folderId ?? cached?.folderId ?? (
+        noteRef.current?.id === tab.noteID ? noteRef.current.folderId : ""
+      );
+      if (tabFolderID && folderLineage(tabFolderID, folderByID).some((item) => item.id === folderID)) {
+        evictedTabIDs.add(tab.id);
+        tabNoteCacheRef.current.delete(tab.id);
+      }
+    }
+    if (!evictedTabIDs.size) return;
+    const remainingTabs = tabsRef.current.filter((tab) => !evictedTabIDs.has(tab.id));
+    const fallbackTab = remainingTabs[0] ?? {
+      id: nextTabIDRef.current++,
+      noteID: "",
+      title: "New tab",
+      lastActiveAt: Date.now(),
+    };
+    const nextTabs = remainingTabs.length ? remainingTabs : [fallbackTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    if (evictedTabIDs.has(activeTabIDRef.current)) {
+      activeTabIDRef.current = fallbackTab.id;
+      setActiveTabID(fallbackTab.id);
+      applyLoadedNote(null);
+      setNoteTrail([]);
+      if (fallbackTab.noteID) {
+        void VaultService.GetNote(fallbackTab.noteID).then((loaded) => {
+          if (activeTabIDRef.current === fallbackTab.id) applyLoadedNote(loaded);
+        }).catch((reason) => setError(errorText(reason)));
+      }
+    }
+  };
+
 
   const lockFolder = async (folder: Folder) => {
     const password = await requestFolderPassword(`Password for “${folder.name}”`, "Lock folder");
     if (password === null) return;
     setError("");
     try {
+      if (noteRef.current && folderLineage(noteRef.current.folderId, folderByID).some((item) => item.id === folder.id)) {
+        await persistCurrent();
+      }
       await VaultService.LockFolder(folder.id, password);
+      clearLockedPlaintextUI(folder.id);
+      evictLockedFolderTabs(folder.id);
+      void Events.Emit("cipherleaf:scratchpad-cleared", {
+        vaultId: sessionRef.current?.vaultId ?? "",
+        folderIDs: folderIDsInLockedSubtree(folder.id),
+      }).catch((reason) => console.error(`Scratchpad lock cleanup failed: ${errorText(reason)}`));
       if (folderLineage(selectedFolderID, folderByID).some((item) => item.id === folder.id)) {
         setSelectedFolderID("all");
       }
@@ -3004,6 +3197,12 @@ function App() {
         setSelectedFolderID("all");
       }
       await VaultService.LockFolderSession(folder.id);
+      clearLockedPlaintextUI(folder.id);
+      evictLockedFolderTabs(folder.id);
+      void Events.Emit("cipherleaf:scratchpad-cleared", {
+        vaultId: sessionRef.current?.vaultId ?? "",
+        folderIDs: folderIDsInLockedSubtree(folder.id),
+      }).catch((reason) => console.error(`Scratchpad lock cleanup failed: ${errorText(reason)}`));
       setUnlockedFolderIDs((current) => {
         return new Set(
           [...current].filter(
@@ -3184,7 +3383,14 @@ function App() {
       setGraphOpen(false);
       setTimeTrackingOpen(false);
       const cached = now - target.lastActiveAt < 60_000 ? tabNoteCacheRef.current.get(tabID) : undefined;
-      if (cached) applyLoadedNote(cached);
+      const cachedSummary = cached && notes.find((item) => item.id === cached.id);
+      const cachedAuthorized = Boolean(
+        cached &&
+        cachedSummary?.folderId === cached.folderId &&
+        !folderIsLocked(cached.folderId, folderByID, unlockedFolderIDs),
+      );
+      if (cached && !cachedAuthorized) tabNoteCacheRef.current.delete(tabID);
+      if (cached && cachedAuthorized) applyLoadedNote(cached);
       else if (target.noteID) applyLoadedNote(await VaultService.GetNote(target.noteID));
       else applyLoadedNote(null);
       setNoteTrail([]);
@@ -3324,6 +3530,9 @@ function App() {
     try {
       if (noteRef.current?.id === id) await persistCurrent();
       const moved = await VaultService.MoveNote(id, folderID);
+      for (const [tabID, cached] of tabNoteCacheRef.current) {
+        if (cached.id === id) tabNoteCacheRef.current.delete(tabID);
+      }
       setNotes((await VaultService.ListNotes()) ?? []);
       if (noteRef.current?.id === id) {
         applyLoadedNote(moved, "saved");
@@ -3476,15 +3685,6 @@ function App() {
     const next = { ...current, ...patch };
     if ("content" in patch) setGlobalSearchTarget(null);
     noteRef.current = next;
-    const vaultId = sessionRef.current?.vaultId;
-    if (vaultId && ("content" in patch || "title" in patch)) {
-      const draftSequence = ++draftSequenceRef.current;
-      void Events.Emit("cipherleaf:scratchpad-note-draft-changed", {
-        vaultId,
-        note: next,
-        draftSequence,
-      }).catch(() => {});
-    }
     markDirty();
     if ("title" in patch) {
       setTabs((currentTabs) => currentTabs.map((tab) => tab.id === activeTabIDRef.current
@@ -3852,7 +4052,7 @@ function App() {
       const created = await VaultService.CreateNoteInFolder("Untitled", targetFolder);
       createdID = created.id;
       const metadata = newCardMetadata(created.id, new Date(created.createdAt), cardWriteChangesToEditorDefault);
-      const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""));
+      const saved = await VaultService.SaveNote(created.id, "Untitled", serializeCardDocument(metadata, ""), created.revision);
       updateSummary(saved.summary);
       if (request !== templateRequestRef.current) return cardReference(created.id);
       setSelectedTemplateID("");
@@ -3946,7 +4146,7 @@ function App() {
         return;
       }
       const draft: CardTemplate = { id: template.id, name: `${board.title} card`, status: "not-started", tags: [], writeChangesToEditor: false, body: "" };
-      const saved = await runSerializedSave(() => VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft)));
+      const saved = await runSerializedSave(() => VaultService.SaveNote(template.id, template.title, serializeTemplateDocument(draft), template.revision));
       if (request !== templateRequestRef.current || cardPanelRef.current) {
         await VaultService.DeleteNote(template.id).catch(() => {});
         return;
@@ -3994,7 +4194,7 @@ function App() {
       const metadata = template
         ? { ...transitionCard(base, template.status), title: template.name.trim() || "Untitled", tags: normalizeCardTags(template.tags) }
         : base;
-      const saved = await VaultService.SaveNote(created.id, metadata.title, serializeCardDocument(metadata, template?.body ?? ""));
+      const saved = await VaultService.SaveNote(created.id, metadata.title, serializeCardDocument(metadata, template?.body ?? ""), created.revision);
       const latestSource = noteRef.current?.id === sourceNoteID ? markdownForEditing(noteRef.current.content) : null;
       const latestBoard = latestSource?.split("\n").map((line) => parseBoardMarker(line)).find((marker) => marker?.id === boardID);
       if (!latestSource || !latestBoard) {
@@ -4094,9 +4294,29 @@ function App() {
           writeChangesToEditor: metadata.writeChangesToEditor,
           body: cardPanel.body,
         };
-        const saved = await runSerializedSave(() => VaultService.SaveNote(cardPanel.note.id, `Template: ${title}`, serializeTemplateDocument(template)));
+        let panelChanged = false;
+        const saved = await runSerializedSave(async () => {
+          const current = cardPanelRef.current;
+          const expectedRevision = current?.note.id === panelAtStart.note.id
+            ? current.note.revision
+            : panelAtStart.note.revision;
+          const saved = await VaultService.SaveNote(cardPanel.note.id, `Template: ${title}`, serializeTemplateDocument(template), expectedRevision);
+          const latestPanel = cardPanelRef.current;
+          if (latestPanel?.note.id === saved.note.id) {
+            panelChanged = latestPanel !== panelAtStart;
+            cardPanelRef.current = { ...latestPanel, note: { ...latestPanel.note, revision: saved.note.revision } };
+          }
+          return saved;
+        });
         updateSummary(saved.summary);
-        if (cardPanelRef.current !== panelAtStart) return;
+        const currentPanel = cardPanelRef.current;
+        if (currentPanel?.note.id !== saved.note.id) return;
+        if (panelChanged) {
+          setCardPanel((current) => current?.note.id === saved.note.id
+            ? { ...current, note: { ...current.note, revision: saved.note.revision } }
+            : current);
+          return;
+        }
         setCardPanel({ note: saved.note, metadata, body: cardPanel.body, kind: "template" });
         setCardPanelDirty(false);
         return;
@@ -4110,17 +4330,38 @@ function App() {
       const journaledMain = cardPanel.metadata.writeChangesToEditor && mainContent
         ? appendCardJournalToMainEditor(mainContent, previousBody, body, metadata)
         : null;
-      const saved = await VaultService.SaveNote(
-        cardPanel.note.id,
-        title,
-        serializeCardDocument(metadata, body),
-      );
+      let panelChanged = false;
+      const saved = await runSerializedSave(async () => {
+        const current = cardPanelRef.current;
+        const expectedRevision = current?.note.id === panelAtStart.note.id
+          ? current.note.revision
+          : panelAtStart.note.revision;
+        const saved = await VaultService.SaveNote(
+          cardPanel.note.id,
+          title,
+          serializeCardDocument(metadata, body),
+          expectedRevision,
+        );
+        const latestPanel = cardPanelRef.current;
+        if (latestPanel?.note.id === saved.note.id) {
+          panelChanged = latestPanel !== panelAtStart;
+          cardPanelRef.current = { ...latestPanel, note: { ...latestPanel.note, revision: saved.note.revision } };
+        }
+        return saved;
+      });
       updateSummary(saved.summary);
       if (journaledMain && mainNote) {
         editNote({ content: journaledMain }, false);
         await persistCurrent();
       }
-      if (cardPanelRef.current !== panelAtStart) return;
+      const currentPanel = cardPanelRef.current;
+      if (currentPanel?.note.id !== saved.note.id) return;
+      if (panelChanged) {
+        setCardPanel((current) => current?.note.id === saved.note.id
+          ? { ...current, note: { ...current.note, revision: saved.note.revision } }
+          : current);
+        return;
+      }
       setCardPanel({ note: saved.note, metadata, body });
       setCardPanelDirty(false);
     } catch (reason) {
@@ -4160,7 +4401,7 @@ function App() {
         tags: cardPanel.metadata.tags,
         writeChangesToEditor: cardPanel.metadata.writeChangesToEditor,
         body: cardPanel.body,
-      }));
+      }), template.revision);
       updateSummary(saved.summary);
       setSelectedTemplateID(template.id);
     } catch (reason) {
@@ -4222,7 +4463,7 @@ function App() {
       const parsed = parseCardDocument(loaded.content, id, loaded.title);
       if (!parsed) return;
       const metadata = transitionCard(parsed.metadata, status);
-      const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body));
+      const saved = await VaultService.SaveNote(id, metadata.title, serializeCardDocument(metadata, parsed.body), loaded.revision);
       updateSummary(saved.summary);
       if (request === templateRequestRef.current && cardPanelRef.current?.note.id === id) {
         setCardPanel({ note: saved.note, metadata, body: parsed.body });
@@ -5909,8 +6150,15 @@ function App() {
             <div className="document-heading conflict-heading">
               <div>
                 <p className="eyebrow">Merge conflict</p>
-                <h2>{conflictResolution.localNote.title || "Untitled"}</h2>
+                <h2>{conflictResolution.title || "Untitled"}</h2>
               </div>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void reloadConflictNote()}
+              >
+                Reload latest
+              </button>
               <button
                 type="button"
                 className="primary-button"

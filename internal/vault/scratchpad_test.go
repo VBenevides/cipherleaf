@@ -183,6 +183,14 @@ func TestAbsentRemoteScratchpadDoesNotClearLocal(t *testing.T) {
 	}
 }
 
+func TestScratchpadRevisionWinsOverLaterTimestamp(t *testing.T) {
+	stale := ScratchpadState{Content: "stale", Revision: 1, ModifiedAt: 200}
+	current := ScratchpadState{Content: "current", Revision: 2, ModifiedAt: 100}
+	if scratchpadStateIsNewer(stale, current) {
+		t.Fatal("stale lower-revision Scratchpad state won because its timestamp was later")
+	}
+}
+
 func TestScratchpadTiesConvergeByContent(t *testing.T) {
 	fastScratchpadKDF(t)
 	source := NewStore()

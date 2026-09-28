@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,11 +44,13 @@ type VaultService struct {
 	scratchpad                     scratchpadStore
 }
 
-type syncJob struct{ done chan syncJobResult }
-type syncJobResult struct {
-	result SyncResult
-	err    error
-}
+type (
+	syncJob       struct{ done chan syncJobResult }
+	syncJobResult struct {
+		result SyncResult
+		err    error
+	}
+)
 
 const (
 	clipboardWayland = "wl-paste"
@@ -122,6 +125,12 @@ type SyncTimings struct {
 	TotalMilliseconds     int64 `json:"totalMilliseconds"`
 	TransportMilliseconds int64 `json:"transportMilliseconds"`
 	LocalMilliseconds     int64 `json:"localMilliseconds"`
+}
+
+type noteSavedEvent struct {
+	VaultID  string `json:"vaultId"`
+	NoteID   string `json:"noteId"`
+	Revision uint64 `json:"revision"`
 }
 
 func NewVaultService() *VaultService {
@@ -489,6 +498,7 @@ func (s *VaultService) RememberVaultSecret(secret string) error {
 	}
 	return nil
 } // ForgetVaultSecret removes any remembered secret for the currently open
+
 // vault from the OS keychain. It is a no-op when the vault is not linked to
 // a keychain entry.
 func (s *VaultService) ForgetVaultSecret() error {
@@ -763,16 +773,30 @@ func (s *VaultService) GetNote(id string) (vault.Note, error) {
 	return s.store.GetNote(id)
 }
 
-func (s *VaultService) SaveNote(id, title, content string) (vault.SavedNote, error) {
-	note, err := s.store.SaveNote(id, title, content)
+func (s *VaultService) SaveNote(id, title, content string, expectedRevision uint64) (vault.SavedNote, error) {
+	note, summary, vaultID, err := s.store.SaveNoteAtRevisionWithSummary(id, title, content, expectedRevision)
 	if err != nil {
 		return vault.SavedNote{}, err
 	}
-	summary, err := s.store.GetNoteSummary(id)
-	if err != nil {
-		return vault.SavedNote{}, err
+	saved := vault.SavedNote{Note: note, Summary: summary}
+	s.emitNoteSavedEvent(vaultID, note.ID, note.Revision)
+	return saved, nil
+}
+
+func (s *VaultService) emitNoteSavedEvent(vaultID, noteID string, revision uint64) {
+	s.mu.RLock()
+	app := s.app
+	s.mu.RUnlock()
+	if app == nil || app.Event == nil {
+		return
 	}
-	return vault.SavedNote{Note: note, Summary: summary}, nil
+	if app.Event.Emit("cipherleaf:note-saved", noteSavedEvent{
+		VaultID:  vaultID,
+		NoteID:   noteID,
+		Revision: revision,
+	}) {
+		log.Printf("note-saved event was cancelled for %s", noteID)
+	}
 }
 
 func (s *VaultService) SaveImageAttachment(noteID, imageDataURL string) (string, error) {

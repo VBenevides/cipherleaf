@@ -18,10 +18,10 @@ test("puts the card journal under each tag", () => {
   const result = appendCardContentJournal("> Root\n>> Existing", "> Root\n>> Updated", metadata(), date);
 
   assert.ok(result);
-  assert.match(result, new RegExp(`> 2026-09-03\\n  > Work\\n    \\[ \\] \\[card\\]\\(note:card-1\\)`));
-  assert.match(result, /  > Work[\s\S]*      > Root[\s\S]*  > Ops\n    \[ \] \[card\]\(note:card-1\)/);
-  assert.equal((result.match(/    \[ \] \[card\]\(note:card-1\)/g) ?? []).length, 2);
-  assert.equal((result.match(/      > Updated/g) ?? []).length, 2);
+  assert.match(result, /> 2026-09-03\n {2}> Work\n {4}\[ \] \[card\]\(note:card-1\)/);
+  assert.match(result, / {2}> Work[\s\S]* {6}> Root[\s\S]* {2}> Ops\n {4}\[ \] \[card\]\(note:card-1\)/);
+  assert.equal((result.match(/ {4}\[ \] \[card\]\(note:card-1\)/g) ?? []).length, 2);
+  assert.equal((result.match(/ {6}> Updated/g) ?? []).length, 2);
   assert.doesNotMatch(result, new RegExp(`${CARD_JOURNAL_START}|${CARD_JOURNAL_END}`));
 });
 
@@ -39,7 +39,7 @@ test("adds the journal below the board and merges into today's section", () => {
   assert.ok(result);
   assert.ok(result.includes("> 2026-09-03: daily\n  > Existing\n  > Work"));
   assert.ok(result.includes("  > Work\n    [ ] [card](note:card-1)"));
-  assert.ok(result.indexOf(CARD_JOURNAL_START) < 0);
+  assert.equal(result.includes(CARD_JOURNAL_START), false);
 });
 
 test("appends card content to an existing tag section", () => {
@@ -63,7 +63,7 @@ test("appends card content to an existing tag section", () => {
   );
 
   assert.ok(result);
-  assert.equal((result.match(/^  > Tag 1$/gm) ?? []).length, 1);
+  assert.equal((result.match(/^ {2}> Tag 1$/gm) ?? []).length, 1);
   assert.ok(result.includes("      > Existing content\n    [ ] [card](note:card-1)"));
   assert.ok(result.indexOf("note:card-1") < result.indexOf("  - Untagged content"));
   assert.ok(result.indexOf("  - Untagged content") < result.indexOf("  > Tag 2"));
@@ -104,7 +104,7 @@ test("merges an existing tag without a board marker", () => {
   );
 
   assert.ok(result);
-  assert.equal((result.match(/^  > Tag 1$/gm) ?? []).length, 1);
+  assert.equal((result.match(/^ {2}> Tag 1$/gm) ?? []).length, 1);
   assert.ok(result.includes("    • Existing content\n    [ ] [card](note:card-1)"));
 });
 
@@ -128,7 +128,7 @@ test("creates a new date without rolling older content forward", () => {
   const previousDate = result.indexOf("> 2026-09-02");
   assert.ok(result.indexOf("> 2026-09-03") < previousDate);
   const currentDate = result.slice(0, previousDate);
-  assert.equal((currentDate.match(/^  > Tag 1$/gm) ?? []).length, 1);
+  assert.equal((currentDate.match(/^ {2}> Tag 1$/gm) ?? []).length, 1);
   assert.ok(currentDate.includes("    [ ] [card](note:card-1)"));
   assert.equal(currentDate.includes("Existing content"), false);
   assert.equal(currentDate.includes("Done"), false);
@@ -249,7 +249,7 @@ test("journals a newly saved checked point with its children", () => {
     assert.ok(result.includes("> [x] Done\n        > Child"));
     if (!tags.length) {
       assert.ok(result.includes("  > Untagged"));
-      assert.doesNotMatch(result, /^  >\s*$/m);
+      assert.doesNotMatch(result, /^ {2}>\s*$/m);
     }
   }
 });
@@ -302,8 +302,8 @@ test("keeps only the latest version of a repeated same-day change", () => {
   assert.equal((result.match(/note:card-1/g) ?? []).length, 1);
   assert.equal((result.match(/note:other-card/g) ?? []).length, 1);
   assert.ok(result.includes("        > Testasc"));
-  assert.doesNotMatch(result, /^      > Keep$/m);
-  assert.doesNotMatch(result, /^        > Testas$/m);
+  assert.doesNotMatch(result, /^ {6}> Keep$/m);
+  assert.doesNotMatch(result, /^ {8}> Testas$/m);
 });
 
 test("accumulates separate same-day changes without unchanged siblings", () => {
@@ -319,7 +319,7 @@ test("accumulates separate same-day changes without unchanged siblings", () => {
   assert.equal((result.match(/note:card-1/g) ?? []).length, 1);
   assert.ok(result.includes("> First changed"));
   assert.ok(result.includes("> Second changed"));
-  assert.doesNotMatch(result, /^        > Keep$/m);
+  assert.doesNotMatch(result, /^ {8}> Keep$/m);
 });
 
 test("appends a checked point when its unchecked copy exists only on an older date", () => {
@@ -353,8 +353,8 @@ test("splits comma-separated tags into separate journal sections", () => {
   const result = appendCardContentJournal("Before", "After", { ...metadata(), tags: ["Tag 1, Tag 2"] }, date);
 
   assert.ok(result);
-  assert.equal((result.match(/  > Tag [12]/g) ?? []).length, 2);
-  assert.equal((result.match(/    \[ \] \[card\]\(note:card-1\)/g) ?? []).length, 2);
+  assert.equal((result.match(/ {2}> Tag [12]/g) ?? []).length, 2);
+  assert.equal((result.match(/ {4}\[ \] \[card\]\(note:card-1\)/g) ?? []).length, 2);
   assert.doesNotMatch(result, /Tag 1, Tag 2/);
 });
 
@@ -362,7 +362,7 @@ test("maps only concluded cards to a checked journal title", () => {
   for (const status of ["not-started", "in-progress", "blocked", "finished"] as const) {
     const result = appendCardContentJournal("Before", "After", metadata(status), date);
     assert.ok(result);
-    assert.match(result, new RegExp(`    \\[${status === "finished" ? "x" : " "}\\]`));
+    assert.ok(result.includes(`    [${status === "finished" ? "x" : " "}]`));
   }
 });
 
@@ -378,21 +378,21 @@ test("journals additions and preserves nested element structure", () => {
   const result = appendCardContentJournal("> Root", "> Root\n>> Added\n>>> Child", metadata(), date);
 
   assert.ok(result);
-  assert.match(result, /      > Root/);
-  assert.match(result, /        > Added/);
-  assert.match(result, /          > Child/);
+  assert.match(result, / {6}> Root/);
+  assert.match(result, / {8}> Added/);
+  assert.match(result, / {10}> Child/);
 });
 
 test("journals reordering and code content changes", () => {
   const reordered = appendCardContentJournal("> A\n> B", "> B\n> A", metadata(), date);
   assert.ok(reordered);
-  assert.match(reordered, /      > B/);
-  assert.match(reordered, /      > A/);
+  assert.match(reordered, / {6}> B/);
+  assert.match(reordered, / {6}> A/);
 
   const code = appendCardContentJournal("```ts\nconst a = 1\n```", "```js\nconst a = 2\n```", metadata(), date);
   assert.ok(code);
-  assert.match(code, /      ```js/);
-  assert.match(code, /      const a = 2/);
+  assert.match(code, / {6}```js/);
+  assert.match(code, / {6}const a = 2/);
 });
 
 test("journals large cards without quadratic diff allocation", () => {
@@ -400,8 +400,8 @@ test("journals large cards without quadratic diff allocation", () => {
   const result = appendCardContentJournal(previous, `${previous}\n> Added`, metadata(), date);
 
   assert.ok(result);
-  assert.match(result, /      > Added/);
-  assert.equal((result.match(/      > Item /g) ?? []).length, 0);
+  assert.match(result, / {6}> Added/);
+  assert.equal((result.match(/ {6}> Item /g) ?? []).length, 0);
 });
 
 test("does not emit journal wrapper markers", () => {

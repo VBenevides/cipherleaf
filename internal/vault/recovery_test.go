@@ -316,3 +316,37 @@ func TestPermanentTrashDeletion(t *testing.T) {
 		t.Fatal("restored permanently deleted note")
 	}
 }
+
+func TestPermanentTrashDeletionRemovesOrphanedDescendants(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "orphan-test-secret"); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.CreateFolder("Parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateFolder("Child", parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteFolder(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteFolder(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PermanentlyDeleteTrashItem("folder", parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListTrash()
+	if err != nil || len(items) != 1 || items[0].ID != child.ID {
+		t.Fatalf("orphaned child trash = %#v, %v", items, err)
+	}
+	if err := store.PermanentlyDeleteTrashItem("folder", child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if items, err := store.ListTrash(); err != nil || len(items) != 0 {
+		t.Fatalf("trash after orphan cleanup = %#v, %v", items, err)
+	}
+}

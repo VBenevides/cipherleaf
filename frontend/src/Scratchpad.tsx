@@ -3,7 +3,7 @@ import { Events, Window } from "@wailsio/runtime";
 import type { StateEffect } from "@codemirror/state";
 import { VaultService } from "../bindings/cipherleaf/internal/app";
 import type { ScratchpadState } from "../bindings/cipherleaf/internal/app/models";
-import type { Note } from "../bindings/cipherleaf/internal/vault/models";
+import type { Note, NoteSummary } from "../bindings/cipherleaf/internal/vault/models";
 import { errorText } from "./errors";
 import { createSerialTaskRunner } from "./serialTask";
 import { cardMetadataFromSummary, type BoardColumn, type CardMetadata, type CardStatus } from "./cards";
@@ -13,6 +13,7 @@ import {
   prepareNoteContent,
 } from "./objectDocument";
 
+import { parseNoteSavedEvent } from "./noteSavedEvent";
 const LiveMarkdownEditor = lazy(() => import("./LiveMarkdownEditor"));
 
 type ScratchpadProps = {
@@ -40,20 +41,12 @@ type ScratchpadProps = {
   readonly onIncreaseFontSize?: () => void;
   readonly defaultSectionsCollapsed?: boolean;
 };
-
-type PendingTargetDraft = {
-  readonly note: Note;
-  readonly draftSequence: number;
-};
-
 type SavedScrollSnapshot = {
   readonly snapshot: StateEffect<unknown>;
   readonly document: string;
 };
 
-function targetNoteKey(vaultId: string, noteID: string): string {
-  return JSON.stringify([vaultId, noteID]);
-}
+
 
 const EMPTY_STATE: ScratchpadState = {
   content: "",
@@ -62,11 +55,17 @@ const EMPTY_STATE: ScratchpadState = {
   revision: 0,
 };
 
-const DEFAULT_SCRATCHPAD_SHORTCUT_TARGET = "scratchpad";
+const MAX_NOTE_BYTES = 10 * 1024 * 1024;
+const MAX_SCROLL_SNAPSHOTS = 8;
+
+
 
 function noteIDForShortcutTarget(target: string): string | null {
   return target.startsWith("note:") && target.length > "note:".length ? target.slice("note:".length) : null;
 }
+
+const DEFAULT_SCRATCHPAD_SHORTCUT_TARGET = "scratchpad";
+
 
 function noteForEditing(note: Note): Note {
   return { ...note, content: prepareNoteContent(note.content).canonicalText };
@@ -83,10 +82,18 @@ function scratchpadState(value: unknown): ScratchpadState | null {
     : value;
   if (!candidate || typeof candidate !== "object") return null;
   const state = candidate as Partial<ScratchpadState>;
-  if (!Number.isFinite(state.generation) || !Number.isFinite(state.revision)) return null;
+  if (
+    !Number.isSafeInteger(state.generation) ||
+    state.generation! < 0 ||
+    !Number.isSafeInteger(state.revision) ||
+    state.revision! < 0 ||
+    typeof state.content !== "string" ||
+    state.content.length > MAX_NOTE_BYTES ||
+    new TextEncoder().encode(state.content).byteLength > MAX_NOTE_BYTES
+  ) return null;
   return {
-    content: typeof state.content === "string" ? state.content : "",
-    caretOffset: Number.isFinite(state.caretOffset) ? Math.max(0, Math.floor(state.caretOffset!)) : 0,
+    content: state.content,
+    caretOffset: Number.isSafeInteger(state.caretOffset) ? Math.max(0, state.caretOffset!) : 0,
     generation: state.generation!,
     revision: state.revision!,
   };
@@ -121,6 +128,7 @@ export default function Scratchpad({
   const [targetNote, setTargetNote] = useState<Note | null>(null);
   const [targetContent, setTargetContent] = useState("");
   const [overlayCardData, setOverlayCardData] = useState<ReadonlyMap<string, CardMetadata>>(new Map());
+  const overlayCardRevisionsRef = useRef(new Map<string, number>());
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const stateRef = useRef(state);
@@ -133,9 +141,8 @@ export default function Scratchpad({
   const targetContentRef = useRef("");
   const targetDirtyRef = useRef(false);
   const targetRequestRef = useRef(0);
+  const targetNoteIDRef = useRef<string | null>(null);
   const targetVaultIDRef = useRef("");
-  const targetDraftsRef = useRef(new Map<string, PendingTargetDraft>());
-  const persistedDraftSequencesRef = useRef(new Map<string, number>());
   const scrollSnapshotsRef = useRef(new Map<string, SavedScrollSnapshot>());
   const overlayCardTitles = useMemo(
     () => new Map([...overlayCardData].map(([id, card]) => [id, card.title])),
@@ -166,7 +173,12 @@ export default function Scratchpad({
     return save(async () => {
       if (generation !== generationRef.current) return;
       try {
-        const saved = scratchpadState(await VaultService.SaveScratchpad(content, caretOffset, generation));
+        const saved = scratchpadState(await VaultService.SaveScratchpad(
+          content,
+          caretOffset,
+          generation,
+          stateRef.current.revision,
+        ));
         if (saved?.generation !== generationRef.current) return;
         const latestLocalChange = localChange === localChangeRef.current;
         if (latestLocalChange) lastSavedLocalChangeRef.current = localChange;
@@ -181,25 +193,35 @@ export default function Scratchpad({
     return save(async () => {
       if (request !== targetRequestRef.current || targetNoteRef.current?.id !== note.id) return;
       try {
-        const vaultId = targetVaultIDRef.current;
-        const saved = await VaultService.SaveNote(note.id, note.title, markdownForEditing(content));
-        if (vaultId) {
-          void Events.Emit("cipherleaf:scratchpad-note-changed", {
-            vaultId,
-            note: saved.note,
-            summary: saved.summary,
-          }).catch(() => {});
-        }
+        const currentNote = targetNoteRef.current;
+        if (!currentNote) return;
+        const saved = await VaultService.SaveNote(
+          currentNote.id,
+          currentNote.title,
+          markdownForEditing(content),
+          currentNote.revision,
+        );
         if (request !== targetRequestRef.current) return;
         const prepared = noteForEditing(saved.note);
-        if (targetNoteRef.current?.id === note.id && targetContentRef.current === content) {
+        if (targetNoteRef.current?.id !== currentNote.id) return;
+        const latestContent = targetContentRef.current;
+        if (latestContent === content) {
           const current = { ...prepared, content };
           targetNoteRef.current = current;
           setTargetNote(current);
           targetDirtyRef.current = false;
+        } else {
+          targetNoteRef.current = {
+            ...targetNoteRef.current,
+            revision: Math.max(targetNoteRef.current.revision, prepared.revision),
+          };
         }
       } catch (reason) {
-        reportError(reason);
+        if (errorText(reason).startsWith("note was changed by another writer")) {
+          setError("This note changed elsewhere. Copy the draft, then reload latest before retrying.");
+        } else {
+          reportError(reason);
+        }
       }
     });
   }, [reportError, save]);
@@ -247,7 +269,9 @@ export default function Scratchpad({
     targetContentRef.current = "";
     targetDirtyRef.current = false;
     targetVaultIDRef.current = "";
+    targetNoteIDRef.current = null;
     loadedRef.current = false;
+    overlayCardRevisionsRef.current.clear();
     setOverlayCardData(new Map());
     setTargetNote(null);
     setTargetContent("");
@@ -261,28 +285,19 @@ export default function Scratchpad({
       targetVaultIDRef.current = currentSession?.vaultId ?? "";
       if (summaries) {
         const cards = new Map<string, CardMetadata>();
+        overlayCardRevisionsRef.current.clear();
         for (const summary of summaries) {
+          overlayCardRevisionsRef.current.set(summary.id, summary.revision);
           const metadata = cardMetadataFromSummary(summary);
           if (metadata) cards.set(summary.id, metadata);
         }
         setOverlayCardData(cards);
       }
       const noteID = noteIDForShortcutTarget(target);
+      targetNoteIDRef.current = noteID;
       if (noteID) {
-        let loadedNote = noteForEditing(await VaultService.GetNote(noteID));
+        const loadedNote = noteForEditing(await VaultService.GetNote(noteID));
         if (request !== targetRequestRef.current) return;
-        const key = targetNoteKey(targetVaultIDRef.current, loadedNote.id);
-        const pending = targetDraftsRef.current.get(key);
-        const persistedDraftSequence = persistedDraftSequencesRef.current.get(key) ?? 0;
-        if (
-          pending &&
-          pending.draftSequence > persistedDraftSequence &&
-          pending.note.revision >= loadedNote.revision
-        ) {
-          loadedNote = { ...pending.note };
-        } else if (pending && pending.note.revision < loadedNote.revision) {
-          targetDraftsRef.current.delete(key);
-        }
         setError("");
         targetNoteRef.current = loadedNote;
         targetContentRef.current = loadedNote.content;
@@ -299,7 +314,7 @@ export default function Scratchpad({
       targetNoteRef.current = null;
       targetContentRef.current = "";
       targetDirtyRef.current = false;
-      targetDraftsRef.current.clear();
+
       setTargetNote(null);
       setTargetContent("");
       applyState(next);
@@ -309,16 +324,17 @@ export default function Scratchpad({
       if (request !== targetRequestRef.current) return;
       targetNoteRef.current = null;
       targetDirtyRef.current = false;
-      targetDraftsRef.current.clear();
       targetVaultIDRef.current = "";
+      targetNoteIDRef.current = null;
+      overlayCardRevisionsRef.current.clear();
       setOverlayCardData(new Map());
       setTargetNote(null);
       try {
         const fallback = scratchpadState(await VaultService.GetScratchpad());
         if (request !== targetRequestRef.current) return;
         if (fallback) applyState(fallback);
-      } catch {
-        // Keep the editor cleared when the vault is unavailable.
+      } catch (error_) {
+        console.error(`Scratchpad fallback refresh failed: ${errorText(error_)}`);
       }
       if (request !== targetRequestRef.current) return;
       loadedRef.current = true;
@@ -327,11 +343,20 @@ export default function Scratchpad({
     }
   }, [applyState, overlay, reportError]);
 
-  const clearTarget = useCallback(() => {
+  const clearTarget = useCallback((resetScratchpad = false) => {
     targetRequestRef.current++;
     targetNoteRef.current = null;
     targetContentRef.current = "";
     targetDirtyRef.current = false;
+    targetNoteIDRef.current = null;
+    scrollSnapshotsRef.current.clear();
+    if (resetScratchpad) {
+      stateRef.current = EMPTY_STATE;
+      generationRef.current = EMPTY_STATE.generation;
+      localChangeRef.current = 0;
+      lastSavedLocalChangeRef.current = 0;
+      setState(EMPTY_STATE);
+    }
     setTargetNote(null);
     setTargetContent("");
     setLoaded(false);
@@ -340,79 +365,120 @@ export default function Scratchpad({
 
   useEffect(() => {
     let active = true;
-    const applyChanged = (event: unknown) => {
-      const next = scratchpadState(event);
-      if (active && !targetNoteRef.current && next) {
+    const applyChanged = async () => {
+      const request = targetRequestRef.current;
+      const generation = generationRef.current;
+      const vaultID = targetVaultIDRef.current;
+      if (!active || targetNoteRef.current) return;
+      try {
+        const next = scratchpadState(await VaultService.GetScratchpad());
+        if (
+          !active ||
+          request !== targetRequestRef.current ||
+          generation !== generationRef.current ||
+          vaultID !== targetVaultIDRef.current ||
+          targetNoteRef.current ||
+          !next
+        ) return;
         const preserveLocal = next.generation === stateRef.current.generation &&
           localChangeRef.current > lastSavedLocalChangeRef.current;
         applyState(next, preserveLocal);
         loadedRef.current = true;
         setLoaded(true);
+      } catch (reason) {
+        if (active) console.error(`Scratchpad refresh failed: ${errorText(reason)}`);
       }
     };
     const offChanged = Events.On("cipherleaf:scratchpad-changed", applyChanged);
-    const applyTargetNoteEvent = (event: unknown, draft: boolean) => {
-      if (!overlay || !active) return;
-      const raw = event && typeof event === "object" && "data" in event ? event.data : event;
-      if (!raw || typeof raw !== "object") return;
-      const payload = raw as { vaultId?: unknown; note?: unknown; draftSequence?: unknown };
-      const changedNote = payload.note && typeof payload.note === "object" ? payload.note as Note : null;
-      const draftSequence = typeof payload.draftSequence === "number" && Number.isSafeInteger(payload.draftSequence)
-        ? payload.draftSequence
-        : 0;
-      if (typeof payload.vaultId !== "string" || !changedNote || (draft && draftSequence <= 0)) return;
-      const key = targetNoteKey(payload.vaultId, changedNote.id);
-      const pending = targetDraftsRef.current.get(key);
-      if (draft) {
-        if (!pending || draftSequence > pending.draftSequence) {
-          targetDraftsRef.current.set(key, { note: changedNote, draftSequence });
-        }
-      } else {
-        const persisted = persistedDraftSequencesRef.current.get(key) ?? 0;
-        if (draftSequence > persisted) persistedDraftSequencesRef.current.set(key, draftSequence);
-      }
-      if (!loadedRef.current) {
-        if (!draft) {
-          void loadTarget();
+    const applySavedNoteEvent = async (event: unknown) => {
+      const payload = parseNoteSavedEvent(event);
+      if (!overlay || !active || payload?.vaultId !== targetVaultIDRef.current) return;
+      if (!payload) return;
+      const { noteID, revision } = payload;
+      const request = targetRequestRef.current;
+      const vaultID = targetVaultIDRef.current;
+      let authoritativeNote: Note;
+      let summaries: readonly NoteSummary[];
+      try {
+        const [loadedNote, loadedSummaries] = await Promise.all([
+          VaultService.GetNote(noteID),
+          VaultService.ListNotes(),
+        ]);
+        if (!loadedNote || !loadedSummaries) throw new Error("authoritative note refresh returned incomplete data");
+        authoritativeNote = loadedNote;
+        summaries = loadedSummaries;
+      } catch (reason) {
+        if (active && request === targetRequestRef.current && vaultID === targetVaultIDRef.current) {
+          console.error(`Scratchpad note refresh failed: ${errorText(reason)}`);
         }
         return;
       }
-      const current = targetNoteRef.current;
       if (
-        payload.vaultId !== targetVaultIDRef.current ||
-        !current ||
-        changedNote.id !== current.id ||
-        changedNote.revision < current.revision
+        !active ||
+        request !== targetRequestRef.current ||
+        vaultID !== targetVaultIDRef.current
       ) return;
-      if (draft) {
-        const latest = targetDraftsRef.current.get(key);
-        const persisted = persistedDraftSequencesRef.current.get(key) ?? 0;
-        if (latest?.draftSequence !== draftSequence || draftSequence <= persisted || targetDirtyRef.current) return;
-      } else {
-        const latest = targetDraftsRef.current.get(key);
-        if (latest && latest.draftSequence > draftSequence) {
-          if (!targetDirtyRef.current) {
-            targetNoteRef.current = { ...latest.note };
-            targetContentRef.current = latest.note.content;
-            setTargetNote(targetNoteRef.current);
-            setTargetContent(latest.note.content);
-          }
-          return;
-        }
-        targetDraftsRef.current.delete(key);
-        if (changedNote.revision <= current.revision || targetDirtyRef.current) return;
+      const authoritativeSummary = summaries.find((item) => item.id === noteID);
+      if (
+        !authoritativeSummary ||
+        authoritativeNote.id !== noteID ||
+        authoritativeNote.revision !== revision ||
+        authoritativeSummary.revision !== revision
+      ) return;
+      const wasKnownCard = overlayCardRevisionsRef.current.has(noteID);
+      const isTargetNote = noteID === targetNoteIDRef.current;
+      const metadata = cardMetadataFromSummary(authoritativeSummary);
+      if (!wasKnownCard && !isTargetNote && !metadata) return;
+      const previousRevision = overlayCardRevisionsRef.current.get(noteID) ?? 0;
+      if (authoritativeSummary.revision <= previousRevision) return;
+      overlayCardRevisionsRef.current.set(noteID, authoritativeSummary.revision);
+      setOverlayCardData((current) => {
+        const next = new Map(current);
+        if (metadata) next.set(noteID, metadata);
+        else next.delete(noteID);
+        return next;
+      });
+      const currentTarget = targetNoteRef.current;
+      if (
+        currentTarget?.id === authoritativeNote.id &&
+        !targetDirtyRef.current &&
+        authoritativeNote.revision > currentTarget.revision
+      ) {
+        const prepared = noteForEditing(authoritativeNote);
+        targetNoteRef.current = prepared;
+        targetContentRef.current = prepared.content;
+        setTargetNote(prepared);
+        setTargetContent(prepared.content);
       }
-      const prepared = draft ? { ...changedNote } : noteForEditing(changedNote);
-      targetNoteRef.current = prepared;
-      targetContentRef.current = prepared.content;
-      targetDirtyRef.current = false;
-      setTargetNote(prepared);
-      setTargetContent(prepared.content);
     };
-    const offTargetNoteChanged = Events.On("cipherleaf:scratchpad-note-changed", (event) => applyTargetNoteEvent(event, false));
-    const offTargetNoteDraftChanged = Events.On("cipherleaf:scratchpad-note-draft-changed", (event) => applyTargetNoteEvent(event, true));
-    const offCleared = Events.On("cipherleaf:scratchpad-cleared", () => {
-      if (active) clearTarget();
+    const offSaved = Events.On("cipherleaf:note-saved", applySavedNoteEvent);
+    const offCleared = Events.On("cipherleaf:scratchpad-cleared", (event) => {
+      if (!active) return;
+      const raw = event && typeof event === "object" && "data" in event ? event.data : event;
+      if (!raw || typeof raw !== "object") {
+        clearTarget(true);
+        return;
+      }
+      const payload = raw as { all?: unknown; vaultId?: unknown; folderIDs?: unknown };
+      if (scratchpadState(raw)) {
+        clearTarget(true);
+        return;
+      }
+      if (payload.all === true) {
+        clearTarget(true);
+        return;
+      }
+      const folderIDs = Array.isArray(payload.folderIDs) && payload.folderIDs.every((id) => typeof id === "string")
+        ? payload.folderIDs
+        : [];
+      if (
+        typeof payload.vaultId === "string" &&
+        payload.vaultId === targetVaultIDRef.current &&
+        targetNoteRef.current &&
+        folderIDs.includes(targetNoteRef.current.folderId)
+      ) {
+        clearTarget();
+      }
     });
     const offTarget = Events.On("cipherleaf:scratchpad-overlay-refresh", () => {
       if (!active) return;
@@ -428,8 +494,7 @@ export default function Scratchpad({
       active = false;
       generationRef.current += 1;
       offChanged();
-      offTargetNoteChanged();
-      offTargetNoteDraftChanged();
+      offSaved();
       offCleared();
       offTarget();
     };
@@ -482,6 +547,18 @@ export default function Scratchpad({
       {error && (
         <div className="scratchpad-alert" role="alert">
           <span>{error}</span>
+          {error.startsWith("This note changed elsewhere.") && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                targetDirtyRef.current = false;
+                void loadTarget();
+              }}
+            >
+              Reload latest
+            </button>
+          )}
           <button type="button" className="icon-button" onClick={() => setError("")} aria-label="Dismiss error">×</button>
         </div>
       )}
@@ -516,7 +593,16 @@ export default function Scratchpad({
               onCaretChange={targetNote ? undefined : (offset) => updateCaret(offset, state.generation)}
               scrollSnapshot={overlay ? scrollSnapshotsRef.current.get(editorScrollKey)?.snapshot : undefined}
               scrollSnapshotDocument={overlay ? scrollSnapshotsRef.current.get(editorScrollKey)?.document : undefined}
-              onScrollSnapshotChange={overlay ? (snapshot, document) => scrollSnapshotsRef.current.set(editorScrollKey, { snapshot, document }) : undefined}
+              onScrollSnapshotChange={overlay ? (snapshot, document) => {
+                const snapshots = scrollSnapshotsRef.current;
+                snapshots.delete(editorScrollKey);
+                snapshots.set(editorScrollKey, { snapshot, document });
+                while (snapshots.size > MAX_SCROLL_SNAPSHOTS) {
+                  const oldest = snapshots.keys().next().value;
+                  if (oldest === undefined) break;
+                  snapshots.delete(oldest);
+                }
+              } : undefined}
               showToolbar
               defaultSectionsCollapsed={defaultSectionsCollapsed}
             />

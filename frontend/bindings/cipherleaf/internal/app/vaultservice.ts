@@ -422,12 +422,12 @@ export function SaveImageAttachment(noteID: string, imageDataURL: string): $Canc
     return $Call.ByID(1556359170, noteID, imageDataURL);
 }
 
-export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.SavedNote> {
-    return $Call.ByID(2770680190, id, title, content);
+export function SaveNote(id: string, title: string, content: string, expectedRevision: number): $CancellablePromise<vault$0.SavedNote> {
+    return $Call.ByID(2770680190, id, title, content, expectedRevision);
 }
 
-export function SaveScratchpad(content: string, caretOffset: number, generation: number): $CancellablePromise<$models.ScratchpadState> {
-    return $Call.ByID(2199009165, content, caretOffset, generation);
+export function SaveScratchpad(content: string, caretOffset: number, generation: number, expectedRevision: number): $CancellablePromise<$models.ScratchpadState> {
+    return $Call.ByID(2199009165, content, caretOffset, generation, expectedRevision);
 }
 
 export function SaveVaultSettings(settings: vault$0.VaultSettings): $CancellablePromise<vault$0.VaultSettings> {

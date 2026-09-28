@@ -365,7 +365,9 @@ export function boardColumnsForMarker(
   }));
   for (const id of marker.cardIDs) {
     const status = cards.get(id)?.status;
-    columns.find((column) => column.id === status)?.cardIDs.push(id) ?? columns[0].cardIDs.push(id);
+    const column = columns.find((item) => item.id === status);
+    if (column) column.cardIDs.push(id);
+    else columns[0].cardIDs.push(id);
   }
   return columns;
 }

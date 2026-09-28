@@ -152,28 +152,58 @@ func (s *Store) listTrashedFoldersLocked() ([]trashedFolder, error) {
 	return result, nil
 }
 
+func (s *Store) requireTrashFolderAccessibleLocked(folderID string, trashedFolders map[string]trashedFolder, seen map[string]struct{}) error {
+	if folderID == "" {
+		return nil
+	}
+	if s.folderExistsLocked(folderID) {
+		return s.requireFolderAccessibleLocked(folderID)
+	}
+	if _, ok := seen[folderID]; ok {
+		return ErrFolderLocked
+	}
+	item, ok := trashedFolders[folderID]
+	if !ok {
+		return nil
+	}
+	seen[folderID] = struct{}{}
+	return s.requireTrashFolderAccessibleLocked(item.Folder.ParentID, trashedFolders, seen)
+}
+
+func (s *Store) trashFolderMapLocked(items []trashedFolder) map[string]trashedFolder {
+	result := make(map[string]trashedFolder, len(items))
+	for _, item := range items {
+		result[item.Folder.ID] = item
+	}
+	return result
+}
+
 func (s *Store) ListTrash() ([]TrashItem, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := s.requireUnlocked(); err != nil {
 		return nil, err
 	}
+	folders, err := s.listTrashedFoldersLocked()
+	if err != nil {
+		return nil, err
+	}
+	trashedFolders := s.trashFolderMapLocked(folders)
 	items := make([]TrashItem, 0)
 	notes, err := s.listTrashedNotesLocked()
 	if err != nil {
 		return nil, err
 	}
 	for _, item := range notes {
-		if s.folderExistsLocked(item.Note.FolderID) && s.requireFolderAccessibleLocked(item.Note.FolderID) != nil {
+		if err := s.requireTrashFolderAccessibleLocked(item.Note.FolderID, trashedFolders, make(map[string]struct{})); err != nil {
 			continue
 		}
 		items = append(items, TrashItem{ID: item.Note.ID, Kind: "note", Title: item.Note.Title, DeletedAt: item.DeletedAt})
 	}
-	folders, err := s.listTrashedFoldersLocked()
-	if err != nil {
-		return nil, err
-	}
 	for _, item := range folders {
+		if err := s.requireTrashFolderAccessibleLocked(item.Folder.ParentID, trashedFolders, make(map[string]struct{})); err != nil {
+			continue
+		}
 		items = append(items, TrashItem{ID: item.Folder.ID, Kind: "folder", Title: item.Folder.Name, DeletedAt: item.DeletedAt})
 	}
 	slices.SortFunc(items, func(left, right TrashItem) int { return strings.Compare(right.DeletedAt, left.DeletedAt) })
@@ -194,16 +224,14 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 		if err := s.readRecoveryRecordLocked(path, trashNoteObjectType, id, &item); err != nil {
 			return err
 		}
-		if s.folderExistsLocked(item.Note.FolderID) {
-			if err := s.requireFolderAccessibleLocked(item.Note.FolderID); err != nil {
-				return err
-			}
+		if !s.folderExistsLocked(item.Note.FolderID) {
+			return ErrFolderLocked
+		}
+		if err := s.requireFolderAccessibleLocked(item.Note.FolderID); err != nil {
+			return err
 		}
 		if _, found := s.findNoteLocked(id); found {
 			return errors.New("note already exists")
-		}
-		if !s.folderExistsLocked(item.Note.FolderID) {
-			item.Note.FolderID = ""
 		}
 		tombstone, _ := findTombstone(s.manifest.DeletedNotes, id)
 		item.Note.Revision = max(item.Note.Revision+2, tombstone.Revision+1)
@@ -235,7 +263,10 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 		}
 		if item.Folder.ParentID != "" {
 			if _, found := s.findFolderLocked(item.Folder.ParentID); !found {
-				item.Folder.ParentID = ""
+				return ErrFolderLocked
+			}
+			if err := s.requireFolderAccessibleLocked(item.Folder.ParentID); err != nil {
+				return err
 			}
 		}
 		item.Folder.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -255,14 +286,38 @@ func (s *Store) RestoreTrashItem(kind, id string) error {
 	return nil
 }
 
+func (s *Store) requireTrashItemAccessibleLocked(kind, id string) error {
+	trashedFolders, err := s.listTrashedFoldersLocked()
+	if err != nil {
+		return err
+	}
+	folderMap := s.trashFolderMapLocked(trashedFolders)
+	switch kind {
+	case "note":
+		var item trashedNote
+		if err := s.readRecoveryRecordLocked(s.trashPathLocked(kind, id), trashNoteObjectType, id, &item); err != nil {
+			return err
+		}
+		return s.requireTrashFolderAccessibleLocked(item.Note.FolderID, folderMap, make(map[string]struct{}))
+	case "folder":
+		var item trashedFolder
+		if err := s.readRecoveryRecordLocked(s.trashPathLocked(kind, id), trashFolderObjectType, id, &item); err != nil {
+			return err
+		}
+		return s.requireTrashFolderAccessibleLocked(item.Folder.ParentID, folderMap, make(map[string]struct{}))
+	default:
+		return errors.New("invalid trash item kind")
+	}
+}
+
 func (s *Store) PermanentlyDeleteTrashItem(kind, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
 		return err
 	}
-	if kind != "note" && kind != "folder" {
-		return errors.New("invalid trash item kind")
+	if err := s.requireTrashItemAccessibleLocked(kind, id); err != nil {
+		return err
 	}
 	path := s.trashPathLocked(kind, id)
 	if err := os.Remove(path); err != nil {

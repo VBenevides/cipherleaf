@@ -14,6 +14,7 @@ const (
 	mainWindowName                  = "main"
 	scratchpadWindowName            = "scratchpad"
 	defaultScratchpadShortcutTarget = "scratchpad"
+	scratchpadFocusEvent            = "cipherleaf:scratchpad-focus"
 )
 
 func validScratchpadShortcutTarget(target string) bool {
@@ -134,7 +135,7 @@ func (s *VaultService) HideScratchpad() error {
 	}
 	scratchpad, ok := app.Window.GetByName(scratchpadWindowName)
 	if !ok || scratchpad == nil {
-		return errors.New("Scratchpad window is unavailable")
+		return errors.New("scratchpad window is unavailable")
 	}
 	hideScratchpadWindow(scratchpad)
 	return nil
@@ -147,7 +148,7 @@ func (s *VaultService) SetScratchpadShortcut(shortcut string) (string, error) {
 	defer s.scratchpadShortcutMu.Unlock()
 
 	if !s.scratchpadShortcutInitialized {
-		return "", errors.New("Scratchpad shortcut is not initialized")
+		return "", errors.New("scratchpad shortcut is not initialized")
 	}
 	shortcut = strings.TrimSpace(shortcut)
 	current := s.scratchpadShortcut
@@ -208,44 +209,54 @@ func (s *VaultService) toggleScratchpad() {
 		return
 	}
 	if s.GetScratchpadShortcutTarget() != defaultScratchpadShortcutTarget {
-		if scratchpad.IsVisible() {
-			hideScratchpadWindow(scratchpad)
-			return
-		}
-		if s.GetSession().Locked {
-			mainWindow.Show()
-			mainWindow.Focus()
-			return
-		}
-		mainWindowActive := mainWindow.IsFocused() && mainWindow.IsVisible()
-		if mainWindowActive {
-			mainWindow.EmitEvent("cipherleaf:scratchpad-focus")
-			return
-		}
-		positionScratchpad(app, mainWindow, scratchpad)
-		scratchpad.Show()
-		scratchpad.Focus()
-		scratchpad.EmitEvent("cipherleaf:scratchpad-overlay-refresh")
+		s.toggleScratchpadForTarget(app, mainWindow, scratchpad)
 		return
 	}
+	s.toggleDefaultScratchpad(app, mainWindow, scratchpad)
+}
 
+func (s *VaultService) toggleScratchpadForTarget(app *application.App, mainWindow, scratchpad application.Window) {
+	if scratchpad.IsVisible() {
+		hideScratchpadWindow(scratchpad)
+		return
+	}
+	if s.GetSession().Locked {
+		mainWindow.Show()
+		mainWindow.Focus()
+		return
+	}
+	if mainWindow.IsFocused() && mainWindow.IsVisible() {
+		mainWindow.EmitEvent(scratchpadFocusEvent)
+		return
+	}
+	positionScratchpad(app, mainWindow, scratchpad)
+	scratchpad.Show()
+	scratchpad.Focus()
+	scratchpad.EmitEvent("cipherleaf:scratchpad-overlay-refresh")
+}
+
+func (s *VaultService) toggleDefaultScratchpad(app *application.App, mainWindow, scratchpad application.Window) {
 	mainWindowActive := mainWindow.IsFocused() && mainWindow.IsVisible()
 	if scratchpad.IsVisible() {
 		hideScratchpadWindow(scratchpad)
 		if mainWindowActive {
-			mainWindow.EmitEvent("cipherleaf:scratchpad-focus")
+			mainWindow.EmitEvent(scratchpadFocusEvent)
 		}
-	} else if mainWindowActive {
-		mainWindow.EmitEvent("cipherleaf:scratchpad-focus")
-	} else if s.GetSession().Locked {
+		return
+	}
+	if mainWindowActive {
+		mainWindow.EmitEvent(scratchpadFocusEvent)
+		return
+	}
+	if s.GetSession().Locked {
 		hideScratchpadWindow(scratchpad)
 		mainWindow.Show()
 		mainWindow.Focus()
-	} else {
-		positionScratchpad(app, mainWindow, scratchpad)
-		scratchpad.Show()
-		scratchpad.Focus()
+		return
 	}
+	positionScratchpad(app, mainWindow, scratchpad)
+	scratchpad.Show()
+	scratchpad.Focus()
 }
 
 func hideScratchpadWindow(window application.Window) {

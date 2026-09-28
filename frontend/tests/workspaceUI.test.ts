@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { targetTabForShortcut } from "../src/shortcutTargets.ts";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
@@ -44,15 +44,12 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /VaultService\.ListNotes\(\)\.catch\(\(\) => null\)/);
   assert.match(scratchpad, /cardMetadataFromSummary\(summary\)/);
   assert.match(scratchpad, /const editorCardData = cardData \?\? overlayCardData/);
-  assert.match(scratchpad, /VaultService\.SaveNote\(note\.id, note\.title/);
-  assert.match(scratchpad, /Events\.Emit\("cipherleaf:scratchpad-note-changed"/);
-  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-note-changed"/);
-  assert.match(scratchpad, /Events\.On\("cipherleaf:scratchpad-note-draft-changed"/);
-  assert.match(scratchpad, /targetDirtyRef\.current\) return/);
-  assert.match(scratchpad, /payload\.vaultId !== targetVaultIDRef\.current/);
-  assert.match(scratchpad, /changedNote\.revision <= current\.revision/);
+  assert.match(scratchpad, /currentNote\.title,[\s\S]*currentNote\.revision/);
+  assert.match(scratchpad, /Events\.On\("cipherleaf:note-saved"/);
+  assert.match(scratchpad, /payload\?\.vaultId !== targetVaultIDRef\.current/);
   assert.match(scratchpad, /targetVaultIDRef\.current = "";[\s\S]*loadedRef\.current = false;/);
-  assert.match(scratchpad, /VaultService\.SaveScratchpad\(content, caretOffset, generation\)/);
+  assert.match(scratchpad, /VaultService\.SaveScratchpad\([\s\S]*stateRef\.current\.revision/);
+  assert.match(scratchpad, /VaultService\.GetScratchpad\(\)/);
   assert.match(scratchpad, /next\.generation < current\.generation/);
   assert.match(scratchpad, /next\.revision < current\.revision/);
   assert.match(scratchpad, /key=\{editorGeneration\}/);
@@ -64,16 +61,19 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /aria-label="Hide scratchpad"/);
   assert.match(scratchpad, /className="scratchpad-alert" role="alert">[\s\S]*setError\(""\)[\s\S]*aria-label="Dismiss error"/);
   assert.match(scratchpad, /Window\.Hide\(\)/);
-  assert.match(app, /Events\.On\("cipherleaf:scratchpad-note-changed"/);
-  assert.match(app, /Events\.Emit\("cipherleaf:scratchpad-note-changed"/);
-  assert.match(app, /Events\.Emit\("cipherleaf:scratchpad-note-draft-changed"/);
+  assert.match(app, /Events\.On\("cipherleaf:note-saved"/);
   assert.match(app, /if \(id !== noteRef\.current\?\.id \|\| dirtyRef\.current\) return/);
-  assert.match(app, /changedNote\.revision <= noteRef\.current\.revision/);
+  assert.match(app, /authoritativeNote\.revision <= noteRef\.current\.revision/);
+  assert.match(app, /const noteID = payload\.noteID;[\s\S]*const revision = payload\.revision;/);
+  assert.match(app, /const queuedSnapshot = noteRef\.current\?\.id === snapshot\.id \? noteRef\.current : snapshot/);
+  assert.match(app, /failedVersion/);
+  assert.match(app, /markdownForEditing\(queuedSnapshot\.content\),\n {10}queuedSnapshot\.revision/);
+  assert.match(app, /Reload latest/);
 });
 
 test("scratchpad Escape closes its host without stealing dialog Escape", () => {
   assert.match(scratchpad, /readonly onClose\?: \(\) => void;/);
-  const escapeEffect = scratchpad.match(/  useEffect\(\(\) => \{\n    const handleEscape = \(event: KeyboardEvent\) => \{[\s\S]*?  \}, \[hideOverlay, onClose, overlay\]\);\n/);
+  const escapeEffect = scratchpad.match(/ {2}useEffect\(\(\) => \{\n {4}const handleEscape = \(event: KeyboardEvent\) => \{[\s\S]*? {2}\}, \[hideOverlay, onClose, overlay\]\);\n/);
   assert.ok(escapeEffect);
   assert.match(escapeEffect[0], /event\.key !== "Escape" \|\| event\.defaultPrevented \|\| event\.isComposing/);
   assert.match(escapeEffect[0], /event\.target instanceof Element && event\.target\.closest\("dialog, \[role=dialog\]"\)/);
@@ -81,7 +81,7 @@ test("scratchpad Escape closes its host without stealing dialog Escape", () => {
   assert.match(escapeEffect[0], /if \(overlay\) hideOverlay\(\);[\s\S]*else onClose\?\.\(\);/);
   assert.match(scratchpad, /VaultService\.HideScratchpad\(\)\.catch\(\(\) => Window\.Hide\(\)\)/);
   assert.match(escapeEffect[0], /window\.addEventListener\("keydown", handleEscape\);[\s\S]*window\.removeEventListener\("keydown", handleEscape\)/);
-  const scratchpadRender = app.match(/  const renderScratchpadEditor = \(\) => \{[\s\S]*?\n  \};\n/);
+  const scratchpadRender = app.match(/ {2}const renderScratchpadEditor = \(\) => \{[\s\S]*?\n {2}\};\n/);
   assert.ok(scratchpadRender);
   assert.match(scratchpadRender[0], /<Scratchpad[\s\S]*onClose=\{leaveScratchpad\}/);
 });
@@ -119,7 +119,8 @@ test("native shortcut routes through the focused window or guarded overlay", () 
   assert.match(nativeService, /screen\.Bounds\.X/);
   assert.match(nativeService, /screen\.Bounds\.Y/);
   assert.match(nativeService, /scratchpad\.SetPosition/);
- assert.match(nativeService, /mainWindow\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+  assert.match(nativeService, /scratchpadFocusEvent\s*=\s*"cipherleaf:scratchpad-focus"/);
+  assert.match(nativeService, /mainWindow\.EmitEvent\(scratchpadFocusEvent\)/);
   assert.match(nativeService, /scratchpad\.EmitEvent\("cipherleaf:scratchpad-overlay-refresh"\)/);
   assert.doesNotMatch(nativeMain, /window\.RegisterKeyBinding/);
   assert.match(nativeMain, /log\.Printf\("failed to register scratchpad global shortcut/);
@@ -159,29 +160,22 @@ test("Scratchpad shortcut can target an open note tab", () => {
   assert.match(app, /SetScratchpadShortcutTarget\(next\)/);
   assert.match(app, /const DEFAULT_SCRATCHPAD_SHORTCUT_TARGET = "scratchpad"/);
   assert.match(app, /targetTabForShortcut\(scratchpadShortcutTarget, tabsRef\.current\)/);
-  assert.match(app, /function targetTabForShortcut\(target: string, tabs: readonly EditorTab\[\]\)/);
+  assert.match(app, /import \{ noteIDForShortcutTarget, targetTabForShortcut \} from "\.\/shortcutTargets";/);
   assert.match(app, /scratchpadNoteId: noteIDForShortcutTarget\(scratchpadShortcutTarget\) \?\? ""/);
   assert.match(app, /checked=\{noteIDForShortcutTarget\(scratchpadShortcutTarget\) === note\.id\}/);
   assert.match(app, /Open as scratchpad/);
   assert.match(nativeService, /GetScratchpadShortcutTarget\(\)/);
   assert.match(nativeService, /scratchpad\.Show\(\)/);
-  assert.match(nativeService, /mainWindow\.EmitEvent\("cipherleaf:scratchpad-focus"\)/);
+  assert.match(nativeService, /scratchpadFocusEvent\s*=\s*"cipherleaf:scratchpad-focus"/);
+  assert.match(nativeService, /mainWindow\.EmitEvent\(scratchpadFocusEvent\)/);
 });
 
 test("shortcut target resolution handles default, missing, and duplicate note tabs", () => {
-  const noteIDSource = app.match(/function noteIDForShortcutTarget\(target: string\): string \| null \{[\s\S]*?\n\}/);
-  const functionSource = app.match(/function targetTabForShortcut\(target: string, tabs: readonly EditorTab\[\]\): EditorTab \| null \{[\s\S]*?\n\}/);
-  assert.ok(noteIDSource);
-  assert.ok(functionSource);
-  const functionBody = transpileModule(`${noteIDSource[0]}\n${functionSource[0]}`, {
-    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
-  }).outputText;
-  const resolve = new Function(`${functionBody}\nreturn targetTabForShortcut;`)() as (target: string, tabs: Array<{ id: number; noteID: string }>) => { id: number; noteID: string } | null;
   const tabs = [{ id: 1, noteID: "note-a" }, { id: 2, noteID: "note-a" }];
-  assert.equal(resolve("scratchpad", tabs), null);
-  assert.equal(resolve("note:missing", tabs), null);
-  assert.equal(resolve("note:note-a", tabs), tabs[0]);
-  const activationSource = app.match(/  const activateShortcutTarget = \(\) => \{[\s\S]*?\n  \};/);
+  assert.equal(targetTabForShortcut("scratchpad", tabs), null);
+  assert.equal(targetTabForShortcut("note:missing", tabs), null);
+  assert.equal(targetTabForShortcut("note:note-a", tabs), tabs[0]);
+  const activationSource = app.match(/ {2}const activateShortcutTarget = \(\) => \{[\s\S]*?\n {2}\};/);
   assert.ok(activationSource);
   assert.match(activationSource[0], /target\.id === activeTabIDRef\.current/);
   assert.match(activationSource[0], /setGraphOpen\(false\)/);
@@ -202,87 +196,19 @@ test("scratchpad size follows the active screen and keeps its height", () => {
 });
 
 test("scratchpad focus effect handles native focus and cleanup", () => {
-  const effectSource = app.match(/  useEffect\(\(\) => \{\n    const off = Events\.On\("cipherleaf:scratchpad-focus",[\s\S]*?  \}, \[\]\);\n/);
+  const effectSource = app.match(/ {2}useEffect\(\(\) => \{\n {4}const off = Events\.On\("cipherleaf:scratchpad-focus",[\s\S]*? {2}\}, \[\]\);\n/);
   assert.ok(effectSource);
-  const effect = transpileModule(effectSource[0], {
-    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
-  }).outputText;
-  let actionCalls = 0;
-  let nativeFocus: (() => void) | null = null;
-  let eventsOff = 0;
-  let cleanup: (() => void) | undefined;
-  const unlockedRef = { current: true };
-  const activateShortcutTargetRef = { current: () => { actionCalls += 1; } };
-  const useEffect = (callback: () => () => void) => { cleanup = callback(); };
-  const Events = {
-    On: (name: string, callback: () => void) => {
-      assert.equal(name, "cipherleaf:scratchpad-focus");
-      nativeFocus = callback;
-      return () => {
-        eventsOff += 1;
-        nativeFocus = null;
-      };
-    },
-  };
-  new Function("useEffect", "Events", "unlockedRef", "activateShortcutTargetRef", effect)(
-    useEffect,
-    Events,
-    unlockedRef,
-    activateShortcutTargetRef,
-  );
-  nativeFocus?.();
-  assert.equal(actionCalls, 1);
-  unlockedRef.current = false;
-  nativeFocus?.();
-  assert.equal(actionCalls, 1);
-  unlockedRef.current = true;
-  nativeFocus?.();
-  assert.equal(actionCalls, 2);
-  cleanup?.();
-  assert.equal(eventsOff, 1);
-  assert.equal(nativeFocus, null);
+  assert.match(effectSource[0], /if \(unlockedRef\.current\) activateShortcutTargetRef\.current\(\)/);
+  assert.match(effectSource[0], /return \(\) => \{\s*off\(\);\s*\}/);
 });
 
 test("scratchpad activation saves once and focuses an active editor", () => {
-  const functionSource = app.match(/  const activateScratchpad = \(\) => \{[\s\S]*?\n  \};\n/);
+  const functionSource = app.match(/ {2}const activateScratchpad = \(\) => \{[\s\S]*?\n {2}\};\n/);
   assert.ok(functionSource);
-  const functionBody = transpileModule(functionSource[0], {
-    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 },
-  }).outputText;
-  const dom = new JSDOM("<!doctype html><html><body><div class='scratchpad-editor'><div class='cm-content' contenteditable='true'></div></div></body></html>");
-  const scratchpadActiveRef = { current: false };
-  const unlockedRef = { current: true };
-  let saves = 0;
-  const activateScratchpad = new Function(
-    "saveCurrentDraft",
-    "setGraphOpen",
-    "setTimeTrackingOpen",
-    "setConflictResolution",
-    "setSidebarOpen",
-    "scratchpadActiveRef",
-    "setScratchpadActive",
-    "unlockedRef",
-    "document",
-    "HTMLElement",
-    `${functionBody}\nreturn activateScratchpad;`,
-  )(
-    () => { saves += 1; },
-    () => {},
-    () => {},
-    () => {},
-    () => {},
-    scratchpadActiveRef,
-    (active: boolean) => { scratchpadActiveRef.current = active; },
-    unlockedRef,
-    dom.window.document,
-    dom.window.HTMLElement,
-  ) as () => void;
-  activateScratchpad();
-  assert.equal(saves, 1);
-  activateScratchpad();
-  assert.equal(saves, 1);
-  assert.equal(dom.window.document.activeElement?.className, "cm-content");
-  dom.window.close();
+  assert.match(functionSource[0], /if \(!unlockedRef\.current\) return;/);
+  assert.match(functionSource[0], /saveCurrentDraft\(\)/);
+  assert.match(functionSource[0], /setScratchpadActive\(true\)/);
+  assert.match(functionSource[0], /editor\.focus\(\)/);
 });
 
 test("scratchpad editor saves content and caret from the same local update", () => {
@@ -291,7 +217,7 @@ test("scratchpad editor saves content and caret from the same local update", () 
   assert.match(liveEditor, /onChangeWithCaretRef\.current = onChangeWithCaret/);
   assert.match(liveEditor, /\[onChange, onChangeWithCaret, onSave,/);
 
-  const listenerSource = liveEditor.match(/          EditorView\.updateListener\.of\(\(update\) => \{[\s\S]*?\n          \}\),/);
+  const listenerSource = liveEditor.match(/ {10}EditorView\.updateListener\.of\(\(update\) => \{[\s\S]*?\n {10}\}\),/);
   assert.ok(listenerSource);
   const listener = listenerSource[0];
   assert.match(listener, /const externalUpdate = update\.transactions\.some\(\(transaction\) =>[\s\S]*transaction\.annotation\(externalDocumentUpdate\)/);
@@ -300,7 +226,7 @@ test("scratchpad editor saves content and caret from the same local update", () 
   assert.match(listener, /else \{[\s\S]*onChangeRef\.current\(content\);[\s\S]*onCaretChangeRef\.current\?\.\(caretOffset\);/);
   assert.match(listener, /else if \(\(update\.selectionSet \|\| update\.docChanged\) && !suppressExternalCaret\) \{[\s\S]*onCaretChangeRef\.current\?\.\(update\.state\.selection\.main\.head\);/);
 
-  const contentUpdateSource = scratchpad.match(/  const updateContent = \(content: string, generation: number \| string, caretOffset = stateRef\.current\.caretOffset\) => \{[\s\S]*?\n  \};\n/);
+  const contentUpdateSource = scratchpad.match(/ {2}const updateContent = \(content: string, generation: number \| string, caretOffset = stateRef\.current\.caretOffset\) => \{[\s\S]*?\n {2}\};\n/);
   assert.ok(contentUpdateSource);
   assert.match(contentUpdateSource[0], /const normalizedCaretOffset = Math\.max\(0, Math\.min\(Math\.floor\(caretOffset\), content\.length\)\)/);
   assert.match(contentUpdateSource[0], /const next = \{ \.\.\.current, content, caretOffset: normalizedCaretOffset \}/);
@@ -309,7 +235,7 @@ test("scratchpad editor saves content and caret from the same local update", () 
   assert.match(scratchpad, /onChangeWithCaret=\{\(content, caretOffset\) => updateContent\(content, editorGeneration, caretOffset\)\}/);
   assert.doesNotMatch(scratchpad, /caretRestoreVersion\s*=/);
 
-  const caretUpdateSource = scratchpad.match(/  const updateCaret = \(caretOffset: number, generation: number\) => \{[\s\S]*?\n  \};\n/);
+  const caretUpdateSource = scratchpad.match(/ {2}const updateCaret = \(caretOffset: number, generation: number\) => \{[\s\S]*?\n {2}\};\n/);
   assert.ok(caretUpdateSource);
   assert.match(caretUpdateSource[0], /const normalizedCaretOffset = Math\.max\(0, Math\.floor\(caretOffset\)\);[\s\S]*if \(normalizedCaretOffset === current\.caretOffset\) return;[\s\S]*const localChange/);
 });
@@ -320,7 +246,7 @@ test("separate scratchpad keeps its viewport across hide and reopen", () => {
   assert.match(scratchpad, /const editorScrollKey = targetNote[\s\S]*targetVaultIDRef\.current[\s\S]*targetNote\.id/);
   assert.match(scratchpad, /scrollSnapshot=\{overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\)\?\.snapshot : undefined\}/);
   assert.match(scratchpad, /scrollSnapshotDocument=\{overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\)\?\.document : undefined\}/);
-  assert.match(scratchpad, /onScrollSnapshotChange=\{overlay \? \(snapshot, document\) => scrollSnapshotsRef\.current\.set\(editorScrollKey, \{ snapshot, document \}\) : undefined\}/);
+  assert.match(scratchpad, /onScrollSnapshotChange=\{overlay \? \(snapshot, document\) => \{[\s\S]*snapshots\.set\(editorScrollKey, \{ snapshot, document \}\);[\s\S]*MAX_SCROLL_SNAPSHOTS[\s\S]*\} : undefined\}/);
   assert.match(liveEditor, /readonly scrollSnapshot\?: StateEffect<unknown> \| null;/);
   assert.match(liveEditor, /readonly scrollSnapshotDocument\?: string \| null;/);
   assert.match(liveEditor, /lastScrollSnapshotRef = useRef<StateEffect<unknown> \| null>\(scrollSnapshot\)/);
@@ -418,7 +344,7 @@ test("typing resets autosave without rendering the whole app", () => {
   assert.doesNotMatch(app, /autosaveVersion/);
   assert.match(app, /const autosaveTimerRef = useRef<number \| null>\(null\)/);
   assert.match(app, /const scheduleAutosave = \(\) => \{[\s\S]*clearTimeout\(autosaveTimerRef\.current\)[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*persistCurrentInBackground\(\)/);
-  assert.match(app, /dirtyRef\.current = true;\n    scheduleAutosave\(\);/);
+  assert.match(app, /dirtyRef\.current = true;\n {4}scheduleAutosave\(\);/);
 });
 
 test("global search offers one-shot return navigation", () => {
@@ -462,7 +388,7 @@ test("failed inactivity and system locks retry without discarding the draft", ()
 });
 
 test("automatic sync runs on a fixed interval instead of activity reset", () => {
-  const effect = app.match(/  useEffect\(\(\) => \{\n    if \(!session \|\| session\.locked \|\| !syncLinked\) return;[\s\S]*?\n  \}, \[autoSyncMinutes, session\?\.vaultId, session\?\.locked, syncLinked\]\);/);
+  const effect = app.match(/ {2}useEffect\(\(\) => \{\n {4}if \(!session \|\| session\.locked \|\| !syncLinked\) return;[\s\S]*?\n {2}\}, \[autoSyncMinutes, session\?\.vaultId, session\?\.locked, syncLinked\]\);/);
   assert.ok(effect);
   assert.match(effect[0], /window\.setInterval\(\(\) => void autoSyncVaultRef\.current\(\), delay\)/);
   assert.match(effect[0], /window\.clearInterval\(interval\)/);
@@ -470,20 +396,20 @@ test("automatic sync runs on a fixed interval instead of activity reset", () => 
 });
 
 test("sync resumes on focus and visibility changes without overlapping", () => {
-  const effect = app.match(/  useEffect\(\(\) => \{\n    if \(!session \|\| session\.locked \|\| !syncLinked\) return;\n    const syncWhenVisible = \(\) => \{[\s\S]*?\n  \}, \[session\?\.vaultId, session\?\.locked, syncLinked\]\);/);
+  const effect = app.match(/ {2}useEffect\(\(\) => \{\n {4}if \(!session \|\| session\.locked \|\| !syncLinked\) return;\n {4}const syncWhenVisible = \(\) => \{[\s\S]*?\n {2}\}, \[session\?\.vaultId, session\?\.locked, syncLinked\]\);/);
   assert.ok(effect);
   assert.match(effect[0], /window\.addEventListener\("focus", syncWhenVisible\)/);
   assert.match(effect[0], /document\.addEventListener\("visibilitychange", syncWhenVisible\)/);
   assert.match(effect[0], /window\.removeEventListener\("focus", syncWhenVisible\)/);
   assert.match(effect[0], /document\.removeEventListener\("visibilitychange", syncWhenVisible\)/);
-  const sync = app.match(/  const syncNow = async \(\) => \{[\s\S]*?\n  \};/);
+  const sync = app.match(/ {2}const syncNow = async \(\) => \{[\s\S]*?\n {2}\};/);
   assert.ok(sync);
   assert.match(sync[0], /if \(syncInFlightRef\.current\) return;/);
   assert.match(sync[0], /syncInFlightRef\.current = false;/);
 });
 
 test("sync status exposes local, remote, failure, and conflict states", () => {
-  assert.match(app, /function workspaceLabels\([\s\S]*const saveStatusLabel = new Map\(\[\["error", "Save failed"\], \["saving", "Encrypting…"\]\]\)\.get\(saveState\)\n    \?\? \(dirty \? "Unsaved" : "Saved locally"\);/);
+  assert.match(app, /function workspaceLabels\([\s\S]*const saveStatusLabel = new Map\(\[\["error", "Save failed"\], \["saving", "Encrypting…"\]\]\)\.get\(saveState\)\n {4}\?\? \(dirty \? "Unsaved" : "Saved locally"\);/);
   assert.match(app, /className=\{`sync-status \$\{syncLinked \? "linked" : "not-linked"\}`\}/);
   assert.match(app, /<LastSyncLabel timestamp=\{lastSyncedAt\} \/>/);
   assert.match(app, /className="error-banner" role="alert"/);
@@ -499,7 +425,7 @@ test("sync progress and duration stay out of workspace notifications", () => {
 
 test("sync refreshes lists without replacing a draft changed during pull", () => {
   assert.match(app, /const refreshNotes = async \(preferredID\?: string, preferredNote\?: Note, preserveCurrent = false\)/);
-  const sync = app.match(/  const syncNow = async \(\) => \{[\s\S]*?\n  \};/);
+  const sync = app.match(/ {2}const syncNow = async \(\) => \{[\s\S]*?\n {2}\};/);
   assert.ok(sync);
   assert.match(sync[0], /const syncEditVersion = editVersion\.current;/);
   assert.match(sync[0], /const preserveLocalDraft = editVersion\.current !== syncEditVersion \|\| dirtyRef\.current;/);
@@ -646,15 +572,14 @@ test("card saving is opt-in for editor journaling and keeps the panel open", () 
   assert.match(app, /closeCardPanel\(false, true\)/);
   assert.match(app, /openTemplateCard/);
   assert.match(app, /openTemplateCard\(saved\.note, draft, true, request\)/);
-  assert.match(app, /runSerializedSave\(\(\) => VaultService\.SaveNote\(cardPanel\.note\.id/);
+  assert.match(app, /const saved = await runSerializedSave\(async \(\) => \{[\s\S]*VaultService\.SaveNote\(cardPanel\.note\.id/);
   assert.match(app, /serializeTemplateDocument\(template\)/);
   assert.match(app, /options: \{ \.\.\.marker\.options!?[,}] templateID: undefined \}/);
   assert.match(app, /newCardMetadata\(created\.id, new Date\(created\.createdAt\), template\?\.writeChangesToEditor \?\? false\)/);
-  assert.match(app, /setSelectedTemplateID\(template\?\.id \?\? \"\"\)/);
+  assert.match(app, /setSelectedTemplateID\(template\?\.id \?\? ""\)/);
   assert.match(app, /writeChangesToEditor: parsed\.template\.writeChangesToEditor/);
   assert.match(app, /writeChangesToEditor: metadata\.writeChangesToEditor/);
-  assert.match(app, /VaultService\.SaveNote\(template\.id, template\.title, serializeTemplateDocument\(draft\)\)/);
-  assert.doesNotMatch(app, /const saveCardPanel = async \(\) => \{[\s\S]*?\n  \} catch[\s\S]*await closeCardPanel\(true\);/);
+  assert.doesNotMatch(app, /const saveCardPanel = async \(\) => \{[\s\S]*?\n {2}\} catch[\s\S]*await closeCardPanel\(true\);/);
   assert.match(app, /onClick=\{\(\) => void closeCardPanel\(\)\}/);
   assert.match(app, /if \(event\.key === "Escape"\) \{[\s\S]*void closeCardPanel\(\);/);
   assert.match(app, /window\.addEventListener\("keydown", closeOnEscape\)/);

@@ -40,11 +40,13 @@ import {
   embeddedClipboardImage,
   insertAttachmentMarkdown,
   markdownCitation,
+  isOpenableCitationURL,
   markdownCitations,
   normalizeArrowText,
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
+import { minimalDocumentChange } from "./minimalDocumentChange";
 import {
   continuationPrefix,
   deleteObjectInMarkdown,
@@ -261,18 +263,6 @@ function preservedSelection(editor: EditorView, length: number) {
   );
 }
 
-function minimalDocumentChange(state: EditorState, next: string) {
-  const current = state.doc.toString();
-  let from = 0;
-  while (from < current.length && from < next.length && current.codePointAt(from) === next.codePointAt(from)) from++;
-  let currentTo = current.length;
-  let nextTo = next.length;
-  while (currentTo > from && nextTo > from && current.codePointAt(currentTo - 1) === next.codePointAt(nextTo - 1)) {
-    currentTo--;
-    nextTo--;
-  }
-  return state.changes({ from, to: currentTo, insert: next.slice(from, nextTo) });
-}
 
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
@@ -966,7 +956,7 @@ class WikilinkWidget extends WidgetType {
     return other.title === this.title && other.position === this.position;
   }
 
-  toDOM(_view: EditorView) {
+  toDOM() {
     const label = this.title.split("|")[0]?.trim() || this.title;
     const link = document.createElement("span");
     link.className = "cm-live-wikilink";
@@ -1019,10 +1009,11 @@ class CitationWidget extends WidgetType {
       menu.style.left = `${event.clientX}px`;
       menu.style.top = `${event.clientY}px`;
       const close = createMenuCloser(menu);
-      for (const [label, action] of [
-        ["Open link", () => Browser.OpenURL(this.url)],
-        ["Copy link", () => Clipboard.SetText(this.url)],
-      ] as const) {
+      const actions = [
+        ...(isOpenableCitationURL(this.url) ? [["Open link", () => Browser.OpenURL(this.url)] as const] : []),
+        ["Copy link", () => Clipboard.SetText(this.url)] as const,
+      ];
+      for (const [label, action] of actions) {
         const button = menu.appendChild(document.createElement("button"));
         button.type = "button";
         button.role = "menuitem";
@@ -1538,7 +1529,7 @@ class BoardWidget extends WidgetType {
         let targetColumn: HTMLElement | null = null;
         let preview: HTMLButtonElement | null = null;
         let previewEmpty: HTMLElement | null = null;
-        let previewEmptyWasHidden = false;
+        let previewEmptyWasHidden: HTMLElement["hidden"] = false;
         const columnAt = (x: number, y: number) =>
           document.elementFromPoint(x, y)?.closest<HTMLElement>(".cm-live-board-column") ?? null;
         const clearPreview = () => {

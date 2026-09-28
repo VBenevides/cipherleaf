@@ -808,6 +808,47 @@ func TestTamperedNoteFailsAuthentication(t *testing.T) {
 	}
 }
 
+func TestSaveNoteAtRevisionRejectsStaleWriter(t *testing.T) {
+	previous := defaultKDF
+	defaultKDF.Memory = 8 * 1024
+	defaultKDF.Time = 1
+	t.Cleanup(func() { defaultKDF = previous })
+
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "revision-conflict-secret"); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNote("Original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.SaveNoteAtRevision(note.ID, "First writer", "first content", note.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyBefore, err := store.ListNoteVersions(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveNoteAtRevision(note.ID, "Stale writer", "stale content", note.Revision); !errors.Is(err, ErrNoteRevisionConflict) {
+		t.Fatalf("stale SaveNoteAtRevision() error = %v, want ErrNoteRevisionConflict", err)
+	}
+	loaded, err := store.GetNote(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Title != saved.Title || loaded.Content != saved.Content || loaded.Revision != saved.Revision {
+		t.Fatalf("stale save changed durable note = %#v, want %#v", loaded, saved)
+	}
+	historyAfter, err := store.ListNoteVersions(note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(historyAfter) != len(historyBefore) {
+		t.Fatalf("stale save changed history length from %d to %d", len(historyBefore), len(historyAfter))
+	}
+}
+
 func TestSaveNoteRollsBackWhenManifestWriteFails(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore()
