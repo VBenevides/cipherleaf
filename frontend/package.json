@@ -8,8 +8,8 @@
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
     "bench": "node --experimental-strip-types --expose-gc tests/performance.bench.ts",
-    "test": "node --test --experimental-strip-types tests/*.test.ts",
-    "coverage": "c8 --all --src src --extension .ts --extension .tsx --exclude 'src/vite-env.d.ts' --exclude 'tests/**' --exclude 'bindings/**' --reporter=text --reporter=lcov --check-coverage --lines=85 vite-node --config vite.config.ts tests/coverage.tsx",
+    "test": "node --test --experimental-strip-types tests/*.test.ts && npm run coverage",
+    "coverage": "c8 --all --src src --extension .ts --extension .tsx --exclude 'src/vite-env.d.ts' --exclude 'tests/**' --exclude 'bindings/**' --reports-dir ../.ouro/quality/coverage/frontend --reporter=text --reporter=lcov --check-coverage --lines=85 node --enable-source-maps node_modules/vite-node/dist/cli.mjs --config vite.config.ts tests/coverage.tsx",
     "preview": "vite preview"
   },
   "dependencies": {

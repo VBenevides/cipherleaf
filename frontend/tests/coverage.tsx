@@ -19,6 +19,15 @@ await Promise.all([
   import("./timeTrackingAccessibility.test.ts"),
   import("./workspaceUI.test.ts"),
 ]);
-await import("./componentCoverage.tsx");
-await import("./scratchpadCoverage.tsx");
-await import("./domCoverage.tsx");
+// Each harness installs runtime globals before the next module is evaluated.
+try {
+  await import("./componentCoverage.tsx");
+  await import("./scratchpadCoverage.tsx");
+  await import("./domCoverage.tsx");
+} catch (error) {
+  console.error("[coverage] harness failed", error);
+  process.exit(1);
+}
+
+// App effects install intervals; preserve any test-runner failure when ending the process.
+setTimeout(() => process.exit(process.exitCode ?? 0), 0);

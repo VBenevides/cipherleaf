@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	appsession "cipherleaf/internal/session"
@@ -133,6 +136,7 @@ func TestScratchpadShortcutApplicationBranches(t *testing.T) {
 		DisableDefaultSignalHandler: true,
 		Transport:                   coverageNoopTransport{},
 	})
+	cleanupPendingScratchpadShortcuts(t, wailsApp)
 	wailsApp.Window.Add(application.NewWindow(application.WebviewWindowOptions{Name: mainWindowName}))
 	wailsApp.Window.Add(application.NewWindow(application.WebviewWindowOptions{Name: scratchpadWindowName}))
 	if err := wailsApp.Screen.LayoutScreens([]*application.Screen{{
@@ -179,4 +183,215 @@ func TestScratchpadShortcutApplicationBranches(t *testing.T) {
 	}
 
 	service.toggleScratchpad()
+}
+
+// The application is deliberately never run: Wails keeps these registrations
+// pending, so these tests exercise conflicts without binding OS shortcuts.
+func newPendingScratchpadShortcutService(t *testing.T) (*VaultService, *application.App) {
+	t.Helper()
+	t.Setenv("XDG_SESSION_TYPE", "x11")
+	app := application.New(application.Options{
+		DisableDefaultSignalHandler: true,
+		Transport:                   coverageNoopTransport{},
+	})
+	cleanupPendingScratchpadShortcuts(t, app)
+	service := newScratchpadShortcutTestService(t)
+	service.SetApp(app)
+	return service, app
+}
+
+func cleanupPendingScratchpadShortcuts(t *testing.T, app *application.App) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, shortcut := range []string{appsession.DefaultScratchpadShortcut, "Alt+S", "Ctrl+Shift+S"} {
+			if app.GlobalShortcut.IsRegistered(shortcut) {
+				if err := app.GlobalShortcut.Unregister(shortcut); err != nil {
+					t.Errorf("release test shortcut %q: %v", shortcut, err)
+				}
+			}
+		}
+	})
+}
+
+func TestScratchpadShortcutInitializationPersistenceFailure(t *testing.T) {
+	service, app := newPendingScratchpadShortcutService(t)
+	service.recent = appsession.NewRecentVaultStore(t.TempDir())
+	if err := service.InitializeScratchpadShortcut(); err != nil {
+		t.Fatalf("usable session shortcut rejected because persistence failed: %v", err)
+	}
+	if got := service.GetScratchpadShortcut(); got != appsession.DefaultScratchpadShortcut {
+		t.Fatalf("session shortcut = %q", got)
+	}
+	if !app.GlobalShortcut.IsRegistered(appsession.DefaultScratchpadShortcut) {
+		t.Fatal("session shortcut was not retained")
+	}
+	if err := service.InitializeScratchpadShortcut(); err != nil {
+		t.Fatalf("initialization should remain idempotent after persistence failure: %v", err)
+	}
+}
+
+func TestScratchpadShortcutInitializationBothBindingsConflict(t *testing.T) {
+	service, app := newPendingScratchpadShortcutService(t)
+	const saved = "Alt+S"
+	if err := service.recent.SetScratchpadShortcut(saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, shortcut := range []string{saved, appsession.DefaultScratchpadShortcut} {
+		if err := app.GlobalShortcut.Register(shortcut, func() {}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.InitializeScratchpadShortcut(); err == nil ||
+		!strings.Contains(err.Error(), saved) || !strings.Contains(err.Error(), appsession.DefaultScratchpadShortcut) {
+		t.Fatalf("both conflicting bindings should be reported: %v", err)
+	}
+	if got := service.recent.GetScratchpadShortcut(); got != saved {
+		t.Fatalf("failed initialization changed saved shortcut to %q", got)
+	}
+	if err := app.GlobalShortcut.Unregister(saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.InitializeScratchpadShortcut(); err != nil {
+		t.Fatalf("initialization could not recover after conflict was removed: %v", err)
+	}
+	if got := service.GetScratchpadShortcut(); got != saved {
+		t.Fatalf("recovered shortcut = %q", got)
+	}
+}
+
+func TestScratchpadShortcutChangeConflictAndPersistenceRollback(t *testing.T) {
+	service, app := newPendingScratchpadShortcutService(t)
+	if err := service.InitializeScratchpadShortcut(); err != nil {
+		t.Fatal(err)
+	}
+	current := service.GetScratchpadShortcut()
+	const candidate = "Alt+S"
+	if err := app.GlobalShortcut.Register(candidate, func() {}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.SetScratchpadShortcut(candidate); err == nil || got != current {
+		t.Fatalf("conflicting change = %q, %v", got, err)
+	}
+	if got := service.recent.GetScratchpadShortcut(); got != current {
+		t.Fatalf("conflict changed persisted shortcut to %q", got)
+	}
+	if err := app.GlobalShortcut.Unregister(candidate); err != nil {
+		t.Fatal(err)
+	}
+	testScratchpadShortcutPersistenceRollback(t, service, app, current, candidate)
+}
+
+func testScratchpadShortcutPersistenceRollback(t *testing.T, service *VaultService, app *application.App, current, candidate string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "recent.json")
+	service.recent = appsession.NewRecentVaultStore(path)
+	if err := service.recent.SetScratchpadShortcut(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.SetScratchpadShortcut(candidate); err == nil || got != current {
+		t.Fatalf("unpersistable change = %q, %v", got, err)
+	}
+	if app.GlobalShortcut.IsRegistered(candidate) || !app.GlobalShortcut.IsRegistered(current) {
+		t.Fatal("persistence failure did not release candidate and retain current binding")
+	}
+	if got := service.GetScratchpadShortcut(); got != current {
+		t.Fatalf("persistence failure changed session shortcut to %q", got)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.SetScratchpadShortcut(candidate); err != nil || got != candidate {
+		t.Fatalf("retry after repairing persistence = %q, %v", got, err)
+	}
+	if app.GlobalShortcut.IsRegistered(current) || !app.GlobalShortcut.IsRegistered(candidate) {
+		t.Fatal("successful retry did not replace the old binding")
+	}
+	if got := service.recent.GetScratchpadShortcut(); got != candidate {
+		t.Fatalf("successful retry persisted %q", got)
+	}
+}
+
+func TestScratchpadShortcutRetirementRecovery(t *testing.T) {
+	t.Run("restore previous", func(t *testing.T) {
+		service, app := newPendingScratchpadShortcutService(t)
+		if err := service.InitializeScratchpadShortcut(); err != nil {
+			t.Fatal(err)
+		}
+		current := service.GetScratchpadShortcut()
+		if err := app.GlobalShortcut.Unregister(current); err != nil {
+			t.Fatal(err)
+		}
+		testScratchpadShortcutRetirementResult(t, service, app, current)
+		if app.GlobalShortcut.IsRegistered("Alt+S") {
+			t.Fatal("rollback left candidate registered")
+		}
+		testScratchpadShortcutReplacementAfterRecovery(t, service, app, current)
+	})
+	t.Run("retain candidate when restoration conflicts", func(t *testing.T) {
+		service, app := newPendingScratchpadShortcutService(t)
+		if err := service.InitializeScratchpadShortcut(); err != nil {
+			t.Fatal(err)
+		}
+		// A native retirement failure can leave the previous binding
+		// occupied. Restoration must not discard the usable candidate.
+		service.scratchpadShortcutRegistration = func() error {
+			return errors.New("binding could not be retired")
+		}
+		testScratchpadShortcutRetirementResult(t, service, app, "Alt+S")
+		testScratchpadShortcutReplacementAfterRecovery(t, service, app, "Alt+S")
+	})
+}
+
+func testScratchpadShortcutRetirementResult(t *testing.T, service *VaultService, app *application.App, want string) {
+	t.Helper()
+	if got, err := service.SetScratchpadShortcut("Alt+S"); err == nil || got != want {
+		t.Fatalf("retirement failure = %q, %v; want %q and error", got, err, want)
+	}
+	if got := service.GetScratchpadShortcut(); got != want {
+		t.Fatalf("effective shortcut = %q, want %q", got, want)
+	}
+	if got := service.recent.GetScratchpadShortcut(); got != want {
+		t.Fatalf("persisted shortcut = %q, want %q", got, want)
+	}
+	if !app.GlobalShortcut.IsRegistered(want) {
+		t.Fatalf("effective shortcut %q is unavailable", want)
+	}
+}
+
+func testScratchpadShortcutReplacementAfterRecovery(t *testing.T, service *VaultService, app *application.App, previous string) {
+	t.Helper()
+	// A later change must retire whichever registration recovery kept.
+	const next = "Ctrl+Shift+S"
+	if got, err := service.SetScratchpadShortcut(next); err != nil || got != next {
+		t.Fatalf("change after recovery = %q, %v", got, err)
+	}
+	if app.GlobalShortcut.IsRegistered(previous) || !app.GlobalShortcut.IsRegistered(next) {
+		t.Fatal("recovered registration could not be replaced")
+	}
+}
+
+func TestScratchpadShortcutTargetResetAndLockedVault(t *testing.T) {
+	service := newScratchpadShortcutTestService(t)
+	if _, err := service.SetScratchpadShortcutTarget("note:abc"); err == nil {
+		t.Fatal("locked vault accepted a target change")
+	}
+	if _, err := service.store.Create(t.TempDir(), "shortcut target secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetScratchpadShortcutTarget("note:abc"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.SetScratchpadShortcutTarget("   "); err != nil || got != defaultScratchpadShortcutTarget {
+		t.Fatalf("reset target = %q, %v", got, err)
+	}
+	if got := service.GetScratchpadShortcutTarget(); got != defaultScratchpadShortcutTarget {
+		t.Fatalf("reset did not restore default target: %q", got)
+	}
+	settings, err := service.store.GetVaultSettings()
+	if err != nil || settings.ScratchpadNoteID != "" {
+		t.Fatalf("reset did not clear persisted note target: %q, %v", settings.ScratchpadNoteID, err)
+	}
 }

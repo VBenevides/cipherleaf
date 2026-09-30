@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { setTimeout as delay } from "node:timers/promises";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create } from "react-test-renderer";
@@ -14,6 +15,13 @@ import { ThemedDatePicker } from "../src/ThemedDatePicker";
 import { SNIPPETS, completeCodeFenceElement, expandSnippet, expandSnippetWithContext, rollLastDatedSection } from "../src/snippets";
 import { boardMarker } from "../src/cards";
 import { canonicalObjectDocumentFromMarkdown } from "../src/objectDocument";
+
+const eventRuntime = await import("../node_modules/@wailsio/runtime/dist/listener.js") as {
+  eventListeners: Map<string, Array<{ dispatch: (event: unknown) => void }>>;
+};
+const emitEvent = (name: string, data: unknown) => {
+  for (const listener of eventRuntime.eventListeners.get(name) ?? []) listener.dispatch({ data });
+};
 
 const storage = new Map<string, string>();
 const windowListeners = new Map<string, Set<(event: any) => void>>();
@@ -72,6 +80,8 @@ const timeEntry = { id: "entry", name: "Task", clientId: "client", projectId: "p
 const timeRange = { entry: timeEntry, startedAtUtc: timeEntry.startedAtUtc, endedAtUtc: timeEntry.endedAtUtc, totalSeconds: 3600 };
 const syncResult = { linked: true, message: "Sync complete", warning: "", branch: "main", lastCommit: "commit", pull: { linked: true, message: "Pulled", warning: "", branch: "main", lastCommit: "commit", stagingPath: "", temporary: false }, push: { linked: true, message: "Pushed", warning: "", branch: "main", lastCommit: "commit", upToDate: true, localMilliseconds: 1, transportMilliseconds: 1, transportPerformed: true }, merge: { pulledNotes: 0, updatedNotes: 0, deletedNotes: 0, pulledFolders: 0, deletedFolders: 0, updatedSettings: false, upToDate: true, conflicts: [], trackingConflicts: [] }, timings: { pullMilliseconds: 1, mergeMilliseconds: 1, pushMilliseconds: 1, totalMilliseconds: 3, transportMilliseconds: 1, localMilliseconds: 2 }, git: { sshConnectionReuse: true, sshConnectionPersistSeconds: 1, transportOperations: 1, gitBytes: 1, repositoryFilesBytes: 1, platform: "test", architecture: "test", gitVersion: "git", openSshVersion: "ssh", usedPrefetch: true, repositoryPath: "/repo" } };
 let conflictNext = false;
+let authoritativeNoteRevision = 1;
+let revisionConflict = false;
 let timeTrackingMode: "normal" | "empty" | "error" = "normal";
 const richFolders = [
   { id: "folder", name: "Folder", parentId: "", order: 0, locked: false, hidden: false },
@@ -249,13 +259,13 @@ setTransport({
       case 516244023: return [];
       case 2155705394: return null;
       case 220507736: return emptyAppMode ? [] : richFolders;
-      case 888598820: return emptyAppMode ? [] : richNotes;
+      case 888598820: return emptyAppMode ? [] : richNotes.map((item) => item.id === "note" ? { ...item, revision: authoritativeNoteRevision } : item);
       case 1503400201:
         if (request?.args?.[0] === "template") return templateNote;
         if (boardAppMode) return boardNote;
         if (openCardMode) return cardNote;
-        return note;
-      case 715955408: return note;
+        return { ...note, revision: authoritativeNoteRevision };
+      case 715955408: return { ...note, revision: authoritativeNoteRevision };
       case 1766611694: return timeTrackingMode === "empty" ? { entries: [], days: [], totalSeconds: 0 } : { entries: [timeRange], days: [{ localDate: "2026-09-08", totalSeconds: 3600 }], totalSeconds: 3600 };
       case 1301789830: return { cpuPercent: 1, memoryBytes: 2, memoryUsage: [{ name: "cipherleaf", pid: 1, memoryBytes: 2 }] };
       case 3277829736: return { notesBytes: 2, attachmentsBytes: 3, timeTrackingBytes: 4, gitBytes: 5 };
@@ -264,7 +274,19 @@ setTransport({
       case 3216968481: return note;
       case 991868496: return [{ noteId: "note", title: "Note", folderId: "folder", field: "content", snippet: "Task", offset: 0, matchLength: 4, utf16Offset: 0, utf16MatchLength: 4 }];
       case 1932071061: return { replacedNotes: 1, replacements: 1 };
-      case 2770680190: return request?.args?.[0] === "template" ? templateNote : { note, summary: richNotes[0] };
+      case 2770680190: {
+        if (revisionConflict) {
+          authoritativeNoteRevision = Math.max(authoritativeNoteRevision, request.args[3]) + 1;
+          throw new Error("note was changed by another writer");
+        }
+        const [id, title, content, expectedRevision] = request.args;
+        let original = note;
+        if (id === "template") original = templateNote;
+        else if (id === "card") original = cardNote;
+        const savedNote = { ...original, id, title, content, revision: expectedRevision + 1 };
+        if (id === "note") authoritativeNoteRevision = savedNote.revision;
+        return { note: savedNote, summary: { ...richNotes[0], id, title, revision: savedNote.revision } };
+      }
       case 814546393: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
       case 2911480927: return note;
       case 239305947: return richFolders[0];
@@ -413,6 +435,13 @@ await act(async () => {
   await new Promise((resolve) => setTimeout(resolve, 100));
 });
 assert.match(JSON.stringify(appRenderer?.toJSON()), /workspace/);
+emitEvent("cipherleaf:note-saved", { vaultId: "other-vault", noteId: "note", revision: 2 });
+emitEvent("cipherleaf:note-saved", { vaultId: "vault", noteId: "note", revision: "invalid" });
+authoritativeNoteRevision = 2;
+await act(async () => {
+  emitEvent("cipherleaf:note-saved", { vaultId: "vault", noteId: "note", revision: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+});
 const appButton = (name: string) => appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim() === name))[0];
 const appButtonStarting = (name: string) => appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim().startsWith(name)))[0];
 const buttonEvent = { preventDefault: onChange, stopPropagation: onChange, currentTarget: { closest: () => ({ removeAttribute: onChange }) } };
@@ -440,7 +469,10 @@ const clickLastApp = async (name: string) => {
   const buttons = appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim() === name));
   const button = buttons?.at(-1);
   assert.ok(button, `missing app button: ${name}`);
-  await act(async () => { button.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => {
+    button.props.onClick?.(buttonEvent);
+    await delay(0);
+  });
 };
 const waitForApp = () => new Promise((resolve) => setTimeout(resolve, 10));
 const completePrompt = async (trigger: string, value: string) => {
@@ -516,11 +548,11 @@ await clickApp("Delete template");
 await clickApp("Delete card");
 await clickLastApp("Delete card");
 openCardMode = false;
-const noteRow = appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("note-list-item"))[0];
-await act(async () => { noteRow?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
+const noteRow = () => appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("note-list-item"))[0];
+await act(async () => { noteRow()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Open in a New Tab");
 await clickLastApp("Close Note");
-await act(async () => { noteRow?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
+await act(async () => { noteRow()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Delete note");
 await submitAppDialog();
 const folderRow = appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("folder-list-item") && typeof node.props.onContextMenu === "function")[0];
@@ -894,6 +926,26 @@ await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20));
 assert.match(JSON.stringify(appRenderer?.toJSON()), /coverage failure/);
 throwMethod = -1;
 await clickApp("Close statistics");
+authoritativeNoteRevision += 1;
+revisionConflict = true;
+const conflictTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
+await act(async () => { conflictTitle?.props.onChange({ target: { value: "Revision conflict" } }); });
+await clickApp("Save this note (Ctrl + S)");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+assert.ok(appRenderer?.root.findAll((node) => textContent(node).includes("Reload latest")).length);
+await clickApp("Reload latest");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+revisionConflict = true;
+const retryConflictTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
+await act(async () => { retryConflictTitle?.props.onChange({ target: { value: "Retry conflict" } }); });
+await clickApp("Save this note (Ctrl + S)");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+await clickApp("Save merged file");
+await submitAppDialog();
+assert.match(JSON.stringify(appRenderer?.toJSON()), /remote note changed again|Remote edits were preserved|latest conflict base/i);
+revisionConflict = false;
+await clickApp("Save merged file");
+await submitAppDialog();
 const failingTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
 await act(async () => { failingTitle?.props.onChange({ target: { value: "Save failure" } }); });
 throwMethod = 2770680190;

@@ -2,6 +2,16 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [Unreleased]
+
+### Other
+
+- Generate frontend LCOV during `npm test` under `.ouro/quality/coverage/frontend` so Ouro's Sonar analysis receives coverage.
+- Fixed coverage harness save responses and stale React test-node references; harness failures now print their cause and exit nonzero instead of leaving App timers running.
+- Updated the transitive `brace-expansion` and `undici` dependencies to resolve dependency audit findings.
+- Enable native source maps when collecting frontend coverage so LCOV locations match TypeScript source lines.
+- Added portal response, activation-isolation, shortcut rollback, and target-reset regression coverage.
+
 ## [1.0.7] - 2026-09-24
 
 ### Features
