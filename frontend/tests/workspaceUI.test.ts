@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { targetTabForShortcut } from "../src/shortcutTargets.ts";
+import { parseNoteSavedEvent } from "../src/noteSavedEvent.ts";
 
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
@@ -13,6 +14,20 @@ const scratchpad = readFileSync(new URL("../src/Scratchpad.tsx", import.meta.url
 const cards = readFileSync(new URL("../src/cards.ts", import.meta.url), "utf8");
 const liveEditor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
 const style = readFileSync(new URL("../public/style.css", import.meta.url), "utf8");
+
+test("note saved events require a vault, note, and positive revision", () => {
+  assert.equal(parseNoteSavedEvent(null), null);
+  assert.equal(parseNoteSavedEvent({ data: [] }), null);
+  assert.equal(parseNoteSavedEvent({ vaultId: "", noteId: "note", revision: 1 }), null);
+  assert.equal(parseNoteSavedEvent({ vaultId: "vault", noteId: "", revision: 1 }), null);
+  assert.equal(parseNoteSavedEvent({ vaultId: "vault", noteId: "note", revision: 0 }), null);
+  assert.equal(parseNoteSavedEvent({ vaultId: "vault", noteId: "note", revision: 1.5 }), null);
+  assert.deepEqual(parseNoteSavedEvent({ data: { vaultId: "vault", noteId: "note", revision: 2 } }), {
+    vaultId: "vault",
+    noteID: "note",
+    revision: 2,
+  });
+});
 
 test("scratchpad is a fixed rightmost tab with normal-tab-only shortcuts", () => {
   assert.match(app, /import Scratchpad from "\.\/Scratchpad"/);

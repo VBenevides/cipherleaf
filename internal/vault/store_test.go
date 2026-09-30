@@ -847,6 +847,12 @@ func TestSaveNoteAtRevisionRejectsStaleWriter(t *testing.T) {
 	if len(historyAfter) != len(historyBefore) {
 		t.Fatalf("stale save changed history length from %d to %d", len(historyBefore), len(historyAfter))
 	}
+	if _, summary, vaultID, err := store.SaveNoteAtRevisionWithSummary(note.ID, saved.Title, saved.Content, saved.Revision); err != nil || summary.ID != note.ID || vaultID == "" {
+		t.Fatalf("SaveNoteAtRevisionWithSummary() = %#v, %q, %v", summary, vaultID, err)
+	}
+	if _, err := store.SaveNoteAtRevision(note.ID, note.Title, strings.Repeat("x", maxNoteBytes+1), saved.Revision); err == nil {
+		t.Fatal("oversized raw note was accepted")
+	}
 }
 
 func TestSaveNoteRollsBackWhenManifestWriteFails(t *testing.T) {

@@ -514,6 +514,61 @@ func TestProtectChangedSnapshotRejectsSymlinks(t *testing.T) {
 	}
 }
 
+func TestChangedSnapshotPathValidation(t *testing.T) {
+	root := t.TempDir()
+	hash := strings.Repeat("a", 32)
+	relative := filepath.ToSlash(filepath.Join("objects", "aa", hash+".enc"))
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, filepath.FromSlash(relative))), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := validateChangedSnapshotPath(root, relative); err != nil || got != path {
+		t.Fatalf("validateChangedSnapshotPath() = %q, %v; want %q", got, err, path)
+	}
+	if err := validateChangedSnapshotParent(root, relative); err != nil {
+		t.Fatalf("validateChangedSnapshotParent() = %v", err)
+	}
+	for _, unsafe := range []string{"../escape", "objects/aa/missing.enc"} {
+		if _, err := validateChangedSnapshotPath(root, unsafe); err == nil {
+			t.Fatalf("validateChangedSnapshotPath(%q) accepted unsafe or missing path", unsafe)
+		}
+	}
+	if err := validateChangedSnapshotParent(root, "../escape"); err == nil {
+		t.Fatal("validateChangedSnapshotParent accepted an unsafe path")
+	}
+	fileParent := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(fileParent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateChangedSnapshotParent(root, filepath.ToSlash(filepath.Join("not-a-directory", "child.enc"))); err == nil {
+		t.Fatal("validateChangedSnapshotParent accepted a file parent")
+	}
+	if _, err := validateChangedSnapshotPath(root, filepath.ToSlash(filepath.Join("not-a-directory", "child.enc"))); err == nil {
+		t.Fatal("validateChangedSnapshotPath accepted a file parent")
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(root, "objects", "bb", strings.Repeat("b", 32)+".enc")
+	if err := os.MkdirAll(filepath.Dir(symlinkPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, symlinkPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	relativeSymlink, err := filepath.Rel(root, symlinkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateChangedSnapshotPath(root, filepath.ToSlash(relativeSymlink)); err == nil {
+		t.Fatal("validateChangedSnapshotPath accepted a symlink")
+	}
+}
+
 func TestMaterializeChangedRepositoryRejectsSymlinkedDeleteParent(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

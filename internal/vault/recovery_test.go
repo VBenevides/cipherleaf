@@ -2,6 +2,7 @@ package vault
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -314,6 +315,41 @@ func TestPermanentTrashDeletion(t *testing.T) {
 	}
 	if err := store.RestoreTrashItem("note", note.ID); err == nil {
 		t.Fatal("restored permanently deleted note")
+	}
+}
+
+func TestTrashRestoreRequiresAccessibleParents(t *testing.T) {
+	store := NewStore()
+	if _, err := store.Create(t.TempDir(), "restore-parent-secret"); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.CreateFolder("Parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.CreateNoteInFolder("Note", parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteNote(note.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteFolder(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RestoreTrashItem("note", note.ID); !errors.Is(err, ErrFolderLocked) {
+		t.Fatalf("restoring note without its folder = %v, want ErrFolderLocked", err)
+	}
+
+	store.mu.RLock()
+	cycle := map[string]trashedFolder{
+		"a": {Folder: Folder{ID: "a", ParentID: "b"}},
+		"b": {Folder: Folder{ID: "b", ParentID: "a"}},
+	}
+	cycleErr := store.requireTrashFolderAccessibleLocked("a", cycle, make(map[string]struct{}))
+	store.mu.RUnlock()
+	if !errors.Is(cycleErr, ErrFolderLocked) {
+		t.Fatalf("cyclic trash folders = %v, want ErrFolderLocked", cycleErr)
 	}
 }
 
