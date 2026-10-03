@@ -3441,30 +3441,47 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
     }
   }
 
+  const document = cachedObjectDocument(view.state);
+  const selected = new Set([...lineNumbers].map((lineNumber) => document.byLine.get(lineNumber)?.id));
   const changes: { from: number; to?: number; insert: string }[] = [];
+  const handled = new Set<string>();
 
   for (const lineNumber of [...lineNumbers].sort((left, right) => left - right)) {
-    const line = view.state.doc.line(lineNumber);
+    const object = document.byLine.get(lineNumber);
+    if (!object || handled.has(object.id)) continue;
+    handled.add(object.id);
+    let ancestor = object.parentId ? document.byId.get(object.parentId) : undefined;
+    let ancestorSelected = false;
+    while (ancestor) {
+      if (selected.has(ancestor.id)) { ancestorSelected = true; break; }
+      ancestor = ancestor.parentId ? document.byId.get(ancestor.parentId) : undefined;
+    }
+    if (ancestorSelected) continue;
 
-    if (direction === 1) {
+    const parent = object.parentId ? document.byId.get(object.parentId) : undefined;
+    const siblings = parent?.children ?? document.roots;
+    const previousSibling = siblings[siblings.indexOf(object) - 1];
+    // Outline indentation represents parentage, not arbitrary leading whitespace.
+    if (direction === 1 && !previousSibling) continue;
+    const targetIndent = direction === 1 ? previousSibling.indent + 2 : parent?.indent ?? 0;
+    const delta = targetIndent - object.indent;
+    if (delta === 0) continue;
+    let lastDescendant = object;
+    while (lastDescendant.children.length) lastDescendant = lastDescendant.children[lastDescendant.children.length - 1];
+    for (let currentLine = object.lineStart; currentLine <= lastDescendant.lineEnd; currentLine++) {
+      const line = view.state.doc.line(currentLine);
+      const leading = /^[ \t]*/.exec(line.text)![0];
+      const width = leading.replace(/\t/g, "  ").length;
       changes.push({
         from: line.from,
-        insert: "  ",
+        to: line.from + leading.length,
+        insert: " ".repeat(Math.max(0, width + delta)),
       });
-      continue;
     }
-
-    const removable = /(?:^ {1,2}|\t)/.exec(line.text)?.[0];
-    if (!removable) continue;
-
-    changes.push({
-      from: line.from,
-      to: line.from + removable.length,
-      insert: "",
-    });
   }
 
-  if (changes.length === 0) return false;
+  // Consume Tab at a tree boundary so another keymap cannot insert hidden spaces.
+  if (changes.length === 0) return true;
 
   view.dispatch({ changes });
   view.focus();

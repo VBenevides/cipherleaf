@@ -1004,6 +1004,35 @@ Object.defineProperty(document, "elementsFromPoint", { configurable: true, value
 await act(async () => { await wait(); liveDrag.root.unmount(); });
 liveDrag.shell.remove();
 
+for (const [source, lineNumber, expectedIndented, expectedDedented] of [
+  ["> Only", 1, "> Only", "> Only"],
+  ["> Parent\n> Child", 2, "> Parent\n  > Child", "> Parent\n> Child"],
+  ["> Parent\n> Child\n  > Grandchild", 2, "> Parent\n  > Child\n    > Grandchild", "> Parent\n> Child\n  > Grandchild"],
+  ["> Parent\n                    > Child", 2, "> Parent\n                    > Child", "> Parent\n> Child"],
+] as const) {
+  const depthHost = mount("keyboard-depth-host");
+  await act(async () => {
+    depthHost.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "keyboard-depth", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const depthView = EditorView.findFromDOM(depthHost.body.querySelector(".cm-editor")!)!;
+  await act(async () => {
+    depthView.dispatch({ selection: EditorSelection.cursor(depthView.state.doc.line(lineNumber).to) });
+    for (let press = 0; press < 10; press++) key(depthView.contentDOM, "Tab");
+  });
+  assert.equal(depthView.state.doc.toString(), expectedIndented);
+  const targetLine = depthHost.body.querySelector<HTMLElement>(`[data-object-line="${lineNumber}"].cm-live-object-line`)!;
+  assert.equal(targetLine.style.getPropertyValue("--live-object-depth"), lineNumber === 1 ? "0" : "1");
+  await act(async () => { key(depthView.contentDOM, "Tab", { shiftKey: true }); });
+  assert.equal(depthView.state.doc.toString(), expectedDedented);
+  assert.equal(depthHost.body.querySelector<HTMLElement>(`[data-object-line="${lineNumber}"].cm-live-object-line`)!.style.getPropertyValue("--live-object-depth"), "0");
+  await act(async () => { depthHost.root.unmount(); });
+  depthHost.shell.remove();
+}
+
 for (const taskText of ["[ ] Task", "[x] Task", "[] Task", "- [ ] Task", "  * [x] Task"]) {
   const taskHost = mount("keyboard-task-host");
   await act(async () => {

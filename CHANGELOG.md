@@ -9,6 +9,10 @@ All notable changes to Cipherleaf are documented here.
 - Press Space immediately after a live-preview checkbox to toggle its checked state.
 - Added repeatable mounted live-editor typing and caret-movement benchmarks at 100, 1,000, and 10,000 lines, with per-operation latency distributions.
 
+### Bugfixes
+
+- Make outline Tab/Shift+Tab change visible parentage without stacking hidden indentation; preserve descendants when moving a parent.
+
 ### Other
 
 - Generate frontend LCOV during `npm test` under `.ouro/quality/coverage/frontend` so Ouro's Sonar analysis receives coverage.
