@@ -1004,6 +1004,24 @@ Object.defineProperty(document, "elementsFromPoint", { configurable: true, value
 await act(async () => { await wait(); liveDrag.root.unmount(); });
 liveDrag.shell.remove();
 
+const readOnlyTaskHost = mount("readonly-task-host");
+await act(async () => {
+  readOnlyTaskHost.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "readonly-task", value: "[ ] Task", readOnly: true, onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const readOnlyTaskView = EditorView.findFromDOM(readOnlyTaskHost.body.querySelector(".cm-editor")!)!;
+await act(async () => {
+  readOnlyTaskView.dispatch({ selection: EditorSelection.cursor(4) });
+  key(readOnlyTaskView.contentDOM, " ");
+});
+assert.equal(readOnlyTaskView.state.doc.toString(), "[ ] Task");
+assert.equal(readOnlyTaskHost.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked, false);
+await act(async () => { readOnlyTaskHost.root.unmount(); });
+readOnlyTaskHost.shell.remove();
+
 for (const source of ["[ ] Task", "[x] Task", "[] Task", "- [ ] Task", "  * [x] Task", "> [ ] Task", "Ordinary text"]) {
   const homeHost = mount("keyboard-home-host");
   await act(async () => {

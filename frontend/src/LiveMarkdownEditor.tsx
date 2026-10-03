@@ -3454,6 +3454,7 @@ function moveToCheckboxStart(view: EditorView, extend = false): boolean {
 }
 
 function toggleTaskAfterCheckbox(view: EditorView): boolean {
+  if (view.state.readOnly) return false;
   const range = view.state.selection.main;
   if (!range.empty || view.state.selection.ranges.length !== 1) return false;
   const line = view.state.doc.lineAt(range.head);
