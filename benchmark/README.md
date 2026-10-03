@@ -24,6 +24,24 @@ when `CIPHERLEAF_BENCH_REPOSITORY` and `CIPHERLEAF_BENCH_SSH_KEY` are set.
 
 Compare two runs with `diff -u old.md new.md`.
 
+## Live-editor interactions
+
+Run `cd frontend && npm run bench:editor` for the mounted live-preview editor.
+The main `npm run bench` and `benchmark/run.sh` include this workload.
+Documents contain 100, 1,000, or 10,000 lines of sections and checkbox tasks.
+Each workload has one warm-up and ten measured runs, reset to identical
+content and a caret near the document midpoint. Typing inserts 100 `x`
+characters through the editor input transaction; caret movement dispatches
+100 alternating Left/Right key events. Assertions verify the final text,
+change callback, and caret positions.
+
+Output reports mean milliseconds per operation, p50/p95/max latency, and
+operations exceeding the 16.67 ms frame budget. These JSDOM measurements
+include synchronous live-editor transactions, decoration updates, and DOM
+updates, but exclude browser layout, paint, native input, and desktop IPC.
+They are repeatable interaction-cost measurements, not visual frame timing.
+Use a real browser or desktop profiler to investigate perceived sluggishness.
+
 ## Performance budgets
 
 Measured on Linux/amd64 with a Ryzen 7 5800X3D. Regressions above these

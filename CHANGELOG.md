@@ -7,6 +7,7 @@ All notable changes to Cipherleaf are documented here.
 ### Features
 
 - Press Space immediately after a live-preview checkbox to toggle its checked state.
+- Added repeatable mounted live-editor typing and caret-movement benchmarks at 100, 1,000, and 10,000 lines, with per-operation latency distributions.
 
 ### Other
 
