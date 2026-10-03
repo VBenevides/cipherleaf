@@ -18,6 +18,7 @@ All notable changes to Cipherleaf are documented here.
 
 ### Other
 
+- Replace source-text assertions for checkbox boundaries and line-start breaks with mounted-editor behavior regressions.
 - Generate frontend LCOV during `npm test` under `.ouro/quality/coverage/frontend` so Ouro's Sonar analysis receives coverage.
 - Fixed coverage harness save responses and stale React test-node references; harness failures now print their cause and exit nonzero instead of leaving App timers running.
 - Updated the transitive `brace-expansion` and `undici` dependencies to resolve dependency audit findings.
