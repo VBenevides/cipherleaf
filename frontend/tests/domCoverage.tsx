@@ -1004,6 +1004,38 @@ Object.defineProperty(document, "elementsFromPoint", { configurable: true, value
 await act(async () => { await wait(); liveDrag.root.unmount(); });
 liveDrag.shell.remove();
 
+for (const source of ["[ ] Task", "[x] Task", "[] Task", "- [ ] Task", "  * [x] Task", "> [ ] Task", "Ordinary text"]) {
+  const homeHost = mount("keyboard-home-host");
+  await act(async () => {
+    homeHost.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "keyboard-home", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const homeView = EditorView.findFromDOM(homeHost.body.querySelector(".cm-editor")!)!;
+  const contentFrom = source.includes("Task") ? source.indexOf("Task") : 0;
+  for (const position of new Set([source.length, contentFrom + 1, contentFrom])) {
+    await act(async () => {
+      homeView.dispatch({ selection: EditorSelection.cursor(position) });
+      key(homeView.contentDOM, "Home");
+    });
+    assert.equal(homeView.state.selection.main.head, contentFrom);
+    assert.equal(homeView.state.selection.main.empty, true);
+    await act(async () => { key(homeView.contentDOM, "Home"); });
+    assert.equal(homeView.state.selection.main.head, contentFrom);
+  }
+  await act(async () => {
+    homeView.dispatch({ selection: EditorSelection.cursor(source.length) });
+    key(homeView.contentDOM, "Home", { shiftKey: true });
+  });
+  assert.equal(homeView.state.selection.main.anchor, source.length);
+  assert.equal(homeView.state.selection.main.head, contentFrom);
+  assert.equal(homeView.state.doc.toString(), source);
+  await act(async () => { homeHost.root.unmount(); });
+  homeHost.shell.remove();
+}
+
 const findHost = mount("keyboard-find-host");
 const findDocument = "> First\n  > Nested\n    - needle one\n> Second\n  - needle two\n> Unrelated\n  - keep hidden";
 await act(async () => {

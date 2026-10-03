@@ -14,6 +14,7 @@ All notable changes to Cipherleaf are documented here.
 - Make outline Tab/Shift+Tab change visible parentage without stacking hidden indentation; preserve descendants when moving a parent.
 - Preserve the original element and create an empty line of the same type when Enter is pressed at its raw or visible start, without duplicating markers into content.
 - Reveal collapsed ancestors of the active Ctrl+F match and center next/previous search navigation without expanding unrelated sections.
+- Keep Home and Shift+Home immediately after the live-preview checkbox, including repeated Home presses.
 
 ### Other
 

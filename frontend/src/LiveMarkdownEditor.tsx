@@ -3437,6 +3437,22 @@ function expandSnippetBeforeCursor(
   return applySnippetExpansion(view, match[1], from, range.head, onCreateCard, onCreateBoard);
 }
 
+function moveToCheckboxStart(view: EditorView, extend = false): boolean {
+  if (view.state.selection.ranges.length !== 1) return false;
+  const range = view.state.selection.main;
+  const line = view.state.doc.lineAt(range.head);
+  const object = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (!object || object.lineNumber !== line.number || object.checked === undefined) return false;
+  view.dispatch({
+    selection: extend
+      ? EditorSelection.range(range.anchor, object.textFrom)
+      : EditorSelection.cursor(object.textFrom),
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  return true;
+}
+
 function toggleTaskAfterCheckbox(view: EditorView): boolean {
   const range = view.state.selection.main;
   if (!range.empty || view.state.selection.ranges.length !== 1) return false;
@@ -4130,6 +4146,11 @@ export default function LiveMarkdownEditor({
             {
               key: "Space",
               run: toggleTaskAfterCheckbox,
+            },
+            {
+              key: "Home",
+              run: (editor) => moveToCheckboxStart(editor),
+              shift: (editor) => moveToCheckboxStart(editor, true),
             },
             {
               key: "Mod-z",
