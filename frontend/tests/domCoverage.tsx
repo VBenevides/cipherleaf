@@ -1004,6 +1004,49 @@ Object.defineProperty(document, "elementsFromPoint", { configurable: true, value
 await act(async () => { await wait(); liveDrag.root.unmount(); });
 liveDrag.shell.remove();
 
+const findHost = mount("keyboard-find-host");
+const findDocument = "> First\n  > Nested\n    - needle one\n> Second\n  - needle two\n> Unrelated\n  - keep hidden";
+await act(async () => {
+  findHost.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "keyboard-find", value: findDocument, onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: true,
+  }));
+  await wait();
+});
+const findView = EditorView.findFromDOM(findHost.body.querySelector(".cm-editor")!)!;
+assert.equal(findHost.body.querySelector('[data-object-line="3"]'), null);
+await act(async () => {
+  key(findView.contentDOM, "f", { ctrlKey: true });
+  await wait();
+});
+const findInput = findHost.body.querySelector<HTMLInputElement>('.cm-search input[name="search"]')!;
+assert.ok(findInput);
+await act(async () => {
+  findInput.value = "needle";
+  findInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  findHost.body.querySelector<HTMLButtonElement>('.cm-search button[name="next"]')!.click();
+  await wait();
+});
+assert.equal(findView.state.selection.main.from, findDocument.indexOf("needle"));
+assert.equal(findView.state.sliceDoc(findView.state.selection.main.from, findView.state.selection.main.to), "needle");
+assert.ok(findHost.body.querySelector('[data-object-line="3"]'));
+assert.equal(findHost.body.querySelector('[data-object-line="7"]'), null);
+await act(async () => {
+  findHost.body.querySelector<HTMLButtonElement>('.cm-search button[name="next"]')!.click();
+  await wait();
+});
+assert.equal(findView.state.selection.main.from, findDocument.lastIndexOf("needle"));
+assert.ok(findHost.body.querySelector('[data-object-line="5"]'));
+await act(async () => {
+  findHost.body.querySelector<HTMLButtonElement>('.cm-search button[name="prev"]')!.click();
+  await wait();
+});
+assert.equal(findView.state.selection.main.from, findDocument.indexOf("needle"));
+assert.ok(findHost.body.querySelector('[data-object-line="3"]'));
+assert.equal(findHost.body.querySelector('[data-object-line="7"]'), null);
+await act(async () => { findHost.root.unmount(); });
+findHost.shell.remove();
+
 for (const [source, prefix] of [
   ["> Title", "> "], ["* Item", "* "], ["- Item", "- "], ["1. Item", "1. "],
   ["[x] Task", "[ ] "], ["- [x] Task", "- [ ] "], ["> [x] Task", "> [ ] "],

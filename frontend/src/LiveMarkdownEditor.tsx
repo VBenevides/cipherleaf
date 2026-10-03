@@ -3074,6 +3074,31 @@ function updateCollapsedQuotes(
     }
   }
 
+  if (transaction.isUserEvent("select.search") && transaction.newSelection.ranges.length === 1) {
+    cachedContext ??= transaction.docChanged
+      ? transaction.state.field(objectDocumentField)
+      : { lines: value.lines, objectDocument: value.objectDocument };
+    const state = transaction.state;
+    const match = transaction.newSelection.main;
+    const firstLine = state.doc.lineAt(match.from).number;
+    const lastLine = state.doc.lineAt(match.to).number;
+    for (const key of collapsed) {
+      const position = key.startsWith("object:")
+        ? cachedContext.objectDocument.byId.get(key.slice(7))?.from
+        : Number(key.slice("position:".length));
+      if (position === undefined || !Number.isSafeInteger(position) || position < 0 || position > state.doc.length) continue;
+      const line = state.doc.lineAt(position);
+      const level = headingLevel(line.text);
+      const end = level !== null
+        ? headingSectionEnd(state, line.number, level)
+        : toggleSectionEnd(cachedContext.objectDocument, line.number);
+      if (line.number < lastLine && end >= firstLine) {
+        collapsed.delete(key);
+        collapseChanged = true;
+      }
+    }
+  }
+
   return { collapsed, cachedContext, collapseChanged };
 }
 
@@ -4219,7 +4244,7 @@ export default function LiveMarkdownEditor({
               },
             },
           ])),
-          search(),
+          search({ scrollToMatch: (range) => EditorView.scrollIntoView(range, { y: "center" }) }),
           keymap.of(searchKeymap),
           autocompletion({
             override: [(context) => snippetCompletion(
