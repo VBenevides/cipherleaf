@@ -1004,6 +1004,40 @@ Object.defineProperty(document, "elementsFromPoint", { configurable: true, value
 await act(async () => { await wait(); liveDrag.root.unmount(); });
 liveDrag.shell.remove();
 
+for (const taskText of ["[ ] Task", "[x] Task", "[] Task", "- [ ] Task", "  * [x] Task"]) {
+  const taskHost = mount("keyboard-task-host");
+  await act(async () => {
+    taskHost.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "keyboard-task", value: taskText, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const taskView = EditorView.findFromDOM(taskHost.body.querySelector(".cm-editor")!)!;
+  const textFrom = taskView.state.doc.toString().indexOf("Task");
+  await act(async () => {
+    taskView.dispatch({ selection: EditorSelection.cursor(textFrom) });
+    key(taskView.contentDOM, " ");
+  });
+  const wasChecked = taskText.includes("[x]");
+  assert.equal(taskView.state.doc.toString(), taskText.replace(/\[(?: |x)?\]/, wasChecked ? "[ ]" : "[x]"));
+  assert.equal(taskHost.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked, !wasChecked);
+  await act(async () => { key(taskView.contentDOM, " "); });
+  assert.equal(taskView.state.doc.toString(), taskText.replace(/\[(?: |x)?\]/, wasChecked ? "[x]" : "[ ]"));
+  await act(async () => {
+    taskView.dispatch({ selection: EditorSelection.cursor(taskView.state.doc.length) });
+    const before = taskView.state.doc.toString();
+    const event = new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    taskView.contentDOM.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, false);
+    // JSDOM does not perform the browser's default text insertion.
+    taskView.dispatch(taskView.state.replaceSelection(" "));
+    assert.equal(taskView.state.doc.toString(), `${before} `);
+    taskHost.root.unmount();
+  });
+  taskHost.shell.remove();
+}
+
 const mainHost = document.body.appendChild(document.createElement("div"));
 mainHost.id = "root";
 const reactDOMClient = await import("react-dom/client");

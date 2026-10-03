@@ -4,6 +4,10 @@ All notable changes to Cipherleaf are documented here.
 
 ## [Unreleased]
 
+### Features
+
+- Press Space immediately after a live-preview checkbox to toggle its checked state.
+
 ### Other
 
 - Generate frontend LCOV during `npm test` under `.ouro/quality/coverage/frontend` so Ouro's Sonar analysis receives coverage.

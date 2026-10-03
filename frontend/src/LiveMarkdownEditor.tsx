@@ -3412,6 +3412,24 @@ function expandSnippetBeforeCursor(
   return applySnippetExpansion(view, match[1], from, range.head, onCreateCard, onCreateBoard);
 }
 
+function toggleTaskAfterCheckbox(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty || view.state.selection.ranges.length !== 1) return false;
+  const line = view.state.doc.lineAt(range.head);
+  const object = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (!object || object.lineNumber !== line.number ||
+      object.checked === undefined || range.head !== object.textFrom) return false;
+  const bracketOffset = object.sourcePrefix.lastIndexOf("[");
+  if (bracketOffset < 0) return false;
+  const from = object.from + bracketOffset + 1;
+  const empty = object.sourcePrefix.slice(bracketOffset, bracketOffset + 2) === "[]";
+  view.dispatch({
+    changes: { from, to: from + 1, insert: object.checked ? " " : empty ? "x]" : "x" },
+    userEvent: "input",
+  });
+  return true;
+}
+
 function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
   const lineNumbers = new Set<number>();
 
@@ -4063,6 +4081,10 @@ export default function LiveMarkdownEditor({
                 });
                 return true;
               },
+            },
+            {
+              key: "Space",
+              run: toggleTaskAfterCheckbox,
             },
             {
               key: "Mod-z",
