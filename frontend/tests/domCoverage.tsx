@@ -1004,6 +1004,32 @@ Object.defineProperty(document, "elementsFromPoint", { configurable: true, value
 await act(async () => { await wait(); liveDrag.root.unmount(); });
 liveDrag.shell.remove();
 
+for (const [source, prefix] of [
+  ["> Title", "> "], ["* Item", "* "], ["- Item", "- "], ["1. Item", "1. "],
+  ["[x] Task", "[ ] "], ["- [x] Task", "- [ ] "], ["> [x] Task", "> [ ] "],
+  ["  > Title", "  > "], ["< Text", "< "], ["Plain text", ""],
+] as const) {
+  for (const position of new Set([0, prefix.length, Math.min(1, prefix.length)])) {
+    const splitHost = mount("keyboard-split-host");
+    await act(async () => {
+      splitHost.root.render(createElement(LiveMarkdownEditor, {
+        noteID: "keyboard-split", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+        onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+      }));
+      await wait();
+    });
+    const splitView = EditorView.findFromDOM(splitHost.body.querySelector(".cm-editor")!)!;
+    await act(async () => {
+      splitView.dispatch({ selection: EditorSelection.cursor(position) });
+      key(splitView.contentDOM, "Enter");
+    });
+    assert.equal(splitView.state.doc.toString(), `${prefix}\n${source}`);
+    assert.equal(splitView.state.selection.main.head, prefix.length);
+    await act(async () => { splitHost.root.unmount(); });
+    splitHost.shell.remove();
+  }
+}
+
 for (const [source, lineNumber, expectedIndented, expectedDedented] of [
   ["> Only", 1, "> Only", "> Only"],
   ["> Parent\n> Child", 2, "> Parent\n  > Child", "> Parent\n> Child"],

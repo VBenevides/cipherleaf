@@ -12,6 +12,7 @@ All notable changes to Cipherleaf are documented here.
 ### Bugfixes
 
 - Make outline Tab/Shift+Tab change visible parentage without stacking hidden indentation; preserve descendants when moving a parent.
+- Preserve the original element and create an empty line of the same type when Enter is pressed at its raw or visible start, without duplicating markers into content.
 
 ### Other
 

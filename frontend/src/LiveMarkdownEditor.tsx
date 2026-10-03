@@ -3546,17 +3546,20 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
   if (!isCodeContent && !object) return false;
 
-  const atObjectStart = range.head === line.from && object?.tag !== "code";
+  const atObjectStart = object !== null && object.tag !== "code" &&
+    range.head <= line.from + object.sourcePrefix.length;
+  const prefix = object?.sourcePrefix.replace(/\[(?:x|X)\]/g, "[ ]") ?? indentation;
   let inserted = "\n";
-  if (isCodeContent) inserted = `\n${indentation}`;
-  else if (!atObjectStart && object?.tag !== "code") inserted = `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
+  if (atObjectStart) inserted = `${prefix}\n`;
+  else if (isCodeContent) inserted = `\n${indentation}`;
+  else if (object?.tag !== "code") inserted = `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
 
   view.dispatch({
     changes: {
-      from: range.head,
+      from: atObjectStart ? line.from : range.head,
       insert: inserted,
     },
-    selection: EditorSelection.cursor(range.head + inserted.length),
+    selection: EditorSelection.cursor(atObjectStart ? line.from + prefix.length : range.head + inserted.length),
   });
 
   view.focus();
