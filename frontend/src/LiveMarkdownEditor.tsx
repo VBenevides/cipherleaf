@@ -3039,6 +3039,43 @@ function applyCollapseEffect(
   return true;
 }
 
+function collapsedSectionContainsMatch(
+  state: EditorState,
+  document: ObjectDocument,
+  key: string,
+  firstLine: number,
+  lastLine: number,
+): boolean {
+  const position = key.startsWith("object:")
+    ? document.byId.get(key.slice(7))?.from
+    : Number(key.slice("position:".length));
+  if (position === undefined || !Number.isSafeInteger(position) || position < 0 || position > state.doc.length) return false;
+  const line = state.doc.lineAt(position);
+  const level = headingLevel(line.text);
+  const end = level !== null
+    ? headingSectionEnd(state, line.number, level)
+    : toggleSectionEnd(document, line.number);
+  return line.number < lastLine && end >= firstLine;
+}
+
+function revealCollapsedSearchMatch(
+  state: EditorState,
+  document: ObjectDocument,
+  collapsed: Set<string>,
+): boolean {
+  const match = state.selection.main;
+  const firstLine = state.doc.lineAt(match.from).number;
+  const lastLine = state.doc.lineAt(match.to).number;
+  let changed = false;
+  for (const key of collapsed) {
+    if (collapsedSectionContainsMatch(state, document, key, firstLine, lastLine)) {
+      collapsed.delete(key);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function updateCollapsedQuotes(
   value: LivePreviewState,
   transaction: Transaction,
@@ -3078,25 +3115,11 @@ function updateCollapsedQuotes(
     cachedContext ??= transaction.docChanged
       ? transaction.state.field(objectDocumentField)
       : { lines: value.lines, objectDocument: value.objectDocument };
-    const state = transaction.state;
-    const match = transaction.newSelection.main;
-    const firstLine = state.doc.lineAt(match.from).number;
-    const lastLine = state.doc.lineAt(match.to).number;
-    for (const key of collapsed) {
-      const position = key.startsWith("object:")
-        ? cachedContext.objectDocument.byId.get(key.slice(7))?.from
-        : Number(key.slice("position:".length));
-      if (position === undefined || !Number.isSafeInteger(position) || position < 0 || position > state.doc.length) continue;
-      const line = state.doc.lineAt(position);
-      const level = headingLevel(line.text);
-      const end = level !== null
-        ? headingSectionEnd(state, line.number, level)
-        : toggleSectionEnd(cachedContext.objectDocument, line.number);
-      if (line.number < lastLine && end >= firstLine) {
-        collapsed.delete(key);
-        collapseChanged = true;
-      }
-    }
+    collapseChanged = revealCollapsedSearchMatch(
+      transaction.state,
+      cachedContext.objectDocument,
+      collapsed,
+    ) || collapseChanged;
   }
 
   return { collapsed, cachedContext, collapseChanged };
@@ -3442,7 +3465,7 @@ function moveToCheckboxStart(view: EditorView, extend = false): boolean {
   const range = view.state.selection.main;
   const line = view.state.doc.lineAt(range.head);
   const object = cachedObjectDocument(view.state).byLine.get(line.number);
-  if (!object || object.lineNumber !== line.number || object.checked === undefined) return false;
+  if (object?.lineNumber !== line.number || object.checked === undefined) return false;
   view.dispatch({
     selection: extend
       ? EditorSelection.range(range.anchor, object.textFrom)
@@ -3459,76 +3482,104 @@ function toggleTaskAfterCheckbox(view: EditorView): boolean {
   if (!range.empty || view.state.selection.ranges.length !== 1) return false;
   const line = view.state.doc.lineAt(range.head);
   const object = cachedObjectDocument(view.state).byLine.get(line.number);
-  if (!object || object.lineNumber !== line.number ||
+  if (object?.lineNumber !== line.number ||
       object.checked === undefined || range.head !== object.textFrom) return false;
   const bracketOffset = object.sourcePrefix.lastIndexOf("[");
   if (bracketOffset < 0) return false;
   const from = object.from + bracketOffset + 1;
   const empty = object.sourcePrefix.slice(bracketOffset, bracketOffset + 2) === "[]";
+  let insert = "x";
+  if (object.checked) insert = " ";
+  else if (empty) insert = "x]";
   view.dispatch({
-    changes: { from, to: from + 1, insert: object.checked ? " " : empty ? "x]" : "x" },
+    changes: { from, to: from + 1, insert },
     userEvent: "input",
   });
   return true;
 }
 
-function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
+function selectedOutlineLines(state: EditorState): Set<number> {
   const lineNumbers = new Set<number>();
 
-  for (const range of view.state.selection.ranges) {
-    const first = view.state.doc.lineAt(range.from).number;
-    const last = view.state.doc.lineAt(range.to).number;
+  for (const range of state.selection.ranges) {
+    const first = state.doc.lineAt(range.from).number;
+    const last = state.doc.lineAt(range.to).number;
     for (let lineNumber = first; lineNumber <= last; lineNumber++) {
       lineNumbers.add(lineNumber);
     }
   }
 
+  return lineNumbers;
+}
+
+function hasSelectedOutlineAncestor(
+  object: ObjectLine,
+  document: ObjectDocument,
+  selected: Set<string | undefined>,
+): boolean {
+  let ancestor = object.parentId ? document.byId.get(object.parentId) : undefined;
+  while (ancestor) {
+    if (selected.has(ancestor.id)) return true;
+    ancestor = ancestor.parentId ? document.byId.get(ancestor.parentId) : undefined;
+  }
+  return false;
+}
+
+function outlineTargetIndent(
+  object: ObjectLine,
+  document: ObjectDocument,
+  direction: 1 | -1,
+): number | undefined {
+  const parent = object.parentId ? document.byId.get(object.parentId) : undefined;
+  if (direction === -1) return parent?.indent ?? 0;
+  const siblings = parent?.children ?? document.roots;
+  const previousSibling = siblings[siblings.indexOf(object) - 1];
+  // Outline indentation represents parentage, not arbitrary leading whitespace.
+  return previousSibling ? previousSibling.indent + 2 : undefined;
+}
+
+function appendOutlineIndentChanges(
+  changes: EditorTextChange[],
+  state: EditorState,
+  object: ObjectLine,
+  delta: number,
+): void {
+  let lastDescendant = object;
+  while (lastDescendant.children.length) {
+    lastDescendant = lastDescendant.children[lastDescendant.children.length - 1];
+  }
+  for (let lineNumber = object.lineStart; lineNumber <= lastDescendant.lineEnd; lineNumber++) {
+    const line = state.doc.line(lineNumber);
+    const leading = /^[ \t]*/.exec(line.text)![0];
+    const width = leading.replace(/\t/g, "  ").length;
+    changes.push({
+      from: line.from,
+      to: line.from + leading.length,
+      insert: " ".repeat(Math.max(0, width + delta)),
+    });
+  }
+}
+
+function changeOutlineDepth(view: EditorView, direction: 1 | -1): void {
+  const lineNumbers = selectedOutlineLines(view.state);
   const document = cachedObjectDocument(view.state);
   const selected = new Set([...lineNumbers].map((lineNumber) => document.byLine.get(lineNumber)?.id));
-  const changes: { from: number; to?: number; insert: string }[] = [];
+  const changes: EditorTextChange[] = [];
   const handled = new Set<string>();
 
   for (const lineNumber of [...lineNumbers].sort((left, right) => left - right)) {
     const object = document.byLine.get(lineNumber);
     if (!object || handled.has(object.id)) continue;
     handled.add(object.id);
-    let ancestor = object.parentId ? document.byId.get(object.parentId) : undefined;
-    let ancestorSelected = false;
-    while (ancestor) {
-      if (selected.has(ancestor.id)) { ancestorSelected = true; break; }
-      ancestor = ancestor.parentId ? document.byId.get(ancestor.parentId) : undefined;
-    }
-    if (ancestorSelected) continue;
-
-    const parent = object.parentId ? document.byId.get(object.parentId) : undefined;
-    const siblings = parent?.children ?? document.roots;
-    const previousSibling = siblings[siblings.indexOf(object) - 1];
-    // Outline indentation represents parentage, not arbitrary leading whitespace.
-    if (direction === 1 && !previousSibling) continue;
-    const targetIndent = direction === 1 ? previousSibling.indent + 2 : parent?.indent ?? 0;
-    const delta = targetIndent - object.indent;
-    if (delta === 0) continue;
-    let lastDescendant = object;
-    while (lastDescendant.children.length) lastDescendant = lastDescendant.children[lastDescendant.children.length - 1];
-    for (let currentLine = object.lineStart; currentLine <= lastDescendant.lineEnd; currentLine++) {
-      const line = view.state.doc.line(currentLine);
-      const leading = /^[ \t]*/.exec(line.text)![0];
-      const width = leading.replace(/\t/g, "  ").length;
-      changes.push({
-        from: line.from,
-        to: line.from + leading.length,
-        insert: " ".repeat(Math.max(0, width + delta)),
-      });
-    }
+    if (hasSelectedOutlineAncestor(object, document, selected)) continue;
+    const targetIndent = outlineTargetIndent(object, document, direction);
+    if (targetIndent === undefined || targetIndent === object.indent) continue;
+    appendOutlineIndentChanges(changes, view.state, object, targetIndent - object.indent);
   }
 
-  // Consume Tab at a tree boundary so another keymap cannot insert hidden spaces.
-  if (changes.length === 0) return true;
-
+  if (changes.length === 0) return;
   view.dispatch({ changes });
   view.focus();
-
-  return true;
 }
 
 type EditorTextChange = { from: number; to?: number; insert: string };
@@ -3590,7 +3641,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
 
   const atObjectStart = object !== null && object.tag !== "code" &&
     range.head <= line.from + object.sourcePrefix.length;
-  const prefix = object?.sourcePrefix.replace(/\[(?:x|X)\]/g, "[ ]") ?? indentation;
+  const prefix = object?.sourcePrefix.replace(/\[[xX]\]/g, "[ ]") ?? indentation;
   let inserted = "\n";
   if (atObjectStart) inserted = `${prefix}\n`;
   else if (isCodeContent) inserted = `\n${indentation}`;
@@ -4218,11 +4269,18 @@ export default function LiveMarkdownEditor({
             },
             {
               key: "Tab",
-              run: (editor) => changeCodeIndent(editor, 1) || changeOutlineDepth(editor, 1),
+              run: (editor) => {
+                if (!changeCodeIndent(editor, 1)) changeOutlineDepth(editor, 1);
+                // Consume Tab at a tree boundary rather than insert hidden spaces.
+                return true;
+              },
             },
             {
               key: "Shift-Tab",
-              run: (editor) => changeCodeIndent(editor, -1) || changeOutlineDepth(editor, -1),
+              run: (editor) => {
+                if (!changeCodeIndent(editor, -1)) changeOutlineDepth(editor, -1);
+                return true;
+              },
             },
             {
               key: "Mod-s",

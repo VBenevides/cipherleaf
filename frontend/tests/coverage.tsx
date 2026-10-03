@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+
 await Promise.all([
   import("./cards.test.ts"),
   import("./cardJournal.test.ts"),
@@ -26,6 +28,13 @@ try {
   await import("./domCoverage.tsx");
 } catch (error) {
   console.error("[coverage] harness failed", error);
+  writeFileSync(
+    new URL(
+      "../../.ouro/quality/coverage/frontend/harness-error.log",
+      import.meta.url,
+    ),
+    error instanceof Error ? (error.stack ?? error.message) : String(error),
+  );
   process.exit(1);
 }
 

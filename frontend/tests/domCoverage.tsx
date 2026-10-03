@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { EditorSelection } from "@codemirror/state";
+import { EditorSelection, EditorState, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { cardReference, boardMarker, type BoardColumn, type CardMetadata } from "../src/cards";
 import LiveMarkdownEditor, { clipboardClaimsImage, clipboardImage, clipboardMayContainImage, imageDataURL } from "../src/LiveMarkdownEditor";
@@ -1185,6 +1185,155 @@ for (const taskText of ["[ ] Task", "[x] Task", "[] Task", "- [ ] Task", "  * [x
   });
   taskHost.shell.remove();
 }
+
+// A selected label and a continuation line are text, not checkbox commands.
+const taskSelectionHost = mount("task-selection-host");
+const taskSelectionDocument = "[ ] Task\n    continuation\n[ ] Other";
+await act(async () => {
+  taskSelectionHost.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "task-selection", value: taskSelectionDocument, onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+  }));
+  await wait();
+});
+const taskSelectionView = EditorView.findFromDOM(taskSelectionHost.body.querySelector(".cm-editor")!)!;
+for (const selection of [
+  EditorSelection.range(4, 8),
+  EditorSelection.cursor(taskSelectionDocument.indexOf("continuation")),
+]) {
+  await act(async () => {
+    taskSelectionView.dispatch({ selection });
+    const space = new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    taskSelectionView.contentDOM.dispatchEvent(space);
+    assert.equal(space.defaultPrevented, false);
+  });
+  assert.equal(taskSelectionView.state.doc.toString(), taskSelectionDocument);
+  assert.equal(taskSelectionHost.body.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked, false);
+}
+await act(async () => {
+  taskSelectionView.dispatch({
+    effects: StateEffect.appendConfig.of(EditorState.allowMultipleSelections.of(true)),
+  });
+  taskSelectionView.dispatch({
+    selection: EditorSelection.create([EditorSelection.cursor(4), EditorSelection.cursor(taskSelectionDocument.indexOf("Other"))]),
+  });
+  assert.equal(taskSelectionView.state.selection.ranges.length, 2);
+  const space = new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+  taskSelectionView.contentDOM.dispatchEvent(space);
+  assert.equal(space.defaultPrevented, false);
+  key(taskSelectionView.contentDOM, "Home", { shiftKey: true });
+});
+assert.equal(taskSelectionView.state.doc.toString(), taskSelectionDocument);
+assert.equal(taskSelectionView.state.selection.ranges.length, 2);
+assert.deepEqual(taskSelectionView.state.selection.ranges.map((range) => range.anchor), [4, taskSelectionDocument.indexOf("Other")]);
+await act(async () => {
+  const continuation = taskSelectionView.state.doc.line(2);
+  taskSelectionView.dispatch({ selection: EditorSelection.cursor(continuation.to) });
+  key(taskSelectionView.contentDOM, "Home");
+});
+assert.equal(taskSelectionView.state.selection.main.head, taskSelectionView.state.doc.line(2).from + 4);
+await act(async () => { taskSelectionHost.root.unmount(); });
+taskSelectionHost.shell.remove();
+
+// Selecting a parent and its descendants must move each line only once.
+for (const [source, firstLine, lastLine, expected, depths] of [
+  ["> Previous\n> Parent\n  > Child\n    > Grandchild\n> Next", 2, 4,
+    "> Previous\n  > Parent\n    > Child\n      > Grandchild\n> Next", ["0", "1", "2", "3", "0"]],
+  ["> Root\n  > First\n    > Child\n  > Second", 2, 3,
+    "> Root\n  > First\n    > Child\n  > Second", ["0", "1", "2", "1"]],
+  ["> Previous\n> Parent\n\t> Child\n\t\t> Grandchild", 2, 3,
+    "> Previous\n  > Parent\n    > Child\n      > Grandchild", ["0", "1", "2", "3"]],
+] as const) {
+  const selectedDepthHost = mount("selected-depth-host");
+  await act(async () => {
+    selectedDepthHost.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "selected-depth", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const selectedDepthView = EditorView.findFromDOM(selectedDepthHost.body.querySelector(".cm-editor")!)!;
+  await act(async () => {
+    selectedDepthView.dispatch({ selection: EditorSelection.range(selectedDepthView.state.doc.line(firstLine).from, selectedDepthView.state.doc.line(lastLine).to) });
+    key(selectedDepthView.contentDOM, "Tab");
+  });
+  assert.equal(selectedDepthView.state.doc.toString(), expected);
+  for (const [index, depth] of depths.entries()) {
+    assert.equal(selectedDepthHost.body.querySelector<HTMLElement>(`[data-object-line="${index + 1}"].cm-live-object-line`)!.style.getPropertyValue("--live-object-depth"), depth);
+  }
+  await act(async () => { selectedDepthHost.root.unmount(); });
+  selectedDepthHost.shell.remove();
+}
+
+for (const [source, anchor, head, expected, caret] of [
+  ["[x] BeforeAfter", 10, 10, "[x] Before\n[ ] After", 15],
+  ["```ts\n    beforeAfter\n```", 14, 14, "```ts\n    befo\n    reAfter\n```", 19],
+  ["```ts\nvalue\n```", 0, 0, "\n```ts\nvalue\n```", 1],
+  ["BeforeAfter", 6, 11, "Before\n", 7],
+] as const) {
+  const suffixSplitHost = mount("suffix-split-host");
+  await act(async () => {
+    suffixSplitHost.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "suffix-split", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const suffixSplitView = EditorView.findFromDOM(suffixSplitHost.body.querySelector(".cm-editor")!)!;
+  await act(async () => {
+    suffixSplitView.dispatch({ selection: EditorSelection.range(anchor, head) });
+    key(suffixSplitView.contentDOM, "Enter");
+  });
+  assert.equal(suffixSplitView.state.doc.toString(), expected);
+  assert.equal(suffixSplitView.state.selection.main.head, caret);
+  assert.equal(suffixSplitView.state.selection.main.empty, true);
+  await act(async () => { suffixSplitHost.root.unmount(); });
+  suffixSplitHost.shell.remove();
+}
+
+const headingFindHost = mount("heading-find-host");
+const headingFindDocument = "# First\nneedle one\n# Unrelated\nkeep hidden";
+await act(async () => {
+  headingFindHost.root.render(createElement(LiveMarkdownEditor, {
+    noteID: "heading-find", value: headingFindDocument, onChange: () => {}, onSave: () => {}, onError: () => {},
+    onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: true,
+  }));
+  await wait();
+});
+const headingFindView = EditorView.findFromDOM(headingFindHost.body.querySelector(".cm-editor")!)!;
+assert.equal(headingFindHost.body.querySelector('[data-object-line="2"]'), null);
+assert.equal(headingFindHost.body.querySelector('[data-object-line="4"]'), null);
+await act(async () => {
+  headingFindView.dispatch({ changes: { from: 0, insert: "Intro\n" } });
+  await wait();
+});
+assert.equal(headingFindView.state.doc.toString(), `Intro\n${headingFindDocument}`);
+assert.equal(headingFindHost.body.querySelector('[data-object-line="3"]'), null);
+assert.equal(headingFindHost.body.querySelector('[data-object-line="5"]'), null);
+await act(async () => {
+  key(headingFindView.contentDOM, "f", { ctrlKey: true });
+  await wait();
+});
+const headingFindInput = headingFindHost.body.querySelector<HTMLInputElement>('.cm-search input[name="search"]')!;
+await act(async () => {
+  headingFindInput.value = "needle";
+  headingFindInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  headingFindHost.body.querySelector<HTMLButtonElement>('.cm-search button[name="next"]')!.click();
+  await wait();
+});
+assert.equal(headingFindView.state.selection.main.from, `Intro\n${headingFindDocument}`.indexOf("needle"));
+assert.equal(headingFindView.state.sliceDoc(headingFindView.state.selection.main.from, headingFindView.state.selection.main.to), "needle");
+assert.ok(headingFindHost.body.querySelector('[data-object-line="3"]'));
+assert.equal(headingFindHost.body.querySelector('[data-object-line="5"]'), null);
+await act(async () => {
+  headingFindView.dispatch({ changes: { from: 0, to: 6, insert: "" } });
+  await wait();
+});
+assert.equal(headingFindView.state.doc.toString(), headingFindDocument);
+assert.ok(headingFindHost.body.querySelector('[data-object-line="2"]'));
+assert.equal(headingFindHost.body.querySelector('[data-object-line="4"]'), null);
+await act(async () => { headingFindHost.root.unmount(); });
+headingFindHost.shell.remove();
 
 const mainHost = document.body.appendChild(document.createElement("div"));
 mainHost.id = "root";
