@@ -181,12 +181,11 @@ func TestTimeEntryInvalidFinishAndWriteRollback(t *testing.T) {
 func createCompletedTrackingEntry(t *testing.T, store *Store, name, projectID string, tagIDs []string, start, end string) TimeEntry {
 	t.Helper()
 	setTrackingTestNow(store, start)
-	entry, err := store.StartTimeEntry(name, projectID, tagIDs)
-	if err != nil {
+	if _, err := store.StartTimeEntry(name, projectID, tagIDs); err != nil {
 		t.Fatal(err)
 	}
 	setTrackingTestNow(store, end)
-	entry, err = store.FinishActiveTimeEntry()
+	entry, err := store.FinishActiveTimeEntry()
 	if err != nil {
 		t.Fatal(err)
 	}

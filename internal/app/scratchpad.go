@@ -30,11 +30,12 @@ type ScratchpadState struct {
 }
 
 type scratchpadStore struct {
-	mu              sync.RWMutex
-	state           ScratchpadState
-	attachments     map[string][]byte
-	pending         map[string]struct{}
-	attachmentBytes int
+	mu                sync.RWMutex
+	state             ScratchpadState
+	persistedRevision uint64
+	attachments       map[string][]byte
+	pending           map[string]struct{}
+	attachmentBytes   int
 }
 
 func (s *VaultService) GetScratchpad() ScratchpadState {
@@ -72,6 +73,7 @@ func (s *VaultService) hydrateScratchpad() error {
 	if changed && persisted.Revision <= currentRevision {
 		state.Revision = currentRevision + 1
 	}
+	s.scratchpad.persistedRevision = persisted.Revision
 	s.scratchpad.state = state
 	s.scratchpad.mu.Unlock()
 	if changed {
@@ -80,7 +82,7 @@ func (s *VaultService) hydrateScratchpad() error {
 	return nil
 }
 
-func (s *VaultService) SaveScratchpad(content string, caretOffset int, generation uint64) (ScratchpadState, error) {
+func (s *VaultService) SaveScratchpad(content string, caretOffset int, generation uint64, expectedRevision uint64) (ScratchpadState, error) {
 	s.scratchpad.mu.Lock()
 	if s.store.Session().Locked {
 		s.scratchpad.mu.Unlock()
@@ -94,14 +96,19 @@ func (s *VaultService) SaveScratchpad(content string, caretOffset int, generatio
 		s.scratchpad.mu.Unlock()
 		return ScratchpadState{}, ErrScratchpadStaleGeneration
 	}
+	if expectedRevision != s.scratchpad.state.Revision {
+		s.scratchpad.mu.Unlock()
+		return ScratchpadState{}, vault.ErrScratchpadRevisionConflict
+	}
 	if caretOffset < 0 {
 		caretOffset = 0
 	}
-	persisted, err := s.store.SaveScratchpad(content, caretOffset)
+	persisted, err := s.store.SaveScratchpadAtRevision(content, caretOffset, s.scratchpad.persistedRevision)
 	if err != nil {
 		s.scratchpad.mu.Unlock()
 		return ScratchpadState{}, err
 	}
+	s.scratchpad.persistedRevision = persisted.Revision
 	currentRevision := s.scratchpad.state.Revision
 	s.scratchpad.state.Content = persisted.Content
 	s.scratchpad.state.CaretOffset = persisted.CaretOffset
@@ -123,6 +130,7 @@ func (s *scratchpadStore) clearLocked() ScratchpadState {
 	s.state.Content = ""
 	s.state.CaretOffset = 0
 	s.state.Revision = 0
+	s.persistedRevision = 0
 	s.state.Generation++
 	s.attachments = nil
 	s.pending = nil

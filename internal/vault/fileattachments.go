@@ -182,13 +182,10 @@ func (s *Store) ExportFileAttachment(noteID, id, destination string) (string, er
 			return "", err
 		}
 		if _, err := file.Write(data); err != nil {
-			file.Close()
-			_ = os.Remove(path)
-			return "", err
+			return "", errors.Join(err, file.Close(), os.Remove(path))
 		}
 		if err := file.Close(); err != nil {
-			_ = os.Remove(path)
-			return "", err
+			return "", errors.Join(err, os.Remove(path))
 		}
 		return path, nil
 	}

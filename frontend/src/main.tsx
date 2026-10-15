@@ -1,10 +1,16 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { System } from '@wailsio/runtime'
 import App from './App'
 import Scratchpad from './Scratchpad'
 
 const root = document.getElementById('root') as HTMLElement
 const scratchpadWindow = new URLSearchParams(window.location.search).get('window') === 'scratchpad'
+
+if (System.IsMac()) {
+  document.documentElement.dataset.os = 'darwin'
+}
+
 const SCRATCHPAD_THEME_KEY = 'cipherleaf-theme'
 const SCRATCHPAD_OPACITY_KEY = 'cipherleaf-scratchpad-opacity'
 const SCRATCHPAD_DEFAULT_OPACITY = 0.5

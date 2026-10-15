@@ -102,7 +102,7 @@ func TestValidateSettings(t *testing.T) {
 	}
 }
 
-func TestValidateSettingsWarnsAboutBroadKeyPermissions(t *testing.T) {
+func TestValidateSettingsRejectsBroadKeyPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permissions are not exposed on Windows")
 	}
@@ -114,12 +114,9 @@ func TestValidateSettingsWarnsAboutBroadKeyPermissions(t *testing.T) {
 	value.RepositorySSH = "git@github.com:acme/notes.git"
 	value.PrivateKeyPath = keyPath
 	value.RepositoryPrivate = true
-	_, warning, err := ValidateSettings(value, "vault-id-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(warning, "chmod 600") {
-		t.Fatalf("warning = %q", warning)
+	_, _, err := ValidateSettings(value, "vault-id-123")
+	if err == nil || !strings.Contains(err.Error(), "owner") {
+		t.Fatalf("broad key permissions error = %v", err)
 	}
 }
 
@@ -128,7 +125,11 @@ func TestFileSettingsStoreRoundTripIsOwnerOnly(t *testing.T) {
 	store := NewFileSettingsStore(root)
 	value := DefaultSettings("vault-id-123")
 	value.RepositorySSH = "git@github.com:acme/notes.git"
-	value.PrivateKeyPath = "/home/person/.ssh/id_cipherleaf"
+	keyPath := filepath.Join(root, "id_cipherleaf")
+	if err := os.WriteFile(keyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value.PrivateKeyPath = keyPath
 	value.RepositoryPrivate = true
 	if err := store.Save(value); err != nil {
 		t.Fatal(err)
@@ -139,6 +140,14 @@ func TestFileSettingsStoreRoundTripIsOwnerOnly(t *testing.T) {
 	}
 	if loaded != value {
 		t.Fatalf("loaded settings = %#v, want %#v", loaded, value)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(keyPath, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Load(value.VaultID); err == nil {
+			t.Fatal("Load accepted a private key after its permissions became broad")
+		}
 	}
 	path := filepath.Join(root, value.VaultID, settingsFilename)
 	info, err := os.Stat(path)
@@ -407,10 +416,14 @@ func (successfulPullProvider) Pull(
 }
 
 func TestPullTimestampIsRecordedOnlyAfterMergeConfirmation(t *testing.T) {
-	settingsStore := NewFileSettingsStore(t.TempDir())
+	settingsRoot := t.TempDir()
+	settingsStore := NewFileSettingsStore(settingsRoot)
 	settings := DefaultSettings("vault-id-123")
 	settings.RepositorySSH = "git@github.com:acme/notes.git"
-	settings.PrivateKeyPath = "/home/person/.ssh/id_cipherleaf"
+	settings.PrivateKeyPath = filepath.Join(settingsRoot, "id_cipherleaf")
+	if err := os.WriteFile(settings.PrivateKeyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	settings.RepositoryPrivate = true
 	settings.Linked = true
 	if err := settingsStore.Save(settings); err != nil {
@@ -517,11 +530,15 @@ func TestRetryableSyncErrors(t *testing.T) {
 
 func TestManagerSkipsPushForUnchangedSnapshotRevision(t *testing.T) {
 	vaultID := strings.Repeat("a", 32)
-	settingsStore := NewFileSettingsStore(t.TempDir())
+	settingsRoot := t.TempDir()
+	settingsStore := NewFileSettingsStore(settingsRoot)
 	settings := DefaultSettings(vaultID)
 	settings.Linked = true
 	settings.RepositorySSH = "git@github.com:acme/notes.git"
-	settings.PrivateKeyPath = "/key"
+	settings.PrivateKeyPath = filepath.Join(settingsRoot, "id_cipherleaf")
+	if err := os.WriteFile(settings.PrivateKeyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	settings.RepositoryPrivate = true
 	settings.LastSnapshotRev = "same"
 	settings.LastCommit = strings.Repeat("b", 40)
@@ -550,11 +567,15 @@ func TestManagerSkipsPushForUnchangedSnapshotRevision(t *testing.T) {
 
 func TestManagerPersistsForcePushRevision(t *testing.T) {
 	vaultID := strings.Repeat("a", 32)
-	settingsStore := NewFileSettingsStore(t.TempDir())
+	settingsRoot := t.TempDir()
+	settingsStore := NewFileSettingsStore(settingsRoot)
 	settings := DefaultSettings(vaultID)
 	settings.Linked = true
 	settings.RepositorySSH = "git@github.com:acme/notes.git"
-	settings.PrivateKeyPath = "/key"
+	settings.PrivateKeyPath = filepath.Join(settingsRoot, "id_cipherleaf")
+	if err := os.WriteFile(settings.PrivateKeyPath, []byte("not-a-real-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	settings.RepositoryPrivate = true
 	if err := settingsStore.Save(settings); err != nil {
 		t.Fatal(err)

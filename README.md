@@ -173,6 +173,18 @@ Check the production frontend build:
 npm --prefix frontend run build
 ```
 
+### Local quality evidence
+
+With Ouro configured, run `ouro quality --root "$PWD" --json` and inspect the
+returned run's reports under `.ouro/runs/`. A Sonar-only pass does not prove
+that tests or the full quality profile passed.
+
+The managed-local Sonar instance has no native branch history: its project
+dashboard describes the latest scanned checkout, not a branch-isolated result.
+Use the immutable run report to identify the scanned Git branch and findings.
+Uncommitted lines can lack blame information. Preserve pending work; do not
+commit unrelated changes merely to remove scanner warnings.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -186,11 +198,15 @@ npm --prefix frontend run build
 | `Ctrl/Cmd+Shift+H` | Replace across notes |
 | `Ctrl/Cmd+Shift+T` | Open the time-entry start form |
 | `Ctrl/Cmd+Shift+E` | Confirm finishing the active timer |
-| `Super+grave/backtick` | Open Scratchpad (global overlay when supported by desktop; app unfocused; editable from the Command Palette) |
+| `Super+grave/backtick` | Open the note marked “Open as scratchpad” (the Scratchpad by default) |
 | `Ctrl+]` / `Ctrl+[` | Expand/collapse the current outline section |
 | `Ctrl+Shift+]` / `Ctrl+Shift+[` | Expand/collapse all outline sections |
 
+Open a note and select **Open as scratchpad** to change the shortcut target. Select the
+Scratchpad checkbox to restore the default. This choice is stored in the encrypted vault.
+
 Inside outline sections, `Tab` and `Shift+Tab` indent or outdent rows.
+`Ctrl+Shift+Tab` outdents all children of the current element, preserving their subtrees.
 Consecutive `>` lines form one collapsible section; additional `>` characters
 create nesting:
 

@@ -185,6 +185,13 @@ export function GetScratchpadShortcut(): $CancellablePromise<string> {
     return $Call.ByID(1175710304);
 }
 
+/**
+ * GetScratchpadShortcutTarget returns the tab opened by the Scratchpad shortcut.
+ */
+export function GetScratchpadShortcutTarget(): $CancellablePromise<string> {
+    return $Call.ByID(3332482185);
+}
+
 export function GetSession(): $CancellablePromise<vault$0.Session> {
     return $Call.ByID(355925843);
 }
@@ -415,12 +422,12 @@ export function SaveImageAttachment(noteID: string, imageDataURL: string): $Canc
     return $Call.ByID(1556359170, noteID, imageDataURL);
 }
 
-export function SaveNote(id: string, title: string, content: string): $CancellablePromise<vault$0.SavedNote> {
-    return $Call.ByID(2770680190, id, title, content);
+export function SaveNote(id: string, title: string, content: string, expectedRevision: number): $CancellablePromise<vault$0.SavedNote> {
+    return $Call.ByID(2770680190, id, title, content, expectedRevision);
 }
 
-export function SaveScratchpad(content: string, caretOffset: number, generation: number): $CancellablePromise<$models.ScratchpadState> {
-    return $Call.ByID(2199009165, content, caretOffset, generation);
+export function SaveScratchpad(content: string, caretOffset: number, generation: number, expectedRevision: number): $CancellablePromise<$models.ScratchpadState> {
+    return $Call.ByID(2199009165, content, caretOffset, generation, expectedRevision);
 }
 
 export function SaveVaultSettings(settings: vault$0.VaultSettings): $CancellablePromise<vault$0.VaultSettings> {
@@ -465,6 +472,13 @@ export function SetFolderSortMode(id: string, mode: string): $CancellablePromise
  */
 export function SetScratchpadShortcut(shortcut: string): $CancellablePromise<string> {
     return $Call.ByID(2182337292, shortcut);
+}
+
+/**
+ * SetScratchpadShortcutTarget changes the tab opened by the Scratchpad shortcut.
+ */
+export function SetScratchpadShortcutTarget(target: string): $CancellablePromise<string> {
+    return $Call.ByID(2987846773, target);
 }
 
 export function StartTimeEntry(name: string, projectID: string, tagIDs: string[] | null): $CancellablePromise<vault$0.TimeEntry> {

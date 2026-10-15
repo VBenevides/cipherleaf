@@ -102,6 +102,7 @@ func TestLockedFolderProtectsEveryContentAPI(t *testing.T) {
 		func() error { _, err := store.ListNoteVersions(note.ID); return err },
 		func() error { _, err := store.RestoreNoteVersion(note.ID, 1); return err },
 		func() error { return store.RestoreTrashItem("note", trashed.ID) },
+		func() error { return store.PermanentlyDeleteTrashItem("note", trashed.ID) },
 	}
 	for index, check := range checks {
 		if err := check(); !errors.Is(err, ErrFolderLocked) {

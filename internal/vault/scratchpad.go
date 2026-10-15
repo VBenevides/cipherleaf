@@ -2,6 +2,7 @@ package vault
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -25,6 +26,14 @@ func (s *Store) GetScratchpad() (ScratchpadState, error) {
 }
 
 func (s *Store) SaveScratchpad(content string, caretOffset int) (ScratchpadState, error) {
+	return s.saveScratchpad(content, caretOffset, nil)
+}
+
+func (s *Store) SaveScratchpadAtRevision(content string, caretOffset int, expectedRevision uint64) (ScratchpadState, error) {
+	return s.saveScratchpad(content, caretOffset, &expectedRevision)
+}
+
+func (s *Store) saveScratchpad(content string, caretOffset int, expectedRevision *uint64) (ScratchpadState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.requireUnlocked(); err != nil {
@@ -33,8 +42,11 @@ func (s *Store) SaveScratchpad(content string, caretOffset int) (ScratchpadState
 	if len(content) > maxScratchpadBytes {
 		return ScratchpadState{}, errors.New("scratchpad exceeds the 10 MiB limit")
 	}
-	caretOffset = max(caretOffset, 0)
 	previous := s.manifest.Scratchpad
+	if expectedRevision != nil && previous.Revision != *expectedRevision {
+		return ScratchpadState{}, fmt.Errorf("%w: expected revision %d, found %d", ErrScratchpadRevisionConflict, *expectedRevision, previous.Revision)
+	}
+	caretOffset = max(caretOffset, 0)
 	now := time.Now().UnixMilli()
 	state := ScratchpadState{
 		Content:     content,
@@ -73,11 +85,11 @@ func scratchpadStateIsNewer(left, right ScratchpadState) bool {
 	if right.Revision == 0 {
 		return true
 	}
-	if left.ModifiedAt != right.ModifiedAt {
-		return left.ModifiedAt > right.ModifiedAt
-	}
 	if left.Revision != right.Revision {
 		return left.Revision > right.Revision
+	}
+	if left.ModifiedAt != right.ModifiedAt {
+		return left.ModifiedAt > right.ModifiedAt
 	}
 	if compared := strings.Compare(left.Content, right.Content); compared != 0 {
 		return compared > 0

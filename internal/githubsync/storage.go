@@ -78,16 +78,11 @@ func (s *FileSettingsStore) Load(vaultID string) (SyncSettings, error) {
 		settings.VaultID != vaultID {
 		return SyncSettings{}, errors.New("GitHub sync settings use an unsupported format or belong to another vault")
 	}
-	if _, err := ParseGitHubSSHRepository(settings.RepositorySSH); err != nil {
-		return SyncSettings{}, errors.New("saved GitHub sync settings contain an invalid repository")
+	validated, _, err := ValidateSettings(settings, vaultID)
+	if err != nil {
+		return SyncSettings{}, errors.New("saved GitHub sync settings failed validation")
 	}
-	if !validBranch(settings.Branch) {
-		return SyncSettings{}, errors.New("saved GitHub sync settings contain an invalid branch")
-	}
-	if !settings.RepositoryPrivate {
-		return SyncSettings{}, errors.New("saved GitHub sync settings do not confirm a private repository")
-	}
-	return settings, nil
+	return validated, nil
 }
 
 func (s *FileSettingsStore) Save(settings SyncSettings) error {

@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { setTimeout as delay } from "node:timers/promises";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create } from "react-test-renderer";
@@ -14,6 +15,13 @@ import { ThemedDatePicker } from "../src/ThemedDatePicker";
 import { SNIPPETS, completeCodeFenceElement, expandSnippet, expandSnippetWithContext, rollLastDatedSection } from "../src/snippets";
 import { boardMarker } from "../src/cards";
 import { canonicalObjectDocumentFromMarkdown } from "../src/objectDocument";
+
+const eventRuntime = await import("../node_modules/@wailsio/runtime/dist/listener.js") as {
+  eventListeners: Map<string, Array<{ dispatch: (event: unknown) => void }>>;
+};
+const emitEvent = (name: string, data: unknown) => {
+  for (const listener of eventRuntime.eventListeners.get(name) ?? []) listener.dispatch({ data });
+};
 
 const storage = new Map<string, string>();
 const windowListeners = new Map<string, Set<(event: any) => void>>();
@@ -57,7 +65,7 @@ const folders = [{ id: "folder", name: "Folder", parentId: "", order: 0, locked:
 const notes = [{ id: "note", title: "Note", folderId: "folder", order: 0, updatedAt: "", createdAt: "", tags: [], outgoingLinks: [] }];
 const note = { id: "note", title: "Note", folderId: "folder", order: 0, content: "# Note\n\n- [ ] Task", updatedAt: "", createdAt: "", modifiedAt: 0, revision: 0 };
 const boardNote = { ...note, content: boardMarker("board-1", [], "Roadmap") };
-const templateNote = { ...note, id: "template", title: "Template", content: ["---", "cipherleaf-card-template: true", "cipherleaf-card-template-name: Template", "cipherleaf-card-template-status: in-progress", "cipherleaf-card-template-tags: [work]", "cipherleaf-card-template-write-changes-to-editor: true", "---", "Template body"].join("\n") };
+const templateNote = { ...note, createdAt: "2026-01-01T12:00:00Z", id: "template", title: "Template", content: ["---", "cipherleaf-card-template: true", "cipherleaf-card-template-name: Template", "cipherleaf-card-template-status: in-progress", "cipherleaf-card-template-tags: [work]", "cipherleaf-card-template-write-changes-to-editor: true", "---", "Template body"].join("\n") };
 const cardNote = { id: "card", title: "Card", folderId: "folder", order: 0, content: [
   "---", "cipherleaf-card: true", "cipherleaf-card-status: not-started", "cipherleaf-card-tags: [work]", "cipherleaf-card-created-at: 2026-01-01T12:00:00", "cipherleaf-card-started-at: 2026-01-02T12:00:00", "cipherleaf-card-finished-at: 2026-01-04T12:00:00", "---", "Card body",
 ].join("\n") };
@@ -72,6 +80,8 @@ const timeEntry = { id: "entry", name: "Task", clientId: "client", projectId: "p
 const timeRange = { entry: timeEntry, startedAtUtc: timeEntry.startedAtUtc, endedAtUtc: timeEntry.endedAtUtc, totalSeconds: 3600 };
 const syncResult = { linked: true, message: "Sync complete", warning: "", branch: "main", lastCommit: "commit", pull: { linked: true, message: "Pulled", warning: "", branch: "main", lastCommit: "commit", stagingPath: "", temporary: false }, push: { linked: true, message: "Pushed", warning: "", branch: "main", lastCommit: "commit", upToDate: true, localMilliseconds: 1, transportMilliseconds: 1, transportPerformed: true }, merge: { pulledNotes: 0, updatedNotes: 0, deletedNotes: 0, pulledFolders: 0, deletedFolders: 0, updatedSettings: false, upToDate: true, conflicts: [], trackingConflicts: [] }, timings: { pullMilliseconds: 1, mergeMilliseconds: 1, pushMilliseconds: 1, totalMilliseconds: 3, transportMilliseconds: 1, localMilliseconds: 2 }, git: { sshConnectionReuse: true, sshConnectionPersistSeconds: 1, transportOperations: 1, gitBytes: 1, repositoryFilesBytes: 1, platform: "test", architecture: "test", gitVersion: "git", openSshVersion: "ssh", usedPrefetch: true, repositoryPath: "/repo" } };
 let conflictNext = false;
+let authoritativeNoteRevision = 1;
+let revisionConflict = false;
 let timeTrackingMode: "normal" | "empty" | "error" = "normal";
 const richFolders = [
   { id: "folder", name: "Folder", parentId: "", order: 0, locked: false, hidden: false },
@@ -127,7 +137,12 @@ assert.match(render(createElement(ObjectTreeView, { value: "[report.pdf](attachm
 assert.match(render(createElement(ThemedDatePicker, { ariaLabel: "Invalid date", value: "invalid", onChange })), /Select date/);
 
 const graphRenderer = create(createElement(GraphView, { folders: richFolders, notes: richNotes, onSelectFolder: onChange, onSelectNote: onChange }));
-await act(async () => { for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom out").props.onClick(); for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom in").props.onClick(); buttonNamed(graphRenderer, "Reset zoom").props.onClick(); buttonNamed(graphRenderer, "Folders").props.onClick(); });
+await act(async () => {
+  for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom out").props.onClick();
+  for (let i = 0; i < 20; i++) buttonNamed(graphRenderer, "Zoom in").props.onClick();
+  buttonNamed(graphRenderer, "Reset zoom").props.onClick();
+  buttonNamed(graphRenderer, "Folders").props.onClick();
+});
 const graphNodes = graphRenderer.root.findAll((node) => typeof node.props.onClick === "function" && String(node.props.className ?? "").includes("graph-node"));
 await act(async () => { graphNodes.forEach((node) => { node.props.onClick(); node.props.onKeyDown({ key: "Enter", preventDefault: onChange }); }); });
 await act(async () => { graphNodes.forEach((node) => { node.props.onKeyDown({ key: " ", preventDefault: onChange }); node.props.onKeyDown({ key: "Escape", preventDefault: onChange }); }); });
@@ -228,12 +243,16 @@ let linkedAppMode = false;
 let boardAppMode = false;
 let throwMethod = -1;
 let lockedAction: "create" | "clone" = "create";
+let shortcutTarget = "scratchpad";
 let vaultSettings = { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
 setTransport({
   call: async (_objectID, _method, _windowName, request) => {
     if (request?.methodID === throwMethod) throw new Error("coverage failure");
     if (timeTrackingMode === "error" && [308561412, 1766611694, 2155705394, 259867052].includes(request?.methodID ?? -1)) throw new Error("time tracking failed");
     switch (request?.methodID) {
+      case 3332482185: return shortcutTarget;
+      case 2987846773: shortcutTarget = request.args[0]; return shortcutTarget;
+      case 687321542: return { content: "scratch draft", caretOffset: 0, generation: 1, revision: 1 };
       case 355925843: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
       case 3632998615: return { path: "/vault", theme: "light" };
       case 1694639620: return ["/vault", "/other-vault"];
@@ -244,9 +263,13 @@ setTransport({
       case 516244023: return [];
       case 2155705394: return null;
       case 220507736: return emptyAppMode ? [] : richFolders;
-      case 888598820: return emptyAppMode ? [] : richNotes;
-      case 1503400201: return request?.args?.[0] === "template" ? templateNote : boardAppMode ? boardNote : openCardMode ? cardNote : note;
-      case 715955408: return note;
+      case 888598820: return emptyAppMode ? [] : richNotes.map((item) => item.id === "note" ? { ...item, revision: authoritativeNoteRevision } : item);
+      case 1503400201:
+        if (request?.args?.[0] === "template") return templateNote;
+        if (boardAppMode) return boardNote;
+        if (openCardMode) return cardNote;
+        return { ...note, revision: authoritativeNoteRevision };
+      case 715955408: return { ...note, revision: authoritativeNoteRevision };
       case 1766611694: return timeTrackingMode === "empty" ? { entries: [], days: [], totalSeconds: 0 } : { entries: [timeRange], days: [{ localDate: "2026-09-08", totalSeconds: 3600 }], totalSeconds: 3600 };
       case 1301789830: return { cpuPercent: 1, memoryBytes: 2, memoryUsage: [{ name: "cipherleaf", pid: 1, memoryBytes: 2 }] };
       case 3277829736: return { notesBytes: 2, attachmentsBytes: 3, timeTrackingBytes: 4, gitBytes: 5 };
@@ -255,12 +278,26 @@ setTransport({
       case 3216968481: return note;
       case 991868496: return [{ noteId: "note", title: "Note", folderId: "folder", field: "content", snippet: "Task", offset: 0, matchLength: 4, utf16Offset: 0, utf16MatchLength: 4 }];
       case 1932071061: return { replacedNotes: 1, replacements: 1 };
-      case 2770680190: return request?.args?.[0] === "template" ? templateNote : { note, summary: richNotes[0] };
+      case 2770680190: {
+        if (revisionConflict) {
+          authoritativeNoteRevision = Math.max(authoritativeNoteRevision, request.args[3]) + 1;
+          throw new Error("note was changed by another writer");
+        }
+        const [id, title, content, expectedRevision] = request.args;
+        let original = note;
+        if (id === "template") original = templateNote;
+        else if (id === "card") original = cardNote;
+        const savedNote = { ...original, id, title, content, revision: expectedRevision + 1 };
+        if (id === "note") authoritativeNoteRevision = savedNote.revision;
+        return { note: savedNote, summary: { ...richNotes[0], id, title, revision: savedNote.revision } };
+      }
       case 814546393: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
-      case 2911480927: return note;
+      case 2911480927: return boardAppMode ? templateNote : note;
       case 239305947: return richFolders[0];
       case 4062770880: return clients[0];
       case 2039739724: return projects[0];
+    }
+    switch (request?.methodID) {
       case 1966438356:
       case 3548001575:
       case 1556478150: return projects[0];
@@ -290,14 +327,16 @@ setTransport({
       case 4139522503: return { locked: true, path: "/vault", vaultId: "", noteCount: 0 };
       case 2182536893: return { id: "file", filename: "file.txt", mimeType: "text/plain", size: 12 };
       case 40245150: return "/export/file.txt";
-      case 3438204788: return "/tmp/file.txt";
+      case 3438204788: return "/selected-file.txt";
       case 3669256728: return "/backup/snapshot";
       case 1268925393: return [{ noteId: "other-note", title: "Other note", folderId: "folder", field: "content", snippet: "Linked note", offset: 0, matchLength: 4, utf16Offset: 0, utf16MatchLength: 4 }];
       case 4116603909: return [];
       case 3315011432: return "secret";
+    }
+    switch (request?.methodID) {
       case 1416189504: return { success: true, message: "Connection verified", warning: "", branch: "main" };
       case 3499492715: {
-        vaultSettings = { ...vaultSettings, ...(request?.args?.[0] ?? {}), revision: vaultSettings.revision + 1, modifiedAt: vaultSettings.modifiedAt + 1 };
+        vaultSettings = { ...vaultSettings, ...(request?.args?.[0]), revision: vaultSettings.revision + 1, modifiedAt: vaultSettings.modifiedAt + 1 };
         return vaultSettings;
       }
       case 1224618098: return "/backup";
@@ -400,6 +439,13 @@ await act(async () => {
   await new Promise((resolve) => setTimeout(resolve, 100));
 });
 assert.match(JSON.stringify(appRenderer?.toJSON()), /workspace/);
+emitEvent("cipherleaf:note-saved", { vaultId: "other-vault", noteId: "note", revision: 2 });
+emitEvent("cipherleaf:note-saved", { vaultId: "vault", noteId: "note", revision: "invalid" });
+authoritativeNoteRevision = 2;
+await act(async () => {
+  emitEvent("cipherleaf:note-saved", { vaultId: "vault", noteId: "note", revision: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+});
 const appButton = (name: string) => appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim() === name))[0];
 const appButtonStarting = (name: string) => appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim().startsWith(name)))[0];
 const buttonEvent = { preventDefault: onChange, stopPropagation: onChange, currentTarget: { closest: () => ({ removeAttribute: onChange }) } };
@@ -427,7 +473,10 @@ const clickLastApp = async (name: string) => {
   const buttons = appRenderer?.root.findAll((node) => node.type === "button" && [textContent(node), node.props["aria-label"], node.props.title].some((value) => String(value ?? "").trim() === name));
   const button = buttons?.at(-1);
   assert.ok(button, `missing app button: ${name}`);
-  await act(async () => { button.props.onClick?.(buttonEvent); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => {
+    button.props.onClick?.(buttonEvent);
+    await delay(0);
+  });
 };
 const waitForApp = () => new Promise((resolve) => setTimeout(resolve, 10));
 const completePrompt = async (trigger: string, value: string) => {
@@ -453,6 +502,30 @@ const submitAppDialog = async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 };
+// Exercise shortcut routing through the mounted App rather than source assertions.
+const setScratchpadTarget = async (checked: boolean) => {
+  const toggle = appRenderer!.root.findAll((node) => node.type === "label" && node.props.className === "scratchpad-target-toggle")[0].findByType("input");
+  await act(async () => { toggle.props.onChange({ target: { checked } }); await waitForApp(); });
+};
+await setScratchpadTarget(true);
+assert.equal(shortcutTarget, "note:note");
+await act(async () => { emitEvent("cipherleaf:scratchpad-focus", null); await waitForApp(); });
+assert.ok(appRenderer!.root.findAll((node) => node.type === "input" && node.props.className === "title-input").length);
+await setScratchpadTarget(false);
+assert.equal(shortcutTarget, "scratchpad");
+await act(async () => { emitEvent("cipherleaf:scratchpad-focus", null); await waitForApp(); });
+assert.match(JSON.stringify(appRenderer!.toJSON()), /scratchpad-editor/);
+const scratchpadToggle = appRenderer!.root.findAll((node) => node.type === "label" && node.props.className === "scratchpad-target-toggle")[0].findByType("input");
+await act(async () => { scratchpadToggle.props.onChange(); await waitForApp(); });
+await act(async () => {
+  const scratchpad = appRenderer!.root.findAll((node) => typeof node.type === "function" && node.type.name === "Scratchpad")[0];
+  scratchpad.props.onClose();
+  await waitForApp();
+});
+throwMethod = 2987846773;
+await setScratchpadTarget(true);
+assert.match(JSON.stringify(appRenderer!.toJSON()), /coverage failure/);
+throwMethod = -1;
 const liveEditor = appRenderer?.root.findAll((node) => typeof node.type === "function" && (node.type as Function).name === "LiveMarkdownEditor")[0];
 assert.ok(liveEditor);
 openCardMode = true;
@@ -503,11 +576,11 @@ await clickApp("Delete template");
 await clickApp("Delete card");
 await clickLastApp("Delete card");
 openCardMode = false;
-const noteRow = appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("note-list-item"))[0];
-await act(async () => { noteRow?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
+const noteRow = () => appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("note-list-item"))[0];
+await act(async () => { noteRow()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Open in a New Tab");
 await clickLastApp("Close Note");
-await act(async () => { noteRow?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
+await act(async () => { noteRow()?.props.onContextMenu?.({ preventDefault: onChange, stopPropagation: onChange, clientX: 10, clientY: 20 }); });
 await clickApp("Delete note");
 await submitAppDialog();
 const folderRow = appRenderer?.root.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("folder-list-item") && typeof node.props.onContextMenu === "function")[0];
@@ -621,7 +694,7 @@ assert.equal(dailyFormatInput()?.props.value, "DD/MM/YYYY");
 await clickApp("Close settings");
 
 const originalHTMLElement = (globalThis as { HTMLElement?: unknown }).HTMLElement;
-if (typeof originalHTMLElement !== "function") Object.assign(globalThis, { HTMLElement: class {} });
+if (typeof originalHTMLElement !== "function") Object.assign(globalThis, { HTMLElement: class HTMLElementStub { readonly nodeType = 1; } });
 try {
   dispatchWindow("keydown", { code: "KeyP", ctrlKey: true, metaKey: false, shiftKey: true, key: "P", preventDefault: onChange, target: { closest: () => null } });
   await waitForApp();
@@ -881,6 +954,26 @@ await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20));
 assert.match(JSON.stringify(appRenderer?.toJSON()), /coverage failure/);
 throwMethod = -1;
 await clickApp("Close statistics");
+authoritativeNoteRevision += 1;
+revisionConflict = true;
+const conflictTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
+await act(async () => { conflictTitle?.props.onChange({ target: { value: "Revision conflict" } }); });
+await clickApp("Save this note (Ctrl + S)");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+assert.ok(appRenderer?.root.findAll((node) => textContent(node).includes("Reload latest")).length);
+await clickApp("Reload latest");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+revisionConflict = true;
+const retryConflictTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
+await act(async () => { retryConflictTitle?.props.onChange({ target: { value: "Retry conflict" } }); });
+await clickApp("Save this note (Ctrl + S)");
+await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+await clickApp("Save merged file");
+await submitAppDialog();
+assert.match(JSON.stringify(appRenderer?.toJSON()), /remote note changed again|Remote edits were preserved|latest conflict base/i);
+revisionConflict = false;
+await clickApp("Save merged file");
+await submitAppDialog();
 const failingTitle = appRenderer?.root.findAll((node) => node.type === "input" && node.props.className === "title-input")[0];
 await act(async () => { failingTitle?.props.onChange({ target: { value: "Save failure" } }); });
 throwMethod = 2770680190;
@@ -902,6 +995,30 @@ const boardRenderer = create(createElement(App));
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
 const boardEditor = boardRenderer.root.findAll((node) => typeof node.type === "function" && (node.type as Function).name === "LiveMarkdownEditor")[0];
 assert.ok(boardEditor);
+await act(async () => {
+  boardEditor.props.onOpenBoardTemplate("board-1", "template");
+  await waitForApp();
+});
+const templateTitleInput = boardRenderer.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Title")[0];
+assert.ok(templateTitleInput, textContent(boardRenderer.root));
+await act(async () => { templateTitleInput.props.onChange({ target: { value: "Updated template" } }); });
+const saveTemplate = boardRenderer.root.findAll((node) => node.type === "button" && textContent(node) === "Save template")[0];
+assert.ok(saveTemplate);
+await act(async () => { saveTemplate.props.onClick(); await waitForApp(); });
+assert.equal(boardRenderer.root.findAll((node) => node.props["aria-label"] === "Card details").length, 1);
+await act(async () => {
+  boardRenderer.root.findByProps({ "aria-label": "Close card" }).props.onClick();
+  await waitForApp();
+});
+await act(async () => {
+  boardEditor.props.onOpenBoardTemplate("board-1", "");
+  await waitForApp();
+});
+assert.ok(buttonNamed(boardRenderer, "Save template"));
+await act(async () => {
+  boardRenderer.root.findByProps({ "aria-label": "Close card" }).props.onClick();
+  await waitForApp();
+});
 await act(async () => {
   boardEditor.props.onChangeBoardTitle?.("board-1", "Updated roadmap");
   boardEditor.props.onChangeBoardColumns?.("board-1", [{ id: "todo", name: "Todo", color: "#123456", cardIDs: [] }], [], ["orphan"]);

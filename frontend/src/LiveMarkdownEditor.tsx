@@ -40,11 +40,13 @@ import {
   embeddedClipboardImage,
   insertAttachmentMarkdown,
   markdownCitation,
+  isOpenableCitationURL,
   markdownCitations,
   normalizeArrowText,
   parseAttachmentMarkdown,
   tableCells,
 } from "./markdown";
+import { minimalDocumentChange } from "./minimalDocumentChange";
 import {
   continuationPrefix,
   deleteObjectInMarkdown,
@@ -107,6 +109,9 @@ type LiveMarkdownEditorProps = {
   readonly caretOffset?: number | null;
   readonly caretRestoreVersion?: number;
   readonly onCaretChange?: (offset: number) => void;
+  readonly scrollSnapshot?: StateEffect<unknown> | null;
+  readonly scrollSnapshotDocument?: string | null;
+  readonly onScrollSnapshotChange?: (snapshot: StateEffect<unknown>, document: string) => void;
   readonly readOnly?: boolean;
   readonly showToolbar?: boolean;
   readonly highlightLineNumbers?: ReadonlySet<number>;
@@ -258,18 +263,6 @@ function preservedSelection(editor: EditorView, length: number) {
   );
 }
 
-function minimalDocumentChange(state: EditorState, next: string) {
-  const current = state.doc.toString();
-  let from = 0;
-  while (from < current.length && from < next.length && current.codePointAt(from) === next.codePointAt(from)) from++;
-  let currentTo = current.length;
-  let nextTo = next.length;
-  while (currentTo > from && nextTo > from && current.codePointAt(currentTo - 1) === next.codePointAt(nextTo - 1)) {
-    currentTo--;
-    nextTo--;
-  }
-  return state.changes({ from, to: currentTo, insert: next.slice(from, nextTo) });
-}
 
 const toggleQuote = StateEffect.define<number>({
   map: (position, changes) => changes.mapPos(position),
@@ -963,7 +956,7 @@ class WikilinkWidget extends WidgetType {
     return other.title === this.title && other.position === this.position;
   }
 
-  toDOM(_view: EditorView) {
+  toDOM() {
     const label = this.title.split("|")[0]?.trim() || this.title;
     const link = document.createElement("span");
     link.className = "cm-live-wikilink";
@@ -1016,10 +1009,11 @@ class CitationWidget extends WidgetType {
       menu.style.left = `${event.clientX}px`;
       menu.style.top = `${event.clientY}px`;
       const close = createMenuCloser(menu);
-      for (const [label, action] of [
-        ["Open link", () => Browser.OpenURL(this.url)],
-        ["Copy link", () => Clipboard.SetText(this.url)],
-      ] as const) {
+      const actions = [
+        ...(isOpenableCitationURL(this.url) ? [["Open link", () => Browser.OpenURL(this.url)] as const] : []),
+        ["Copy link", () => Clipboard.SetText(this.url)] as const,
+      ];
+      for (const [label, action] of actions) {
         const button = menu.appendChild(document.createElement("button"));
         button.type = "button";
         button.role = "menuitem";
@@ -1258,6 +1252,33 @@ function updateBoardMinimizedState({
   boardToggle.setAttribute("aria-expanded", String(!isMinimized));
 }
 
+function updateBoardColumnFilter(
+  column: HTMLElement | undefined,
+  visible: ReadonlySet<string>,
+  sourceCount: number,
+  filtered: boolean,
+) {
+  const visibleCount = filtered ? visible.size : sourceCount;
+  const count = column?.querySelector<HTMLElement>(".cm-live-board-column-count");
+  if (count) {
+    count.textContent = String(visibleCount);
+    count.setAttribute("aria-label", `${visibleCount} ${filtered ? "matching " : ""}cards`);
+  }
+  for (const item of column?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
+    item.hidden = !visible.has(item.dataset.cardId ?? "");
+  }
+  const empty = column?.querySelector<HTMLElement>(".cm-live-board-empty");
+  if (!empty) return;
+  const noMatches = filtered && sourceCount > 0;
+  empty.hidden = visible.size > 0;
+  empty.querySelector<HTMLElement>(".cm-live-board-empty-message")!.textContent = noMatches
+    ? "No matching cards"
+    : "No cards in this column";
+  empty.querySelector<HTMLElement>(".cm-live-board-empty-hint")!.textContent = noMatches
+    ? "Try a different filter."
+    : "Cards will appear here when added to this column.";
+}
+
 function updateBoardFilter({
   board,
   filter,
@@ -1287,24 +1308,7 @@ function updateBoardFilter({
     const filtered = Boolean(titleQuery || tagFilter.value);
     const columnElement = [...board.querySelectorAll<HTMLElement>(".cm-live-board-column")]
       .find((item) => item.dataset.columnId === column.id);
-    const count = columnElement?.querySelector<HTMLElement>(".cm-live-board-column-count");
-    if (count) {
-      count.textContent = String(filtered ? visible.size : sourceCards.length);
-      count.setAttribute("aria-label", `${filtered ? visible.size : sourceCards.length} ${filtered ? "matching " : ""}cards`);
-    }
-    for (const item of columnElement?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
-      item.hidden = !visible.has(item.dataset.cardId ?? "");
-    }
-    const empty = columnElement?.querySelector<HTMLElement>(".cm-live-board-empty");
-    if (empty) {
-      empty.hidden = visible.size > 0;
-      empty.querySelector<HTMLElement>(".cm-live-board-empty-message")!.textContent = filtered && sourceCards.length > 0
-        ? "No matching cards"
-        : "No cards in this column";
-      empty.querySelector<HTMLElement>(".cm-live-board-empty-hint")!.textContent = filtered && sourceCards.length > 0
-        ? "Try a different filter."
-        : "Cards will appear here when added to this column.";
-    }
+    updateBoardColumnFilter(columnElement, visible, sourceCards.length, filtered);
   }
 }
 
@@ -1340,6 +1344,7 @@ class BoardWidget extends WidgetType {
       other.deletedColumns.length !== this.deletedColumns.length || other.orphanCardIDs.length !== this.orphanCardIDs.length) return false;
     if (!sameBoardCardIDs(this.cardIDs, other.cardIDs, this.cards, other.cards)) return false;
     if (!sameBoardCardViews([
+      ...this.columns.flatMap((column) => column.cardIDs),
       ...this.deletedColumns.flatMap((column) => column.cardIDs),
       ...this.orphanCardIDs,
     ], this.cards, other.cards)) return false;
@@ -1534,7 +1539,7 @@ class BoardWidget extends WidgetType {
         let targetColumn: HTMLElement | null = null;
         let preview: HTMLButtonElement | null = null;
         let previewEmpty: HTMLElement | null = null;
-        let previewEmptyWasHidden = false;
+        let previewEmptyWasHidden: HTMLElement["hidden"] = false;
         const columnAt = (x: number, y: number) =>
           document.elementFromPoint(x, y)?.closest<HTMLElement>(".cm-live-board-column") ?? null;
         const clearPreview = () => {
@@ -3044,6 +3049,43 @@ function applyCollapseEffect(
   return true;
 }
 
+function collapsedSectionContainsMatch(
+  state: EditorState,
+  document: ObjectDocument,
+  key: string,
+  firstLine: number,
+  lastLine: number,
+): boolean {
+  const position = key.startsWith("object:")
+    ? document.byId.get(key.slice(7))?.from
+    : Number(key.slice("position:".length));
+  if (position === undefined || !Number.isSafeInteger(position) || position < 0 || position > state.doc.length) return false;
+  const line = state.doc.lineAt(position);
+  const level = headingLevel(line.text);
+  const end = level !== null
+    ? headingSectionEnd(state, line.number, level)
+    : toggleSectionEnd(document, line.number);
+  return line.number < lastLine && end >= firstLine;
+}
+
+function revealCollapsedSearchMatch(
+  state: EditorState,
+  document: ObjectDocument,
+  collapsed: Set<string>,
+): boolean {
+  const match = state.selection.main;
+  const firstLine = state.doc.lineAt(match.from).number;
+  const lastLine = state.doc.lineAt(match.to).number;
+  let changed = false;
+  for (const key of collapsed) {
+    if (collapsedSectionContainsMatch(state, document, key, firstLine, lastLine)) {
+      collapsed.delete(key);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function updateCollapsedQuotes(
   value: LivePreviewState,
   transaction: Transaction,
@@ -3077,6 +3119,17 @@ function updateCollapsedQuotes(
     if (applyCollapseEffect(effect, transaction.state, cachedContext.objectDocument, collapsed)) {
       collapseChanged = true;
     }
+  }
+
+  if (transaction.isUserEvent("select.search") && transaction.newSelection.ranges.length === 1) {
+    cachedContext ??= transaction.docChanged
+      ? transaction.state.field(objectDocumentField)
+      : { lines: value.lines, objectDocument: value.objectDocument };
+    collapseChanged = revealCollapsedSearchMatch(
+      transaction.state,
+      cachedContext.objectDocument,
+      collapsed,
+    ) || collapseChanged;
   }
 
   return { collapsed, cachedContext, collapseChanged };
@@ -3417,46 +3470,139 @@ function expandSnippetBeforeCursor(
   return applySnippetExpansion(view, match[1], from, range.head, onCreateCard, onCreateBoard);
 }
 
-function changeOutlineDepth(view: EditorView, direction: 1 | -1) {
+function moveToCheckboxStart(view: EditorView, extend = false): boolean {
+  if (view.state.selection.ranges.length !== 1) return false;
+  const range = view.state.selection.main;
+  const line = view.state.doc.lineAt(range.head);
+  const object = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (object?.lineNumber !== line.number || object.checked === undefined) return false;
+  view.dispatch({
+    selection: extend
+      ? EditorSelection.range(range.anchor, object.textFrom)
+      : EditorSelection.cursor(object.textFrom),
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  return true;
+}
+
+function toggleTaskAfterCheckbox(view: EditorView): boolean {
+  if (view.state.readOnly) return false;
+  const range = view.state.selection.main;
+  if (!range.empty || view.state.selection.ranges.length !== 1) return false;
+  const line = view.state.doc.lineAt(range.head);
+  const object = cachedObjectDocument(view.state).byLine.get(line.number);
+  if (object?.lineNumber !== line.number ||
+      object.checked === undefined || range.head !== object.textFrom) return false;
+  const bracketOffset = object.sourcePrefix.lastIndexOf("[");
+  if (bracketOffset < 0) return false;
+  const from = object.from + bracketOffset + 1;
+  const empty = object.sourcePrefix.slice(bracketOffset, bracketOffset + 2) === "[]";
+  let insert = "x";
+  if (object.checked) insert = " ";
+  else if (empty) insert = "x]";
+  view.dispatch({
+    changes: { from, to: from + 1, insert },
+    userEvent: "input",
+  });
+  return true;
+}
+
+function selectedOutlineLines(state: EditorState): Set<number> {
   const lineNumbers = new Set<number>();
 
-  for (const range of view.state.selection.ranges) {
-    const first = view.state.doc.lineAt(range.from).number;
-    const last = view.state.doc.lineAt(range.to).number;
+  for (const range of state.selection.ranges) {
+    const first = state.doc.lineAt(range.from).number;
+    const last = state.doc.lineAt(range.to).number;
     for (let lineNumber = first; lineNumber <= last; lineNumber++) {
       lineNumbers.add(lineNumber);
     }
   }
 
-  const changes: { from: number; to?: number; insert: string }[] = [];
+  return lineNumbers;
+}
 
-  for (const lineNumber of [...lineNumbers].sort((left, right) => left - right)) {
-    const line = view.state.doc.line(lineNumber);
+function hasSelectedOutlineAncestor(
+  object: ObjectLine,
+  document: ObjectDocument,
+  selected: Set<string | undefined>,
+): boolean {
+  let ancestor = object.parentId ? document.byId.get(object.parentId) : undefined;
+  while (ancestor) {
+    if (selected.has(ancestor.id)) return true;
+    ancestor = ancestor.parentId ? document.byId.get(ancestor.parentId) : undefined;
+  }
+  return false;
+}
 
-    if (direction === 1) {
-      changes.push({
-        from: line.from,
-        insert: "  ",
-      });
-      continue;
-    }
+function outlineTargetIndent(
+  object: ObjectLine,
+  document: ObjectDocument,
+  direction: 1 | -1,
+): number | undefined {
+  const parent = object.parentId ? document.byId.get(object.parentId) : undefined;
+  if (direction === -1) return parent?.indent ?? 0;
+  const siblings = parent?.children ?? document.roots;
+  const previousSibling = siblings[siblings.indexOf(object) - 1];
+  // Outline indentation represents parentage, not arbitrary leading whitespace.
+  return previousSibling ? previousSibling.indent + 2 : undefined;
+}
 
-    const removable = /(?:^ {1,2}|\t)/.exec(line.text)?.[0];
-    if (!removable) continue;
-
+function appendOutlineIndentChanges(
+  changes: EditorTextChange[],
+  state: EditorState,
+  object: ObjectLine,
+  delta: number,
+): void {
+  let lastDescendant = object;
+  while (lastDescendant.children.length) {
+    lastDescendant = lastDescendant.children[lastDescendant.children.length - 1];
+  }
+  for (let lineNumber = object.lineStart; lineNumber <= lastDescendant.lineEnd; lineNumber++) {
+    const line = state.doc.line(lineNumber);
+    const leading = /^[ \t]*/.exec(line.text)![0];
+    const width = leading.replace(/\t/g, "  ").length;
     changes.push({
       from: line.from,
-      to: line.from + removable.length,
-      insert: "",
+      to: line.from + leading.length,
+      insert: " ".repeat(Math.max(0, width + delta)),
     });
   }
+}
 
-  if (changes.length === 0) return false;
+function changeOutlineDepth(view: EditorView, direction: 1 | -1): void {
+  const lineNumbers = selectedOutlineLines(view.state);
+  const document = cachedObjectDocument(view.state);
+  const selected = new Set([...lineNumbers].map((lineNumber) => document.byLine.get(lineNumber)?.id));
+  const changes: EditorTextChange[] = [];
+  const handled = new Set<string>();
 
+  for (const lineNumber of [...lineNumbers].sort((left, right) => left - right)) {
+    const object = document.byLine.get(lineNumber);
+    if (!object || handled.has(object.id)) continue;
+    handled.add(object.id);
+    if (hasSelectedOutlineAncestor(object, document, selected)) continue;
+    const targetIndent = outlineTargetIndent(object, document, direction);
+    if (targetIndent === undefined || targetIndent === object.indent) continue;
+    appendOutlineIndentChanges(changes, view.state, object, targetIndent - object.indent);
+  }
+
+  if (changes.length === 0) return;
   view.dispatch({ changes });
   view.focus();
+}
 
-  return true;
+function outdentOutlineChildren(view: EditorView): void {
+  if (view.state.readOnly) return;
+  const document = cachedObjectDocument(view.state);
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const object = document.byLine.get(line.number);
+  if (!object) return;
+  const changes: EditorTextChange[] = [];
+  for (const child of object.children) {
+    appendOutlineIndentChanges(changes, view.state, child, object.indent - child.indent);
+  }
+  if (changes.length) view.dispatch({ changes, userEvent: "input.indent" });
 }
 
 type EditorTextChange = { from: number; to?: number; insert: string };
@@ -3516,17 +3662,21 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   const isCodeContent = owner?.tag === "code" && line.number > owner.lineNumber && line.number <= owner.textLineEnd;
   if (!isCodeContent && !object) return false;
 
-  const atObjectStart = range.head === line.from && object?.tag !== "code";
+  const atObjectStart = object !== null && object.tag !== "code" &&
+    range.head <= line.from + object.sourcePrefix.length;
+  const prefix = object?.sourcePrefix.replace(/\[[xX]\]/g, "[ ]") ?? indentation;
   let inserted = "\n";
-  if (isCodeContent) inserted = `\n${indentation}`;
-  else if (!atObjectStart && object?.tag !== "code") inserted = `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
+  if (atObjectStart) inserted = `${prefix}\n`;
+  else if (isCodeContent) inserted = `\n${indentation}`;
+  else if (object?.tags.includes("section")) inserted = `\n${" ".repeat(object.indent + 2)}> `;
+  else if (object?.tag !== "code") inserted = `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
 
   view.dispatch({
     changes: {
-      from: range.head,
+      from: atObjectStart ? line.from : range.head,
       insert: inserted,
     },
-    selection: EditorSelection.cursor(range.head + inserted.length),
+    selection: EditorSelection.cursor(atObjectStart ? line.from + prefix.length : range.head + inserted.length),
   });
 
   view.focus();
@@ -3930,6 +4080,9 @@ export default function LiveMarkdownEditor({
   caretOffset = null,
   caretRestoreVersion = 0,
   onCaretChange,
+  scrollSnapshot = null,
+  scrollSnapshotDocument = null,
+  onScrollSnapshotChange,
   readOnly = false,
   showToolbar = true,
   highlightLineNumbers = new Set<number>(),
@@ -3960,6 +4113,11 @@ export default function LiveMarkdownEditor({
   const onIncreaseFontSizeRef = useRef(onIncreaseFontSize);
   const onSearchTargetAppliedRef = useRef(onSearchTargetApplied);
   const onCaretChangeRef = useRef(onCaretChange);
+  const onScrollSnapshotChangeRef = useRef(onScrollSnapshotChange);
+  const lastScrollSnapshotRef = useRef<StateEffect<unknown> | null>(scrollSnapshot);
+  const scrollRestoreFrameRef = useRef<number | null>(null);
+  const scrollRestoreReleaseFrameRef = useRef<number | null>(null);
+  const scrollRestorePendingRef = useRef(false);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [hiddenAncestors, setHiddenAncestors] = useState<string[]>([]);
 
@@ -4013,11 +4171,13 @@ export default function LiveMarkdownEditor({
     onIncreaseFontSizeRef.current = onIncreaseFontSize;
     onSearchTargetAppliedRef.current = onSearchTargetApplied;
     onCaretChangeRef.current = onCaretChange;
+    onScrollSnapshotChangeRef.current = onScrollSnapshotChange;
+    if (scrollSnapshot) lastScrollSnapshotRef.current = scrollSnapshot;
     if (previousCardData !== cardData || previousCardTemplates !== cardTemplates) {
       const editor = view.current;
       if (editor) editor.dispatch({ effects: [refreshLivePreview.of(null), editor.scrollSnapshot()] });
     }
-  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange]);
+  }, [onChange, onChangeWithCaret, onSave, onError, onOpenWikilink, onOpenCard, cardTitles, cardData, onCreateCard, onCreateBoard, onMoveCard, onMoveCardInBoard, onAddCardToBoard, onChangeBoardTitle, onChangeBoardColumns, cardTemplates, onChangeBoardTemplate, onOpenBoardTemplate, onCreateBoardTemplate, onDecreaseFontSize, onIncreaseFontSize, onSearchTargetApplied, onCaretChange, onScrollSnapshotChange, scrollSnapshot]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -4058,6 +4218,15 @@ export default function LiveMarkdownEditor({
                 });
                 return true;
               },
+            },
+            {
+              key: "Space",
+              run: toggleTaskAfterCheckbox,
+            },
+            {
+              key: "Home",
+              run: (editor) => moveToCheckboxStart(editor),
+              shift: (editor) => moveToCheckboxStart(editor, true),
             },
             {
               key: "Mod-z",
@@ -4123,12 +4292,27 @@ export default function LiveMarkdownEditor({
                 insertNewlineAtOutlineDepth(editor),
             },
             {
+              key: "Ctrl-Shift-Tab",
+              preventDefault: true,
+              run: (editor) => {
+                outdentOutlineChildren(editor);
+                return true;
+              },
+            },
+            {
               key: "Tab",
-              run: (editor) => changeCodeIndent(editor, 1) || changeOutlineDepth(editor, 1),
+              run: (editor) => {
+                if (!changeCodeIndent(editor, 1)) changeOutlineDepth(editor, 1);
+                // Consume Tab at a tree boundary rather than insert hidden spaces.
+                return true;
+              },
             },
             {
               key: "Shift-Tab",
-              run: (editor) => changeCodeIndent(editor, -1) || changeOutlineDepth(editor, -1),
+              run: (editor) => {
+                if (!changeCodeIndent(editor, -1)) changeOutlineDepth(editor, -1);
+                return true;
+              },
             },
             {
               key: "Mod-s",
@@ -4172,7 +4356,7 @@ export default function LiveMarkdownEditor({
               },
             },
           ])),
-          search(),
+          search({ scrollToMatch: (range) => EditorView.scrollIntoView(range, { y: "center" }) }),
           keymap.of(searchKeymap),
           autocompletion({
             override: [(context) => snippetCompletion(
@@ -4376,6 +4560,13 @@ export default function LiveMarkdownEditor({
           }),
           searchHighlightField,
           EditorView.updateListener.of((update) => {
+            if (update.docChanged && lastScrollSnapshotRef.current) {
+              const snapshot = lastScrollSnapshotRef.current.map(update.changes);
+              if (snapshot) {
+                lastScrollSnapshotRef.current = snapshot;
+                onScrollSnapshotChangeRef.current?.(snapshot, update.state.doc.toString());
+              }
+            }
             const externalUpdate = update.transactions.some((transaction) =>
               transaction.annotation(externalDocumentUpdate),
             );
@@ -4404,11 +4595,43 @@ export default function LiveMarkdownEditor({
     });
     const journalRules = installJournalRules(editor);
     scheduleJournalRules = journalRules.schedule;
-    const handleScroll = () => syncHiddenAncestors(editor);
+    const handleScroll = () => {
+      if (onScrollSnapshotChangeRef.current && !scrollRestorePendingRef.current && document.hasFocus()) {
+        const snapshot = editor.scrollSnapshot();
+        lastScrollSnapshotRef.current = snapshot;
+        onScrollSnapshotChangeRef.current(snapshot, editor.state.doc.toString());
+      }
+      syncHiddenAncestors(editor);
+    };
+    const restoreScroll = () => {
+      if (!lastScrollSnapshotRef.current) return;
+      if (scrollRestoreFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreFrameRef.current);
+      if (scrollRestoreReleaseFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreReleaseFrameRef.current);
+      scrollRestorePendingRef.current = true;
+      scrollRestoreFrameRef.current = window.requestAnimationFrame(() => {
+        scrollRestoreFrameRef.current = null;
+        if (view.current === editor && lastScrollSnapshotRef.current) {
+          editor.dispatch({ effects: lastScrollSnapshotRef.current });
+        }
+        scrollRestoreReleaseFrameRef.current = window.requestAnimationFrame(() => {
+          scrollRestoreReleaseFrameRef.current = null;
+          scrollRestorePendingRef.current = false;
+        });
+      });
+    };
     editor.scrollDOM.addEventListener("scroll", handleScroll, { passive: true });
+    if (onScrollSnapshotChange) window.addEventListener("focus", restoreScroll);
     syncHiddenAncestors(editor);
 
     view.current = editor;
+    if (scrollSnapshot && scrollSnapshotDocument !== null && scrollSnapshotDocument !== normalizedValue) {
+      const savedState = EditorState.create({ doc: scrollSnapshotDocument });
+      lastScrollSnapshotRef.current = scrollSnapshot.map(minimalDocumentChange(savedState, normalizedValue)) ?? null;
+      if (lastScrollSnapshotRef.current) {
+        onScrollSnapshotChangeRef.current?.(lastScrollSnapshotRef.current, normalizedValue);
+      }
+    }
+    restoreScroll();
     if (typeof caretOffset === "number" && Number.isFinite(caretOffset)) {
       const position = Math.max(0, Math.min(Math.floor(caretOffset), editor.state.doc.length));
       editor.dispatch({
@@ -4423,7 +4646,13 @@ export default function LiveMarkdownEditor({
 
     return () => {
       onCaretChangeRef.current?.(editor.state.selection.main.head);
+      if (scrollRestoreFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreFrameRef.current);
+      if (scrollRestoreReleaseFrameRef.current !== null) window.cancelAnimationFrame(scrollRestoreReleaseFrameRef.current);
+      scrollRestoreFrameRef.current = null;
+      scrollRestoreReleaseFrameRef.current = null;
+      scrollRestorePendingRef.current = false;
       editor.scrollDOM.removeEventListener("scroll", handleScroll);
+      if (onScrollSnapshotChange) window.removeEventListener("focus", restoreScroll);
       journalRules.destroy();
       editor.destroy();
       view.current = null;
@@ -4437,10 +4666,11 @@ export default function LiveMarkdownEditor({
     if (editor.state.doc.toString() === normalizedValue) return;
 
     const changes = minimalDocumentChange(editor.state, normalizedValue);
+    const snapshot = lastScrollSnapshotRef.current?.map(changes) ?? editor.scrollSnapshot().map(changes)!;
     editor.dispatch({
       changes,
       selection: preservedSelection(editor, normalizedValue.length),
-      effects: editor.scrollSnapshot().map(changes)!,
+      effects: snapshot,
       annotations: [
         externalDocumentUpdate.of(true),
         Transaction.addToHistory.of(false),

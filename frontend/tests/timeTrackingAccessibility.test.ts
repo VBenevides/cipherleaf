@@ -39,7 +39,7 @@ test("timer and calendar modals use native dialog surfaces", () => {
   assert.match(app, /<dialog open className="modal-backdrop timer-modal-backdrop" aria-modal="true" aria-labelledby="timer-dialog-title">/);
   assert.doesNotMatch(app, /timer-modal-backdrop"[^>]*onMouseDown=/);
   assert.match(app, /<div className="vault-modal timer-modal">/);
-  assert.match(app, /<dialog open aria-modal="true" aria-labelledby="calendar-title"\n          className="modal-backdrop calendar-backdrop"/);
+  assert.match(app, /<dialog open aria-modal="true" aria-labelledby="calendar-title"\n {10}className="modal-backdrop calendar-backdrop"/);
   assert.doesNotMatch(app, /calendar-backdrop"[^>]*onMouseDown=/);
   assert.match(app, /<div className="vault-modal calendar-modal">/);
   assert.match(style, /\.timer-modal \{ background: var\(--modal-surface\); \}/);
@@ -106,7 +106,7 @@ test("dashboard period selection uses the themed custom dropdown", () => {
 });
 
 test("task correction saves before refreshing and shows save errors", () => {
-  assert.match(view, /setEditing\(null\);\n      await loadEntries\(\);/);
+  assert.match(view, /setEditing\(null\);\n {6}await loadEntries\(\);/);
   assert.match(view, /\{error && <div className="time-tracking-error" role="alert">\{error\}<\/div>\}/);
 });
 
@@ -120,7 +120,7 @@ test("native and popover menus use theme surfaces", () => {
 });
 
 test("native date and time pickers follow the selected theme", () => {
-  assert.match(style, /:root \{\n  color-scheme: light;/);
+  assert.match(style, /:root \{\n {2}color-scheme: light;/);
   assert.match(style, /:root:not\(\[data-theme="dark"\]\) select,[\s\S]*color-scheme: light !important;/);
   assert.match(style, /:root\[data-theme="dark"\] select,[\s\S]*color-scheme: dark;/);
   assert.match(style, /:root:not\(\[data-theme="dark"\]\) select option \{[\s\S]*background: var\(--modal-control-surface\);/);

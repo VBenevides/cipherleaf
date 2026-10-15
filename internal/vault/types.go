@@ -125,6 +125,7 @@ type manifest struct {
 
 // VaultSettings contains general preferences encrypted and synced with a vault.
 type VaultSettings struct {
+	ScratchpadNoteID                string `json:"scratchpadNoteId,omitempty"`
 	DailyNoteFormat                 string `json:"dailyNoteFormat"`
 	DailyNoteFolderID               string `json:"dailyNoteFolderId"`
 	DailyTemplateNoteID             string `json:"dailyTemplateNoteId"`

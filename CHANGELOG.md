@@ -2,6 +2,55 @@
 
 All notable changes to Cipherleaf are documented here.
 
+## [1.0.7] - 2026-10-15
+
+### Features
+
+- Added macOS support, with titlebar spacing for the native traffic lights, updated app icons, and scratchpad windows hidden on window close.
+- The scratchpad shortcut can now open a specific note: select **Open as scratchpad** on a note to set it as the shortcut target; the choice is stored in the encrypted vault, and the Scratchpad checkbox restores the default target.
+- Added global scratchpad shortcut registration on Linux Wayland sessions through the xdg-desktop-portal GlobalShortcuts API, falling back to the Wails global shortcut on X11.
+- Press Space immediately after a live-preview checkbox to toggle its checked state; read-only editors remain unchanged.
+- Added repeatable mounted live-editor typing and caret-movement benchmarks at 100, 1,000, and 10,000 lines, with per-operation latency distributions.
+- Added `Ctrl+Shift+Tab` to outdent the current element's immediate children, preserving their subtrees and leaving the parent unchanged.
+- Press Enter after a `>` section's text to create an indented child; other element types retain same-level insertion.
+
+### Bugfixes
+
+- Fixed the scratchpad preserving its viewport when reopened and keeping draft edits synchronized between the main window and the scratchpad overlay.
+- Fixed the scratchpad error banner to be dismissible.
+- Fixed the live-preview caret centering and removed per-keystroke whole-app renders.
+- Fixed board columns not refreshing when card metadata changes, and constrained board columns to a 360px height with internal scrolling instead of fixed 310–520px rows.
+- Added revision-checked note saves with conflict detection and latest-note reload/merge handling instead of allowing stale writers to overwrite newer content.
+- Fixed live Scratchpad card metadata updates for validated note-save events, including vault filtering and stale-event rejection.
+- Make outline Tab/Shift+Tab change visible parentage without stacking hidden indentation; preserve descendants when moving a parent.
+- Preserve the original element and create an empty line of the same type when Enter is pressed at its raw or visible start, without duplicating markers into content.
+- Reveal collapsed ancestors of the active Ctrl+F match and center next/previous search navigation without expanding unrelated sections.
+- Keep Home and Shift+Home immediately after the live-preview checkbox, including repeated Home presses.
+- Added revision checks to Scratchpad saves and made higher revisions take precedence over timestamps to reject stale updates.
+- Clear plaintext search, conflict, card-panel, cached-tab, and overlay state when vaults or folders are locked; reject stale asynchronous refreshes.
+- Reject unsafe and symlinked Git snapshot paths, and revalidate saved SSH keys with owner-only permissions required on non-Windows systems.
+- Respect locked-folder access in trash listing and permanent deletion, and require accessible parent folders before restoring trashed items.
+- Restrict citation-menu link opening to HTTP and HTTPS URLs while retaining link copying.
+- Preserve file-close and temporary-cleanup errors; report attachment cleanup failures without treating a durable note save as failed.
+
+### Other
+
+- Documented the scratchpad shortcut target behavior in the README and user guide.
+- Expanded frontend and Go regression coverage for scratchpad targeting, draft synchronization, viewport restoration, board refresh, and Wayland shortcut registration.
+- Replace source-text assertions for checkbox boundaries and line-start breaks with mounted-editor behavior regressions.
+- Simplify editor search-reveal and outline-indentation commands while retaining keyboard behavior and tree-boundary handling.
+- Add selection, continuation, subtree, code-split, and collapsed-heading regressions; persist coverage-harness failure diagnostics outside truncated gate output.
+- Generate frontend LCOV during `npm test` under `.ouro/quality/coverage/frontend` so Ouro's Sonar analysis receives coverage.
+- Fixed coverage harness save responses and stale React test-node references; harness failures now print their cause and exit nonzero instead of leaving App timers running.
+- Updated the transitive `brace-expansion` and `undici` dependencies to resolve dependency audit findings.
+- Supply Vite transform maps and generated line lengths to V8 coverage so LCOV locations match original TypeScript source, including query-qualified entry modules, without changing coverage counts or thresholds.
+- Added portal response, activation-isolation, shortcut rollback, and target-reset regression coverage.
+- Added local ESLint and Prettier dependencies and frontend lint configuration, and pinned SonarQube workflow actions to commit hashes.
+- Updated Go crypto and related dependencies, and patched the transitive `source-map-js` dependency to address a reported denial-of-service vulnerability.
+- Simplified Scratchpad loading and scroll-state lookup, board-filter presentation, and outline key handling without changing existing behavior.
+- Expanded regression coverage for revision conflicts, note-event validation, vault and Git path safety, child outdenting, section insertion, and read-only editors.
+- Documented local Sonar evidence provenance and the distinction between a Sonar-only pass and a full quality-profile pass.
+
 ## [1.0.6] - 2026-09-13
 
 ### Features

@@ -67,6 +67,10 @@ export function markdownCitation(label: string, url: string): string | null {
   return `[${name}](${link})`;
 }
 
+export function isOpenableCitationURL(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
 function isMarkdownLinkTarget(link: string): boolean {
   if (!link || /[\s)]/.test(link)) return false;
   if (/^[a-z]:[\\/]/i.test(link)) return true;

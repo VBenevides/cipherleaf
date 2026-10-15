@@ -230,7 +230,8 @@ func TestVaultServiceLifecycleAndDiagnostics(t *testing.T) {
 	if last, err := service.GetLastSession(); err != nil || last.Theme != "dark" {
 		t.Fatalf("last session = %#v, %v", last, err)
 	}
-	if _, err := service.SaveNote(mustCreateServiceNote(t, service).ID, "Lifecycle note", "content"); err != nil {
+	serviceNote := mustCreateServiceNote(t, service)
+	if _, err := service.SaveNote(serviceNote.ID, "Lifecycle note", "content", serviceNote.Revision); err != nil {
 		t.Fatal(err)
 	}
 	service.LockVault()

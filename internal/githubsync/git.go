@@ -108,12 +108,12 @@ func NewGitConnectionTester(runtimeDir string) *GitConnectionTester {
 func (t *GitConnectionTester) TestConnection(
 	parent context.Context,
 	settings SyncSettings,
-) (ConnectionResult, error) {
+) (result ConnectionResult, returnErr error) {
 	if _, err := exec.LookPath("git"); err != nil {
-		return ConnectionResult{}, errors.New("Git is not installed or is not available on PATH")
+		return ConnectionResult{}, errors.New("git is not installed or is not available on PATH")
 	}
 	if _, err := exec.LookPath("ssh"); err != nil {
-		return ConnectionResult{}, errors.New("OpenSSH is not installed or is not available on PATH")
+		return ConnectionResult{}, errors.New("openssh is not installed or is not available on PATH")
 	}
 	knownHosts, wrapper, err := prepareSSHFiles(t.runtimeDir)
 	if err != nil {
@@ -141,7 +141,11 @@ func (t *GitConnectionTester) TestConnection(
 	if err != nil {
 		return ConnectionResult{}, errors.New("could not create a temporary Git connection test")
 	}
-	defer os.RemoveAll(testRepository)
+	defer func() {
+		if removeErr := os.RemoveAll(testRepository); removeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary Git connection test: %w", removeErr))
+		}
+	}()
 	localCommands := [][]string{
 		{"-C", testRepository, "init", gitQuietFlag},
 		{
@@ -156,7 +160,7 @@ func (t *GitConnectionTester) TestConnection(
 	for _, arguments := range localCommands {
 		_, err = t.runner.Run(contextWithTimeout, "git", arguments, localGitEnvironment())
 		if err != nil {
-			return ConnectionResult{}, errors.New("Git could not prepare its temporary write-permission test")
+			return ConnectionResult{}, errors.New("git could not prepare its temporary write-permission test")
 		}
 	}
 	testRef := fmt.Sprintf(
@@ -216,10 +220,12 @@ func prepareSSHFiles(runtimeDir string) (string, string, error) {
 	return knownHosts, wrapper, nil
 }
 
-var remoteObjectPath = regexp.MustCompile(`^objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
-var remoteAttachmentPath = regexp.MustCompile(`^attachments/(?:[a-f0-9]{32}|shared)/([a-f0-9]{32})\.enc$`)
-var remoteTrackingObjectPath = regexp.MustCompile(`^tracking/objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
-var remoteVaultID = regexp.MustCompile(`^[a-f0-9]{32}$`)
+var (
+	remoteObjectPath         = regexp.MustCompile(`^objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
+	remoteAttachmentPath     = regexp.MustCompile(`^attachments/(?:[a-f0-9]{32}|shared)/([a-f0-9]{32})\.enc$`)
+	remoteTrackingObjectPath = regexp.MustCompile(`^tracking/objects/([a-f0-9]{2})/([a-f0-9]{32})\.enc$`)
+	remoteVaultID            = regexp.MustCompile(`^[a-f0-9]{32}$`)
+)
 
 type GitHubSSHProvider struct {
 	runner     GitRunner
@@ -281,12 +287,12 @@ func (p *GitHubSSHProvider) Link(
 	parent context.Context,
 	settings SyncSettings,
 	snapshot RemoteSnapshotStore,
-) (LinkResult, error) {
+) (result LinkResult, returnErr error) {
 	if _, err := exec.LookPath("git"); err != nil {
-		return LinkResult{}, errors.New("Git is not installed or is not available on PATH")
+		return LinkResult{}, errors.New("git is not installed or is not available on PATH")
 	}
 	if _, err := exec.LookPath("ssh"); err != nil {
-		return LinkResult{}, errors.New("OpenSSH is not installed or is not available on PATH")
+		return LinkResult{}, errors.New("openssh is not installed or is not available on PATH")
 	}
 	knownHosts, wrapper, err := prepareSSHFiles(p.runtimeDir)
 	if err != nil {
@@ -325,7 +331,11 @@ func (p *GitHubSSHProvider) Link(
 	if err != nil {
 		return LinkResult{}, errors.New("could not prepare a temporary encrypted Git cache")
 	}
-	defer os.RemoveAll(stagingRoot)
+	defer func() {
+		if removeErr := os.RemoveAll(stagingRoot); removeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary encrypted Git cache: %w", removeErr))
+		}
+	}()
 	workingTree := filepath.Join(stagingRoot, "repository")
 	output, err := p.runner.Run(
 		contextWithTimeout,
@@ -379,12 +389,12 @@ func (p *GitHubSSHProvider) Link(
 func (p *GitHubSSHProvider) Download(
 	parent context.Context,
 	settings SyncSettings,
-) (DownloadedVault, error) {
+) (result DownloadedVault, returnErr error) {
 	if _, err := exec.LookPath("git"); err != nil {
-		return DownloadedVault{}, errors.New("Git is not installed or is not available on PATH")
+		return DownloadedVault{}, errors.New("git is not installed or is not available on PATH")
 	}
 	if _, err := exec.LookPath("ssh"); err != nil {
-		return DownloadedVault{}, errors.New("OpenSSH is not installed or is not available on PATH")
+		return DownloadedVault{}, errors.New("openssh is not installed or is not available on PATH")
 	}
 	knownHosts, wrapper, err := prepareSSHFiles(p.runtimeDir)
 	if err != nil {
@@ -419,7 +429,11 @@ func (p *GitHubSSHProvider) Download(
 	if err != nil {
 		return DownloadedVault{}, errors.New("could not prepare a temporary encrypted Git cache")
 	}
-	defer os.RemoveAll(stagingRoot)
+	defer func() {
+		if removeErr := os.RemoveAll(stagingRoot); removeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary encrypted Git cache: %w", removeErr))
+		}
+	}()
 	workingTree := filepath.Join(stagingRoot, "repository")
 	output, err := p.runner.Run(
 		contextWithTimeout,
@@ -497,10 +511,10 @@ func (p *GitHubSSHProvider) push(
 ) (PushResult, error) {
 	localStartedAt := time.Now()
 	if _, err := exec.LookPath("git"); err != nil {
-		return PushResult{}, errors.New("Git is not installed or is not available on PATH")
+		return PushResult{}, errors.New("git is not installed or is not available on PATH")
 	}
 	if _, err := exec.LookPath("ssh"); err != nil {
-		return PushResult{}, errors.New("OpenSSH is not installed or is not available on PATH")
+		return PushResult{}, errors.New("openssh is not installed or is not available on PATH")
 	}
 	cachePath := p.cacheRepositoryPath(settings)
 	if _, err := os.Stat(filepath.Join(cachePath, ".git")); err != nil {
@@ -525,7 +539,7 @@ func (p *GitHubSSHProvider) push(
 		return PushResult{}, err
 	}
 	if err := p.stageChangedSnapshot(contextWithTimeout, cachePath); err != nil {
-		return PushResult{}, errors.New("Git could not stage the encrypted vault snapshot")
+		return PushResult{}, errors.New("git could not stage the encrypted vault snapshot")
 	}
 	staged, err := p.runner.Run(
 		contextWithTimeout,
@@ -534,7 +548,7 @@ func (p *GitHubSSHProvider) push(
 		localGitEnvironment(),
 	)
 	if err != nil {
-		return PushResult{}, errors.New("Git could not inspect the staged snapshot")
+		return PushResult{}, errors.New("git could not inspect the staged snapshot")
 	}
 	if len(bytes.TrimSpace(staged)) == 0 {
 		commit, err := p.resolveCommit(contextWithTimeout, cachePath)
@@ -559,7 +573,7 @@ func (p *GitHubSSHProvider) push(
 	}
 	if output, err := p.runner.Run(contextWithTimeout, "git", commitArguments, localGitEnvironment()); err != nil {
 		_ = output
-		return PushResult{}, errors.New("Git could not commit the encrypted vault snapshot")
+		return PushResult{}, errors.New("git could not commit the encrypted vault snapshot")
 	}
 	pushArguments := []string{
 		"-c", gitHooksPathPrefix + emptyHooks,
@@ -569,7 +583,8 @@ func (p *GitHubSSHProvider) push(
 	if force {
 		pushArguments = append(pushArguments, "--force-with-lease")
 	}
-	pushArguments = append(pushArguments,
+	pushArguments = append(
+		pushArguments,
 		"origin",
 		gitHeadsRefPrefix+settings.Branch,
 	)
@@ -642,10 +657,10 @@ func (p *GitHubSSHProvider) Pull(
 	settings SyncSettings,
 ) (PullResult, error) {
 	if _, err := exec.LookPath("git"); err != nil {
-		return PullResult{}, errors.New("Git is not installed or is not available on PATH")
+		return PullResult{}, errors.New("git is not installed or is not available on PATH")
 	}
 	if _, err := exec.LookPath("ssh"); err != nil {
-		return PullResult{}, errors.New("OpenSSH is not installed or is not available on PATH")
+		return PullResult{}, errors.New("openssh is not installed or is not available on PATH")
 	}
 	knownHosts, wrapper, err := prepareSSHFiles(p.runtimeDir)
 	if err != nil {
@@ -766,7 +781,7 @@ func (p *GitHubSSHProvider) ensureLinkedCache(
 	ctx context.Context,
 	settings SyncSettings,
 	environment []string,
-) (string, error) {
+) (cachePathResult string, returnErr error) {
 	cachePath := p.cacheRepositoryPath(settings)
 	if info, err := os.Stat(filepath.Join(cachePath, ".git")); err == nil && info.IsDir() {
 		return cachePath, nil
@@ -775,7 +790,11 @@ func (p *GitHubSSHProvider) ensureLinkedCache(
 	if err != nil {
 		return "", errors.New("could not prepare a replacement encrypted Git cache")
 	}
-	defer os.RemoveAll(stagingRoot)
+	defer func() {
+		if removeErr := os.RemoveAll(stagingRoot); removeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove replacement encrypted Git cache: %w", removeErr))
+		}
+	}()
 	workingTree := filepath.Join(stagingRoot, "repository")
 	output, err := p.runner.Run(
 		ctx,
@@ -811,7 +830,7 @@ func (p *GitHubSSHProvider) initializeEmptyRepository(
 		localGitEnvironment(),
 	); err != nil {
 		_ = output
-		return "", errors.New("Git could not create the configured branch")
+		return "", errors.New("git could not create the configured branch")
 	}
 	if err := snapshot.ExportRemoteSnapshot(workingTree); err != nil {
 		return "", err
@@ -827,7 +846,7 @@ func (p *GitHubSSHProvider) initializeEmptyRepository(
 		localGitEnvironment(),
 	); err != nil {
 		_ = output
-		return "", errors.New("Git could not stage the encrypted vault snapshot")
+		return "", errors.New("git could not stage the encrypted vault snapshot")
 	}
 	commitArguments := []string{
 		"-c", gitHooksPathPrefix + emptyHooks,
@@ -844,7 +863,7 @@ func (p *GitHubSSHProvider) initializeEmptyRepository(
 		localGitEnvironment(),
 	); err != nil {
 		_ = output
-		return "", errors.New("Git could not commit the encrypted vault snapshot")
+		return "", errors.New("git could not commit the encrypted vault snapshot")
 	}
 	pushArguments := []string{
 		"-c", gitHooksPathPrefix + emptyHooks,
@@ -898,7 +917,7 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 		localGitEnvironment(),
 	); err != nil {
 		_ = output
-		return "", errors.New("Git could not stage the encrypted vault snapshot")
+		return "", errors.New("git could not stage the encrypted vault snapshot")
 	}
 	staged, err := p.runner.Run(
 		ctx,
@@ -907,7 +926,7 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 		localGitEnvironment(),
 	)
 	if err != nil {
-		return "", errors.New("Git could not inspect the staged snapshot")
+		return "", errors.New("git could not inspect the staged snapshot")
 	}
 	if len(bytes.TrimSpace(staged)) > 0 {
 		commitArguments := []string{
@@ -920,7 +939,7 @@ func (p *GitHubSSHProvider) acceptExistingRepository(
 		}
 		if output, err := p.runner.Run(ctx, "git", commitArguments, localGitEnvironment()); err != nil {
 			_ = output
-			return "", errors.New("Git could not commit the encrypted vault snapshot")
+			return "", errors.New("git could not commit the encrypted vault snapshot")
 		}
 		pushArguments := []string{
 			"-c", gitHooksPathPrefix + emptyHooks,
@@ -948,7 +967,7 @@ func (p *GitHubSSHProvider) materializeExistingRepository(
 		localGitEnvironment(),
 	)
 	if err != nil {
-		return errors.New("Git could not inspect the existing repository")
+		return errors.New("git could not inspect the existing repository")
 	}
 	if _, err := parseRemotePaths(output); err != nil {
 		return err
@@ -960,7 +979,7 @@ func (p *GitHubSSHProvider) materializeExistingRepository(
 		localGitEnvironment(),
 	); err != nil {
 		_ = output
-		return errors.New("Git could not materialize the existing encrypted repository")
+		return errors.New("git could not materialize the existing encrypted repository")
 	}
 	if err := validateWorkingTreeLayout(workingTree); err != nil {
 		return err
@@ -989,7 +1008,7 @@ func (p *GitHubSSHProvider) changedRemotePaths(
 		localGitEnvironment(),
 	)
 	if err != nil {
-		return nil, errors.New("Git could not inspect the updated repository")
+		return nil, errors.New("git could not inspect the updated repository")
 	}
 	if _, err := parseRemotePaths(remotePaths); err != nil {
 		return nil, err
@@ -1001,7 +1020,7 @@ func (p *GitHubSSHProvider) changedRemotePaths(
 		localGitEnvironment(),
 	)
 	if err != nil {
-		return nil, errors.New("Git could not inspect encrypted repository changes")
+		return nil, errors.New("git could not inspect encrypted repository changes")
 	}
 	return parseChangedRemotePaths(diff)
 }
@@ -1015,6 +1034,9 @@ func (p *GitHubSSHProvider) materializeChangedRepository(
 	checkout := make([]string, 0, len(changed))
 	for _, item := range changed {
 		if item.deleted {
+			if err := validateChangedSnapshotParent(workingTree, item.path); err != nil {
+				return err
+			}
 			if err := os.Remove(filepath.Join(workingTree, item.path)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return errors.New("could not remove an obsolete encrypted Git cache file")
 			}
@@ -1027,9 +1049,12 @@ func (p *GitHubSSHProvider) materializeChangedRepository(
 		arguments := append([]string{"-C", workingTree, "checkout", "--force", reference, "--"}, checkout[:count]...)
 		if output, err := p.runner.Run(ctx, "git", arguments, localGitEnvironment()); err != nil {
 			_ = output
-			return errors.New("Git could not materialize updated encrypted files")
+			return errors.New("git could not materialize updated encrypted files")
 		}
 		checkout = checkout[count:]
+	}
+	if err := validateWorkingTreeLayout(workingTree); err != nil {
+		return err
 	}
 	if err := protectChangedSnapshot(workingTree, changed); err != nil {
 		return err
@@ -1055,7 +1080,7 @@ func (p *GitHubSSHProvider) prepareExistingCache(
 			localGitEnvironment(),
 		); err != nil {
 			_ = output
-			return errors.New("Git could not prepare the existing encrypted cache")
+			return errors.New("git could not prepare the existing encrypted cache")
 		}
 	}
 	return nil
@@ -1077,18 +1102,19 @@ func (p *GitHubSSHProvider) resolveReference(
 		localGitEnvironment(),
 	)
 	if err != nil {
-		return "", errors.New("Git could not record the synchronized commit")
+		return "", errors.New("git could not record the synchronized commit")
 	}
 	commit := strings.TrimSpace(string(output))
 	if len(commit) < 40 || len(commit) > 64 {
-		return "", errors.New("Git returned an invalid synchronized commit")
+		return "", errors.New("git returned an invalid synchronized commit")
 	}
 	return commit, nil
 }
 
 func secureGitEnvironment(settings SyncSettings, knownHosts, wrapper string) []string {
 	controlID := sha256.Sum256([]byte(settings.VaultID + "\x00" + settings.RepositorySSH + "\x00" + settings.PrivateKeyPath))
-	return append(localGitEnvironment(),
+	return append(
+		localGitEnvironment(),
 		"GIT_SSH="+wrapper,
 		"CIPHERLEAF_SSH_KEY="+settings.PrivateKeyPath,
 		"CIPHERLEAF_KNOWN_HOSTS="+knownHosts,
@@ -1186,11 +1212,11 @@ func parseChangedRemotePaths(data []byte) ([]changedRemotePath, error) {
 
 func parseChangedRemotePath(fields [][]byte, index int, status string) ([]changedRemotePath, int, error) {
 	if index >= len(fields) {
-		return nil, index, errors.New("Git returned malformed encrypted repository changes")
+		return nil, index, errors.New("git returned malformed encrypted repository changes")
 	}
 	if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
 		if index+1 >= len(fields) {
-			return nil, index, errors.New("Git returned malformed encrypted repository changes")
+			return nil, index, errors.New("git returned malformed encrypted repository changes")
 		}
 		oldPath, newPath := string(fields[index]), string(fields[index+1])
 		if !validRemotePath(oldPath) || !validRemotePath(newPath) {
@@ -1212,7 +1238,7 @@ func parseChangedRemotePath(fields [][]byte, index int, status string) ([]change
 	case "D":
 		return []changedRemotePath{{path: path, deleted: true}}, index + 1, nil
 	default:
-		return nil, index, errors.New("Git returned an unsupported encrypted repository change")
+		return nil, index, errors.New("git returned an unsupported encrypted repository change")
 	}
 }
 
@@ -1296,12 +1322,65 @@ func protectMaterializedSnapshot(root string) error {
 	})
 }
 
+func validateChangedSnapshotParent(root, relative string) error {
+	if !validRemotePath(filepath.ToSlash(relative)) {
+		return errors.New("encrypted snapshot contains an unsafe repository path")
+	}
+	for current := filepath.Dir(filepath.Join(root, filepath.FromSlash(relative))); ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("encrypted snapshot contains a symlink")
+		}
+		if !info.IsDir() {
+			return errors.New("encrypted snapshot contains a non-directory path component")
+		}
+		if current == root {
+			return nil
+		}
+	}
+}
+
+func validateChangedSnapshotPath(root, relative string) (string, error) {
+	if !validRemotePath(filepath.ToSlash(relative)) {
+		return "", errors.New("encrypted snapshot contains an unsafe repository path")
+	}
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	for current := path; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("encrypted snapshot contains a symlink")
+		}
+		if current == path {
+			if !info.Mode().IsRegular() {
+				return "", errors.New("encrypted snapshot contains a non-regular file")
+			}
+		} else if !info.IsDir() {
+			return "", errors.New("encrypted snapshot contains a non-directory path component")
+		}
+		if current == root {
+			return path, nil
+		}
+	}
+}
+
 func protectChangedSnapshot(root string, changed []changedRemotePath) error {
 	for _, item := range changed {
 		if item.deleted {
 			continue
 		}
-		path := filepath.Join(root, item.path)
+		path, err := validateChangedSnapshotPath(root, item.path)
+		if err != nil {
+			return err
+		}
 		if err := os.Chmod(path, 0o600); err != nil {
 			return errors.New("could not protect the encrypted Git cache")
 		}

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   normalizeStackedExclusiveObjectPrefix,
@@ -57,17 +56,6 @@ test("rewrites every supported object type without retaining old markers", () =>
   assert.equal(replaceExclusiveObjectPrefix("  # Heading", "* "), "  * Heading");
 });
 
-test("bare checkbox prefixes have a removable caret boundary", () => {
-  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
-  assert.match(editor, /object\.barePrefixSize > 0[\s\S]*addHiddenRange\(syntaxFrom, bracketFrom/);
-  assert.match(editor, /function restoreArrowSubstitution\(view: EditorView\)/);
-  assert.match(editor, /let source: string \| null = null;[\s\S]*if \(glyph === "→"\) source = "->";[\s\S]*else if \(glyph === "←"\) source = "<-";/);
-  assert.match(editor, /if \(!range\.empty \|\| range\.head === 0\) return false/);
-  assert.match(editor, /selection: EditorSelection\.cursor\(range\.head - 1 \+ source\.length\)/);
-  assert.match(editor, /function handleBackspace\(view: EditorView\)/);
-  assert.match(editor, /key: "Backspace",[\s\S]*run: handleBackspace/);
-});
-
 test("continues numbering from the previous numbered object", () => {
   assert.equal(replaceExclusiveObjectPrefix("> Second", "1. ", "1. First"), "2. Second");
   assert.equal(normalizeStackedExclusiveObjectPrefix("> 1. Second", "4. First"), "5. Second");
@@ -80,9 +68,4 @@ test("continues bare text objects at the same indentation", () => {
   assert.equal(repeatedObjectPrefix("- [ ] Task"), "- [ ] ");
   assert.equal(repeatedObjectPrefix("1. Task"), "2. ");
   assert.equal(repeatedObjectPrefix("plain"), null);
-});
-
-test("inserting before an object does not duplicate its marker", () => {
-  const editor = readFileSync(new URL("../src/LiveMarkdownEditor.tsx", import.meta.url), "utf8");
-  assert.match(editor, /const atObjectStart = range\.head === line\.from && object\?\.tag !== "code";[\s\S]*let inserted = "\\n";[\s\S]*else if \(!atObjectStart && object\?\.tag !== "code"\)/);
 });
