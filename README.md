@@ -173,6 +173,18 @@ Check the production frontend build:
 npm --prefix frontend run build
 ```
 
+### Local quality evidence
+
+With Ouro configured, run `ouro quality --root "$PWD" --json` and inspect the
+returned run's reports under `.ouro/runs/`. A Sonar-only pass does not prove
+that tests or the full quality profile passed.
+
+The managed-local Sonar instance has no native branch history: its project
+dashboard describes the latest scanned checkout, not a branch-isolated result.
+Use the immutable run report to identify the scanned Git branch and findings.
+Uncommitted lines can lack blame information. Preserve pending work; do not
+commit unrelated changes merely to remove scanner warnings.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
