@@ -311,6 +311,14 @@ boardTitle.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 const filter = board.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")!;
 filter.value = "card";
 filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+filter.value = "no-such-card";
+filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+assert.ok([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].every((card) => card.hidden));
+assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-column-count")].every((count) => count.textContent === "0" && count.getAttribute("aria-label") === "0 matching cards"));
+assert.ok([...board.querySelectorAll<HTMLElement>(".cm-live-board-empty-message")].every((message) => message.textContent === "No matching cards"));
+filter.value = "CARD";
+filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+assert.ok([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-card")].every((card) => !card.hidden));
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.click();
 board.querySelector<HTMLButtonElement>(".cm-live-board-card")?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
 ([...board.querySelectorAll<HTMLButtonElement>(".cm-live-board-controls .secondary-button")].find((button) => button.textContent === "New card"))?.click();
@@ -339,6 +347,11 @@ await act(async () => {
 });
 const configuredBoard = configured.body.querySelector<HTMLElement>(".cm-live-board")!;
 assert.equal(configuredBoard.querySelector<HTMLElement>(".cm-live-board-card-title")?.textContent, "Backlog card");
+const configuredFilter = configuredBoard.querySelector<HTMLInputElement>("[aria-label='Filter board cards by title']")!;
+configuredFilter.value = "no-such-card";
+configuredFilter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+assert.equal(configuredBoard.querySelector<HTMLElement>('[data-column-id="todo"] .cm-live-board-empty-message')?.textContent, "No matching cards");
+assert.equal(configuredBoard.querySelector<HTMLElement>('[data-column-id="done"] .cm-live-board-empty-message')?.textContent, "No cards in this column");
 const renamedConfiguredCards = new Map(cards);
 renamedConfiguredCards.set("card-1", { ...cards.get("card-1")!, title: "Renamed configured card" });
 await act(async () => {

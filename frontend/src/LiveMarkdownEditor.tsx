@@ -1252,6 +1252,33 @@ function updateBoardMinimizedState({
   boardToggle.setAttribute("aria-expanded", String(!isMinimized));
 }
 
+function updateBoardColumnFilter(
+  column: HTMLElement | undefined,
+  visible: ReadonlySet<string>,
+  sourceCount: number,
+  filtered: boolean,
+) {
+  const visibleCount = filtered ? visible.size : sourceCount;
+  const count = column?.querySelector<HTMLElement>(".cm-live-board-column-count");
+  if (count) {
+    count.textContent = String(visibleCount);
+    count.setAttribute("aria-label", `${visibleCount} ${filtered ? "matching " : ""}cards`);
+  }
+  for (const item of column?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
+    item.hidden = !visible.has(item.dataset.cardId ?? "");
+  }
+  const empty = column?.querySelector<HTMLElement>(".cm-live-board-empty");
+  if (!empty) return;
+  const noMatches = filtered && sourceCount > 0;
+  empty.hidden = visible.size > 0;
+  empty.querySelector<HTMLElement>(".cm-live-board-empty-message")!.textContent = noMatches
+    ? "No matching cards"
+    : "No cards in this column";
+  empty.querySelector<HTMLElement>(".cm-live-board-empty-hint")!.textContent = noMatches
+    ? "Try a different filter."
+    : "Cards will appear here when added to this column.";
+}
+
 function updateBoardFilter({
   board,
   filter,
@@ -1281,24 +1308,7 @@ function updateBoardFilter({
     const filtered = Boolean(titleQuery || tagFilter.value);
     const columnElement = [...board.querySelectorAll<HTMLElement>(".cm-live-board-column")]
       .find((item) => item.dataset.columnId === column.id);
-    const count = columnElement?.querySelector<HTMLElement>(".cm-live-board-column-count");
-    if (count) {
-      count.textContent = String(filtered ? visible.size : sourceCards.length);
-      count.setAttribute("aria-label", `${filtered ? visible.size : sourceCards.length} ${filtered ? "matching " : ""}cards`);
-    }
-    for (const item of columnElement?.querySelectorAll<HTMLButtonElement>(".cm-live-board-card") ?? []) {
-      item.hidden = !visible.has(item.dataset.cardId ?? "");
-    }
-    const empty = columnElement?.querySelector<HTMLElement>(".cm-live-board-empty");
-    if (empty) {
-      empty.hidden = visible.size > 0;
-      empty.querySelector<HTMLElement>(".cm-live-board-empty-message")!.textContent = filtered && sourceCards.length > 0
-        ? "No matching cards"
-        : "No cards in this column";
-      empty.querySelector<HTMLElement>(".cm-live-board-empty-hint")!.textContent = filtered && sourceCards.length > 0
-        ? "Try a different filter."
-        : "Cards will appear here when added to this column.";
-    }
+    updateBoardColumnFilter(columnElement, visible, sourceCards.length, filtered);
   }
 }
 
