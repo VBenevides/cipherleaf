@@ -3668,6 +3668,7 @@ function insertNewlineAtOutlineDepth(view: EditorView) {
   let inserted = "\n";
   if (atObjectStart) inserted = `${prefix}\n`;
   else if (isCodeContent) inserted = `\n${indentation}`;
+  else if (object?.tags.includes("section")) inserted = `\n${" ".repeat(object.indent + 2)}> `;
   else if (object?.tag !== "code") inserted = `\n${repeatedObjectPrefix(line.text) ?? indentation}`;
 
   view.dispatch({

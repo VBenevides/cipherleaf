@@ -69,7 +69,7 @@ test("scratchpad overlay and backend state are generation fenced", () => {
   assert.match(scratchpad, /next\.revision < current\.revision/);
   assert.match(scratchpad, /key=\{editorGeneration\}/);
   assert.match(scratchpad, /const editorGeneration = targetNote\?\.id \?\? state\.generation/);
-  assert.match(scratchpad, /currentNote\.id !== generation/);
+  assert.match(scratchpad, /if \(currentNote\?\.id !== generation\) return;/);
   assert.match(scratchpad, /const clearTarget = useCallback/);
   assert.match(scratchpad, /noteID=\{targetNote\?\.id \?\? "scratchpad:" \+ editorGeneration\}/);
   assert.match(scratchpad, /Open as scratchpad/);

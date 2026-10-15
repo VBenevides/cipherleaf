@@ -1165,6 +1165,31 @@ for (const [source, lineNumber, expectedIndented, expectedDedented] of [
   depthHost.shell.remove();
 }
 
+for (const [source, expected] of [
+  ["> Section", "> Section\n  > "],
+  ["  > Section", "  > Section\n    > "],
+  [">> Section", ">> Section\n    > "],
+  ["- Item", "- Item\n- "],
+  ["[ ] Task", "[ ] Task\n[ ] "],
+] as const) {
+  const host = mount("section-enter-host");
+  await act(async () => {
+    host.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "section-enter", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const view = EditorView.findFromDOM(host.body.querySelector(".cm-editor")!)!;
+  await act(async () => {
+    view.dispatch({ selection: EditorSelection.cursor(view.state.doc.length) });
+    key(view.contentDOM, "Enter");
+  });
+  assert.equal(view.state.doc.toString(), expected);
+  await act(async () => { host.root.unmount(); });
+  host.shell.remove();
+}
+
 for (const [source, expected, readOnly] of [
   ["> Parent\n  > First\n    > Grandchild\n  > Second\n> Neighbor", "> Parent\n> First\n  > Grandchild\n> Second\n> Neighbor", false],
   ["> Parent", "> Parent", false],
@@ -1174,6 +1199,7 @@ for (const [source, expected, readOnly] of [
   await act(async () => {
     host.root.render(createElement(LiveMarkdownEditor, {
       noteID: "outdent-children", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      readOnly,
       onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
     }));
     await wait();
@@ -1181,7 +1207,7 @@ for (const [source, expected, readOnly] of [
   const view = EditorView.findFromDOM(host.body.querySelector(".cm-editor")!)!;
   await act(async () => {
     view.dispatch({ selection: EditorSelection.cursor(view.state.doc.line(1).to) });
-    if (readOnly) view.dispatch({ effects: StateEffect.appendConfig.of(EditorState.readOnly.of(true)) });
+    assert.equal(view.state.readOnly, readOnly);
     key(view.contentDOM, "Tab", { ctrlKey: true, shiftKey: true });
   });
   assert.equal(view.state.doc.toString(), expected);
