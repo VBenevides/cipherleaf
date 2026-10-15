@@ -2,9 +2,7 @@
 
 All notable changes to Cipherleaf are documented here.
 
-## [Unreleased]
-
-## [1.0.7] - 2026-09-24
+## [1.0.7] - 2026-10-15
 
 ### Features
 
@@ -13,6 +11,8 @@ All notable changes to Cipherleaf are documented here.
 - Added global scratchpad shortcut registration on Linux Wayland sessions through the xdg-desktop-portal GlobalShortcuts API, falling back to the Wails global shortcut on X11.
 - Press Space immediately after a live-preview checkbox to toggle its checked state; read-only editors remain unchanged.
 - Added repeatable mounted live-editor typing and caret-movement benchmarks at 100, 1,000, and 10,000 lines, with per-operation latency distributions.
+- Added `Ctrl+Shift+Tab` to outdent the current element's immediate children, preserving their subtrees and leaving the parent unchanged.
+- Press Enter after a `>` section's text to create an indented child; other element types retain same-level insertion.
 
 ### Bugfixes
 
@@ -26,6 +26,12 @@ All notable changes to Cipherleaf are documented here.
 - Preserve the original element and create an empty line of the same type when Enter is pressed at its raw or visible start, without duplicating markers into content.
 - Reveal collapsed ancestors of the active Ctrl+F match and center next/previous search navigation without expanding unrelated sections.
 - Keep Home and Shift+Home immediately after the live-preview checkbox, including repeated Home presses.
+- Added revision checks to Scratchpad saves and made higher revisions take precedence over timestamps to reject stale updates.
+- Clear plaintext search, conflict, card-panel, cached-tab, and overlay state when vaults or folders are locked; reject stale asynchronous refreshes.
+- Reject unsafe and symlinked Git snapshot paths, and revalidate saved SSH keys with owner-only permissions required on non-Windows systems.
+- Respect locked-folder access in trash listing and permanent deletion, and require accessible parent folders before restoring trashed items.
+- Restrict citation-menu link opening to HTTP and HTTPS URLs while retaining link copying.
+- Preserve file-close and temporary-cleanup errors; report attachment cleanup failures without treating a durable note save as failed.
 
 ### Other
 
@@ -39,6 +45,11 @@ All notable changes to Cipherleaf are documented here.
 - Updated the transitive `brace-expansion` and `undici` dependencies to resolve dependency audit findings.
 - Supply Vite transform maps and generated line lengths to V8 coverage so LCOV locations match original TypeScript source, including query-qualified entry modules, without changing coverage counts or thresholds.
 - Added portal response, activation-isolation, shortcut rollback, and target-reset regression coverage.
+- Added local ESLint and Prettier dependencies and frontend lint configuration, and pinned SonarQube workflow actions to commit hashes.
+- Updated Go crypto and related dependencies, and patched the transitive `source-map-js` dependency to address a reported denial-of-service vulnerability.
+- Simplified Scratchpad loading and scroll-state lookup, board-filter presentation, and outline key handling without changing existing behavior.
+- Expanded regression coverage for revision conflicts, note-event validation, vault and Git path safety, child outdenting, section insertion, and read-only editors.
+- Documented local Sonar evidence provenance and the distinction between a Sonar-only pass and a full quality-profile pass.
 
 ## [1.0.6] - 2026-09-13
 
