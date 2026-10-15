@@ -105,6 +105,7 @@ const transport: RuntimeTransport = {
         return { locked: false, path: "/vault", vaultId: "vault-1", noteCount: 1 };
       case getNoteMethod: {
         const noteID = request?.args?.[0];
+        if (noteID === "missing-note") throw new Error("Target note unavailable");
         if (noteID === "card" || noteID === "new-card") {
           const isNewCard = noteID === "new-card";
           return {
@@ -467,6 +468,17 @@ try {
   await act(async () => { overlay.unmount(); });
   assert.equal(keydownListeners.size, 0);
   assert.equal(eventRuntime.eventListeners.get(noteSaved)?.length ?? 0, 0);
+
+  shortcutTarget = "note:missing-note";
+  let recovery!: ReturnType<typeof create>;
+  await act(async () => {
+    recovery = create(createElement(Scratchpad, { overlay: true, onError: (reason) => { error = reason; } }));
+    await flush();
+  });
+  assert.equal(editorOf(recovery).props.value, currentState.content);
+  assert.match(alertText(recovery), /Target note unavailable/);
+  assert.ok(error instanceof Error);
+  await act(async () => { recovery.unmount(); });
 } finally {
   Events.Off(changed, cleared);
   Events.Off(noteSaved);

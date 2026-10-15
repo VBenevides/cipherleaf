@@ -263,6 +263,28 @@ export default function Scratchpad({
     void VaultService.HideScratchpad().catch(() => Window.Hide());
   }, []);
 
+  const recoverTargetLoad = useCallback(async (reason: unknown, request: number) => {
+    if (request !== targetRequestRef.current) return;
+    targetNoteRef.current = null;
+    targetDirtyRef.current = false;
+    targetVaultIDRef.current = "";
+    targetNoteIDRef.current = null;
+    overlayCardRevisionsRef.current.clear();
+    setOverlayCardData(new Map());
+    setTargetNote(null);
+    try {
+      const fallback = scratchpadState(await VaultService.GetScratchpad());
+      if (request !== targetRequestRef.current) return;
+      if (fallback) applyState(fallback);
+    } catch (error_) {
+      console.error(`Scratchpad fallback refresh failed: ${errorText(error_)}`);
+    }
+    if (request !== targetRequestRef.current) return;
+    loadedRef.current = true;
+    setLoaded(true);
+    reportError(reason);
+  }, [applyState, reportError]);
+
   const loadTarget = useCallback(async () => {
     const request = ++targetRequestRef.current;
     targetNoteRef.current = null;
@@ -321,27 +343,9 @@ export default function Scratchpad({
       loadedRef.current = true;
       setLoaded(true);
     } catch (reason) {
-      if (request !== targetRequestRef.current) return;
-      targetNoteRef.current = null;
-      targetDirtyRef.current = false;
-      targetVaultIDRef.current = "";
-      targetNoteIDRef.current = null;
-      overlayCardRevisionsRef.current.clear();
-      setOverlayCardData(new Map());
-      setTargetNote(null);
-      try {
-        const fallback = scratchpadState(await VaultService.GetScratchpad());
-        if (request !== targetRequestRef.current) return;
-        if (fallback) applyState(fallback);
-      } catch (error_) {
-        console.error(`Scratchpad fallback refresh failed: ${errorText(error_)}`);
-      }
-      if (request !== targetRequestRef.current) return;
-      loadedRef.current = true;
-      setLoaded(true);
-      reportError(reason);
+      await recoverTargetLoad(reason, request);
     }
-  }, [applyState, overlay, reportError]);
+  }, [applyState, overlay, recoverTargetLoad]);
 
   const clearTarget = useCallback((resetScratchpad = false) => {
     targetRequestRef.current++;
