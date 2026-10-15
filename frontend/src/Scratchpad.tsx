@@ -230,7 +230,7 @@ export default function Scratchpad({
     if (!loadedRef.current) return;
     if (typeof generation === "string") {
       const currentNote = targetNoteRef.current;
-      if (!currentNote || currentNote.id !== generation) return;
+      if (currentNote?.id !== generation) return;
       targetDirtyRef.current = true;
       targetContentRef.current = content;
       setTargetContent(content);
