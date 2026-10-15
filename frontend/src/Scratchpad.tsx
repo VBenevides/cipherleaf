@@ -516,6 +516,7 @@ export default function Scratchpad({
   const editorScrollKey = targetNote
     ? `note:${targetVaultIDRef.current}:${targetNote.id}`
     : `scratchpad:${state.generation}`;
+  const editorScrollSnapshot = overlay ? scrollSnapshotsRef.current.get(editorScrollKey) : undefined;
   const editorCardData = cardData ?? overlayCardData;
   const editorCardTitles = cardTitles ?? overlayCardTitles;
   return (
@@ -591,8 +592,8 @@ export default function Scratchpad({
               onIncreaseFontSize={onIncreaseFontSize}
               caretOffset={targetNote ? undefined : state.caretOffset}
               onCaretChange={targetNote ? undefined : (offset) => updateCaret(offset, state.generation)}
-              scrollSnapshot={overlay ? scrollSnapshotsRef.current.get(editorScrollKey)?.snapshot : undefined}
-              scrollSnapshotDocument={overlay ? scrollSnapshotsRef.current.get(editorScrollKey)?.document : undefined}
+              scrollSnapshot={editorScrollSnapshot?.snapshot}
+              scrollSnapshotDocument={editorScrollSnapshot?.document}
               onScrollSnapshotChange={overlay ? (snapshot, document) => {
                 const snapshots = scrollSnapshotsRef.current;
                 snapshots.delete(editorScrollKey);

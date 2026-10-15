@@ -259,8 +259,9 @@ test("separate scratchpad keeps its viewport across hide and reopen", () => {
   assert.match(scratchpad, /type SavedScrollSnapshot = \{[\s\S]*snapshot: StateEffect<unknown>;[\s\S]*document: string;/);
   assert.match(scratchpad, /const scrollSnapshotsRef = useRef\(new Map<string, SavedScrollSnapshot>\(\)\)/);
   assert.match(scratchpad, /const editorScrollKey = targetNote[\s\S]*targetVaultIDRef\.current[\s\S]*targetNote\.id/);
-  assert.match(scratchpad, /scrollSnapshot=\{overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\)\?\.snapshot : undefined\}/);
-  assert.match(scratchpad, /scrollSnapshotDocument=\{overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\)\?\.document : undefined\}/);
+  assert.match(scratchpad, /const editorScrollSnapshot = overlay \? scrollSnapshotsRef\.current\.get\(editorScrollKey\) : undefined;/);
+  assert.match(scratchpad, /scrollSnapshot=\{editorScrollSnapshot\?\.snapshot\}/);
+  assert.match(scratchpad, /scrollSnapshotDocument=\{editorScrollSnapshot\?\.document\}/);
   assert.match(scratchpad, /onScrollSnapshotChange=\{overlay \? \(snapshot, document\) => \{[\s\S]*snapshots\.set\(editorScrollKey, \{ snapshot, document \}\);[\s\S]*MAX_SCROLL_SNAPSHOTS[\s\S]*\} : undefined\}/);
   assert.match(liveEditor, /readonly scrollSnapshot\?: StateEffect<unknown> \| null;/);
   assert.match(liveEditor, /readonly scrollSnapshotDocument\?: string \| null;/);
