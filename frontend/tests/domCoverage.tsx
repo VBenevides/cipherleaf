@@ -1152,6 +1152,30 @@ for (const [source, lineNumber, expectedIndented, expectedDedented] of [
   depthHost.shell.remove();
 }
 
+for (const [source, expected, readOnly] of [
+  ["> Parent\n  > First\n    > Grandchild\n  > Second\n> Neighbor", "> Parent\n> First\n  > Grandchild\n> Second\n> Neighbor", false],
+  ["> Parent", "> Parent", false],
+  ["> Parent\n  > Child", "> Parent\n  > Child", true],
+] as const) {
+  const host = mount("keyboard-outdent-children-host");
+  await act(async () => {
+    host.root.render(createElement(LiveMarkdownEditor, {
+      noteID: "outdent-children", value: source, onChange: () => {}, onSave: () => {}, onError: () => {},
+      onOpenWikilink: () => {}, onOpenCard: () => {}, showToolbar: false, defaultSectionsCollapsed: false,
+    }));
+    await wait();
+  });
+  const view = EditorView.findFromDOM(host.body.querySelector(".cm-editor")!)!;
+  await act(async () => {
+    view.dispatch({ selection: EditorSelection.cursor(view.state.doc.line(1).to) });
+    if (readOnly) view.dispatch({ effects: StateEffect.appendConfig.of(EditorState.readOnly.of(true)) });
+    key(view.contentDOM, "Tab", { ctrlKey: true, shiftKey: true });
+  });
+  assert.equal(view.state.doc.toString(), expected);
+  await act(async () => { host.root.unmount(); });
+  host.shell.remove();
+}
+
 for (const taskText of ["[ ] Task", "[x] Task", "[] Task", "- [ ] Task", "  * [x] Task"]) {
   const taskHost = mount("keyboard-task-host");
   await act(async () => {

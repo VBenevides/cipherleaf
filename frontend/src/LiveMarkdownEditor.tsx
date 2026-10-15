@@ -3582,6 +3582,19 @@ function changeOutlineDepth(view: EditorView, direction: 1 | -1): void {
   view.focus();
 }
 
+function outdentOutlineChildren(view: EditorView): void {
+  if (view.state.readOnly) return;
+  const document = cachedObjectDocument(view.state);
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const object = document.byLine.get(line.number);
+  if (!object) return;
+  const changes: EditorTextChange[] = [];
+  for (const child of object.children) {
+    appendOutlineIndentChanges(changes, view.state, child, object.indent - child.indent);
+  }
+  if (changes.length) view.dispatch({ changes, userEvent: "input.indent" });
+}
+
 type EditorTextChange = { from: number; to?: number; insert: string };
 
 function codeIndentLineNumbers(view: EditorView, objectDocument: ObjectDocument): Set<number> {
@@ -4266,6 +4279,14 @@ export default function LiveMarkdownEditor({
                   () => onCreateBoardRef.current?.() ?? Promise.resolve(null),
                 ) ||
                 insertNewlineAtOutlineDepth(editor),
+            },
+            {
+              key: "Ctrl-Shift-Tab",
+              preventDefault: true,
+              run: (editor) => {
+                outdentOutlineChildren(editor);
+                return true;
+              },
             },
             {
               key: "Tab",

@@ -194,6 +194,7 @@ Open a note and select **Open as scratchpad** to change the shortcut target. Sel
 Scratchpad checkbox to restore the default. This choice is stored in the encrypted vault.
 
 Inside outline sections, `Tab` and `Shift+Tab` indent or outdent rows.
+`Ctrl+Shift+Tab` outdents all children of the current element, preserving their subtrees.
 Consecutive `>` lines form one collapsible section; additional `>` characters
 create nesting:
 
