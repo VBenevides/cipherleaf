@@ -455,6 +455,18 @@ try {
   });
   await act(async () => { await flush(); });
   assert.equal(editorOf(overlay).props.value, "rapid two");
+
+  // Failed target saves retain the draft and offer explicit conflict recovery.
+  for (const reason of ["disk unavailable", "note was changed by another writer"]) {
+    await act(async () => {
+      editorOf(overlay).props.onChangeWithCaret("unsaved draft", 4);
+      await flush();
+      noteSaveRequests.at(-1)!.result.reject(new Error(reason));
+      await flush();
+    });
+    assert.equal(editorOf(overlay).props.value, "unsaved draft");
+    assert.match(alertText(overlay), reason.startsWith("note was") ? /changed elsewhere/ : /disk unavailable/);
+  }
   await act(async () => {
     overlay.root.findByProps({ "aria-label": "Hide scratchpad" }).props.onClick();
     await flush();
@@ -465,6 +477,41 @@ try {
     await flush();
   });
   assert.equal(windowHideCalls, 2);
+  await act(async () => {
+    const reload = overlay.root.findAllByType("button").find((button) => button.children.includes("Reload latest"));
+    assert.ok(reload);
+    reload.props.onClick();
+    await flush();
+  });
+  assert.equal(editorOf(overlay).props.value, targetContent);
+
+  // Snapshots are scoped by target and bounded; a lock clears cached plaintext.
+  const snapshot = { map: () => snapshot };
+  for (let index = 0; index < 10; index++) {
+    await act(async () => {
+      editorOf(overlay).props.onScrollSnapshotChange(snapshot, `snapshot ${index}`);
+      shortcutTarget = index % 2 ? "note:target-note" : "scratchpad";
+      emit("cipherleaf:scratchpad-overlay-refresh", null);
+      await flush();
+      await flush();
+    });
+  }
+  await act(async () => {
+    emit(cleared, { vaultId: "wrong-vault", folderIDs: ["folder"] });
+    await flush();
+  });
+  assert.equal(editorOf(overlay).props.value, targetContent);
+  await act(async () => {
+    emit(cleared, { vaultId: "vault-1", folderIDs: ["folder"] });
+    await flush();
+  });
+  assert.equal(editorOf(overlay).props.scrollSnapshot, undefined);
+  await act(async () => {
+    shortcutTarget = "scratchpad";
+    emit(cleared, { all: true });
+    await flush();
+  });
+  assert.equal(editorOf(overlay).props.value, currentState.content);
   await act(async () => { overlay.unmount(); });
   assert.equal(keydownListeners.size, 0);
   assert.equal(eventRuntime.eventListeners.get(noteSaved)?.length ?? 0, 0);

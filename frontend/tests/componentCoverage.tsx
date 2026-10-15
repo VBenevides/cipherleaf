@@ -65,7 +65,7 @@ const folders = [{ id: "folder", name: "Folder", parentId: "", order: 0, locked:
 const notes = [{ id: "note", title: "Note", folderId: "folder", order: 0, updatedAt: "", createdAt: "", tags: [], outgoingLinks: [] }];
 const note = { id: "note", title: "Note", folderId: "folder", order: 0, content: "# Note\n\n- [ ] Task", updatedAt: "", createdAt: "", modifiedAt: 0, revision: 0 };
 const boardNote = { ...note, content: boardMarker("board-1", [], "Roadmap") };
-const templateNote = { ...note, id: "template", title: "Template", content: ["---", "cipherleaf-card-template: true", "cipherleaf-card-template-name: Template", "cipherleaf-card-template-status: in-progress", "cipherleaf-card-template-tags: [work]", "cipherleaf-card-template-write-changes-to-editor: true", "---", "Template body"].join("\n") };
+const templateNote = { ...note, createdAt: "2026-01-01T12:00:00Z", id: "template", title: "Template", content: ["---", "cipherleaf-card-template: true", "cipherleaf-card-template-name: Template", "cipherleaf-card-template-status: in-progress", "cipherleaf-card-template-tags: [work]", "cipherleaf-card-template-write-changes-to-editor: true", "---", "Template body"].join("\n") };
 const cardNote = { id: "card", title: "Card", folderId: "folder", order: 0, content: [
   "---", "cipherleaf-card: true", "cipherleaf-card-status: not-started", "cipherleaf-card-tags: [work]", "cipherleaf-card-created-at: 2026-01-01T12:00:00", "cipherleaf-card-started-at: 2026-01-02T12:00:00", "cipherleaf-card-finished-at: 2026-01-04T12:00:00", "---", "Card body",
 ].join("\n") };
@@ -243,12 +243,16 @@ let linkedAppMode = false;
 let boardAppMode = false;
 let throwMethod = -1;
 let lockedAction: "create" | "clone" = "create";
+let shortcutTarget = "scratchpad";
 let vaultSettings = { dailyNoteFormat: "YYYY-MM-DD", dailyNoteFolderId: "folder", dailyTemplateNoteId: "", autosaveIntervalSeconds: 60, autoSyncMinutes: 15, autoLockMinutes: 15, fileHistoryLimit: 10, sectionDefault: "collapsed", revision: 1, modifiedAt: 1 };
 setTransport({
   call: async (_objectID, _method, _windowName, request) => {
     if (request?.methodID === throwMethod) throw new Error("coverage failure");
     if (timeTrackingMode === "error" && [308561412, 1766611694, 2155705394, 259867052].includes(request?.methodID ?? -1)) throw new Error("time tracking failed");
     switch (request?.methodID) {
+      case 3332482185: return shortcutTarget;
+      case 2987846773: shortcutTarget = request.args[0]; return shortcutTarget;
+      case 687321542: return { content: "scratch draft", caretOffset: 0, generation: 1, revision: 1 };
       case 355925843: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
       case 3632998615: return { path: "/vault", theme: "light" };
       case 1694639620: return ["/vault", "/other-vault"];
@@ -288,7 +292,7 @@ setTransport({
         return { note: savedNote, summary: { ...richNotes[0], id, title, revision: savedNote.revision } };
       }
       case 814546393: return { locked: false, path: "/vault", vaultId: "vault", noteCount: 2 };
-      case 2911480927: return note;
+      case 2911480927: return boardAppMode ? templateNote : note;
       case 239305947: return richFolders[0];
       case 4062770880: return clients[0];
       case 2039739724: return projects[0];
@@ -498,6 +502,30 @@ const submitAppDialog = async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 };
+// Exercise shortcut routing through the mounted App rather than source assertions.
+const setScratchpadTarget = async (checked: boolean) => {
+  const toggle = appRenderer!.root.findAll((node) => node.type === "label" && node.props.className === "scratchpad-target-toggle")[0].findByType("input");
+  await act(async () => { toggle.props.onChange({ target: { checked } }); await waitForApp(); });
+};
+await setScratchpadTarget(true);
+assert.equal(shortcutTarget, "note:note");
+await act(async () => { emitEvent("cipherleaf:scratchpad-focus", null); await waitForApp(); });
+assert.ok(appRenderer!.root.findAll((node) => node.type === "input" && node.props.className === "title-input").length);
+await setScratchpadTarget(false);
+assert.equal(shortcutTarget, "scratchpad");
+await act(async () => { emitEvent("cipherleaf:scratchpad-focus", null); await waitForApp(); });
+assert.match(JSON.stringify(appRenderer!.toJSON()), /scratchpad-editor/);
+const scratchpadToggle = appRenderer!.root.findAll((node) => node.type === "label" && node.props.className === "scratchpad-target-toggle")[0].findByType("input");
+await act(async () => { scratchpadToggle.props.onChange(); await waitForApp(); });
+await act(async () => {
+  const scratchpad = appRenderer!.root.findAll((node) => typeof node.type === "function" && node.type.name === "Scratchpad")[0];
+  scratchpad.props.onClose();
+  await waitForApp();
+});
+throwMethod = 2987846773;
+await setScratchpadTarget(true);
+assert.match(JSON.stringify(appRenderer!.toJSON()), /coverage failure/);
+throwMethod = -1;
 const liveEditor = appRenderer?.root.findAll((node) => typeof node.type === "function" && (node.type as Function).name === "LiveMarkdownEditor")[0];
 assert.ok(liveEditor);
 openCardMode = true;
@@ -967,6 +995,30 @@ const boardRenderer = create(createElement(App));
 await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
 const boardEditor = boardRenderer.root.findAll((node) => typeof node.type === "function" && (node.type as Function).name === "LiveMarkdownEditor")[0];
 assert.ok(boardEditor);
+await act(async () => {
+  boardEditor.props.onOpenBoardTemplate("board-1", "template");
+  await waitForApp();
+});
+const templateTitleInput = boardRenderer.root.findAll((node) => node.type === "input" && node.props["aria-label"] === "Title")[0];
+assert.ok(templateTitleInput, textContent(boardRenderer.root));
+await act(async () => { templateTitleInput.props.onChange({ target: { value: "Updated template" } }); });
+const saveTemplate = boardRenderer.root.findAll((node) => node.type === "button" && textContent(node) === "Save template")[0];
+assert.ok(saveTemplate);
+await act(async () => { saveTemplate.props.onClick(); await waitForApp(); });
+assert.equal(boardRenderer.root.findAll((node) => node.props["aria-label"] === "Card details").length, 1);
+await act(async () => {
+  boardRenderer.root.findByProps({ "aria-label": "Close card" }).props.onClick();
+  await waitForApp();
+});
+await act(async () => {
+  boardEditor.props.onOpenBoardTemplate("board-1", "");
+  await waitForApp();
+});
+assert.ok(buttonNamed(boardRenderer, "Save template"));
+await act(async () => {
+  boardRenderer.root.findByProps({ "aria-label": "Close card" }).props.onClick();
+  await waitForApp();
+});
 await act(async () => {
   boardEditor.props.onChangeBoardTitle?.("board-1", "Updated roadmap");
   boardEditor.props.onChangeBoardColumns?.("board-1", [{ id: "todo", name: "Todo", color: "#123456", cardIDs: [] }], [], ["orphan"]);
